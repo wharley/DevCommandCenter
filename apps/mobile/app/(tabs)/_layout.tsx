@@ -1,7 +1,7 @@
 import { useAgentRequests } from "@/backend/agentRequests";
 import { useTaskProposals } from "@/backend/taskProposals";
 import { HomeDataProvider, useHomeData } from "@/screens/homeData";
-import { color, font } from "@/theme";
+import { font, useTheme } from "@/theme";
 import Feather from "@expo/vector-icons/Feather";
 import { Tabs } from "expo-router";
 
@@ -14,6 +14,7 @@ export default function TabsLayout() {
 }
 
 function TabBar() {
+	const { color } = useTheme();
 	const { scan, attention } = useHomeData();
 	const { requests } = useAgentRequests();
 	const { proposals } = useTaskProposals();
@@ -35,7 +36,7 @@ function TabBar() {
 					title: "Agentes",
 					tabBarIcon: ({ color: tint, size }) => <Feather name="cpu" color={tint} size={size - 4} />,
 					tabBarBadge: needsYou > 0 ? needsYou : undefined,
-					tabBarBadgeStyle: { backgroundColor: color.wait, color: color.waitInk, fontSize: 10 },
+					tabBarBadgeStyle: { backgroundColor: color.waitFill, color: color.waitInk, fontSize: 10 },
 				}}
 			/>
 			<Tabs.Screen

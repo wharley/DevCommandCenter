@@ -4,11 +4,13 @@ import { SessionProvider, useSession } from "@/backend/session";
 import { isPairingLink, stashPairingLink } from "@/backend/offerLink";
 import { configureNotificationDisplay, onNotificationTap } from "@/notifications/native";
 import { sessionFromNotificationData } from "@/notifications/registration";
-import { color } from "@/theme";
+import { useTheme } from "@/theme";
 import { UpdateBanner } from "@/updates";
+import { sheetOptions } from "@/ui/surfaces";
 import * as Linking from "expo-linking";
 import { router, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
 import { useEffect, useRef } from "react";
 import { View } from "react-native";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -17,6 +19,11 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 configureNotificationDisplay();
 
 export default function RootLayout() {
+	const { color, scheme } = useTheme();
+	// The window behind the screens (keyboard gaps, sheet edges) follows the scheme too.
+	useEffect(() => {
+		void SystemUI.setBackgroundColorAsync(color.bg);
+	}, [color.bg]);
 	return (
 		<SafeAreaProvider>
 			{/* SDK 55 draws Android edge-to-edge: the window no longer resizes for
@@ -24,7 +31,7 @@ export default function RootLayout() {
 			    Happy and t3code do). */}
 			<KeyboardProvider>
 				<SessionProvider>
-					<StatusBar style="light" />
+					<StatusBar style={scheme === "dark" ? "light" : "dark"} />
 					<View style={{ flex: 1, backgroundColor: color.bg }}>
 						<PairingLinks />
 						<NotificationTaps />
@@ -102,6 +109,7 @@ function OfferNotifications() {
 }
 
 function Routes() {
+	const { color } = useTheme();
 	const { session } = useSession();
 	if (session.status === "loading") return null;
 	const ready = session.status === "remote" || session.status === "demo";
@@ -120,6 +128,7 @@ function Routes() {
 				<Stack.Screen name="notifications" options={{ presentation: "modal" }} />
 				<Stack.Screen name="new-task" options={{ presentation: "modal" }} />
 				<Stack.Screen name="delivery/[id]" options={{ presentation: "modal" }} />
+				<Stack.Screen name="ui-gallery" options={sheetOptions(color)} />
 			</Stack.Protected>
 			<Stack.Screen name="pair" options={{ presentation: ready ? "modal" : "card", gestureEnabled: ready }} />
 		</Stack>

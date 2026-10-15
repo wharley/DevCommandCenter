@@ -29,7 +29,7 @@ import { useBackend } from "@/backend/session";
 import { errorMessage, isAlreadyResolved } from "@/backend/types";
 import { AssistantBlock, PermissionCard, QuestionCard, SystemRow, TraceBlock, UserBubble } from "@/screens/ThreadParts";
 import { ThreadSync, type ThreadSnapshot } from "@/screens/threadSync";
-import { alpha, color, radius } from "@/theme";
+import { alpha, makeStyles, radius, useTheme } from "@/theme";
 import { AccessPill } from "@/ui/AccessPicker";
 import { AgentRequestCard } from "@/ui/AgentRequestCard";
 import { TaskProposalCard } from "@/ui/TaskProposalCard";
@@ -58,6 +58,8 @@ import { KeyboardAvoidingView, useKeyboardState } from "react-native-keyboard-co
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function ThreadScreen() {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const { id } = useLocalSearchParams<{ id: string }>();
 	const threadId = String(id);
 	const backend = useBackend();
@@ -549,6 +551,7 @@ function AgentHeader({
 	label: string | null;
 	state: "idle" | "working" | "waiting";
 }) {
+	const styles = useStyles();
 	return (
 		<View style={styles.agentHeader}>
 			<AgentMascot provider={meta?.providerId} model={meta?.model} state={state} size={24} />
@@ -561,58 +564,60 @@ function AgentHeader({
 	);
 }
 
-const styles = StyleSheet.create({
-	root: { flex: 1, backgroundColor: color.bg },
-	header: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 10,
-		paddingHorizontal: 12,
-		paddingBottom: 10,
-		borderBottomWidth: 1,
-		borderBottomColor: color.border,
-	},
-	back: { padding: 6 },
-	deliver: { padding: 6 },
-	title: { color: color.fg, fontSize: 15, fontWeight: "600" },
-	subtitle: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
-	subtitleText: { fontSize: 10, color: color.faint, letterSpacing: 0.6, flexShrink: 1 },
-	banner: { paddingHorizontal: 12, paddingTop: 10 },
-	error: { color: color.danger, fontSize: 12, marginBottom: 8 },
-	notice: { color: color.mute, fontSize: 12, marginBottom: 8 },
-	listContent: { paddingHorizontal: 16, paddingBottom: 20, paddingTop: 4 },
-	agentHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
-	agentLabel: { fontSize: 11, color: color.mute, flexShrink: 1 },
-	composer: {
-		gap: 8,
-		paddingHorizontal: 12,
-		paddingTop: 8,
-		borderTopWidth: 1,
-		borderTopColor: color.border,
-		backgroundColor: color.panel,
-	},
-	composerRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
-	input: {
-		flex: 1,
-		maxHeight: 140,
-		minHeight: 40,
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.bg,
-		borderRadius: radius.md,
-		color: color.fg,
-		paddingHorizontal: 12,
-		paddingTop: 10,
-		paddingBottom: 10,
-		fontSize: 15,
-	},
-	sendButton: {
-		width: 40,
-		height: 40,
-		borderRadius: 20,
-		backgroundColor: color.accent,
-		alignItems: "center",
-		justifyContent: "center",
-	},
-	stopButton: { backgroundColor: alpha(color.danger, 0.12), borderWidth: 1, borderColor: alpha(color.danger, 0.5) },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		root: { flex: 1, backgroundColor: color.bg },
+		header: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 10,
+			paddingHorizontal: 12,
+			paddingBottom: 10,
+			borderBottomWidth: 1,
+			borderBottomColor: color.border,
+		},
+		back: { padding: 6 },
+		deliver: { padding: 6 },
+		title: { color: color.fg, fontSize: 15, fontWeight: "600" },
+		subtitle: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 },
+		subtitleText: { fontSize: 10, color: color.faint, letterSpacing: 0.6, flexShrink: 1 },
+		banner: { paddingHorizontal: 12, paddingTop: 10 },
+		error: { color: color.danger, fontSize: 12, marginBottom: 8 },
+		notice: { color: color.mute, fontSize: 12, marginBottom: 8 },
+		listContent: { paddingHorizontal: 16, paddingBottom: 20, paddingTop: 4 },
+		agentHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+		agentLabel: { fontSize: 11, color: color.mute, flexShrink: 1 },
+		composer: {
+			gap: 8,
+			paddingHorizontal: 12,
+			paddingTop: 8,
+			borderTopWidth: 1,
+			borderTopColor: color.border,
+			backgroundColor: color.panel,
+		},
+		composerRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
+		input: {
+			flex: 1,
+			maxHeight: 140,
+			minHeight: 40,
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.bg,
+			borderRadius: radius.md,
+			color: color.fg,
+			paddingHorizontal: 12,
+			paddingTop: 10,
+			paddingBottom: 10,
+			fontSize: 15,
+		},
+		sendButton: {
+			width: 40,
+			height: 40,
+			borderRadius: 20,
+			backgroundColor: color.accent,
+			alignItems: "center",
+			justifyContent: "center",
+		},
+		stopButton: { backgroundColor: alpha(color.danger, 0.12), borderWidth: 1, borderColor: alpha(color.danger, 0.5) },
+	}),
+);

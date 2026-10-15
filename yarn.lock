@@ -2649,6 +2649,13 @@
   resolved "https://registry.yarnpkg.com/@expo/sudo-prompt/-/sudo-prompt-9.3.2.tgz#0fd2813402a42988e49145cab220e25bea74b308"
   integrity sha512-HHQigo3rQWKMDzYDLkubN5WQOYXJJE2eNqIQC2axC2iO3mHdwnIR7FgZVvHWtBwAdzBgAP0ECp8KqS8TiMKvgw==
 
+"@expo/ui@~55.0.17":
+  version "55.0.17"
+  resolved "https://registry.yarnpkg.com/@expo/ui/-/ui-55.0.17.tgz#e0b726212d44b21e4aea53a4561b15263a5073d2"
+  integrity sha512-NW/wFs+mhQeA/5W0yUNn6qKRNJBGiuF7NjCLZDFvg5Tyd+hDUEDEhBsLvI9MJ8B2aYuGcbuH9XZBIPF22LMrfQ==
+  dependencies:
+    sf-symbols-typescript "^2.1.0"
+
 "@expo/vector-icons@^15.0.2":
   version "15.1.1"
   resolved "https://registry.yarnpkg.com/@expo/vector-icons/-/vector-icons-15.1.1.tgz#4b1d2c60493c0b0536972f0a5babd5f5c85b48f4"
@@ -10201,6 +10208,11 @@ expo-asset@~55.0.20:
     "@expo/image-utils" "^0.8.17"
     expo-constants "~55.0.17"
 
+expo-blur@~55.0.18:
+  version "55.0.18"
+  resolved "https://registry.yarnpkg.com/expo-blur/-/expo-blur-55.0.18.tgz#304a56dc50428ad6f73609a6de14bc550aa76f73"
+  integrity sha512-eXuVAahonZXLrXa//isvq72ed1to/MmbHUyd2WTkRH2/FjC9X91rZ4BUNIFBZnAxaNXQrKw/ITfG/VMVz1DIhQ==
+
 expo-camera@~55.0.23:
   version "55.0.23"
   resolved "https://registry.yarnpkg.com/expo-camera/-/expo-camera-55.0.23.tgz#5ca5a03f0d7315dad00824a4f403275210d1e4ca"
@@ -10254,10 +10266,15 @@ expo-font@~55.0.8:
   dependencies:
     fontfaceobserver "^2.1.0"
 
-expo-glass-effect@^55.0.11:
+expo-glass-effect@^55.0.11, expo-glass-effect@~55.0.11:
   version "55.0.11"
   resolved "https://registry.yarnpkg.com/expo-glass-effect/-/expo-glass-effect-55.0.11.tgz#23a3ba71e5f740d6ae557f4298f6abdb030da2f8"
   integrity sha512-wqq7GUOqSkfoFJzreZvBG0jzjsq5c582m3glhWSjcmIuByxXXWp6j6GY6hyFuYKzpOXhbuvusVxGCQi0yWnp3g==
+
+expo-haptics@~55.0.18:
+  version "55.0.18"
+  resolved "https://registry.yarnpkg.com/expo-haptics/-/expo-haptics-55.0.18.tgz#3b4b98922e7a05d9551afa740ba1c79a3dd2bd12"
+  integrity sha512-bEH0bf5bBGn7U2eTZVdiXBUk4vTfNGbfv9/9PCYLg3gL7L/WE2g8WKs2vYg1B4/BDSucyO8prZofH3IgvLJojQ==
 
 expo-image-loader@~55.0.1:
   version "55.0.1"
@@ -10404,6 +10421,14 @@ expo-symbols@^55.0.9:
   dependencies:
     "@expo-google-fonts/material-symbols" "^0.4.1"
     sf-symbols-typescript "^2.0.0"
+
+expo-system-ui@~55.0.22:
+  version "55.0.22"
+  resolved "https://registry.yarnpkg.com/expo-system-ui/-/expo-system-ui-55.0.22.tgz#67a8b6b21c29e21b33e3ba60c1c2a70a3ee80e47"
+  integrity sha512-/ma8XGdwXvWkeZN++pHQt66jEQ4ZsaV9B5nP/+PAmXa4hAukPxG2bXjZaNOOOlTssWlaJRclJgGeC+Wo2uJlXQ==
+  dependencies:
+    "@react-native/normalize-colors" "0.83.10"
+    debug "^4.3.2"
 
 expo-updates-interface@~55.1.6:
   version "55.1.6"

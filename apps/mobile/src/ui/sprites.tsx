@@ -22,7 +22,7 @@ import { useEffect, useState } from "react";
 import { Image, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
-import { alpha, color } from "../theme";
+import { alpha, useTheme, type Palette, type Scheme } from "../theme";
 
 /** Half of the desktop's 0.9 s cycle: one frame each. */
 const FRAME_MS = 450;
@@ -72,16 +72,26 @@ export function PixelSprite({
 
 type Tile = { base: string; ink: string };
 
-/** Brand color where the brand has one; the monochrome marks stay neutral. */
-const AGENT_TILES: Record<AgentMascotKey, Tile> = {
+/** Brand color where the brand has one; the monochrome marks stay neutral (`null`). */
+const AGENT_TILES: Record<AgentMascotKey, Tile | null> = {
 	claude: { base: "#D97757", ink: "#E8936F" },
 	codex: { base: "#3B7BF6", ink: "#7AA5FA" },
 	gemini: { base: "#8B5CF6", ink: "#C4B5FD" },
-	cursor: { base: color.mute, ink: "#c4cbd4" },
-	droid: { base: color.mute, ink: "#c4cbd4" },
-	grok: { base: color.mute, ink: "#c4cbd4" },
-	generic: { base: color.mute, ink: color.mute },
+	cursor: null,
+	droid: null,
+	grok: null,
+	generic: null,
 };
+
+/**
+ * The sprite color on its tile. Dark follows the desktop (light ink on a
+ * faint tile); light draws in the tile's own color so it holds on white.
+ */
+function agentTile(key: AgentMascotKey, color: Palette, scheme: Scheme): Tile {
+	const tile = AGENT_TILES[key];
+	if (!tile) return { base: color.mute, ink: scheme === "dark" && key !== "generic" ? "#c4cbd4" : color.mute };
+	return scheme === "dark" ? tile : { base: tile.base, ink: tile.base };
+}
 
 /** The agent's face: a pixel robot in its provider's tile; amber (and waving) when it needs you. */
 export function AgentMascot({
@@ -95,9 +105,10 @@ export function AgentMascot({
 	state?: AgentMascotState;
 	size?: number;
 }) {
+	const { color, scheme } = useTheme();
 	const key = resolveAgentMascotKey(provider, model);
 	const waiting = state === "waiting";
-	const tile = AGENT_TILES[key];
+	const tile = agentTile(key, color, scheme);
 	const ink = waiting ? color.wait : tile.ink;
 	return (
 		<View
@@ -171,8 +182,11 @@ export function ProjectGlyph({
 	active?: boolean;
 	size?: number;
 }) {
+	const { scheme } = useTheme();
 	const visual = resolveProjectIcon(icon, seed);
-	const tile = PROJECT_TILES[resolveProjectColor(colorValue, seed)];
+	const palette = PROJECT_TILES[resolveProjectColor(colorValue, seed)];
+	// Light draws in the 500 shade: the 300 ink washes out on white.
+	const tile = scheme === "dark" ? palette : { base: palette.base, ink: palette.base };
 	const inner = Math.round((size * 0.6) / 10) * 10 || 10;
 	return (
 		<View

@@ -2,7 +2,7 @@ import { isPairingLink, onPairingLink, stashPairingLink, takePairingLink } from 
 import { pairingErrorMessage, pairWithDesktop, readOffer, type PairingProgress } from "@/backend/pairing";
 import { useSession } from "@/backend/session";
 import { Button, Mono, Panel, StateDot, Wordmark } from "@/ui/primitives";
-import { alpha, color, radius } from "@/theme";
+import { alpha, makeStyles, radius, useTheme } from "@/theme";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import * as Linking from "expo-linking";
@@ -26,6 +26,8 @@ type Phase =
 	| { kind: "error"; message: string };
 
 export default function PairScreen() {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const insets = useSafeAreaInsets();
 	const { session, startDemo, completePairing } = useSession();
 	const [phase, setPhase] = useState<Phase>({ kind: "choose" });
@@ -169,6 +171,8 @@ export default function PairScreen() {
 }
 
 function Scanner({ onLink, onCancel }: { onLink: (url: string) => void; onCancel: () => void }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const [permission, requestPermission] = useCameraPermissions();
 	const handled = useRef(false);
 
@@ -209,6 +213,8 @@ function Scanner({ onLink, onCancel }: { onLink: (url: string) => void; onCancel
 }
 
 function Working({ progress, onCancel }: { progress: PairingProgress | null; onCancel: () => void }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const pending = progress?.step === "pending";
 	return (
 		<View style={{ marginTop: 24, gap: 16 }}>
@@ -237,6 +243,8 @@ function Working({ progress, onCancel }: { progress: PairingProgress | null; onC
 }
 
 function Fingerprint({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	return (
 		<View style={{ gap: 4 }}>
 			<Mono style={styles.eyebrowInline}>{label}</Mono>
@@ -247,37 +255,39 @@ function Fingerprint({ label, value, highlight }: { label: string; value: string
 	);
 }
 
-const styles = StyleSheet.create({
-	root: { flex: 1, backgroundColor: color.bg },
-	content: { paddingHorizontal: 20 },
-	header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 28 },
-	close: { color: color.mute, fontSize: 14 },
-	title: { color: color.fg, fontSize: 20, fontWeight: "600" },
-	body: { color: color.mute, fontSize: 14, lineHeight: 20, marginTop: 6 },
-	error: { color: color.danger, fontSize: 13, lineHeight: 18 },
-	eyebrow: { marginTop: 24, marginBottom: 8, fontSize: 10, letterSpacing: 1.8, color: color.mute, textTransform: "uppercase" },
-	eyebrowInline: { fontSize: 10, letterSpacing: 1.5, color: color.mute, textTransform: "uppercase" },
-	input: {
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.panel,
-		borderRadius: radius.md,
-		color: color.fg,
-		padding: 12,
-		fontSize: 14,
-	},
-	row: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 },
-	demoTitle: { color: color.fg, fontSize: 15, fontWeight: "600" },
-	camera: { height: 320, borderRadius: radius.lg, overflow: "hidden", backgroundColor: color.panel },
-	reticle: {
-		position: "absolute",
-		top: 60,
-		bottom: 60,
-		left: 60,
-		right: 60,
-		borderWidth: 2,
-		borderColor: alpha(color.accent, 0.8),
-		borderRadius: radius.lg,
-	},
-	fingerprint: { fontSize: 22, letterSpacing: 2, color: color.accent },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		root: { flex: 1, backgroundColor: color.bg },
+		content: { paddingHorizontal: 20 },
+		header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 28 },
+		close: { color: color.mute, fontSize: 14 },
+		title: { color: color.fg, fontSize: 20, fontWeight: "600" },
+		body: { color: color.mute, fontSize: 14, lineHeight: 20, marginTop: 6 },
+		error: { color: color.danger, fontSize: 13, lineHeight: 18 },
+		eyebrow: { marginTop: 24, marginBottom: 8, fontSize: 10, letterSpacing: 1.8, color: color.mute, textTransform: "uppercase" },
+		eyebrowInline: { fontSize: 10, letterSpacing: 1.5, color: color.mute, textTransform: "uppercase" },
+		input: {
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.panel,
+			borderRadius: radius.md,
+			color: color.fg,
+			padding: 12,
+			fontSize: 14,
+		},
+		row: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 },
+		demoTitle: { color: color.fg, fontSize: 15, fontWeight: "600" },
+		camera: { height: 320, borderRadius: radius.lg, overflow: "hidden", backgroundColor: color.panel },
+		reticle: {
+			position: "absolute",
+			top: 60,
+			bottom: 60,
+			left: 60,
+			right: 60,
+			borderWidth: 2,
+			borderColor: alpha(color.accent, 0.8),
+			borderRadius: radius.lg,
+		},
+		fingerprint: { fontSize: 22, letterSpacing: 2, color: color.accent },
+	}),
+);

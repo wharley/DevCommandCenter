@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Backend } from "../backend/types";
-import { color, radius } from "../theme";
+import { makeStyles, radius, useTheme } from "../theme";
 
 /** Thumbnails already fetched (or known to be gone) in this run of the app. */
 const previews = new Map<string, Promise<string | null>>();
@@ -37,6 +37,7 @@ function loadPreview(backend: Backend, sessionId: string, path: string): Promise
 }
 
 export function PromptAttachments({ paths, backend, sessionId }: { paths: string[]; backend: Backend; sessionId: string }) {
+	const styles = useStyles();
 	return (
 		<View style={styles.row}>
 			{paths.map((path, index) =>
@@ -51,6 +52,8 @@ export function PromptAttachments({ paths, backend, sessionId }: { paths: string
 }
 
 function AttachmentChip({ path }: { path: string }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	return (
 		<View style={styles.chip}>
 			<Feather name={isImagePath(path) ? "image" : "file"} size={12} color={color.mute} />
@@ -62,6 +65,7 @@ function AttachmentChip({ path }: { path: string }) {
 }
 
 function ImageAttachment({ path, backend, sessionId }: { path: string; backend: Backend; sessionId: string }) {
+	const styles = useStyles();
 	const [state, setState] = useState<{ loading: boolean; uri: string | null }>({ loading: true, uri: null });
 	const [open, setOpen] = useState(false);
 	const insets = useSafeAreaInsets();
@@ -91,23 +95,25 @@ function ImageAttachment({ path, backend, sessionId }: { path: string; backend: 
 	);
 }
 
-const styles = StyleSheet.create({
-	row: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 6 },
-	chip: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 6,
-		maxWidth: 220,
-		paddingHorizontal: 8,
-		paddingVertical: 5,
-		borderRadius: radius.sm,
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.bg,
-	},
-	chipText: { color: color.mute, fontSize: 11, flexShrink: 1 },
-	image: { width: 132, height: 100, borderRadius: radius.sm, borderWidth: 1, borderColor: color.border },
-	placeholder: { backgroundColor: color.elevated },
-	viewer: { flex: 1, backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center" },
-	full: { width: "100%", height: "100%" },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		row: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 6 },
+		chip: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 6,
+			maxWidth: 220,
+			paddingHorizontal: 8,
+			paddingVertical: 5,
+			borderRadius: radius.sm,
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.bg,
+		},
+		chipText: { color: color.mute, fontSize: 11, flexShrink: 1 },
+		image: { width: 132, height: 100, borderRadius: radius.sm, borderWidth: 1, borderColor: color.border },
+		placeholder: { backgroundColor: color.elevated },
+		viewer: { flex: 1, backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center" },
+		full: { width: "100%", height: "100%" },
+	}),
+);

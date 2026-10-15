@@ -14,13 +14,14 @@ import Feather from "@expo/vector-icons/Feather";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { Backend } from "../backend/types";
-import { alpha, color, font, radius } from "../theme";
+import { alpha, font, makeStyles, radius, useTheme } from "../theme";
 import { PromptAttachments } from "./PromptAttachments";
 import { RichText } from "../ui/RichText";
 import { Button, Mono, StateDot } from "../ui/primitives";
 
 /** The person's message: attachments over the text, as on the desktop. */
 export function UserBubble({ text, backend, sessionId }: { text: string; backend: Backend; sessionId: string }) {
+	const styles = useStyles();
 	const prompt = splitPrompt(text);
 	return (
 		<View style={[styles.userWrap, { gap: 6 }]}>
@@ -39,6 +40,8 @@ export function UserBubble({ text, backend, sessionId }: { text: string; backend
 }
 
 export function AssistantBlock({ message }: { message: Extract<ChatMessage, { kind: "assistant" }> }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	return (
 		<View style={{ gap: 6 }}>
 			{message.text ? <RichText text={message.text} /> : !message.completed ? <ActivityIndicator size="small" color={color.mute} style={{ alignSelf: "flex-start" }} /> : null}
@@ -49,6 +52,7 @@ export function AssistantBlock({ message }: { message: Extract<ChatMessage, { ki
 }
 
 export function SystemRow({ text }: { text: string }) {
+	const styles = useStyles();
 	return (
 		<View style={styles.systemRow}>
 			<View style={styles.rule} />
@@ -59,6 +63,8 @@ export function SystemRow({ text }: { text: string }) {
 }
 
 export function TraceBlock({ steps }: { steps: TraceStep[] }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const [open, setOpen] = useState(false);
 	const live = steps.some(stepIsLive);
 	const current = live ? [...steps].reverse().find(stepIsLive) : null;
@@ -100,6 +106,8 @@ export function TraceBlock({ steps }: { steps: TraceStep[] }) {
 }
 
 function StepRow({ step }: { step: TraceStep }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const [open, setOpen] = useState(false);
 	const live = stepIsLive(step);
 	const failed = step.kind === "tool" && step.status === "failed";
@@ -171,6 +179,7 @@ export function PermissionCard({
 	busy: boolean;
 	onRespond: (choice: string) => void;
 }) {
+	const styles = useStyles();
 	return (
 		<View style={styles.waitCard}>
 			<View style={styles.waitHead}>
@@ -206,6 +215,8 @@ export function QuestionCard({
 	busy: boolean;
 	onSubmit: (answers: Array<{ question: string; answer: string }>) => void;
 }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const [answers, setAnswers] = useState<Record<string, string>>({});
 	const complete = request.questions.every((q) => (answers[q.id] ?? "").trim());
 	return (
@@ -256,60 +267,62 @@ export function QuestionCard({
 	);
 }
 
-const styles = StyleSheet.create({
-	userWrap: { alignItems: "flex-end" },
-	userBubble: {
-		maxWidth: "85%",
-		backgroundColor: color.accent,
-		borderRadius: radius.lg,
-		borderBottomRightRadius: 4,
-		paddingHorizontal: 14,
-		paddingVertical: 8,
-	},
-	userText: { color: color.accentInk, fontSize: 15, lineHeight: 21 },
-	aborted: { fontSize: 10, letterSpacing: 1.8, textTransform: "uppercase", color: alpha(color.danger, 0.8) },
-	systemRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
-	rule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: color.border },
-	systemText: { fontSize: 10, color: color.faint, letterSpacing: 1.2, textTransform: "uppercase" },
-	trace: { borderWidth: 1, borderColor: alpha(color.border, 0.9), backgroundColor: alpha(color.panel, 0.6), borderRadius: radius.md, overflow: "hidden" },
-	traceHead: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
-	traceLabel: { fontSize: 10, fontWeight: "600", letterSpacing: 1.8, textTransform: "uppercase", color: color.mute },
-	traceCount: { minWidth: 17, height: 17, borderRadius: 9, backgroundColor: color.elevated, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
-	traceCountText: { fontSize: 10, fontWeight: "700", color: color.mute },
-	traceCurrent: { flex: 1, fontSize: 11, color: color.accent },
-	traceFailedWrap: { flexDirection: "row", alignItems: "center", gap: 2 },
-	traceFailed: { fontSize: 10, color: color.danger },
-	traceBody: { borderTopWidth: 1, borderTopColor: color.border, paddingHorizontal: 6, paddingVertical: 6 },
-	stepRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 6, paddingVertical: 6 },
-	stepLabel: { fontSize: 13, color: color.fg, flexShrink: 0, maxWidth: "50%" },
-	stepPreview: { flex: 1, fontSize: 12, color: color.faint, fontFamily: font.mono },
-	stepDetail: { marginLeft: 28, marginBottom: 6, marginRight: 6, gap: 6 },
-	snippet: { fontFamily: font.mono, fontSize: 11, color: color.fg, backgroundColor: color.bg, borderRadius: 6, padding: 8 },
-	waitCard: {
-		borderWidth: 1,
-		borderColor: alpha(color.wait, 0.4),
-		backgroundColor: alpha(color.wait, 0.05),
-		borderRadius: radius.lg,
-		padding: 14,
-		gap: 12,
-	},
-	waitHead: { flexDirection: "row", alignItems: "center", gap: 8 },
-	waitEyebrow: { fontSize: 10, fontWeight: "600", letterSpacing: 1.8, textTransform: "uppercase", color: color.wait },
-	permissionText: { fontSize: 12, lineHeight: 18 },
-	questionHeader: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: color.mute },
-	questionText: { color: color.fg, fontSize: 15, lineHeight: 21 },
-	option: { borderWidth: 1, borderColor: color.border, backgroundColor: color.bg, borderRadius: radius.md, padding: 10, gap: 2 },
-	optionSelected: { borderColor: color.wait, backgroundColor: alpha(color.wait, 0.1) },
-	optionLabel: { color: color.fg, fontSize: 14, fontWeight: "600" },
-	optionDesc: { color: color.mute, fontSize: 12 },
-	answerInput: {
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.bg,
-		borderRadius: radius.md,
-		color: color.fg,
-		padding: 10,
-		fontSize: 14,
-		minHeight: 40,
-	},
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		userWrap: { alignItems: "flex-end" },
+		userBubble: {
+			maxWidth: "85%",
+			backgroundColor: color.accent,
+			borderRadius: radius.lg,
+			borderBottomRightRadius: 4,
+			paddingHorizontal: 14,
+			paddingVertical: 8,
+		},
+		userText: { color: color.accentInk, fontSize: 15, lineHeight: 21 },
+		aborted: { fontSize: 10, letterSpacing: 1.8, textTransform: "uppercase", color: alpha(color.danger, 0.8) },
+		systemRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
+		rule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: color.border },
+		systemText: { fontSize: 10, color: color.faint, letterSpacing: 1.2, textTransform: "uppercase" },
+		trace: { borderWidth: 1, borderColor: alpha(color.border, 0.9), backgroundColor: alpha(color.panel, 0.6), borderRadius: radius.md, overflow: "hidden" },
+		traceHead: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
+		traceLabel: { fontSize: 10, fontWeight: "600", letterSpacing: 1.8, textTransform: "uppercase", color: color.mute },
+		traceCount: { minWidth: 17, height: 17, borderRadius: 9, backgroundColor: color.elevated, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
+		traceCountText: { fontSize: 10, fontWeight: "700", color: color.mute },
+		traceCurrent: { flex: 1, fontSize: 11, color: color.accent },
+		traceFailedWrap: { flexDirection: "row", alignItems: "center", gap: 2 },
+		traceFailed: { fontSize: 10, color: color.danger },
+		traceBody: { borderTopWidth: 1, borderTopColor: color.border, paddingHorizontal: 6, paddingVertical: 6 },
+		stepRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 6, paddingVertical: 6 },
+		stepLabel: { fontSize: 13, color: color.fg, flexShrink: 0, maxWidth: "50%" },
+		stepPreview: { flex: 1, fontSize: 12, color: color.faint, fontFamily: font.mono },
+		stepDetail: { marginLeft: 28, marginBottom: 6, marginRight: 6, gap: 6 },
+		snippet: { fontFamily: font.mono, fontSize: 11, color: color.fg, backgroundColor: color.bg, borderRadius: 6, padding: 8 },
+		waitCard: {
+			borderWidth: 1,
+			borderColor: alpha(color.waitFill, 0.4),
+			backgroundColor: alpha(color.waitFill, 0.05),
+			borderRadius: radius.lg,
+			padding: 14,
+			gap: 12,
+		},
+		waitHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+		waitEyebrow: { fontSize: 10, fontWeight: "600", letterSpacing: 1.8, textTransform: "uppercase", color: color.wait },
+		permissionText: { fontSize: 12, lineHeight: 18 },
+		questionHeader: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: color.mute },
+		questionText: { color: color.fg, fontSize: 15, lineHeight: 21 },
+		option: { borderWidth: 1, borderColor: color.border, backgroundColor: color.bg, borderRadius: radius.md, padding: 10, gap: 2 },
+		optionSelected: { borderColor: color.wait, backgroundColor: alpha(color.waitFill, 0.1) },
+		optionLabel: { color: color.fg, fontSize: 14, fontWeight: "600" },
+		optionDesc: { color: color.mute, fontSize: 12 },
+		answerInput: {
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.bg,
+			borderRadius: radius.md,
+			color: color.fg,
+			padding: 10,
+			fontSize: 14,
+			minHeight: 40,
+		},
+	}),
+);

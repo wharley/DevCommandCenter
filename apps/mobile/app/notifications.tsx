@@ -4,7 +4,7 @@
  * once). "Agora não" is remembered; Settings can turn it on later.
  */
 import { useSession } from "@/backend/session";
-import { color } from "@/theme";
+import { makeStyles, useTheme } from "@/theme";
 import { Button, Mono, Panel } from "@/ui/primitives";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
@@ -13,6 +13,8 @@ import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function NotificationsOffer() {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const insets = useSafeAreaInsets();
 	const { session } = useSession();
 	const [busy, setBusy] = useState(false);
@@ -63,23 +65,25 @@ export default function NotificationsOffer() {
 	);
 }
 
-const styles = StyleSheet.create({
-	root: { flex: 1, backgroundColor: color.bg },
-	content: { paddingHorizontal: 24 },
-	icon: {
-		width: 56,
-		height: 56,
-		borderRadius: 28,
-		alignItems: "center",
-		justifyContent: "center",
-		backgroundColor: color.panel,
-		borderWidth: 1,
-		borderColor: color.border,
-		marginBottom: 20,
-	},
-	title: { color: color.fg, fontSize: 22, fontWeight: "700", lineHeight: 28 },
-	body: { color: color.fg, fontSize: 15, lineHeight: 22, marginTop: 12 },
-	label: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: color.mute },
-	example: { color: color.fg, fontSize: 14, fontWeight: "600" },
-	hint: { color: color.mute, fontSize: 12, lineHeight: 18 },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		root: { flex: 1, backgroundColor: color.bg },
+		content: { paddingHorizontal: 24 },
+		icon: {
+			width: 56,
+			height: 56,
+			borderRadius: 28,
+			alignItems: "center",
+			justifyContent: "center",
+			backgroundColor: color.panel,
+			borderWidth: 1,
+			borderColor: color.border,
+			marginBottom: 20,
+		},
+		title: { color: color.fg, fontSize: 22, fontWeight: "700", lineHeight: 28 },
+		body: { color: color.fg, fontSize: 15, lineHeight: 22, marginTop: 12 },
+		label: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: color.mute },
+		example: { color: color.fg, fontSize: 14, fontWeight: "600" },
+		hint: { color: color.mute, fontSize: 12, lineHeight: 18 },
+	}),
+);

@@ -2,7 +2,7 @@ import { latestSessionByWorkspace, projectGroups, type Comb } from "@dcc/mobile-
 import { HomeHeader } from "@/screens/HomeHeader";
 import { useHomeData } from "@/screens/homeData";
 import { openNewTask, openThread } from "@/screens/rows";
-import { color, radius } from "@/theme";
+import { makeStyles, radius, useTheme } from "@/theme";
 import { EmptyState, Loading, Mono, StateDot } from "@/ui/primitives";
 import { ProjectGlyph } from "@/ui/sprites";
 import Feather from "@expo/vector-icons/Feather";
@@ -16,6 +16,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
  * every task archived) still shows, with a way to start its first task.
  */
 export default function WorkspacesScreen() {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const insets = useSafeAreaInsets();
 	const { scan, attention, combs, catalog, refreshing, refresh } = useHomeData();
 	const [search, setSearch] = useState("");
@@ -133,37 +135,39 @@ export default function WorkspacesScreen() {
 	);
 }
 
-const styles = StyleSheet.create({
-	root: { flex: 1, backgroundColor: color.bg },
-	content: { paddingHorizontal: 16, paddingBottom: 32 },
-	projectHead: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, marginBottom: 6 },
-	project: { color: color.fg, fontSize: 14, fontWeight: "600", flex: 1 },
-	count: { color: color.faint, fontSize: 11 },
-	list: { gap: 8 },
-	comb: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 12,
-		paddingHorizontal: 14,
-		paddingVertical: 12,
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.panel,
-	},
-	combName: { color: color.fg, fontSize: 14, fontWeight: "500" },
-	branch: { color: color.info, fontSize: 11 },
-	sessionLine: { color: color.mute, fontSize: 12 },
-	newTask: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 8,
-		paddingHorizontal: 14,
-		paddingVertical: 11,
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderStyle: "dashed",
-		borderColor: color.border,
-	},
-	newTaskText: { color: color.mute, fontSize: 13 },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		root: { flex: 1, backgroundColor: color.bg },
+		content: { paddingHorizontal: 16, paddingBottom: 32 },
+		projectHead: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, marginBottom: 6 },
+		project: { color: color.fg, fontSize: 14, fontWeight: "600", flex: 1 },
+		count: { color: color.faint, fontSize: 11 },
+		list: { gap: 8 },
+		comb: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 12,
+			paddingHorizontal: 14,
+			paddingVertical: 12,
+			borderRadius: radius.md,
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.panel,
+		},
+		combName: { color: color.fg, fontSize: 14, fontWeight: "500" },
+		branch: { color: color.info, fontSize: 11 },
+		sessionLine: { color: color.mute, fontSize: 12 },
+		newTask: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+			paddingHorizontal: 14,
+			paddingVertical: 11,
+			borderRadius: radius.md,
+			borderWidth: 1,
+			borderStyle: "dashed",
+			borderColor: color.border,
+		},
+		newTaskText: { color: color.mute, fontSize: 13 },
+	}),
+);

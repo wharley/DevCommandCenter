@@ -12,7 +12,7 @@ import * as Updates from "expo-updates";
 import { useEffect, useRef, useState } from "react";
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { color, radius } from "./theme";
+import { makeStyles, radius, useTheme } from "./theme";
 
 const RECHECK_MS = 30 * 60 * 1000;
 
@@ -26,6 +26,8 @@ async function checkAndFetch(): Promise<void> {
 }
 
 export function UpdateBanner() {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const { isUpdatePending } = Updates.useUpdates();
 	const [dismissed, setDismissed] = useState(false);
 	const lastCheck = useRef(Date.now());
@@ -70,19 +72,21 @@ export function appVersionLine(version: string | null | undefined): string {
 	return parts.join(" · ");
 }
 
-const styles = StyleSheet.create({
-	wrap: { position: "absolute", left: 12, right: 12, alignItems: "center", zIndex: 10 },
-	banner: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 10,
-		paddingHorizontal: 14,
-		paddingVertical: 10,
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.elevated,
-	},
-	text: { color: color.fg, fontSize: 13 },
-	action: { color: color.accent, fontSize: 13, fontWeight: "700" },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		wrap: { position: "absolute", left: 12, right: 12, alignItems: "center", zIndex: 10 },
+		banner: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 10,
+			paddingHorizontal: 14,
+			paddingVertical: 10,
+			borderRadius: radius.md,
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.elevated,
+		},
+		text: { color: color.fg, fontSize: 13 },
+		action: { color: color.accent, fontSize: 13, fontWeight: "700" },
+	}),
+);

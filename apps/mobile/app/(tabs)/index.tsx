@@ -6,7 +6,7 @@ import { pendingKey, useHomeData } from "@/screens/homeData";
 import { AgentRequestHeader, AttentionCard, NeedsYouCard, SessionRow } from "@/screens/rows";
 import { AgentRequestCard } from "@/ui/AgentRequestCard";
 import { TaskProposalCard } from "@/ui/TaskProposalCard";
-import { color } from "@/theme";
+import { makeStyles, useTheme } from "@/theme";
 import { EmptyState, Loading, SectionLabel } from "@/ui/primitives";
 import { useMemo, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
@@ -14,6 +14,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 /** Agentes: triage first — what needs you, what is running, what is recent. */
 export default function AgentsScreen() {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const insets = useSafeAreaInsets();
 	const { scan, attention, refreshing, refresh, respond, resolving, showNotice } = useHomeData();
 	const agentRequests = useAgentRequests();
@@ -154,8 +156,10 @@ export default function AgentsScreen() {
 	);
 }
 
-const styles = StyleSheet.create({
-	root: { flex: 1, backgroundColor: color.bg },
-	content: { paddingHorizontal: 16, paddingBottom: 32 },
-	list: { gap: 8 },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		root: { flex: 1, backgroundColor: color.bg },
+		content: { paddingHorizontal: 16, paddingBottom: 32 },
+		list: { gap: 8 },
+	}),
+);

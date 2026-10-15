@@ -20,7 +20,7 @@ import {
 } from "@dcc/mobile-core";
 import { useBackend } from "@/backend/session";
 import { ApiError, errorMessage } from "@/backend/types";
-import { color, radius } from "@/theme";
+import { makeStyles, radius, useTheme } from "@/theme";
 import { Button, Loading, Mono, Panel } from "@/ui/primitives";
 import Feather from "@expo/vector-icons/Feather";
 import { router, useLocalSearchParams } from "expo-router";
@@ -34,6 +34,8 @@ const SLOW = { timeoutMs: 180_000 };
 type Busy = ExecutionDockAction["id"] | "sync" | "complete" | "archive" | "request" | null;
 
 export default function DeliveryScreen() {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const { id } = useLocalSearchParams<{ id: string }>();
 	const workspaceId = String(id);
 	const backend = useBackend();
@@ -331,6 +333,7 @@ export default function DeliveryScreen() {
 }
 
 function Screen({ insets, children }: { insets: { top: number; bottom: number }; children: React.ReactNode }) {
+	const styles = useStyles();
 	return (
 		<ScrollView
 			style={styles.root}
@@ -352,6 +355,7 @@ function Screen({ insets, children }: { insets: { top: number; bottom: number };
 }
 
 function Section({ title, detail, children }: { title: string; detail?: string; children?: React.ReactNode }) {
+	const styles = useStyles();
 	return (
 		<Panel style={{ gap: 10 }}>
 			<View style={styles.sectionHead}>
@@ -364,6 +368,7 @@ function Section({ title, detail, children }: { title: string; detail?: string; 
 }
 
 function Files({ changes }: { changes: DeliveryChange[] }) {
+	const styles = useStyles();
 	const [all, setAll] = useState(false);
 	const shown = all ? changes : changes.slice(0, 8);
 	return (
@@ -388,6 +393,8 @@ function Files({ changes }: { changes: DeliveryChange[] }) {
 }
 
 function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (value: boolean) => void }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	return (
 		<View style={styles.toggle}>
 			<Text style={[styles.body, { flex: 1 }]}>{label}</Text>
@@ -396,37 +403,39 @@ function Toggle({ label, value, onChange }: { label: string; value: boolean; onC
 	);
 }
 
-const styles = StyleSheet.create({
-	root: { flex: 1, backgroundColor: color.bg },
-	content: { paddingHorizontal: 16, gap: 12 },
-	header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
-	title: { color: color.fg, fontSize: 20, fontWeight: "600" },
-	close: { color: color.mute, fontSize: 15 },
-	route: { flexDirection: "row", alignItems: "center", gap: 6 },
-	routeText: { color: color.fg, fontSize: 12, flexShrink: 1 },
-	sectionHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 8 },
-	strong: { color: color.fg, fontSize: 14, fontWeight: "600" },
-	body: { color: color.fg, fontSize: 13, lineHeight: 19 },
-	muted: { color: color.mute, fontSize: 12, lineHeight: 17 },
-	label: { color: color.faint, fontSize: 10, letterSpacing: 0.6 },
-	notice: { color: color.mute, fontSize: 13, padding: 10, borderRadius: radius.sm, backgroundColor: color.panel, borderWidth: 1, borderColor: color.border },
-	error: { color: color.danger, fontSize: 13 },
-	input: {
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.bg,
-		borderRadius: radius.md,
-		color: color.fg,
-		paddingHorizontal: 12,
-		paddingVertical: 10,
-		fontSize: 14,
-	},
-	file: { flexDirection: "row", alignItems: "center", gap: 8 },
-	status: { width: 14, color: color.mute, fontSize: 11 },
-	path: { flex: 1, color: color.fg, fontSize: 12 },
-	plus: { color: color.accent, fontSize: 11 },
-	minus: { color: color.danger, fontSize: 11 },
-	more: { color: color.mute, fontSize: 11, marginTop: 4 },
-	row: { flexDirection: "row", gap: 8 },
-	toggle: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 2 },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		root: { flex: 1, backgroundColor: color.bg },
+		content: { paddingHorizontal: 16, gap: 12 },
+		header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
+		title: { color: color.fg, fontSize: 20, fontWeight: "600" },
+		close: { color: color.mute, fontSize: 15 },
+		route: { flexDirection: "row", alignItems: "center", gap: 6 },
+		routeText: { color: color.fg, fontSize: 12, flexShrink: 1 },
+		sectionHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 8 },
+		strong: { color: color.fg, fontSize: 14, fontWeight: "600" },
+		body: { color: color.fg, fontSize: 13, lineHeight: 19 },
+		muted: { color: color.mute, fontSize: 12, lineHeight: 17 },
+		label: { color: color.faint, fontSize: 10, letterSpacing: 0.6 },
+		notice: { color: color.mute, fontSize: 13, padding: 10, borderRadius: radius.sm, backgroundColor: color.panel, borderWidth: 1, borderColor: color.border },
+		error: { color: color.danger, fontSize: 13 },
+		input: {
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.bg,
+			borderRadius: radius.md,
+			color: color.fg,
+			paddingHorizontal: 12,
+			paddingVertical: 10,
+			fontSize: 14,
+		},
+		file: { flexDirection: "row", alignItems: "center", gap: 8 },
+		status: { width: 14, color: color.mute, fontSize: 11 },
+		path: { flex: 1, color: color.fg, fontSize: 12 },
+		plus: { color: color.accent, fontSize: 11 },
+		minus: { color: color.danger, fontSize: 11 },
+		more: { color: color.mute, fontSize: 11, marginTop: 4 },
+		row: { flexDirection: "row", gap: 8 },
+		toggle: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 2 },
+	}),
+);

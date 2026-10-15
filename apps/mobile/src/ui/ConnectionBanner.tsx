@@ -4,10 +4,12 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useConnectionState, useSession } from "../backend/session";
 import type { Backend } from "../backend/types";
-import { alpha, color } from "../theme";
+import { alpha, makeStyles, useTheme } from "../theme";
 import { Mono, StateDot } from "./primitives";
 
 export function ConnectionBanner({ backend }: { backend: Backend }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const state = useConnectionState(backend);
 	const { signOut } = useSession();
 	const [now, setNow] = useState(Date.now());
@@ -46,7 +48,7 @@ export function ConnectionBanner({ backend }: { backend: Backend }) {
 	}
 	const seconds = state.kind === "offline" ? Math.max(0, Math.ceil((state.retryAt - now) / 1000)) : 0;
 	return (
-		<View style={[styles.bar, { borderColor: alpha(color.wait, 0.35), backgroundColor: alpha(color.wait, 0.05) }]}>
+		<View style={[styles.bar, { borderColor: alpha(color.waitFill, 0.35), backgroundColor: alpha(color.waitFill, 0.05) }]}>
 			<StateDot state="wait" />
 			<Text style={styles.text} numberOfLines={2}>
 				{state.kind === "connecting"
@@ -62,18 +64,20 @@ export function ConnectionBanner({ backend }: { backend: Backend }) {
 	);
 }
 
-const styles = StyleSheet.create({
-	bar: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 10,
-		borderWidth: 1,
-		borderRadius: 12,
-		paddingHorizontal: 12,
-		paddingVertical: 9,
-		marginBottom: 12,
-	},
-	label: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase" },
-	text: { flex: 1, color: color.fg, fontSize: 12, lineHeight: 16 },
-	action: { fontSize: 12, fontWeight: "700" },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		bar: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 10,
+			borderWidth: 1,
+			borderRadius: 12,
+			paddingHorizontal: 12,
+			paddingVertical: 9,
+			marginBottom: 12,
+		},
+		label: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase" },
+		text: { flex: 1, color: color.fg, fontSize: 12, lineHeight: 16 },
+		action: { fontSize: 12, fontWeight: "700" },
+	}),
+);

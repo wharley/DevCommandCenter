@@ -15,19 +15,17 @@ import {
 	type TextStyle,
 	type ViewStyle,
 } from "react-native";
-import { alpha, color, font, radius } from "../theme";
+import { alpha, font, makeStyles, radius, useTheme, type Palette } from "../theme";
 
 export type AgentState = "live" | "wait" | "fail" | "idle";
 
-const STATE_COLOR: Record<AgentState, string> = {
-	live: color.accent,
-	wait: color.wait,
-	fail: color.danger,
-	idle: color.faint,
-};
+function stateColor(state: AgentState, color: Palette): string {
+	return { live: color.accent, wait: color.wait, fail: color.danger, idle: color.faint }[state];
+}
 
 /** A status node. Filled + breathing when live; hollow when idle. */
 export function StateDot({ state, size = 8 }: { state: AgentState; size?: number }) {
+	const { color } = useTheme();
 	const halo = useRef(new Animated.Value(0)).current;
 	useEffect(() => {
 		if (state !== "live") return;
@@ -40,7 +38,7 @@ export function StateDot({ state, size = 8 }: { state: AgentState; size?: number
 		loop.start();
 		return () => loop.stop();
 	}, [state, halo]);
-	const tint = STATE_COLOR[state];
+	const tint = stateColor(state, color);
 	return (
 		<View style={{ width: size, height: size }}>
 			{state === "live" ? (
@@ -71,6 +69,7 @@ export function StateDot({ state, size = 8 }: { state: AgentState; size?: number
 }
 
 export function Mono({ style, children, ...rest }: TextProps & { style?: StyleProp<TextStyle>; children: ReactNode }) {
+	const styles = useStyles();
 	return (
 		<Text style={[styles.mono, style]} {...rest}>
 			{children}
@@ -88,6 +87,8 @@ export function SectionLabel({
 	count?: number;
 	tone?: "mute" | "wait" | "live";
 }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const tint = tone === "wait" ? color.wait : tone === "live" ? color.accent : color.mute;
 	return (
 		<View style={styles.sectionLabel}>
@@ -96,7 +97,7 @@ export function SectionLabel({
 				<View
 					style={[
 						styles.count,
-						{ backgroundColor: tone === "mute" ? color.elevated : tint },
+						{ backgroundColor: tone === "mute" ? color.elevated : tone === "wait" ? color.waitFill : tint },
 					]}
 				>
 					<Mono
@@ -115,6 +116,7 @@ export function SectionLabel({
 
 /** The wordmark, with the live node when the desktop answers. */
 export function Wordmark({ online }: { online?: boolean }) {
+	const styles = useStyles();
 	return (
 		<View style={styles.wordmark}>
 			<StateDot state={online ? "live" : "idle"} />
@@ -125,8 +127,10 @@ export function Wordmark({ online }: { online?: boolean }) {
 }
 
 export function Panel({ children, style, tone }: { children: ReactNode; style?: StyleProp<ViewStyle>; tone?: "wait" | "danger" }) {
-	const border = tone === "wait" ? alpha(color.wait, 0.4) : tone === "danger" ? alpha(color.danger, 0.35) : color.border;
-	const bg = tone === "wait" ? alpha(color.wait, 0.06) : tone === "danger" ? alpha(color.danger, 0.06) : color.panel;
+	const { color } = useTheme();
+	const styles = useStyles();
+	const border = tone === "wait" ? alpha(color.waitFill, 0.4) : tone === "danger" ? alpha(color.danger, 0.35) : color.border;
+	const bg = tone === "wait" ? alpha(color.waitFill, 0.06) : tone === "danger" ? alpha(color.danger, 0.06) : color.panel;
 	return <View style={[styles.panel, { borderColor: border, backgroundColor: bg }, style]}>{children}</View>;
 }
 
@@ -147,9 +151,11 @@ export function Button({
 	style?: StyleProp<ViewStyle>;
 	accessibilityLabel?: string;
 }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const palette = {
 		primary: { bg: color.accent, fg: color.accentInk, border: color.accent },
-		wait: { bg: color.wait, fg: color.waitInk, border: color.wait },
+		wait: { bg: color.waitFill, fg: color.waitInk, border: color.waitFill },
 		ghost: { bg: color.bg, fg: color.fg, border: color.border },
 		danger: { bg: color.bg, fg: color.danger, border: alpha(color.danger, 0.5) },
 	}[variant];
@@ -172,6 +178,7 @@ export function Button({
 }
 
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
+	const styles = useStyles();
 	return (
 		<View style={styles.empty}>
 			<Text style={styles.emptyTitle}>{title}</Text>
@@ -181,6 +188,8 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
 }
 
 export function Loading() {
+	const { color } = useTheme();
+	const styles = useStyles();
 	return (
 		<View style={styles.loading}>
 			<ActivityIndicator color={color.mute} />
@@ -188,27 +197,29 @@ export function Loading() {
 	);
 }
 
-export const styles = StyleSheet.create({
-	mono: { fontFamily: font.mono, color: color.fg },
-	sectionLabel: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10, paddingHorizontal: 2 },
-	eyebrow: { fontSize: 10, fontWeight: "600", letterSpacing: 1.8, textTransform: "uppercase" },
-	count: { minWidth: 17, height: 17, borderRadius: 9, paddingHorizontal: 4, alignItems: "center", justifyContent: "center" },
-	countText: { fontSize: 10, fontWeight: "700" },
-	wordmark: { flexDirection: "row", alignItems: "center", gap: 8 },
-	wordmarkText: { fontSize: 15, fontWeight: "700", letterSpacing: 2 },
-	wordmarkSub: { fontSize: 10, color: color.faint, letterSpacing: 1.5, textTransform: "uppercase" },
-	panel: { borderWidth: 1, borderRadius: radius.lg, padding: 14 },
-	button: {
-		minHeight: 44,
-		borderRadius: radius.md,
-		borderWidth: 1,
-		paddingHorizontal: 14,
-		alignItems: "center",
-		justifyContent: "center",
-	},
-	buttonText: { fontSize: 14, fontWeight: "600" },
-	empty: { alignItems: "center", paddingVertical: 48, paddingHorizontal: 24, gap: 6 },
-	emptyTitle: { color: color.fg, fontSize: 15, fontWeight: "600" },
-	emptyBody: { color: color.mute, fontSize: 13, textAlign: "center", lineHeight: 19 },
-	loading: { paddingVertical: 40, alignItems: "center" },
-});
+export const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		mono: { fontFamily: font.mono, color: color.fg },
+		sectionLabel: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10, paddingHorizontal: 2 },
+		eyebrow: { fontSize: 10, fontWeight: "600", letterSpacing: 1.8, textTransform: "uppercase" },
+		count: { minWidth: 17, height: 17, borderRadius: 9, paddingHorizontal: 4, alignItems: "center", justifyContent: "center" },
+		countText: { fontSize: 10, fontWeight: "700" },
+		wordmark: { flexDirection: "row", alignItems: "center", gap: 8 },
+		wordmarkText: { fontSize: 15, fontWeight: "700", letterSpacing: 2 },
+		wordmarkSub: { fontSize: 10, color: color.faint, letterSpacing: 1.5, textTransform: "uppercase" },
+		panel: { borderWidth: 1, borderRadius: radius.lg, padding: 14 },
+		button: {
+			minHeight: 44,
+			borderRadius: radius.md,
+			borderWidth: 1,
+			paddingHorizontal: 14,
+			alignItems: "center",
+			justifyContent: "center",
+		},
+		buttonText: { fontSize: 14, fontWeight: "600" },
+		empty: { alignItems: "center", paddingVertical: 48, paddingHorizontal: 24, gap: 6 },
+		emptyTitle: { color: color.fg, fontSize: 15, fontWeight: "600" },
+		emptyBody: { color: color.mute, fontSize: 13, textAlign: "center", lineHeight: 19 },
+		loading: { paddingVertical: 40, alignItems: "center" },
+	}),
+);

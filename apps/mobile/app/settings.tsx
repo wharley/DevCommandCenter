@@ -3,7 +3,7 @@ import { useConnectionState, useSession } from "@/backend/session";
 import type { Backend } from "@/backend/types";
 import type { PushRegistration } from "@/notifications/registration";
 import { pushStatusText, usePushStatus } from "@/notifications/usePush";
-import { color } from "@/theme";
+import { makeStyles, useTheme } from "@/theme";
 import { appVersionLine } from "@/updates";
 import { Button, Mono, Panel, StateDot } from "@/ui/primitives";
 import { router } from "expo-router";
@@ -13,6 +13,7 @@ import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function SettingsScreen() {
+	const styles = useStyles();
 	const insets = useSafeAreaInsets();
 	const { session, signOut } = useSession();
 	if (session.status !== "remote" && session.status !== "demo") return null;
@@ -71,12 +72,18 @@ export default function SettingsScreen() {
 					/>
 				</>
 			)}
+			{__DEV__ ? (
+				<Pressable onPress={() => router.push("/ui-gallery")} accessibilityRole="button" style={{ marginTop: 20 }}>
+					<Text style={[styles.action, { textAlign: "center" }]}>Galeria de componentes</Text>
+				</Pressable>
+			) : null}
 			<Mono style={styles.version}>DCC {appVersionLine(Constants.expoConfig?.version)}</Mono>
 		</ScrollView>
 	);
 }
 
 function Connection({ backend }: { backend: Backend }) {
+	const styles = useStyles();
 	const state = useConnectionState(backend);
 	const label =
 		state.kind === "online"
@@ -100,6 +107,8 @@ function Connection({ backend }: { backend: Backend }) {
 }
 
 function Notifications({ push }: { push: PushRegistration }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const status = usePushStatus(push);
 	const [busy, setBusy] = useState(false);
 	const on = status.kind === "on" || status.kind === "pending";
@@ -130,6 +139,8 @@ function Notifications({ push }: { push: PushRegistration }) {
 }
 
 function Field({ label, value, mono, accent }: { label: string; value: string; mono?: boolean; accent?: boolean }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	return (
 		<View style={{ gap: 3 }}>
 			<Mono style={styles.label}>{label}</Mono>
@@ -144,17 +155,19 @@ function Field({ label, value, mono, accent }: { label: string; value: string; m
 	);
 }
 
-const styles = StyleSheet.create({
-	root: { flex: 1, backgroundColor: color.bg },
-	content: { paddingHorizontal: 20 },
-	version: { color: color.faint, fontSize: 10, textAlign: "center", marginTop: 28 },
-	header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
-	title: { color: color.fg, fontSize: 20, fontWeight: "600" },
-	close: { color: color.mute, fontSize: 14 },
-	body: { color: color.fg, fontSize: 14, lineHeight: 20 },
-	hint: { color: color.mute, fontSize: 12, lineHeight: 18, marginTop: 12 },
-	connection: { flexDirection: "row", alignItems: "center", gap: 10 },
-	action: { color: color.wait, fontWeight: "700", fontSize: 13 },
-	label: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: color.mute },
-	value: { color: color.fg, fontSize: 13 },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		root: { flex: 1, backgroundColor: color.bg },
+		content: { paddingHorizontal: 20 },
+		version: { color: color.faint, fontSize: 10, textAlign: "center", marginTop: 28 },
+		header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
+		title: { color: color.fg, fontSize: 20, fontWeight: "600" },
+		close: { color: color.mute, fontSize: 14 },
+		body: { color: color.fg, fontSize: 14, lineHeight: 20 },
+		hint: { color: color.mute, fontSize: 12, lineHeight: 18, marginTop: 12 },
+		connection: { flexDirection: "row", alignItems: "center", gap: 10 },
+		action: { color: color.wait, fontWeight: "700", fontSize: 13 },
+		label: { fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: color.mute },
+		value: { color: color.fg, fontSize: 13 },
+	}),
+);

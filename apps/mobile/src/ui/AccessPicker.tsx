@@ -8,7 +8,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { useState } from "react";
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { alpha, color, radius } from "../theme";
+import { alpha, makeStyles, radius, useTheme, type Palette } from "../theme";
 import { Mono } from "./primitives";
 
 type Props = {
@@ -20,15 +20,16 @@ type Props = {
 	disabled?: boolean;
 };
 
-function tint(policy: AccessPolicy | null): string {
+function tint(policy: AccessPolicy | null, color: Palette): string {
 	if (policy === "full_access") return color.wait;
 	if (policy === "auto") return color.accent;
 	return color.mute;
 }
 
 function PolicyIcon({ policy, size = 13 }: { policy: AccessPolicy | null; size?: number }) {
+	const { color } = useTheme();
 	const name = policy === "full_access" ? "alert-triangle" : "shield";
-	return <Feather name={name} size={size} color={tint(policy)} />;
+	return <Feather name={name} size={size} color={tint(policy, color)} />;
 }
 
 /** "Acesso completo" asks first, like the desktop's dialog. */
@@ -48,6 +49,7 @@ function confirmThen(policy: AccessPolicy, current: AccessPolicy | null, apply: 
 }
 
 function Managed({ providerLabel }: { providerLabel?: string | null }) {
+	const styles = useStyles();
 	return (
 		<View style={styles.managed} accessibilityLabel={t("composer.approval.managedHint", { provider: providerLabel ?? "agente" })}>
 			<PolicyIcon policy={null} />
@@ -58,6 +60,8 @@ function Managed({ providerLabel }: { providerLabel?: string | null }) {
 
 /** "Nova tarefa": the levels side by side, the chosen one explained below. */
 export function AccessChoices({ available, value, onChange, providerLabel, disabled }: Props) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	if (available.length === 0 || !value) {
 		return (
 			<View style={{ gap: 6 }}>
@@ -81,7 +85,7 @@ export function AccessChoices({ available, value, onChange, providerLabel, disab
 							accessibilityLabel={accessLabel(policy)}
 							style={({ pressed }) => [
 								styles.chip,
-								selected && { borderColor: tint(policy), backgroundColor: alpha(tint(policy), 0.08) },
+								selected && { borderColor: tint(policy, color), backgroundColor: alpha(tint(policy, color), 0.08) },
 								disabled && !selected && { opacity: 0.4 },
 								pressed && { backgroundColor: color.elevated },
 							]}
@@ -99,6 +103,8 @@ export function AccessChoices({ available, value, onChange, providerLabel, disab
 
 /** The thread's composer: a compact pill that opens the levels in a sheet. */
 export function AccessPill({ available, value, onChange, providerLabel, disabled }: Props) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const [open, setOpen] = useState(false);
 	const insets = useSafeAreaInsets();
 	if (available.length === 0 || !value) return <Managed providerLabel={providerLabel} />;
@@ -117,12 +123,12 @@ export function AccessPill({ available, value, onChange, providerLabel, disabled
 				accessibilityLabel={`${t("composer.approval.open")}: ${accessLabel(value)}`}
 				style={[
 					styles.pill,
-					value === "full_access" && { backgroundColor: alpha(color.wait, 0.1) },
+					value === "full_access" && { backgroundColor: alpha(color.waitFill, 0.1) },
 					disabled && { opacity: 0.45 },
 				]}
 			>
 				<PolicyIcon policy={value} size={12} />
-				<Mono style={[styles.pillText, { color: tint(value) }]}>{accessLabel(value)}</Mono>
+				<Mono style={[styles.pillText, { color: tint(value, color) }]}>{accessLabel(value)}</Mono>
 				<Feather name="chevron-down" size={12} color={color.faint} />
 			</Pressable>
 			<Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -153,47 +159,49 @@ export function AccessPill({ available, value, onChange, providerLabel, disabled
 	);
 }
 
-const styles = StyleSheet.create({
-	chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-	chip: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 7,
-		paddingHorizontal: 12,
-		paddingVertical: 8,
-		minHeight: 38,
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.panel,
-	},
-	chipText: { color: color.mute, fontSize: 13, fontWeight: "500" },
-	hint: { color: color.faint, fontSize: 12, lineHeight: 17 },
-	managed: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
-	managedText: { fontSize: 11, color: color.mute },
-	pill: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 5,
-		alignSelf: "flex-start",
-		paddingHorizontal: 8,
-		paddingVertical: 4,
-		borderRadius: radius.sm,
-	},
-	pillText: { fontSize: 11, fontWeight: "600" },
-	backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
-	sheet: {
-		backgroundColor: color.panel,
-		borderTopLeftRadius: radius.lg,
-		borderTopRightRadius: radius.lg,
-		borderTopWidth: 1,
-		borderColor: color.border,
-		paddingHorizontal: 12,
-		paddingTop: 16,
-		gap: 4,
-	},
-	sheetTitle: { fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: color.mute, paddingHorizontal: 8, marginBottom: 6 },
-	option: { flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 10, borderRadius: radius.md },
-	optionLabel: { color: color.fg, fontSize: 15, fontWeight: "600" },
-	optionDesc: { color: color.mute, fontSize: 12, lineHeight: 17 },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+		chip: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 7,
+			paddingHorizontal: 12,
+			paddingVertical: 8,
+			minHeight: 38,
+			borderRadius: radius.md,
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.panel,
+		},
+		chipText: { color: color.mute, fontSize: 13, fontWeight: "500" },
+		hint: { color: color.faint, fontSize: 12, lineHeight: 17 },
+		managed: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
+		managedText: { fontSize: 11, color: color.mute },
+		pill: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 5,
+			alignSelf: "flex-start",
+			paddingHorizontal: 8,
+			paddingVertical: 4,
+			borderRadius: radius.sm,
+		},
+		pillText: { fontSize: 11, fontWeight: "600" },
+		backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
+		sheet: {
+			backgroundColor: color.panel,
+			borderTopLeftRadius: radius.lg,
+			borderTopRightRadius: radius.lg,
+			borderTopWidth: 1,
+			borderColor: color.border,
+			paddingHorizontal: 12,
+			paddingTop: 16,
+			gap: 4,
+		},
+		sheetTitle: { fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: color.mute, paddingHorizontal: 8, marginBottom: 6 },
+		option: { flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 10, borderRadius: radius.md },
+		optionLabel: { color: color.fg, fontSize: 15, fontWeight: "600" },
+		optionDesc: { color: color.mute, fontSize: 12, lineHeight: 17 },
+	}),
+);

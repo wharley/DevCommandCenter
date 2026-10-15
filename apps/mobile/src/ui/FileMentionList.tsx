@@ -8,7 +8,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { Backend } from "../backend/types";
-import { color, font, radius } from "../theme";
+import { font, makeStyles, radius, useTheme } from "../theme";
 import { Mono } from "./primitives";
 
 export type FileScope = { workspaceId: string } | { repositoryId: string };
@@ -27,6 +27,8 @@ export function FileMentionList({
 	query: string;
 	onPick: (path: string) => void;
 }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const [files, setFiles] = useState<string[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const scopeKey = "workspaceId" in scope ? `w:${scope.workspaceId}` : `r:${scope.repositoryId}`;
@@ -93,19 +95,21 @@ export function FileMentionList({
 	);
 }
 
-const styles = StyleSheet.create({
-	panel: {
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.panel,
-		borderRadius: radius.md,
-		overflow: "hidden",
-	},
-	head: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 4 },
-	title: { fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: color.mute },
-	list: { maxHeight: 200 },
-	row: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
-	name: { color: color.fg, fontSize: 14, fontFamily: font.mono, flexShrink: 0, maxWidth: "60%" },
-	dir: { color: color.faint, fontSize: 12, fontFamily: font.mono, flex: 1 },
-	empty: { color: color.faint, fontSize: 12, paddingHorizontal: 12, paddingBottom: 10 },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		panel: {
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.panel,
+			borderRadius: radius.md,
+			overflow: "hidden",
+		},
+		head: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 4 },
+		title: { fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: color.mute },
+		list: { maxHeight: 200 },
+		row: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
+		name: { color: color.fg, fontSize: 14, fontFamily: font.mono, flexShrink: 0, maxWidth: "60%" },
+		dir: { color: color.faint, fontSize: 12, fontFamily: font.mono, flex: 1 },
+		empty: { color: color.faint, fontSize: 12, paddingHorizontal: 12, paddingBottom: 10 },
+	}),
+);

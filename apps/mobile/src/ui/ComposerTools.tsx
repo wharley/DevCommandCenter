@@ -13,7 +13,7 @@ import { AttachmentQueue, type PendingAttachment } from "../attachments/queue";
 import type { Backend } from "../backend/types";
 import { errorMessage } from "../backend/types";
 import type { Dictation } from "../dictation/useDictation";
-import { alpha, color, radius } from "../theme";
+import { alpha, makeStyles, radius, useTheme } from "../theme";
 import { Mono } from "./primitives";
 
 export function useAttachments(backend: Backend) {
@@ -51,6 +51,8 @@ const SOURCES: Array<{ source: PickSource; icon: keyof typeof Feather.glyphMap; 
 ];
 
 export function AttachButton({ attachments, disabled }: { attachments: Attachments; disabled?: boolean }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const [open, setOpen] = useState(false);
 	const insets = useSafeAreaInsets();
 	const full = attachments.queue.room() === 0;
@@ -97,6 +99,8 @@ export function AttachButton({ attachments, disabled }: { attachments: Attachmen
 
 /** Thumbnails of what will go with the message; each can be removed before sending. */
 export function AttachmentTray({ attachments }: { attachments: Attachments }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const { items, notice } = attachments;
 	if (items.length === 0 && !notice) return null;
 	return (
@@ -156,6 +160,8 @@ export function AttachmentTray({ attachments }: { attachments: Attachments }) {
 
 /** Tap to dictate, tap again to stop. Never sends. */
 export function MicButton({ dictation, disabled }: { dictation: Dictation; disabled?: boolean }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const { phase } = dictation.state;
 	const live = phase === "listening";
 	return (
@@ -183,6 +189,7 @@ export function MicButton({ dictation, disabled }: { dictation: Dictation; disab
 
 /** "Ouvindo…" while dictating; the error (and a way to the settings) after. */
 export function DictationStatus({ dictation }: { dictation: Dictation }) {
+	const styles = useStyles();
 	const { phase, error, needsSettings, onDevice } = dictation.state;
 	if (phase === "listening") {
 		return (
@@ -209,65 +216,67 @@ export function DictationStatus({ dictation }: { dictation: Dictation }) {
 	);
 }
 
-const styles = StyleSheet.create({
-	tool: {
-		width: 40,
-		height: 40,
-		borderRadius: 20,
-		borderWidth: 1,
-		borderColor: color.border,
-		alignItems: "center",
-		justifyContent: "center",
-		backgroundColor: color.bg,
-	},
-	tray: { gap: 8, paddingTop: 2, paddingRight: 8 },
-	thumb: {
-		width: 64,
-		height: 64,
-		borderRadius: radius.sm,
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.bg,
-		overflow: "hidden",
-	},
-	thumbImage: { width: "100%", height: "100%" },
-	fileThumb: { flex: 1, alignItems: "center", justifyContent: "center", gap: 3, padding: 4 },
-	fileName: { color: color.mute, fontSize: 9, textAlign: "center" },
-	thumbOverlay: {
-		...StyleSheet.absoluteFillObject,
-		alignItems: "center",
-		justifyContent: "center",
-		backgroundColor: "rgba(0,0,0,0.45)",
-	},
-	remove: {
-		position: "absolute",
-		top: 3,
-		right: 3,
-		width: 18,
-		height: 18,
-		borderRadius: 9,
-		alignItems: "center",
-		justifyContent: "center",
-		backgroundColor: "rgba(0,0,0,0.7)",
-	},
-	error: { color: color.danger, fontSize: 12, lineHeight: 17 },
-	link: { color: color.info, fontWeight: "600" },
-	status: { flexDirection: "row", alignItems: "center", gap: 8 },
-	statusText: { fontSize: 11, color: color.mute, flexShrink: 1 },
-	recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: color.danger },
-	backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
-	sheet: {
-		backgroundColor: color.panel,
-		borderTopLeftRadius: radius.lg,
-		borderTopRightRadius: radius.lg,
-		borderTopWidth: 1,
-		borderColor: color.border,
-		paddingHorizontal: 12,
-		paddingTop: 16,
-		gap: 4,
-	},
-	sheetTitle: { fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: color.mute, paddingHorizontal: 8, marginBottom: 6 },
-	sheetHint: { color: color.faint, fontSize: 12, paddingHorizontal: 8, paddingTop: 6 },
-	option: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12, borderRadius: radius.md },
-	optionLabel: { color: color.fg, fontSize: 15, fontWeight: "500" },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		tool: {
+			width: 40,
+			height: 40,
+			borderRadius: 20,
+			borderWidth: 1,
+			borderColor: color.border,
+			alignItems: "center",
+			justifyContent: "center",
+			backgroundColor: color.bg,
+		},
+		tray: { gap: 8, paddingTop: 2, paddingRight: 8 },
+		thumb: {
+			width: 64,
+			height: 64,
+			borderRadius: radius.sm,
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.bg,
+			overflow: "hidden",
+		},
+		thumbImage: { width: "100%", height: "100%" },
+		fileThumb: { flex: 1, alignItems: "center", justifyContent: "center", gap: 3, padding: 4 },
+		fileName: { color: color.mute, fontSize: 9, textAlign: "center" },
+		thumbOverlay: {
+			...StyleSheet.absoluteFillObject,
+			alignItems: "center",
+			justifyContent: "center",
+			backgroundColor: "rgba(0,0,0,0.45)",
+		},
+		remove: {
+			position: "absolute",
+			top: 3,
+			right: 3,
+			width: 18,
+			height: 18,
+			borderRadius: 9,
+			alignItems: "center",
+			justifyContent: "center",
+			backgroundColor: "rgba(0,0,0,0.7)",
+		},
+		error: { color: color.danger, fontSize: 12, lineHeight: 17 },
+		link: { color: color.info, fontWeight: "600" },
+		status: { flexDirection: "row", alignItems: "center", gap: 8 },
+		statusText: { fontSize: 11, color: color.mute, flexShrink: 1 },
+		recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: color.danger },
+		backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
+		sheet: {
+			backgroundColor: color.panel,
+			borderTopLeftRadius: radius.lg,
+			borderTopRightRadius: radius.lg,
+			borderTopWidth: 1,
+			borderColor: color.border,
+			paddingHorizontal: 12,
+			paddingTop: 16,
+			gap: 4,
+		},
+		sheetTitle: { fontSize: 10, letterSpacing: 1.4, textTransform: "uppercase", color: color.mute, paddingHorizontal: 8, marginBottom: 6 },
+		sheetHint: { color: color.faint, fontSize: 12, paddingHorizontal: 8, paddingTop: 6 },
+		option: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12, borderRadius: radius.md },
+		optionLabel: { color: color.fg, fontSize: 15, fontWeight: "500" },
+	}),
+);

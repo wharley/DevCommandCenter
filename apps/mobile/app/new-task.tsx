@@ -24,7 +24,7 @@ import { loadProjectAccess, saveProjectAccess } from "@/backend/accessStore";
 import { cachedCatalog, fetchCatalog } from "@/backend/catalogCache";
 import { useBackend } from "@/backend/session";
 import { errorMessage } from "@/backend/types";
-import { alpha, color, radius } from "@/theme";
+import { alpha, makeStyles, radius, useTheme } from "@/theme";
 import { AccessChoices } from "@/ui/AccessPicker";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
 import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
@@ -53,6 +53,8 @@ type Phase =
 	| { kind: "creating"; step: "sending" | "workspace" | "agent" };
 
 export default function NewTaskScreen() {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const backend = useBackend();
 	const insets = useSafeAreaInsets();
 	const params = useLocalSearchParams<{ repositoryId?: string }>();
@@ -482,6 +484,7 @@ function pickRepository(catalog: MobileCatalog, wanted?: string): string | null 
 }
 
 function Section({ label, children }: { label: string; children: ReactNode }) {
+	const styles = useStyles();
 	return (
 		<View style={{ gap: 10 }}>
 			<Mono style={styles.eyebrow}>{label}</Mono>
@@ -503,6 +506,8 @@ function Chip({
 	accessibilityLabel: string;
 	children: ReactNode;
 }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	return (
 		<Pressable
 			onPress={onPress}
@@ -522,70 +527,72 @@ function Chip({
 	);
 }
 
-const styles = StyleSheet.create({
-	root: { flex: 1, backgroundColor: color.bg },
-	header: {
-		flexDirection: "row",
-		alignItems: "center",
-		justifyContent: "space-between",
-		paddingHorizontal: 16,
-		paddingBottom: 12,
-		borderBottomWidth: 1,
-		borderBottomColor: color.border,
-	},
-	title: { color: color.fg, fontSize: 17, fontWeight: "700" },
-	close: { color: color.mute, fontSize: 14 },
-	content: { paddingHorizontal: 16, paddingTop: 16 },
-	body: { color: color.mute, fontSize: 13, lineHeight: 19 },
-	error: { color: color.danger, fontSize: 12, lineHeight: 17 },
-	eyebrow: { fontSize: 10, fontWeight: "600", letterSpacing: 1.8, textTransform: "uppercase", color: color.mute },
-	chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-	chip: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 8,
-		maxWidth: "100%",
-		paddingLeft: 6,
-		paddingRight: 12,
-		paddingVertical: 6,
-		minHeight: 38,
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.panel,
-	},
-	chipOn: { borderColor: color.accent, backgroundColor: alpha(color.accent, 0.08) },
-	chipText: { color: color.mute, fontSize: 13, fontWeight: "500", flexShrink: 1 },
-	chipTextOn: { color: color.fg },
-	recommended: { fontSize: 9, color: color.accent },
-	hint: { color: color.faint, fontSize: 11, lineHeight: 16 },
-	promptTools: { flexDirection: "row", gap: 8 },
-	prompt: {
-		minHeight: 120,
-		maxHeight: 260,
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.panel,
-		borderRadius: radius.md,
-		color: color.fg,
-		paddingHorizontal: 12,
-		paddingTop: 12,
-		paddingBottom: 12,
-		fontSize: 15,
-		lineHeight: 21,
-	},
-	worktree: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
-	box: {
-		width: 20,
-		height: 20,
-		borderRadius: 5,
-		borderWidth: 1.5,
-		borderColor: color.mute,
-		alignItems: "center",
-		justifyContent: "center",
-	},
-	boxOn: { backgroundColor: color.accent, borderColor: color.accent },
-	worktreeLabel: { color: color.fg, fontSize: 14, fontWeight: "600" },
-	worktreeHint: { color: color.mute, fontSize: 13, flexShrink: 1 },
-	progress: { color: color.mute, fontSize: 12, textAlign: "center" },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		root: { flex: 1, backgroundColor: color.bg },
+		header: {
+			flexDirection: "row",
+			alignItems: "center",
+			justifyContent: "space-between",
+			paddingHorizontal: 16,
+			paddingBottom: 12,
+			borderBottomWidth: 1,
+			borderBottomColor: color.border,
+		},
+		title: { color: color.fg, fontSize: 17, fontWeight: "700" },
+		close: { color: color.mute, fontSize: 14 },
+		content: { paddingHorizontal: 16, paddingTop: 16 },
+		body: { color: color.mute, fontSize: 13, lineHeight: 19 },
+		error: { color: color.danger, fontSize: 12, lineHeight: 17 },
+		eyebrow: { fontSize: 10, fontWeight: "600", letterSpacing: 1.8, textTransform: "uppercase", color: color.mute },
+		chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+		chip: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 8,
+			maxWidth: "100%",
+			paddingLeft: 6,
+			paddingRight: 12,
+			paddingVertical: 6,
+			minHeight: 38,
+			borderRadius: radius.md,
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.panel,
+		},
+		chipOn: { borderColor: color.accent, backgroundColor: alpha(color.accent, 0.08) },
+		chipText: { color: color.mute, fontSize: 13, fontWeight: "500", flexShrink: 1 },
+		chipTextOn: { color: color.fg },
+		recommended: { fontSize: 9, color: color.accent },
+		hint: { color: color.faint, fontSize: 11, lineHeight: 16 },
+		promptTools: { flexDirection: "row", gap: 8 },
+		prompt: {
+			minHeight: 120,
+			maxHeight: 260,
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.panel,
+			borderRadius: radius.md,
+			color: color.fg,
+			paddingHorizontal: 12,
+			paddingTop: 12,
+			paddingBottom: 12,
+			fontSize: 15,
+			lineHeight: 21,
+		},
+		worktree: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
+		box: {
+			width: 20,
+			height: 20,
+			borderRadius: 5,
+			borderWidth: 1.5,
+			borderColor: color.mute,
+			alignItems: "center",
+			justifyContent: "center",
+		},
+		boxOn: { backgroundColor: color.accent, borderColor: color.accent },
+		worktreeLabel: { color: color.fg, fontSize: 14, fontWeight: "600" },
+		worktreeHint: { color: color.mute, fontSize: 13, flexShrink: 1 },
+		progress: { color: color.mute, fontSize: 12, textAlign: "center" },
+	}),
+);

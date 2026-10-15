@@ -14,17 +14,23 @@ import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { markWorkspaceSeen } from "../backend/seenResults";
-import { alpha, color, radius } from "../theme";
+import { alpha, makeStyles, radius, useTheme, type Palette } from "../theme";
 import { Button, Mono } from "../ui/primitives";
 import { AgentMascot } from "../ui/sprites";
 
-const STATUS_TEXT: Record<LiveStatus, { text: string; tint: string }> = {
-	running: { text: "rodando", tint: color.accent },
-	completed: { text: "concluído", tint: color.mute },
-	aborted: { text: "interrompido", tint: color.danger },
-	// A wait, not an error: "Precisa de você" says when it needs the person.
-	limited: { text: "parado no limite de uso", tint: color.mute },
-};
+function statusText(status: LiveStatus, color: Palette): { text: string; tint: string } {
+	switch (status) {
+		case "running":
+			return { text: "rodando", tint: color.accent };
+		case "completed":
+			return { text: "concluído", tint: color.mute };
+		case "aborted":
+			return { text: "interrompido", tint: color.danger };
+		// A wait, not an error: "Precisa de você" says when it needs the person.
+		case "limited":
+			return { text: "parado no limite de uso", tint: color.mute };
+	}
+}
 
 export function openThread(sessionId: string) {
 	router.push({ pathname: "/thread/[id]", params: { id: sessionId } });
@@ -36,8 +42,10 @@ export function openNewTask(repositoryId?: string | null) {
 }
 
 export function SessionRow({ session, status }: { session: SessionSearchResult; status?: LiveStatus }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const place = workspaceLabel(session);
-	const label = status ? STATUS_TEXT[status] : null;
+	const label = status ? statusText(status, color) : null;
 	return (
 		<Pressable
 			onPress={() => openThread(session.sessionId)}
@@ -69,6 +77,7 @@ export function SessionRow({ session, status }: { session: SessionSearchResult; 
 }
 
 export function ProviderTag({ providerId }: { providerId: string }) {
+	const styles = useStyles();
 	return (
 		<View style={styles.tag}>
 			<Mono style={styles.tagText}>{normalizeProvider(providerId)}</Mono>
@@ -85,6 +94,8 @@ export function NeedsYouCard({
 	resolving: boolean;
 	onRespond: (choice: string) => void;
 }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const place = workspaceLabel(item.thread);
 	return (
 		<View style={styles.card}>
@@ -142,6 +153,8 @@ const ATTENTION_ICON: Record<NeedsYouRow["entry"]["reason"], keyof typeof Feathe
 
 /** A task under "Precisa de você" whose answer lives in its thread. */
 export function AttentionCard({ row }: { row: NeedsYouRow }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const { entry, thread } = row;
 	const urgent = entry.reason !== "completed" && entry.reason !== "woke";
 	const open = () => {
@@ -183,6 +196,8 @@ export function AttentionCard({ row }: { row: NeedsYouRow }) {
 
 /** The thread an agent request belongs to, atop its card on the home screen. */
 export function AgentRequestHeader({ sessionId, thread }: { sessionId: string; thread: SessionSearchResult | null }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const place = thread ? workspaceLabel(thread) : "";
 	return (
 		<Pressable onPress={() => openThread(sessionId)} style={styles.cardHead} accessibilityRole="button">
@@ -202,35 +217,37 @@ export function AgentRequestHeader({ sessionId, thread }: { sessionId: string; t
 	);
 }
 
-const styles = StyleSheet.create({
-	row: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 12,
-		paddingHorizontal: 14,
-		paddingVertical: 12,
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderColor: color.border,
-		backgroundColor: color.panel,
-	},
-	titleLine: { flexDirection: "row", alignItems: "center", gap: 6 },
-	title: { color: color.fg, fontSize: 14, fontWeight: "500", flexShrink: 1 },
-	place: { color: color.faint, fontSize: 11 },
-	meta: { color: color.faint, fontSize: 11 },
-	tag: { borderWidth: 1, borderColor: color.border, backgroundColor: color.bg, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
-	tagText: { fontSize: 9, color: color.faint },
-	card: {
-		borderWidth: 1,
-		borderColor: alpha(color.wait, 0.4),
-		backgroundColor: alpha(color.wait, 0.05),
-		borderRadius: radius.lg,
-		padding: 14,
-		gap: 10,
-	},
-	cardHead: { flexDirection: "row", alignItems: "center", gap: 10 },
-	question: { color: color.fg, fontSize: 12, lineHeight: 18 },
-	choices: { flexDirection: "row", gap: 8 },
-	urgent: { borderColor: alpha(color.wait, 0.4) },
-	reasonLine: { flexDirection: "row", alignItems: "center", gap: 6 },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		row: {
+			flexDirection: "row",
+			alignItems: "center",
+			gap: 12,
+			paddingHorizontal: 14,
+			paddingVertical: 12,
+			borderRadius: radius.md,
+			borderWidth: 1,
+			borderColor: color.border,
+			backgroundColor: color.panel,
+		},
+		titleLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+		title: { color: color.fg, fontSize: 14, fontWeight: "500", flexShrink: 1 },
+		place: { color: color.faint, fontSize: 11 },
+		meta: { color: color.faint, fontSize: 11 },
+		tag: { borderWidth: 1, borderColor: color.border, backgroundColor: color.bg, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
+		tagText: { fontSize: 9, color: color.faint },
+		card: {
+			borderWidth: 1,
+			borderColor: alpha(color.waitFill, 0.4),
+			backgroundColor: alpha(color.waitFill, 0.05),
+			borderRadius: radius.lg,
+			padding: 14,
+			gap: 10,
+		},
+		cardHead: { flexDirection: "row", alignItems: "center", gap: 10 },
+		question: { color: color.fg, fontSize: 12, lineHeight: 18 },
+		choices: { flexDirection: "row", gap: 8 },
+		urgent: { borderColor: alpha(color.waitFill, 0.4) },
+		reasonLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+	}),
+);

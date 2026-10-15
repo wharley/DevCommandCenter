@@ -15,7 +15,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { useState, type ReactNode } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import type { AgentRequestAnswer } from "../backend/agentRequests";
-import { alpha, color, radius } from "../theme";
+import { alpha, makeStyles, radius, useTheme } from "../theme";
 import { Button, Mono, StateDot } from "./primitives";
 
 export function AgentRequestCard({
@@ -30,6 +30,8 @@ export function AgentRequestCard({
 	/** The thread it belongs to, on the home screen. */
 	header?: ReactNode;
 }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	const [picked, setPicked] = useState<string[]>([]);
 	const left = secondsLeft(request);
 	const blocker = allowBlocker(request, picked);
@@ -119,6 +121,8 @@ export function AgentRequestCard({
 }
 
 function Notice({ icon, strong, children }: { icon: "monitor" | "alert-triangle"; strong?: boolean; children: ReactNode }) {
+	const { color } = useTheme();
+	const styles = useStyles();
 	return (
 		<View style={[styles.notice, strong && styles.noticeStrong]}>
 			<Feather name={icon} size={14} color={strong ? color.wait : color.mute} style={{ marginTop: 1 }} />
@@ -127,27 +131,29 @@ function Notice({ icon, strong, children }: { icon: "monitor" | "alert-triangle"
 	);
 }
 
-const styles = StyleSheet.create({
-	card: {
-		borderWidth: 1,
-		borderColor: alpha(color.wait, 0.4),
-		backgroundColor: alpha(color.wait, 0.05),
-		borderRadius: radius.lg,
-		padding: 14,
-		gap: 10,
-	},
-	head: { flexDirection: "row", alignItems: "center", gap: 8 },
-	eyebrow: { fontSize: 10, letterSpacing: 0.8, color: color.wait, textTransform: "uppercase", flex: 1 },
-	timer: { fontSize: 10, color: color.mute },
-	url: { color: color.fg, fontSize: 12 },
-	reason: { color: color.fg, fontSize: 13, lineHeight: 19 },
-	notice: { flexDirection: "row", gap: 8, padding: 10, borderRadius: radius.sm, backgroundColor: color.bg, borderWidth: 1, borderColor: color.border },
-	noticeStrong: { borderColor: alpha(color.wait, 0.5) },
-	noticeText: { flex: 1, color: color.mute, fontSize: 12, lineHeight: 17 },
-	apps: { gap: 2 },
-	appsLabel: { fontSize: 10, color: color.faint, marginBottom: 4 },
-	app: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 7 },
-	appName: { color: color.fg, fontSize: 14 },
-	blocker: { color: color.mute, fontSize: 12 },
-	choices: { flexDirection: "row", gap: 8 },
-});
+const useStyles = makeStyles((color) =>
+	StyleSheet.create({
+		card: {
+			borderWidth: 1,
+			borderColor: alpha(color.waitFill, 0.4),
+			backgroundColor: alpha(color.waitFill, 0.05),
+			borderRadius: radius.lg,
+			padding: 14,
+			gap: 10,
+		},
+		head: { flexDirection: "row", alignItems: "center", gap: 8 },
+		eyebrow: { fontSize: 10, letterSpacing: 0.8, color: color.wait, textTransform: "uppercase", flex: 1 },
+		timer: { fontSize: 10, color: color.mute },
+		url: { color: color.fg, fontSize: 12 },
+		reason: { color: color.fg, fontSize: 13, lineHeight: 19 },
+		notice: { flexDirection: "row", gap: 8, padding: 10, borderRadius: radius.sm, backgroundColor: color.bg, borderWidth: 1, borderColor: color.border },
+		noticeStrong: { borderColor: alpha(color.waitFill, 0.5) },
+		noticeText: { flex: 1, color: color.mute, fontSize: 12, lineHeight: 17 },
+		apps: { gap: 2 },
+		appsLabel: { fontSize: 10, color: color.faint, marginBottom: 4 },
+		app: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 7 },
+		appName: { color: color.fg, fontSize: 14 },
+		blocker: { color: color.mute, fontSize: 12 },
+		choices: { flexDirection: "row", gap: 8 },
+	}),
+);
