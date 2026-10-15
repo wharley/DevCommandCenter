@@ -20,20 +20,20 @@ type Props = {
 	disabled?: boolean;
 };
 
-function tint(policy: AccessPolicy | null, color: Palette): string {
+export function accessTint(policy: AccessPolicy | null, color: Palette): string {
 	if (policy === "full_access") return color.wait;
 	if (policy === "auto") return color.accent;
 	return color.mute;
 }
 
-function PolicyIcon({ policy, size = 13 }: { policy: AccessPolicy | null; size?: number }) {
+export function PolicyIcon({ policy, size = 13 }: { policy: AccessPolicy | null; size?: number }) {
 	const { color } = useTheme();
 	const name = policy === "full_access" ? "alert-triangle" : "shield";
-	return <Feather name={name} size={size} color={tint(policy, color)} />;
+	return <Feather name={name} size={size} color={accessTint(policy, color)} />;
 }
 
 /** "Acesso completo" asks first, like the desktop's dialog. */
-function confirmThen(policy: AccessPolicy, current: AccessPolicy | null, apply: (policy: AccessPolicy) => void) {
+export function confirmThen(policy: AccessPolicy, current: AccessPolicy | null, apply: (policy: AccessPolicy) => void) {
 	if (policy !== "full_access" || current === "full_access") {
 		apply(policy);
 		return;
@@ -85,7 +85,7 @@ export function AccessChoices({ available, value, onChange, providerLabel, disab
 							accessibilityLabel={accessLabel(policy)}
 							style={({ pressed }) => [
 								styles.chip,
-								selected && { borderColor: tint(policy, color), backgroundColor: alpha(tint(policy, color), 0.08) },
+								selected && { borderColor: accessTint(policy, color), backgroundColor: alpha(accessTint(policy, color), 0.08) },
 								disabled && !selected && { opacity: 0.4 },
 								pressed && { backgroundColor: color.elevated },
 							]}
@@ -97,6 +97,42 @@ export function AccessChoices({ available, value, onChange, providerLabel, disab
 				})}
 			</View>
 			<Text style={styles.hint}>{accessDescription(value)}</Text>
+		</View>
+	);
+}
+
+/** The levels with what each one allows, for a picker sheet. */
+export function AccessList({
+	available,
+	value,
+	onPick,
+}: {
+	available: readonly AccessPolicy[];
+	value: AccessPolicy | null;
+	onPick: (policy: AccessPolicy) => void;
+}) {
+	const { color } = useTheme();
+	const styles = useStyles();
+	return (
+		<View>
+			{available.map((policy) => (
+				<Pressable
+					key={policy}
+					onPress={() => onPick(policy)}
+					accessibilityRole="radio"
+					accessibilityState={{ selected: policy === value }}
+					style={({ pressed }) => [styles.option, pressed && { backgroundColor: color.elevated }]}
+				>
+					<View style={{ paddingTop: 2 }}>
+						<PolicyIcon policy={policy} size={15} />
+					</View>
+					<View style={{ flex: 1, gap: 2 }}>
+						<Text style={[styles.optionLabel, policy === "full_access" && { color: color.wait }]}>{accessLabel(policy)}</Text>
+						<Text style={styles.optionDesc}>{accessDescription(policy)}</Text>
+					</View>
+					{policy === value ? <Feather name="check" size={16} color={color.accent} /> : null}
+				</Pressable>
+			))}
 		</View>
 	);
 }
@@ -128,31 +164,14 @@ export function AccessPill({ available, value, onChange, providerLabel, disabled
 				]}
 			>
 				<PolicyIcon policy={value} size={12} />
-				<Mono style={[styles.pillText, { color: tint(value, color) }]}>{accessLabel(value)}</Mono>
+				<Mono style={[styles.pillText, { color: accessTint(value, color) }]}>{accessLabel(value)}</Mono>
 				<Feather name="chevron-down" size={12} color={color.faint} />
 			</Pressable>
 			<Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
 				<Pressable style={styles.backdrop} onPress={() => setOpen(false)} accessibilityLabel={t("composer.approval.confirm.cancel")} />
 				<View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
 					<Mono style={styles.sheetTitle}>{t("composer.approval.open")}</Mono>
-					{available.map((policy) => (
-						<Pressable
-							key={policy}
-							onPress={() => pick(policy)}
-							accessibilityRole="radio"
-							accessibilityState={{ selected: policy === value }}
-							style={({ pressed }) => [styles.option, pressed && { backgroundColor: color.elevated }]}
-						>
-							<View style={{ paddingTop: 2 }}>
-								<PolicyIcon policy={policy} size={15} />
-							</View>
-							<View style={{ flex: 1, gap: 2 }}>
-								<Text style={[styles.optionLabel, policy === "full_access" && { color: color.wait }]}>{accessLabel(policy)}</Text>
-								<Text style={styles.optionDesc}>{accessDescription(policy)}</Text>
-							</View>
-							{policy === value ? <Feather name="check" size={16} color={color.fg} /> : null}
-						</Pressable>
-					))}
+					<AccessList available={available} value={value} onPick={pick} />
 				</View>
 			</Modal>
 		</>

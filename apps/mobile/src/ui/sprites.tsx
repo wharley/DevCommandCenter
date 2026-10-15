@@ -151,6 +151,11 @@ const PROJECT_TILES: Record<ProjectColorId, Tile> = {
 	pink: { base: "#ec4899", ink: "#f9a8d4" },
 };
 
+/** The project's color (the 500 shade), for surfaces drawn in it such as the new-task dither. */
+export function projectTint(colorValue?: string | null, seed?: string | null): string {
+	return PROJECT_TILES[resolveProjectColor(colorValue, seed)].base;
+}
+
 const SYMBOL_ICONS: Record<ProjectSymbolId, keyof typeof Feather.glyphMap> = {
 	folder: "folder",
 	terminal: "terminal",

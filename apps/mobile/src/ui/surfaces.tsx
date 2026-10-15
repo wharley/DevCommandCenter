@@ -297,7 +297,7 @@ const useStyles = makeStyles((color) =>
 		},
 		chipOn: { backgroundColor: alpha(color.accent, 0.12) },
 		chipText: { fontSize: 13, fontWeight: "500" },
-		sheetHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 14 },
+		sheetHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14 },
 		sheetPinned: { backgroundColor: color.bg },
 		sheetTitle: { color: color.fg, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
 		sheetClose: {

@@ -1,10 +1,12 @@
 /**
- * Nova tarefa: project, request, agent (and model), worktree — the desktop's
- * launch screen on the phone. Creation runs on the desktop
+ * Nova tarefa: the composer is the screen. The project's mascot over its
+ * dither asks what to do; the request is typed below, with the agent and
+ * model, access, worktree and auto-resume as chips that open their choices. Creation runs on the desktop
  * (`POST /api/v1/mobile/tasks`, idempotent by `requestId`); the phone polls
  * its progress and opens the thread as soon as the session exists.
  */
 import {
+	accessLabel,
 	accessPolicies,
 	applyFileMention,
 	defaultModelId,
@@ -24,19 +26,23 @@ import { loadProjectAccess, saveProjectAccess } from "@/backend/accessStore";
 import { cachedCatalog, fetchCatalog } from "@/backend/catalogCache";
 import { useBackend } from "@/backend/session";
 import { errorMessage } from "@/backend/types";
-import { alpha, makeStyles, radius, useTheme } from "@/theme";
-import { AccessChoices } from "@/ui/AccessPicker";
+import { makeStyles, useTheme } from "@/theme";
+import { AccessList, confirmThen, PolicyIcon } from "@/ui/AccessPicker";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
 import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
 import { FileMentionList } from "@/ui/FileMentionList";
 import { useDictation } from "@/dictation/useDictation";
+import { GlassButton, GlassPill } from "@/ui/glass";
+import { haptic } from "@/ui/haptics";
+import { PickerSheet } from "@/ui/PickerSheet";
 import { Button, Loading, Mono, Panel } from "@/ui/primitives";
-import { AgentMascot, ProjectGlyph } from "@/ui/sprites";
+import { AgentMascot, ProjectGlyph, projectTint } from "@/ui/sprites";
+import { Chip, DitherHero, GroupedList, Row } from "@/ui/surfaces";
 import Feather from "@expo/vector-icons/Feather";
 import * as Crypto from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -58,6 +64,8 @@ export default function NewTaskScreen() {
 	const backend = useBackend();
 	const insets = useSafeAreaInsets();
 	const params = useLocalSearchParams<{ repositoryId?: string }>();
+	// An iOS sheet already starts below the status bar; Android modals are full screen.
+	const topInset = Platform.OS === "ios" ? 8 : insets.top;
 	const [catalog, setCatalog] = useState<MobileCatalog | null>(null);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [repositoryId, setRepositoryId] = useState<string | null>(null);
@@ -74,6 +82,7 @@ export default function NewTaskScreen() {
 	const [promptFocused, setPromptFocused] = useState(false);
 	const input = useRef<TextInput>(null);
 	const [phase, setPhase] = useState<Phase>({ kind: "editing" });
+	const [picker, setPicker] = useState<"project" | "agent" | "access" | null>(null);
 	const alive = useRef(true);
 	const initialized = useRef(false);
 	/** Kept while the draft is unchanged, so a retry can't create the task twice. */
@@ -237,20 +246,20 @@ export default function NewTaskScreen() {
 		}
 	};
 
+	const repoLabel = repository ? repositoryLabel(repository) : null;
+	const modelLabel = provider?.models.find((m) => m.id === model)?.label ?? null;
+	const tint = repository ? projectTint(repository.color, repository.rootPath) : color.accent;
+	const providerProblems = catalog?.providers.filter((p) => providerUnavailableReason(p)) ?? [];
+	const close = () => router.back();
+
 	return (
 		<View style={styles.root}>
-			{/* An iOS sheet already starts below the status bar; Android modals are full screen. */}
-			<View style={[styles.header, { paddingTop: Platform.OS === "ios" ? 16 : insets.top + 8 }]}>
-				<Text style={styles.title}>Nova tarefa</Text>
-				<Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" disabled={creating}>
-					<Text style={[styles.close, creating && { opacity: 0.4 }]}>Fechar</Text>
-				</Pressable>
-			</View>
+			<DitherHero tint={tint} height={440} />
 			<KeyboardAwareScrollView
 				style={{ flex: 1 }}
-				contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+				contentContainerStyle={[styles.content, { paddingTop: topInset + 64, paddingBottom: insets.bottom + 16 }]}
 				keyboardShouldPersistTaps="handled"
-				bottomOffset={96}
+				bottomOffset={24}
 			>
 				<ConnectionBanner backend={backend} />
 				{!catalog ? (
@@ -267,35 +276,30 @@ export default function NewTaskScreen() {
 						<Text style={styles.body}>Nenhum projeto no computador. Adicione um pelo app do DCC no computador.</Text>
 					</Panel>
 				) : (
-					<View style={{ gap: 22 }}>
-						<Section label="Projeto">
-							<View style={styles.chips}>
-								{catalog.repositories.map((repo) => {
-									const selected = repo.id === repositoryId;
-									return (
-										<Chip
-											key={repo.id}
-											selected={selected}
-											disabled={creating}
-											onPress={() => setRepositoryId(repo.id)}
-											accessibilityLabel={`Projeto ${repositoryLabel(repo)}`}
-										>
-											<ProjectGlyph
-												icon={repo.icon === "logo" ? repo.logo : repo.icon}
-												color={repo.color}
-												seed={repo.rootPath}
-												size={22}
-											/>
-											<Text style={[styles.chipText, selected && styles.chipTextOn]} numberOfLines={1}>
-												{repositoryLabel(repo)}
-											</Text>
-										</Chip>
-									);
-								})}
+					<>
+						<View style={styles.hero}>
+							{repository ? (
+								<ProjectGlyph
+									icon={repository.icon === "logo" ? repository.logo : repository.icon}
+									color={repository.color}
+									seed={repository.rootPath}
+									size={96}
+									active={creating}
+								/>
+							) : null}
+							<View style={styles.heroText}>
+								<Text style={styles.lead}>O que vamos fazer em</Text>
+								<Text style={styles.heroTitle} numberOfLines={2} accessibilityRole="header">
+									{repoLabel ?? "qual projeto"}?
+								</Text>
+								<View style={styles.where}>
+									<Feather name={worktree ? "git-branch" : "folder"} size={12} color={color.mute} />
+									<Mono style={styles.whereText}>{worktree ? "num worktree novo" : "no checkout atual"}</Mono>
+								</View>
 							</View>
-						</Section>
+						</View>
 
-						<Section label="Pedido">
+						<View style={styles.composer}>
 							<TextInput
 								ref={input}
 								value={prompt}
@@ -307,7 +311,7 @@ export default function NewTaskScreen() {
 								}}
 								onFocus={() => setPromptFocused(true)}
 								onBlur={() => setPromptFocused(false)}
-								placeholder="O que o agente deve fazer?"
+								placeholder="Descreva a tarefa… use @ para citar um arquivo"
 								placeholderTextColor={color.faint}
 								style={styles.prompt}
 								multiline
@@ -318,125 +322,71 @@ export default function NewTaskScreen() {
 								accessibilityLabel="Pedido para o agente"
 							/>
 							<AttachmentTray attachments={attachments} />
-							{imagesUnsupported ? (
-								<Text style={styles.hint}>{t("composer.attachments.imagesUnsupported")}</Text>
-							) : null}
+							{imagesUnsupported ? <Text style={styles.hint}>{t("composer.attachments.imagesUnsupported")}</Text> : null}
 							<DictationStatus dictation={dictation} />
-							<View style={styles.promptTools}>
-								<AttachButton attachments={attachments} disabled={creating} />
-								<MicButton dictation={dictation} disabled={creating} />
-							</View>
 							{mention && repositoryId ? (
-								<FileMentionList
-									backend={backend}
-									scope={{ repositoryId }}
-									query={mention.query}
-									onPick={insertMention}
-								/>
-							) : (
-								<Text style={styles.hint}>Digite @ para mencionar um arquivo do projeto.</Text>
-							)}
-						</Section>
+								<FileMentionList backend={backend} scope={{ repositoryId }} query={mention.query} onPick={insertMention} />
+							) : null}
 
-						<Section label="Agente">
 							<View style={styles.chips}>
-								{catalog.providers.map((p) => {
-									const reason = providerUnavailableReason(p);
-									const selected = p.id === providerId;
-									return (
-										<Chip
-											key={p.id}
-											selected={selected}
-											disabled={creating || reason !== null}
-											onPress={() => chooseProvider(p)}
-											accessibilityLabel={`Agente ${p.label}${reason ? `, ${reason}` : ""}`}
-										>
-											<AgentMascot provider={p.id} state="idle" size={22} />
-											<Text style={[styles.chipText, selected && styles.chipTextOn]} numberOfLines={1}>
-												{p.label}
-											</Text>
-										</Chip>
-									);
-								})}
+								<Chip
+									label={provider ? `${provider.label}${modelLabel ? ` · ${modelLabel}` : ""}` : "Agente"}
+									leading={provider ? <AgentMascot provider={provider.id} state="idle" size={20} /> : undefined}
+									menu
+									onPress={creating ? undefined : () => setPicker("agent")}
+								/>
+								{provider && availableAccess.length > 0 && access ? (
+									<Chip
+										label={accessLabel(access)}
+										leading={<PolicyIcon policy={access} size={13} />}
+										menu
+										onPress={creating ? undefined : () => setPicker("access")}
+									/>
+								) : null}
+								<Chip
+									label={worktree ? "Novo worktree" : "Checkout atual"}
+									icon={worktree ? "git-branch" : "folder"}
+									selected={worktree}
+									onPress={creating ? undefined : () => setWorktree((value) => !value)}
+								/>
+								<Chip
+									label="Retomar após o limite"
+									icon="rotate-cw"
+									selected={autoResume === true}
+									onPress={creating ? undefined : () => setAutoResume((value) => !value)}
+								/>
 							</View>
-							{catalog.providers.some((p) => providerUnavailableReason(p)) ? (
+							{providerProblems.length > 0 ? (
 								<Text style={styles.hint}>
-									{catalog.providers
-										.filter((p) => providerUnavailableReason(p))
-										.map((p) => `${p.label}: ${providerUnavailableReason(p)}`)
-										.join(" · ")}
+									{providerProblems.map((p) => `${p.label}: ${providerUnavailableReason(p)}`).join(" · ")}
 								</Text>
 							) : null}
-						</Section>
 
-						{provider && provider.models.length > 0 ? (
-							<Section label="Modelo">
-								<View style={styles.chips}>
-									{provider.models.map((m) => {
-										const selected = m.id === model;
-										return (
-											<Chip
-												key={m.id}
-												selected={selected}
-												disabled={creating}
-												onPress={() => setModel(m.id)}
-												accessibilityLabel={`Modelo ${m.label}`}
-											>
-												<Text style={[styles.chipText, selected && styles.chipTextOn]} numberOfLines={1}>
-													{m.label}
-												</Text>
-												{m.recommended ? <Mono style={styles.recommended}>rec.</Mono> : null}
-											</Chip>
-										);
-									})}
+							<View style={styles.actions}>
+								<AttachButton attachments={attachments} disabled={creating} />
+								<MicButton dictation={dictation} disabled={creating} />
+								<View style={{ flex: 1 }}>
+									{creating ? <Text style={styles.progress}>{CREATING_TEXT[phase.step]}</Text> : null}
 								</View>
-							</Section>
-						) : null}
-
-						{provider ? (
-							<Section label="Acesso">
-								<AccessChoices
-									available={availableAccess}
-									value={access}
-									onChange={chooseAccess}
-									providerLabel={provider.label}
-									disabled={creating}
-								/>
-							</Section>
-						) : null}
-
-						<Pressable
-							onPress={() => setWorktree((value) => !value)}
-							disabled={creating}
-							style={styles.worktree}
-							accessibilityRole="checkbox"
-							accessibilityState={{ checked: worktree, disabled: creating }}
-							accessibilityLabel="Worktree"
-						>
-							<View style={[styles.box, worktree && styles.boxOn]}>
-								{worktree ? <Feather name="check" size={13} color={color.accentInk} /> : null}
+								<Pressable
+									onPress={() => {
+										haptic("success");
+										void create();
+									}}
+									disabled={!ready || creating}
+									accessibilityRole="button"
+									accessibilityLabel="Criar tarefa"
+									accessibilityState={{ disabled: !ready || creating, busy: creating }}
+									style={({ pressed }) => [styles.send, (!ready || creating) && { opacity: 0.4 }, pressed && { opacity: 0.8 }]}
+								>
+									{creating ? (
+										<ActivityIndicator size="small" color={color.accentInk} />
+									) : (
+										<Feather name="arrow-up" size={20} color={color.accentInk} />
+									)}
+								</Pressable>
 							</View>
-							<Text style={styles.worktreeLabel}>Worktree</Text>
-							<Text style={styles.worktreeHint} numberOfLines={2}>
-								· {worktree ? "Isolado do checkout original" : "Usa o checkout atual"}
-							</Text>
-						</Pressable>
-
-						<Pressable
-							onPress={() => setAutoResume((value) => !value)}
-							disabled={creating}
-							style={styles.worktree}
-							accessibilityRole="checkbox"
-							accessibilityState={{ checked: autoResume === true, disabled: creating }}
-							accessibilityLabel="Continuar sozinho se o limite acabar"
-						>
-							<View style={[styles.box, autoResume === true && styles.boxOn]}>
-								{autoResume === true ? <Feather name="check" size={13} color={color.accentInk} /> : null}
-							</View>
-							<Text style={styles.worktreeLabel} numberOfLines={2}>
-								Continuar sozinho se o limite acabar
-							</Text>
-						</Pressable>
+						</View>
 
 						{phase.kind === "editing" && phase.error ? (
 							<Panel tone="danger">
@@ -451,18 +401,100 @@ export default function NewTaskScreen() {
 								) : null}
 							</Panel>
 						) : null}
-
-						<Button
-							label="Criar tarefa"
-							busy={creating}
-							disabled={!ready}
-							onPress={() => void create()}
-							accessibilityLabel="Criar tarefa"
-						/>
-						{creating ? <Text style={styles.progress}>{CREATING_TEXT[phase.step]}</Text> : null}
-					</View>
+					</>
 				)}
 			</KeyboardAwareScrollView>
+
+			<View style={[styles.topBar, { top: topInset + 8 }]}>
+				<GlassButton icon="x" accessibilityLabel="Fechar" onPress={close} />
+				{catalog && catalog.repositories.length > 0 ? (
+					<GlassPill
+						onPress={creating ? undefined : () => setPicker("project")}
+						accessibilityLabel={`Projeto: ${repoLabel ?? "nenhum"}. Trocar`}
+						style={styles.projectPill}
+					>
+						<Text style={styles.projectText} numberOfLines={1}>
+							{repoLabel ?? "Projeto"}
+						</Text>
+						<Feather name="chevron-down" size={15} color={color.mute} />
+					</GlassPill>
+				) : null}
+				<View style={{ width: 44 }} />
+			</View>
+
+			<PickerSheet visible={picker === "project"} title="Projeto" onClose={() => setPicker(null)}>
+				<GroupedList inset={54}>
+					{(catalog?.repositories ?? []).map((repo) => (
+						<Row
+							key={repo.id}
+							onPress={() => {
+								haptic("select");
+								setRepositoryId(repo.id);
+								setPicker(null);
+							}}
+							leading={
+								<ProjectGlyph icon={repo.icon === "logo" ? repo.logo : repo.icon} color={repo.color} seed={repo.rootPath} size={30} />
+							}
+							title={repositoryLabel(repo)}
+							trailing={repo.id === repositoryId ? <Feather name="check" size={18} color={color.accent} /> : null}
+						/>
+					))}
+				</GroupedList>
+			</PickerSheet>
+
+			<PickerSheet visible={picker === "agent"} title="Agente e modelo" onClose={() => setPicker(null)}>
+				{(catalog?.providers ?? []).map((p) => {
+					const reason = providerUnavailableReason(p);
+					const chosen = p.id === providerId;
+					return (
+						<GroupedList key={p.id} inset={54}>
+							<Row
+								onPress={
+									reason
+										? undefined
+										: () => {
+												haptic("select");
+												chooseProvider(p);
+												if (p.models.length <= 1) setPicker(null);
+											}
+								}
+								leading={<AgentMascot provider={p.id} state="idle" size={30} />}
+								title={p.label}
+								detail={reason ?? (chosen ? undefined : `${p.models.length} ${p.models.length === 1 ? "modelo" : "modelos"}`)}
+								trailing={chosen && p.models.length === 0 ? <Feather name="check" size={18} color={color.accent} /> : null}
+							/>
+							{chosen
+								? p.models.map((m) => (
+										<Row
+											key={m.id}
+											onPress={() => {
+												haptic("select");
+												setModel(m.id);
+												setPicker(null);
+											}}
+											leading={<View style={{ width: 30 }} />}
+											title={m.label}
+											detail={m.recommended ? "recomendado" : undefined}
+											trailing={m.id === model ? <Feather name="check" size={18} color={color.accent} /> : null}
+										/>
+									))
+								: null}
+						</GroupedList>
+					);
+				})}
+			</PickerSheet>
+
+			<PickerSheet visible={picker === "access"} title="Acesso" onClose={() => setPicker(null)}>
+				<AccessList
+					available={availableAccess}
+					value={access}
+					onPick={(policy) => {
+						setPicker(null);
+						// iOS drops an alert raised while a modal is still closing.
+						setTimeout(() => confirmThen(policy, access, chooseAccess), policy === "full_access" ? 350 : 0);
+					}}
+				/>
+			</PickerSheet>
 		</View>
 	);
 }
@@ -483,116 +515,56 @@ function pickRepository(catalog: MobileCatalog, wanted?: string): string | null 
 	return (byRecent ?? catalog.repositories[0])?.id ?? null;
 }
 
-function Section({ label, children }: { label: string; children: ReactNode }) {
-	const styles = useStyles();
-	return (
-		<View style={{ gap: 10 }}>
-			<Mono style={styles.eyebrow}>{label}</Mono>
-			{children}
-		</View>
-	);
-}
-
-function Chip({
-	selected,
-	disabled,
-	onPress,
-	accessibilityLabel,
-	children,
-}: {
-	selected: boolean;
-	disabled?: boolean;
-	onPress: () => void;
-	accessibilityLabel: string;
-	children: ReactNode;
-}) {
-	const { color } = useTheme();
-	const styles = useStyles();
-	return (
-		<Pressable
-			onPress={onPress}
-			disabled={disabled}
-			accessibilityRole="radio"
-			accessibilityState={{ selected, disabled: !!disabled }}
-			accessibilityLabel={accessibilityLabel}
-			style={({ pressed }) => [
-				styles.chip,
-				selected && styles.chipOn,
-				disabled && !selected && { opacity: 0.4 },
-				pressed && { backgroundColor: color.elevated },
-			]}
-		>
-			{children}
-		</Pressable>
-	);
-}
-
 const useStyles = makeStyles((color) =>
 	StyleSheet.create({
 		root: { flex: 1, backgroundColor: color.bg },
-		header: {
-			flexDirection: "row",
-			alignItems: "center",
-			justifyContent: "space-between",
-			paddingHorizontal: 16,
-			paddingBottom: 12,
-			borderBottomWidth: 1,
-			borderBottomColor: color.border,
-		},
-		title: { color: color.fg, fontSize: 17, fontWeight: "700" },
-		close: { color: color.mute, fontSize: 14 },
-		content: { paddingHorizontal: 16, paddingTop: 16 },
+		content: { flexGrow: 1, paddingHorizontal: 12, gap: 16 },
 		body: { color: color.mute, fontSize: 13, lineHeight: 19 },
 		error: { color: color.danger, fontSize: 12, lineHeight: 17 },
-		eyebrow: { fontSize: 10, fontWeight: "600", letterSpacing: 1.8, textTransform: "uppercase", color: color.mute },
+		hint: { color: color.mute, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },
+		hero: { flexGrow: 1, alignItems: "center", justifyContent: "center", gap: 18, paddingVertical: 24 },
+		heroText: { alignItems: "center", gap: 6, paddingHorizontal: 16 },
+		lead: { color: color.mute, fontSize: 15 },
+		heroTitle: { color: color.fg, fontSize: 28, lineHeight: 33, fontWeight: "700", letterSpacing: -0.7, textAlign: "center" },
+		where: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
+		whereText: { color: color.mute, fontSize: 12 },
+		composer: {
+			borderRadius: 28,
+			paddingHorizontal: 14,
+			paddingTop: 14,
+			paddingBottom: 10,
+			gap: 12,
+			backgroundColor: color.panel,
+			borderWidth: StyleSheet.hairlineWidth,
+			borderColor: color.border,
+			shadowColor: color.shadow,
+			shadowOpacity: 1,
+			shadowRadius: 24,
+			shadowOffset: { width: 0, height: 10 },
+		},
+		prompt: {
+			minHeight: 92,
+			maxHeight: 240,
+			color: color.fg,
+			fontSize: 16,
+			lineHeight: 23,
+			paddingHorizontal: 4,
+			paddingTop: 0,
+			paddingBottom: 0,
+		},
 		chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-		chip: {
+		actions: {
 			flexDirection: "row",
 			alignItems: "center",
-			gap: 8,
-			maxWidth: "100%",
-			paddingLeft: 6,
-			paddingRight: 12,
-			paddingVertical: 6,
-			minHeight: 38,
-			borderRadius: radius.md,
-			borderWidth: 1,
-			borderColor: color.border,
-			backgroundColor: color.panel,
+			gap: 6,
+			paddingTop: 10,
+			borderTopWidth: StyleSheet.hairlineWidth,
+			borderTopColor: color.border,
 		},
-		chipOn: { borderColor: color.accent, backgroundColor: alpha(color.accent, 0.08) },
-		chipText: { color: color.mute, fontSize: 13, fontWeight: "500", flexShrink: 1 },
-		chipTextOn: { color: color.fg },
-		recommended: { fontSize: 9, color: color.accent },
-		hint: { color: color.faint, fontSize: 11, lineHeight: 16 },
-		promptTools: { flexDirection: "row", gap: 8 },
-		prompt: {
-			minHeight: 120,
-			maxHeight: 260,
-			borderWidth: 1,
-			borderColor: color.border,
-			backgroundColor: color.panel,
-			borderRadius: radius.md,
-			color: color.fg,
-			paddingHorizontal: 12,
-			paddingTop: 12,
-			paddingBottom: 12,
-			fontSize: 15,
-			lineHeight: 21,
-		},
-		worktree: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
-		box: {
-			width: 20,
-			height: 20,
-			borderRadius: 5,
-			borderWidth: 1.5,
-			borderColor: color.mute,
-			alignItems: "center",
-			justifyContent: "center",
-		},
-		boxOn: { backgroundColor: color.accent, borderColor: color.accent },
-		worktreeLabel: { color: color.fg, fontSize: 14, fontWeight: "600" },
-		worktreeHint: { color: color.mute, fontSize: 13, flexShrink: 1 },
-		progress: { color: color.mute, fontSize: 12, textAlign: "center" },
+		progress: { color: color.mute, fontSize: 12, textAlign: "right", paddingRight: 6 },
+		send: { width: 44, height: 44, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: color.accent },
+		topBar: { position: "absolute", left: 16, right: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+		projectPill: { paddingHorizontal: 16, maxWidth: 240 },
+		projectText: { color: color.fg, fontSize: 15, fontWeight: "600", flexShrink: 1 },
 	}),
 );
