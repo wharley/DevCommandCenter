@@ -1,7 +1,7 @@
 name: Publish Release
 # Named after the release commit however the tag arrives: a tag pushed on its
 # own (the commit already on main) would otherwise show only "Publish Release".
-run-name: ${{ github.event_name == 'push' && format('chore(release): {0}', github.ref_name) || format('Publish Release ({0})', inputs.target) }}
+run-name: "${{ github.event_name == 'push' && format('chore(release): {0}', github.ref_name) || format('Publish Release ({0})', inputs.target) }}"
 
 on:
   workflow_dispatch:
