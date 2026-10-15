@@ -1037,6 +1037,8 @@ type InspectorChangesSectionProps = {
 	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
 	targetSessionId?: string | null;
 	onOpenExpandedPreview?: (selection?: WorkspaceGitPreviewSelection) => void;
+	/** Show the selected diff in place of the list (off: it opens on the stage). */
+	inlinePreview?: boolean;
 	/** A commit/push/PR action is reconciling the Git state shown below. */
 	isGitActionInProgress?: boolean;
 	/** Every project of a multi-project task, for Undo across the turn. */
@@ -1063,6 +1065,7 @@ export function InspectorChangesSection({
 	isGitActionInProgress = false,
 	turnWorkspaces,
 	turnReviewWorkspaceId = null,
+	inlinePreview = false,
 }: InspectorChangesSectionProps) {
 	const { t } = useTranslation("common");
 	const queryClient = useQueryClient();
@@ -1330,8 +1333,11 @@ export function InspectorChangesSection({
 		branch: branchDiffQuery.data ? branchChanges.length : null,
 	};
 	const hasReviewableChanges = hasAny || branchChanges.length > 0;
+	const selectedPathIn = (group: WorkspaceGitPreviewSelection["group"]) =>
+		selectedPreview?.group === group ? selectedPreview.path : null;
 
-	if (selectedPreview) {
+	// Diffs open on the workbench stage; the list stays and marks the open one.
+	if (selectedPreview && inlinePreview) {
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col">
 				<WorkspaceGitFilePreview
@@ -1455,7 +1461,7 @@ export function InspectorChangesSection({
 							treeView={changesTreeView}
 							onToggleTreeView={() => setChangesTreeView((v) => !v)}
 							showViewToggle={false}
-							selectedPath={null}
+							selectedPath={selectedPathIn("staged")}
 							reviewCommentCounts={reviewCommentCounts}
 							onSelect={handleExpandPreview}
 							onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
@@ -1485,7 +1491,7 @@ export function InspectorChangesSection({
 									strokeWidth={2}
 								/>
 							}
-							selectedPath={null}
+							selectedPath={selectedPathIn("unstaged")}
 							reviewCommentCounts={reviewCommentCounts}
 							onSelect={handleExpandPreview}
 							onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
@@ -1514,7 +1520,7 @@ export function InspectorChangesSection({
 							workspaceRoot={root}
 							gitBusy={gitBusy}
 							treeView={changesTreeView}
-							selectedPath={null}
+							selectedPath={selectedPathIn("committed")}
 							reviewCommentCounts={reviewCommentCounts}
 							onExpand={handleExpandPreview}
 							onAnnotate={workspaceId ? handleAnnotatePreview : undefined}

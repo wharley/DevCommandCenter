@@ -320,8 +320,11 @@ import {
 } from "./features/spec/mission-spec-content";
 import { derivePlanFollowUpState } from "./features/panel/plan-follow-up";
 import { CodeColumn } from "./features/code/code-column";
+import { InspectorChangesSection } from "./features/inspector/inspector-changes-section";
+import { ReviewerFindingsProvider } from "./features/agents/reviewer-findings-context";
 import {
 	setCodeColumnOpen,
+	showCodeColumn,
 	toggleCodeColumn,
 	useCodeColumnOpen,
 } from "./features/code/code-column-store";
@@ -1943,6 +1946,9 @@ export default function App() {
 		selectedLocalWorkspacePath,
 		selectedSessionSummary,
 	]);
+	// The code column's changes follow the session's worktree when it has one.
+	const codeColumnChangesRoot =
+		selectedSessionWorkspacePath?.trim() || selectedLocalWorkspacePath;
 	const openContextualInspector = useCallback(() => {
 		setGitDiffExpanded(false);
 		setInspectorPresentation((current) =>
@@ -1974,12 +1980,6 @@ export default function App() {
 			setInspectorCollapsed(true);
 		}
 	}, [inspectorCollapsed, inspectorPresentation, setInspectorCollapsed]);
-	const openGitInspector = useCallback(() => {
-		setTurnReviewRequest(null);
-		recordUxMetric("diff_discovered");
-		setInspectorMode("git");
-		openContextualInspector();
-	}, [openContextualInspector]);
 	const handleReviewDelegation = useCallback(
 		(delegationId: string, path?: string) => {
 			setTurnReviewRequest(null);
@@ -4360,9 +4360,9 @@ export default function App() {
 	);
 	const handleExpandGitDiff = useCallback(
 		(selection?: WorkspaceGitPreviewSelection) => {
+			// The diff already opens on the stage; nothing to collapse for room.
 			const expand = () => {
 				setGitDiffExpanded(true);
-				setInspectorCollapsed(true);
 			};
 			if (selection) {
 				requestSurfaceSelection(
@@ -5565,6 +5565,31 @@ export default function App() {
 					{globalSurface === null && selectedLocalWorkspacePath && codeColumnOpen ? (
 						<CodeColumn
 							workspaceRoot={selectedLocalWorkspacePath}
+							changesRoot={codeColumnChangesRoot}
+							changes={
+								<ReviewerFindingsProvider workspaceId={selectedWorkspace?.id ?? null}>
+									<InspectorChangesSection
+										turnReviewRequest={turnReviewRequest}
+										onCloseTurnReview={() => setTurnReviewRequest(null)}
+										workspaceRoot={codeColumnChangesRoot}
+										workspaceId={selectedWorkspace?.id ?? null}
+										sessionId={selectedSessionSnapshot?.sessionId ?? null}
+										selectedPreview={
+											surfaceSelection?.kind === "git-diff" ? surfaceSelection.file : null
+										}
+										onSelectPreview={handleOpenEditorFile}
+										onPrefillComposer={handlePrefillComposer}
+										targetSessionId={
+											codeColumnChangesRoot !== selectedLocalWorkspacePath
+												? (selectedSessionSnapshot?.sessionId ?? null)
+												: null
+										}
+										onOpenExpandedPreview={handleExpandGitDiff}
+										turnWorkspaces={turnUndoWorkspaces}
+										turnReviewWorkspaceId={activeWorkspace?.id ?? null}
+									/>
+								</ReviewerFindingsProvider>
+							}
 							selectedPath={
 								surfaceSelection?.kind === "file-edit" ? surfaceSelection.path : null
 							}
@@ -5848,7 +5873,10 @@ export default function App() {
 									inspectorCollapsed={inspectorCollapsed}
 									onInspectorCollapsedChange={setInspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
-									onReviewChanges={openGitInspector}
+									onReviewChanges={() => {
+										recordUxMetric("diff_discovered");
+										showCodeColumn("changes");
+									}}
 									onCompleteWorkspace={
 									isRemoteBackend ? undefined : handleCompleteWorkspace
 								}

@@ -151,7 +151,6 @@ import {
 	readRestorableSecondarySurfaceSelection,
 	readSecondarySurfaceWidth,
 	resolveSecondarySurfaceRestoration,
-	shouldRenderGitDiffSurface,
 } from "./secondary-surface-layout";
 import {
 	useComposerPrefill,
@@ -1050,16 +1049,18 @@ export function WorkspacePanel({
 	// Which stage tab is in front while files are open. A new open request
 	// brings the files forward; an agent turn that ends behind them marks the
 	// Chat tab until the conversation is seen.
-	const fileOpenRequestId =
+	const stageRequestKey =
 		workspaceSurfaceSelection?.kind === "file-edit"
-			? workspaceSurfaceSelection.requestId
-			: null;
+			? `file:${workspaceSurfaceSelection.requestId}`
+			: workspaceSurfaceSelection?.kind === "git-diff"
+				? `diff:${workspaceSurfaceSelection.file.group}:${workspaceSurfaceSelection.file.path}`
+				: null;
 	const [stageChatActive, setStageChatActive] = useState(false);
 	const [stageChatUnread, setStageChatUnread] = useState(false);
 	useEffect(() => {
 		setStageChatActive(false);
-		if (fileOpenRequestId === null) setStageChatUnread(false);
-	}, [fileOpenRequestId]);
+		if (stageRequestKey === null) setStageChatUnread(false);
+	}, [stageRequestKey]);
 	const wasAgentWorkingRef = useRef(agentWorking);
 	useEffect(() => {
 		if (wasAgentWorkingRef.current && !agentWorking && !stageChatActive) {
@@ -1071,7 +1072,7 @@ export function WorkspacePanel({
 		setStageChatActive(true);
 		setStageChatUnread(false);
 	}, []);
-	const showStageFiles = useCallback(() => setStageChatActive(false), []);
+	const showStageContent = useCallback(() => setStageChatActive(false), []);
 	// Mentioning a file means writing to the agent: bring the conversation forward.
 	useEffect(() => subscribeComposerFileMention(() => showStageChat()), [showStageChat]);
 	// Hoisted here (always mounted) so the execution dock stays accurate even while
@@ -1831,9 +1832,15 @@ export function WorkspacePanel({
 			</div>
 		</div>
 	);
-	// Open files are tabs on the stage, next to a Chat tab; the conversation
-	// stays mounted underneath so its scroll and state survive.
-	const stageFileTabs =
+	const stageChat = {
+		chatActive: stageChatActive,
+		chatStatus: agentWorking ? "working" : stageChatUnread ? "unread" : "idle",
+		onShowChat: showStageChat,
+		onShowContent: showStageContent,
+	} as const;
+	// Open files and diffs are tabs on the stage, next to a Chat tab; the
+	// conversation stays mounted underneath so its scroll and state survive.
+	const stageContent =
 		workspaceSurfaceSelection?.kind === "file-edit" ? (
 			<FileTabsSurface
 				workspaceRoot={workspacePath}
@@ -1848,17 +1855,9 @@ export function WorkspacePanel({
 				onSubmitAnnotation={handleSubmitAnnotation}
 				onEditInComposer={handleEditAnnotationInComposer}
 				onAddToReview={handleAddToReview}
-				stage={{
-					chatActive: stageChatActive,
-					chatStatus: agentWorking ? "working" : stageChatUnread ? "unread" : "idle",
-					onShowChat: showStageChat,
-					onShowFiles: showStageFiles,
-				}}
+				stage={stageChat}
 			/>
-		) : null;
-	const secondarySurfaceContent =
-		workspaceSurfaceSelection?.kind === "git-diff" &&
-			shouldRenderGitDiffSurface(inspectorCollapsed) ? (
+		) : workspaceSurfaceSelection?.kind === "git-diff" ? (
 			<WorkspaceEditorSurface
 				workspaceRoot={workspacePath}
 				workspaceId={workspaceId}
@@ -1867,8 +1866,11 @@ export function WorkspacePanel({
 				onSubmitAnnotation={handleSubmitAnnotation}
 				onEditInComposer={handleEditAnnotationInComposer}
 				onAddToReview={handleAddToReview}
+				stage={stageChat}
 			/>
-		) : workspaceSurfaceSelection?.kind === "plan" ? (
+		) : null;
+	const secondarySurfaceContent =
+		workspaceSurfaceSelection?.kind === "plan" ? (
 			latestPlan && latestPlanMarkdown ? (
 				<WorkspacePlanSurface
 					plan={latestPlan}
@@ -1950,17 +1952,17 @@ export function WorkspacePanel({
 				className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
 			>
 				<div
-					className={`flex min-h-0 min-w-0 flex-1 flex-col ${stageFileTabs ? "pt-9" : ""}`}
+					className={`flex min-h-0 min-w-0 flex-1 flex-col ${stageContent ? "pt-9" : ""}`}
 				>
 					{primaryContent}
 				</div>
-				{stageFileTabs ? (
+				{stageContent ? (
 					<div
 						className={`absolute inset-x-0 top-0 z-30 flex flex-col ${
 							stageChatActive ? "h-9 overflow-hidden" : "bottom-0"
 						}`}
 					>
-						{stageFileTabs}
+						{stageContent}
 					</div>
 				) : null}
 				{secondarySurfaceContent ? (

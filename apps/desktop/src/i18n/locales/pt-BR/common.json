@@ -4751,6 +4751,7 @@
   "codeColumn": {
     "ariaLabel": "Código do projeto",
     "files": "Arquivos",
+    "changes": "Mudanças",
     "open": "Mostrar arquivos do projeto",
     "close": "Ocultar arquivos do projeto",
     "mentionInChat": "Mencionar no chat",

@@ -1,4 +1,4 @@
-import { ExternalLink, MessageSquare, Send, X } from "lucide-react";
+import { ExternalLink, GitCompareArrows, MessageSquare, Send, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TrafficLightSpacer } from "@/components/chrome/traffic-light-spacer";
@@ -9,6 +9,7 @@ import { ShortcutDisplay } from "@/features/shortcuts/shortcut-display";
 import { InlineShortcutDisplay } from "@/features/shortcuts/InlineShortcutDisplay";
 import { useWorkspaceGitFilePreviewContent } from "@/features/inspector/use-workspace-git-file-preview-content";
 import { openExternal } from "@/lib/shell-api";
+import { cn } from "@/lib/utils";
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
 import type { WorkspacePrReviewComment } from "@dcc/contracts";
 import type {
@@ -22,6 +23,7 @@ import {
 	type PendingAnnotation,
 } from "./diff-annotation";
 import { WorkspaceChangesDiffLoader } from "./WorkspaceChangesDiffLoader";
+import { StageChatTab, type StageChat } from "./stage-chat-tab";
 import { dispatchFindingToAuthor } from "@/features/agents/finding-to-author-command";
 import { reviewAnnotationsForPath } from "@/features/agents/review-findings";
 import { useReviewerFindings } from "@/features/agents/use-reviewer-findings";
@@ -47,6 +49,8 @@ type WorkspaceEditorSurfaceProps = {
 		request: DiffAnnotationRequest;
 		note: string;
 	}) => void;
+	/** Shown as a tab on the workbench stage, next to the Chat tab. */
+	stage?: StageChat;
 };
 
 type ReviewThread = {
@@ -410,8 +414,13 @@ export function WorkspaceEditorSurface({
 	onSubmitAnnotation,
 	onEditInComposer,
 	onAddToReview,
+	stage,
 }: WorkspaceEditorSurfaceProps) {
 	const { t } = useTranslation("common");
+	// After handing something to the agent, show the conversation: on the stage
+	// the diff stays open behind the Chat tab; elsewhere the surface closes.
+	const revealConversation = stage?.onShowChat ?? onClose;
+	const chatActive = stage?.chatActive ?? false;
 	const [pending, setPending] = useState<PendingAnnotation | null>(null);
 	const [activeReviewThreadId, setActiveReviewThreadId] = useState<string | null>(
 		null,
@@ -456,14 +465,17 @@ export function WorkspaceEditorSurface({
 			if (shouldIgnoreGlobalShortcutTarget(event.target)) {
 				return;
 			}
+			if (chatActive) {
+				return;
+			}
 
 			event.preventDefault();
-			onClose();
+			revealConversation();
 		};
 
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [onClose]);
+	}, [chatActive, revealConversation]);
 
 	const handleAnnotate = useCallback(
 		(payload: DiffAnnotationPayload) => {
@@ -485,9 +497,9 @@ export function WorkspaceEditorSurface({
 			setPending(null);
 			// Reveal the thread (the surface replaces it full-screen) so the
 			// reviewer sees the agent pick up the request.
-			onClose();
+			revealConversation();
 		},
-		[onClose, onSubmitAnnotation, pending],
+		[revealConversation, onSubmitAnnotation, pending],
 	);
 
 	const handleEditInComposer = useCallback(
@@ -496,9 +508,9 @@ export function WorkspaceEditorSurface({
 				onEditInComposer?.({ request: pending.request, instruction });
 			}
 			setPending(null);
-			onClose();
+			revealConversation();
 		},
-		[onClose, onEditInComposer, pending],
+		[revealConversation, onEditInComposer, pending],
 	);
 
 	const handleAddToReview = useCallback(
@@ -574,12 +586,12 @@ export function WorkspaceEditorSurface({
 			newSession: false,
 		});
 		setActiveReviewThreadId(null);
-		onClose();
+		revealConversation();
 	}, [
 		activeReviewSnippet,
 		activeReviewThread,
 		buildReviewAnnotationRequest,
-		onClose,
+		revealConversation,
 		onSubmitAnnotation,
 		selection,
 	]);
@@ -597,12 +609,12 @@ export function WorkspaceEditorSurface({
 			}),
 		});
 		setActiveReviewThreadId(null);
-		onClose();
+		revealConversation();
 	}, [
 		activeReviewSnippet,
 		activeReviewThread,
 		buildReviewAnnotationRequest,
-		onClose,
+		revealConversation,
 		onEditInComposer,
 		selection,
 	]);
@@ -613,6 +625,42 @@ export function WorkspaceEditorSurface({
 			data-focus-scope="editor"
 			className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background text-foreground"
 		>
+			{stage ? (
+				<div className="flex h-9 items-center border-b border-border">
+					<div
+						role="tablist"
+						className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2"
+					>
+						<StageChatTab stage={stage} />
+						<div
+							role="tab"
+							aria-selected={!chatActive}
+							onClick={stage.onShowContent}
+							title={selection.path}
+							className={cn(
+								"group flex h-7 max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors",
+								!chatActive
+									? "bg-muted/60 text-foreground shadow-sm"
+									: "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
+							)}
+						>
+							<GitCompareArrows className="size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+							<span className="truncate">{selection.name}</span>
+							<button
+								type="button"
+								aria-label={t("fileTabs.close")}
+								onClick={(event) => {
+									event.stopPropagation();
+									onClose();
+								}}
+								className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+							>
+								<X className="size-3" strokeWidth={2} />
+							</button>
+						</div>
+					</div>
+				</div>
+			) : (
 			<div
 				className="flex h-9 items-center border-b border-border"
 				data-tauri-drag-region
@@ -636,7 +684,13 @@ export function WorkspaceEditorSurface({
 					</Button>
 				</div>
 			</div>
-			<div className="relative flex min-h-0 flex-1 bg-background">
+			)}
+			<div
+				className={cn(
+					"relative flex min-h-0 flex-1 bg-background",
+					chatActive && "invisible",
+				)}
+			>
 				{query.isError ? (
 					<div className="absolute inset-0 flex items-center justify-center bg-background">
 						<p className="text-[11px] text-destructive">

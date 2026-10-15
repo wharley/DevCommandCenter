@@ -1,4 +1,4 @@
-import { Loader2, MessageSquare, Save, X } from "lucide-react";
+import { Loader2, Save, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-
 import { cn } from "@/lib/utils";
 import type { DiffAnnotationPayload } from "./diff-types";
 import { useFileIndentation } from "./use-file-indentation";
+import { StageChatTab, type StageChat } from "./stage-chat-tab";
 import { EditStateManager } from "@pierre/diffs/edit";
 import type {
 	DiffAnnotationRequest,
@@ -67,13 +68,7 @@ type FileTabsSurfaceProps = {
 	stage?: FileTabsStage;
 };
 
-export type FileTabsStage = {
-	chatActive: boolean;
-	/** What the agent did while the files were in front. */
-	chatStatus: "idle" | "working" | "unread";
-	onShowChat: () => void;
-	onShowFiles: () => void;
-};
+export type FileTabsStage = StageChat;
 
 export function FileTabsSurface({
 	workspaceRoot,
@@ -527,19 +522,7 @@ export function FileTabsSurface({
 					className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2"
 				>
 					{stage ? (
-						<ChatTab
-							active={stage.chatActive}
-							status={stage.chatStatus}
-							label={t("fileTabs.chat")}
-							statusLabel={
-								stage.chatStatus === "working"
-									? t("fileTabs.chatWorking")
-									: stage.chatStatus === "unread"
-										? t("fileTabs.chatUnread")
-										: null
-							}
-							onActivate={stage.onShowChat}
-						/>
+						<StageChatTab stage={stage} />
 					) : null}
 					{openFiles.map((file) => (
 						<Tab
@@ -550,7 +533,7 @@ export function FileTabsSurface({
 							closeLabel={t("fileTabs.close")}
 							onActivate={() => {
 								activateTab(file.path);
-								stage?.onShowFiles();
+								stage?.onShowContent();
 							}}
 							onPin={() => pinTab(file.path)}
 							onClose={() => closeTab(file.path)}
@@ -701,51 +684,6 @@ function fileEditStateKey(workspaceRoot: string | null, path: string): string {
 
 function clearFileEditState(workspaceRoot: string | null, path: string) {
 	EditStateManager.clear("file", fileEditStateKey(workspaceRoot, path));
-}
-
-function ChatTab({
-	active,
-	status,
-	label,
-	statusLabel,
-	onActivate,
-}: {
-	active: boolean;
-	status: FileTabsStage["chatStatus"];
-	label: string;
-	statusLabel: string | null;
-	onActivate: () => void;
-}) {
-	return (
-		<button
-			type="button"
-			role="tab"
-			aria-selected={active}
-			onClick={onActivate}
-			title={statusLabel ?? label}
-			className={cn(
-				"flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 transition-colors",
-				active
-					? "bg-muted/60 text-foreground shadow-sm"
-					: "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
-			)}
-		>
-			<MessageSquare className="size-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
-			<span className="text-[11px]">{label}</span>
-			{status === "working" ? (
-				<Loader2
-					className="size-3 shrink-0 animate-spin text-sky-500"
-					strokeWidth={2}
-					aria-label={statusLabel ?? undefined}
-				/>
-			) : status === "unread" ? (
-				<span
-					className="size-1.5 shrink-0 rounded-full bg-sky-500"
-					aria-label={statusLabel ?? undefined}
-				/>
-			) : null}
-		</button>
-	);
 }
 
 function Tab({
