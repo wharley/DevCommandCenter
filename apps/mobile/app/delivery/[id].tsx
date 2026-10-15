@@ -99,12 +99,14 @@ export default function DeliveryScreen() {
 		setNotice(null);
 		try {
 			await backend.request("POST", `${base}/${action}`, payload, SLOW);
+			haptic("success");
 			setBehind(null);
 			if (done) setNotice(done);
 			return true;
 		} catch (err) {
 			const code = err instanceof ApiError ? (err.body as { error?: { code?: string; outcome?: { target?: string } } } | null)?.error : null;
 			if (code?.code === "behind_remote") setBehind(code.outcome?.target ?? summary?.branch ?? "");
+			haptic("warning");
 			setNotice(errorMessage(err, "A ação git falhou."));
 			return false;
 		} finally {

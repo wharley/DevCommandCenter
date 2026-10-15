@@ -186,9 +186,11 @@ export function PermissionCard({
 				<StateDot state="wait" />
 				<Mono style={styles.waitEyebrow}>pedido de permissão</Mono>
 			</View>
-			<Mono style={styles.permissionText} selectable>
-				{message.question}
-			</Mono>
+			<View style={styles.ask}>
+				<Mono style={styles.permissionText} selectable>
+					{message.question}
+				</Mono>
+			</View>
 			<View style={{ flexDirection: "row", gap: 8 }}>
 				{message.choices.map((choice) => (
 					<Button
@@ -298,11 +300,12 @@ const useStyles = makeStyles((color) =>
 		stepPreview: { flex: 1, fontSize: 12, color: color.faint, fontFamily: font.mono },
 		stepDetail: { marginLeft: 28, marginBottom: 6, marginRight: 6, gap: 6 },
 		snippet: { fontFamily: font.mono, fontSize: 11, color: color.fg, backgroundColor: color.bg, borderRadius: 6, padding: 8 },
+		ask: { borderRadius: radius.md, backgroundColor: color.panel, paddingHorizontal: 12, paddingVertical: 10 },
 		waitCard: {
 			borderWidth: 1,
 			borderColor: alpha(color.waitFill, 0.4),
 			backgroundColor: alpha(color.waitFill, 0.05),
-			borderRadius: radius.lg,
+			borderRadius: radius.xl,
 			padding: 14,
 			gap: 12,
 		},

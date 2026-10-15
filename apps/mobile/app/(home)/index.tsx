@@ -24,6 +24,7 @@ import { TaskProposalCard } from "@/ui/TaskProposalCard";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useMemo } from "react";
+import Animated, { LinearTransition } from "react-native-reanimated";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -100,26 +101,27 @@ export default function HomeScreen() {
 				{!groups ? (
 					<Loading />
 				) : empty ? (
-					<EmptyState title={project ? `Nada em ${project.name} ainda` : "Nada por aqui"}>
+					<EmptyState icon="sun" title={project ? `Nada em ${project.name} ainda` : "Nada por aqui"}>
 						Peça uma tarefa aqui embaixo, ou comece uma no computador.
 					</EmptyState>
 				) : (
-					<View style={styles.sections}>
+					<Animated.View layout={LinearTransition.duration(220)} style={styles.sections}>
 						{needsYouCount > 0 ? (
 							<View>
 								<SectionLabel tone="wait" count={needsYouCount}>
 									Precisa de você
 								</SectionLabel>
-								<View style={styles.cards}>
+								<Animated.View layout={LinearTransition.duration(220)} style={styles.cards}>
 									{requests.map((request) => (
 										<AgentRequestCard
 											key={request.requestId}
 											request={request}
 											busy={agentRequests.answering.has(request.requestId)}
 											header={<AgentRequestHeader sessionId={request.sessionId} thread={sessionById.get(request.sessionId) ?? null} />}
-											onRespond={(answer) =>
-												void agentRequests.respond(request, answer).then((text) => text && showNotice(text))
-											}
+											onRespond={(answer) => {
+												haptic("success");
+												void agentRequests.respond(request, answer).then((text) => text && showNotice(text));
+											}}
 										/>
 									))}
 									{proposals.map((proposal) => (
@@ -133,7 +135,10 @@ export default function HomeScreen() {
 													thread={sessionById.get(proposal.parentSessionId) ?? null}
 												/>
 											}
-											onAnswer={(action) => void taskProposals.answer(proposal, action).then((text) => text && showNotice(text))}
+											onAnswer={(action) => {
+												haptic("select");
+												void taskProposals.answer(proposal, action).then((text) => text && showNotice(text));
+											}}
 										/>
 									))}
 									{groups.needsYou.map((row) =>
@@ -151,7 +156,7 @@ export default function HomeScreen() {
 											<AttentionCard key={`${row.entry.workspaceId}/${row.entry.reason}`} row={row} />
 										),
 									)}
-								</View>
+								</Animated.View>
 							</View>
 						) : null}
 						{runningCount > 0 ? (
@@ -174,7 +179,7 @@ export default function HomeScreen() {
 								</GroupedList>
 							</View>
 						) : null}
-					</View>
+					</Animated.View>
 				)}
 			</ScrollView>
 

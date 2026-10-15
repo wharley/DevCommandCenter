@@ -6,9 +6,10 @@
  */
 import Feather from "@expo/vector-icons/Feather";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
-import { Children, Fragment, useId, type ReactNode } from "react";
+import { Children, isValidElement, useId, type ReactNode } from "react";
+import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import Svg, { Defs, LinearGradient, Mask, Pattern, Rect, Stop } from "react-native-svg";
+import Svg, { Defs, LinearGradient, Mask, Pattern, RadialGradient, Rect, Stop } from "react-native-svg";
 import { alpha, font, makeStyles, radius, useTheme, type Palette } from "../theme";
 import { haptic } from "./haptics";
 
@@ -26,14 +27,20 @@ export function GroupedList({
 	const styles = useStyles();
 	const rows = Children.toArray(children).filter(Boolean);
 	return (
-		<View style={[styles.group, style]}>
+		<Animated.View layout={LinearTransition.duration(220)} style={[styles.group, style]}>
 			{rows.map((row, index) => (
-				<Fragment key={index}>
+				// Rows fade in and out; the rest slide into place.
+				<Animated.View
+					key={isValidElement(row) && row.key != null ? row.key : index}
+					entering={FadeIn.duration(220)}
+					exiting={FadeOut.duration(160)}
+					layout={LinearTransition.duration(220)}
+				>
 					{index > 0 ? <View style={[styles.separator, { marginLeft: inset }]} /> : null}
 					{row}
-				</Fragment>
+				</Animated.View>
 			))}
-		</View>
+		</Animated.View>
 	);
 }
 
@@ -44,6 +51,7 @@ export function Row({
 	detail,
 	trailing,
 	onPress,
+	onLongPress,
 	chevron = false,
 	accessibilityLabel,
 }: {
@@ -53,6 +61,8 @@ export function Row({
 	detail?: ReactNode;
 	trailing?: ReactNode;
 	onPress?: () => void;
+	/** Opens the row's menu. */
+	onLongPress?: () => void;
 	chevron?: boolean;
 	accessibilityLabel?: string;
 }) {
@@ -61,9 +71,19 @@ export function Row({
 	return (
 		<Pressable
 			onPress={onPress}
+			onLongPress={
+				onLongPress
+					? () => {
+							haptic("select");
+							onLongPress();
+						}
+					: undefined
+			}
+			delayLongPress={350}
 			disabled={!onPress}
 			accessibilityRole={onPress ? "button" : undefined}
 			accessibilityLabel={accessibilityLabel ?? title}
+			accessibilityHint={onLongPress ? "Toque e segure para mais ações" : undefined}
 			style={({ pressed }) => [styles.row, pressed && { backgroundColor: color.elevated }]}
 		>
 			{leading}
@@ -210,6 +230,37 @@ export function DitherHero({ tint, height = 460 }: { tint: string; height?: numb
 				<Rect width="100%" height="100%" fill={`url(#${id}fine)`} mask={`url(#${id}mask)`} opacity={strength} />
 				<Rect width="100%" height="100%" fill={`url(#${id}coarse)`} mask={`url(#${id}maskShort)`} opacity={strength * 0.65} />
 			</Svg>
+		</View>
+	);
+}
+
+/**
+ * A round patch of the dither, fading at its edge: the ground under the
+ * mascot in loading and empty states.
+ */
+export function DitherPatch({ tint, size = 132, children }: { tint: string; size?: number; children?: ReactNode }) {
+	const { scheme } = useTheme();
+	const id = useId().replace(/:/g, "");
+	const strength = scheme === "dark" ? 0.4 : 0.26;
+	return (
+		<View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+			<Svg width={size} height={size} style={StyleSheet.absoluteFill}>
+				<Defs>
+					<Pattern id={`${id}p`} width="6" height="6" patternUnits="userSpaceOnUse">
+						<Rect x="0" y="0" width="3" height="3" fill={tint} />
+						<Rect x="3" y="3" width="3" height="3" fill={tint} />
+					</Pattern>
+					<RadialGradient id={`${id}g`} cx="50%" cy="50%" r="50%">
+						<Stop offset="0.25" stopColor="#fff" stopOpacity={1} />
+						<Stop offset="1" stopColor="#fff" stopOpacity={0} />
+					</RadialGradient>
+					<Mask id={`${id}m`}>
+						<Rect width="100%" height="100%" fill={`url(#${id}g)`} />
+					</Mask>
+				</Defs>
+				<Rect width="100%" height="100%" fill={`url(#${id}p)`} mask={`url(#${id}m)`} opacity={strength} />
+			</Svg>
+			{children}
 		</View>
 	);
 }

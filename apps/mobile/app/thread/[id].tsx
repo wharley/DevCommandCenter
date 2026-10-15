@@ -39,6 +39,7 @@ import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachment
 import { FileMentionList } from "@/ui/FileMentionList";
 import { useDictation } from "@/dictation/useDictation";
 import { Glass, GlassButton, GlassPill } from "@/ui/glass";
+import { haptic } from "@/ui/haptics";
 import { Button, Loading, Mono, StateDot } from "@/ui/primitives";
 import { EdgeFade } from "@/ui/surfaces";
 import { AgentMascot } from "@/ui/sprites";
@@ -367,7 +368,10 @@ export default function ThreadScreen() {
 					<PermissionCard
 						message={message}
 						busy={busy.has(message.requestId)}
-						onRespond={(choice) => void respondPermission(message.requestId, choice)}
+						onRespond={(choice) => {
+							haptic(choice === "deny" ? "warning" : "success");
+							void respondPermission(message.requestId, choice);
+						}}
 					/>
 				);
 			default:
@@ -455,7 +459,10 @@ export default function ThreadScreen() {
 										key={request.requestId}
 										request={request}
 										busy={busy.has(request.requestId)}
-										onSubmit={(answers) => void respondQuestion(request.requestId, answers)}
+										onSubmit={(answers) => {
+											haptic("success");
+											void respondQuestion(request.requestId, answers);
+										}}
 									/>
 								))}
 							</View>
@@ -568,7 +575,10 @@ export default function ThreadScreen() {
 						<MicButton dictation={dictation} disabled={sending} />
 						{running ? (
 							<Pressable
-								onPress={() => void stop()}
+								onPress={() => {
+								haptic("warning");
+								void stop();
+							}}
 								style={[styles.sendButton, styles.stopButton]}
 								accessibilityRole="button"
 								accessibilityLabel="Parar o agente"
@@ -577,7 +587,10 @@ export default function ThreadScreen() {
 							</Pressable>
 						) : (
 							<Pressable
-								onPress={() => void send()}
+								onPress={() => {
+								haptic("tap");
+								void send();
+							}}
 								disabled={!canSend}
 								style={[styles.sendButton, { opacity: canSend ? 1 : 0.4 }]}
 								accessibilityRole="button"

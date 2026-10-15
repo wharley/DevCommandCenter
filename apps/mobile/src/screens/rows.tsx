@@ -14,7 +14,12 @@ import {
 } from "@dcc/mobile-core";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActionSheetIOS, Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useBackend } from "../backend/session";
+import { errorMessage } from "../backend/types";
+import { haptic } from "../ui/haptics";
+import { SwipeRow } from "../ui/SwipeRow";
+import { useHomeData } from "./homeData";
 import { markWorkspaceSeen } from "../backend/seenResults";
 import { alpha, makeStyles, radius, useTheme, type Palette } from "../theme";
 import { Button, Mono } from "../ui/primitives";
@@ -44,24 +49,94 @@ export function openNewTask(repositoryId?: string | null) {
 	router.push(repositoryId ? { pathname: "/new-task", params: { repositoryId } } : "/new-task");
 }
 
+/** Stop, complete, archive and the delivery sheet, from a row's swipe or menu. */
+function useTaskActions() {
+	const backend = useBackend();
+	const { refresh, showNotice } = useHomeData();
+	const fail = (error: unknown, fallback: string) => showNotice(errorMessage(error, fallback));
+	const stop = (sessionId: string) => {
+		haptic("warning");
+		void backend
+			.request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/abort`, { sessionId })
+			.then(() => refresh(), (error) => fail(error, "Falha ao parar."));
+	};
+	const workspaceAction = (workspaceId: string, action: "complete" | "archive", done: string) =>
+		void backend
+			.request("POST", `/api/v1/mobile/workspaces/${encodeURIComponent(workspaceId)}/delivery/${action}`, undefined, { timeoutMs: 180_000 })
+			.then(
+				() => {
+					haptic("success");
+					showNotice(done);
+					return refresh();
+				},
+				(error) => fail(error, "A ação falhou."),
+			);
+	const complete = (workspaceId: string) =>
+		Alert.alert("Concluir a tarefa?", "Ela sai das listas de ativas, como no computador.", [
+			{ text: "Cancelar", style: "cancel" },
+			{ text: "Concluir", onPress: () => workspaceAction(workspaceId, "complete", "Tarefa concluída.") },
+		]);
+	const archive = (workspaceId: string) =>
+		Alert.alert("Arquivar a tarefa?", "O workspace fica arquivado no computador. Mudanças não enviadas continuam na pasta.", [
+			{ text: "Cancelar", style: "cancel" },
+			{ text: "Arquivar", style: "destructive", onPress: () => workspaceAction(workspaceId, "archive", "Tarefa arquivada.") },
+		]);
+	const delivery = (workspaceId: string) => router.push({ pathname: "/delivery/[id]", params: { id: workspaceId } });
+	return { stop, complete, archive, delivery };
+}
+
+type MenuItem = { label: string; destructive?: boolean; run: () => void };
+
+/** The row's long-press menu: the system action sheet on iOS, an alert elsewhere. */
+function showMenu(title: string, items: MenuItem[]) {
+	if (Platform.OS === "ios") {
+		const destructive = items.findIndex((item) => item.destructive);
+		ActionSheetIOS.showActionSheetWithOptions(
+			{
+				title,
+				options: [...items.map((item) => item.label), "Cancelar"],
+				cancelButtonIndex: items.length,
+				...(destructive >= 0 ? { destructiveButtonIndex: destructive } : {}),
+			},
+			(index) => items[index]?.run(),
+		);
+		return;
+	}
+	Alert.alert(title, undefined, [
+		...items.map((item) => ({ text: item.label, style: item.destructive ? ("destructive" as const) : ("default" as const), onPress: item.run })),
+		{ text: "Cancelar", style: "cancel" as const },
+	]);
+}
+
 /** A task with an agent working right now: the robot walks, the line under the title is green. */
 export function RunningRow({ session }: { session: SessionSearchResult }) {
 	const { color } = useTheme();
 	const styles = useStyles();
+	const actions = useTaskActions();
 	const place = workspaceLabel(session);
+	const workspaceId = session.workspaceId;
+	const menu = () =>
+		showMenu(sessionTitle(session), [
+			{ label: "Abrir a conversa", run: () => openThread(session.sessionId) },
+			...(workspaceId ? [{ label: "Ver mudanças", run: () => actions.delivery(workspaceId) }] : []),
+			{ label: "Parar o agente", destructive: true, run: () => actions.stop(session.sessionId) },
+		]);
 	return (
-		<Row
-			onPress={() => openThread(session.sessionId)}
-			accessibilityLabel={`${sessionTitle(session)}, rodando`}
-			leading={<AgentMascot provider={session.providerId} model={session.model} state="working" size={30} />}
-			title={sessionTitle(session)}
-			detail={
-				<Mono style={[styles.detail, { color: color.accent }]} numberOfLines={1}>
-					rodando{place ? ` · ${place}` : ""}
-				</Mono>
-			}
-			trailing={<RowMeta session={session} />}
-		/>
+		<SwipeRow action={{ label: "Parar", icon: "square", tint: color.danger, onPress: () => actions.stop(session.sessionId) }}>
+			<Row
+				onLongPress={menu}
+				onPress={() => openThread(session.sessionId)}
+				accessibilityLabel={`${sessionTitle(session)}, rodando`}
+				leading={<AgentMascot provider={session.providerId} model={session.model} state="working" size={30} />}
+				title={sessionTitle(session)}
+				detail={
+					<Mono style={[styles.detail, { color: color.accent }]} numberOfLines={1}>
+						rodando{place ? ` · ${place}` : ""}
+					</Mono>
+				}
+				trailing={<RowMeta session={session} />}
+			/>
+		</SwipeRow>
 	);
 }
 
@@ -85,20 +160,38 @@ export function RecentRow({
 }) {
 	const { color } = useTheme();
 	const styles = useStyles();
+	const actions = useTaskActions();
 	const label = status ? statusText(status, color) : null;
+	const workspaceId = session.workspaceId;
+	const menu = () =>
+		showMenu(sessionTitle(session), [
+			{ label: "Abrir a conversa", run: () => openThread(session.sessionId) },
+			...(workspaceId
+				? [
+						{ label: "Ver mudanças", run: () => actions.delivery(workspaceId) },
+						{ label: "Concluir", run: () => actions.complete(workspaceId) },
+						{ label: "Arquivar", destructive: true, run: () => actions.archive(workspaceId) },
+					]
+				: []),
+		]);
 	return (
-		<Row
-			onPress={onPress ?? (() => openThread(session.sessionId))}
-			accessibilityLabel={`${sessionTitle(session)}${label ? `, ${label.text}` : ""}`}
-			leading={
-				<View style={styles.glyph}>
-					<Feather name={status ? DONE_ICON[status] : "message-square"} size={13} color={status === "aborted" ? color.danger : color.mute} />
-				</View>
-			}
-			title={sessionTitle(session)}
-			detail={workspaceLabel(session) || undefined}
-			trailing={<RowMeta session={session} />}
-		/>
+		<SwipeRow
+			action={workspaceId ? { label: "Arquivar", icon: "archive", tint: color.waitFill, ink: color.waitInk, onPress: () => actions.archive(workspaceId) } : null}
+		>
+			<Row
+				onLongPress={menu}
+				onPress={onPress ?? (() => openThread(session.sessionId))}
+				accessibilityLabel={`${sessionTitle(session)}${label ? `, ${label.text}` : ""}`}
+				leading={
+					<View style={styles.glyph}>
+						<Feather name={status ? DONE_ICON[status] : "message-square"} size={13} color={status === "aborted" ? color.danger : color.mute} />
+					</View>
+				}
+				title={sessionTitle(session)}
+				detail={workspaceLabel(session) || undefined}
+				trailing={<RowMeta session={session} />}
+			/>
+		</SwipeRow>
 	);
 }
 
@@ -145,9 +238,11 @@ export function NeedsYouCard({
 				</View>
 				<Feather name="chevron-right" size={16} color={color.faint} />
 			</Pressable>
-			<Mono style={styles.question} numberOfLines={6}>
-				{item.question}
-			</Mono>
+			<View style={styles.ask}>
+				<Mono style={styles.question} numberOfLines={6}>
+					{item.question}
+				</Mono>
+			</View>
 			<View style={styles.choices}>
 				{item.choices.length === 0 ? (
 					<Button label="Responder ao agente" variant="wait" style={{ flex: 1 }} onPress={() => openThread(item.thread.sessionId)} />
@@ -273,12 +368,14 @@ const useStyles = makeStyles((color) =>
 			borderWidth: 1,
 			borderColor: alpha(color.waitFill, 0.4),
 			backgroundColor: alpha(color.waitFill, 0.05),
-			borderRadius: radius.lg,
+			borderRadius: radius.xl,
 			padding: 14,
-			gap: 10,
+			gap: 12,
 		},
+		// What the agent wants to run, set apart from the card.
+		ask: { borderRadius: radius.md, backgroundColor: color.panel, paddingHorizontal: 12, paddingVertical: 10 },
 		cardHead: { flexDirection: "row", alignItems: "center", gap: 10 },
-		question: { color: color.fg, fontSize: 12, lineHeight: 18 },
+		question: { color: color.fg, fontSize: 13, lineHeight: 19 },
 		choices: { flexDirection: "row", gap: 8 },
 		urgent: { borderColor: alpha(color.waitFill, 0.4) },
 		reasonLine: { flexDirection: "row", alignItems: "center", gap: 6 },

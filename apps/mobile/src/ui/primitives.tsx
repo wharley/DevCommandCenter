@@ -15,7 +15,10 @@ import {
 	type TextStyle,
 	type ViewStyle,
 } from "react-native";
+import Feather from "@expo/vector-icons/Feather";
 import { alpha, font, makeStyles, radius, useTheme, type Palette } from "../theme";
+import { AgentMascot } from "./sprites";
+import { DitherPatch } from "./surfaces";
 
 export type AgentState = "live" | "wait" | "fail" | "idle";
 
@@ -177,22 +180,41 @@ export function Button({
 	);
 }
 
-export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
+/** Nothing to show: an icon resting on the dither, a title and a line of help. */
+export function EmptyState({
+	title,
+	children,
+	icon = "inbox",
+}: {
+	title: string;
+	children?: ReactNode;
+	icon?: keyof typeof Feather.glyphMap;
+}) {
+	const { color } = useTheme();
 	const styles = useStyles();
 	return (
 		<View style={styles.empty}>
+			<DitherPatch tint={color.mute} size={112}>
+				<View style={styles.emptyIcon}>
+					<Feather name={icon} size={22} color={color.mute} />
+				</View>
+			</DitherPatch>
 			<Text style={styles.emptyTitle}>{title}</Text>
 			{children ? <Text style={styles.emptyBody}>{children}</Text> : null}
 		</View>
 	);
 }
 
-export function Loading() {
+/** Waiting on the computer: the agent robot walking over the dither. */
+export function Loading({ label = "Carregando…" }: { label?: string }) {
 	const { color } = useTheme();
 	const styles = useStyles();
 	return (
-		<View style={styles.loading}>
-			<ActivityIndicator color={color.mute} />
+		<View style={styles.loading} accessibilityRole="progressbar" accessibilityLabel={label}>
+			<DitherPatch tint={color.accent} size={96}>
+				<AgentMascot provider={null} state="working" size={40} />
+			</DitherPatch>
+			<Mono style={styles.loadingText}>{label}</Mono>
 		</View>
 	);
 }
@@ -217,9 +239,11 @@ export const useStyles = makeStyles((color) =>
 			justifyContent: "center",
 		},
 		buttonText: { fontSize: 14, fontWeight: "600" },
-		empty: { alignItems: "center", paddingVertical: 48, paddingHorizontal: 24, gap: 6 },
+		empty: { alignItems: "center", paddingVertical: 32, paddingHorizontal: 24, gap: 6 },
+		emptyIcon: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: color.panel },
+		loadingText: { fontSize: 12, color: color.mute },
 		emptyTitle: { color: color.fg, fontSize: 15, fontWeight: "600" },
 		emptyBody: { color: color.mute, fontSize: 13, textAlign: "center", lineHeight: 19 },
-		loading: { paddingVertical: 40, alignItems: "center" },
+		loading: { paddingVertical: 32, alignItems: "center", gap: 4 },
 	}),
 );

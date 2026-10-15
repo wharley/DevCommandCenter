@@ -174,7 +174,7 @@ export function MicButton({ dictation, disabled }: { dictation: Dictation; disab
 			accessibilityState={{ selected: dictation.listening }}
 			style={[
 				styles.tool,
-				live && { backgroundColor: alpha(color.danger, 0.15), borderColor: alpha(color.danger, 0.6) },
+				live && { backgroundColor: alpha(color.danger, 0.15) },
 				disabled && !dictation.listening && { opacity: 0.4 },
 			]}
 		>
@@ -222,11 +222,9 @@ const useStyles = makeStyles((color) =>
 			width: 40,
 			height: 40,
 			borderRadius: 20,
-			borderWidth: 1,
-			borderColor: color.border,
 			alignItems: "center",
 			justifyContent: "center",
-			backgroundColor: color.bg,
+			backgroundColor: color.chip,
 		},
 		tray: { gap: 8, paddingTop: 2, paddingRight: 8 },
 		thumb: {
