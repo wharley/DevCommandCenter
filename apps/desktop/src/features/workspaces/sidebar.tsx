@@ -930,10 +930,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
 		const pushChildTasks = (list: VirtualItem[], groupId: string, workspaceId: string) => {
-			const tasks = withLiveTaskState(
-				childTasks.get(workspaceId) ?? [],
-				workspaceAgentActivities[workspaceId],
-			);
+			const tasks = childTasks.get(workspaceId) ?? [];
 			tasks.forEach((task, index) => {
 				list.push({ kind: "child-task", groupId, workspaceId, task, last: index === tasks.length - 1 });
 			});
@@ -1079,16 +1076,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 		items.push({ kind: "bottom-padding" });
 		return items;
-	}, [
-		childTasks,
-		completedRows,
-		idleGroups,
-		railGroups,
-		sectionOpenState,
-		t,
-		waitingRows,
-		workspaceAgentActivities,
-	]);
+	}, [childTasks, completedRows, idleGroups, railGroups, sectionOpenState, t, waitingRows]);
 
 	const virtualizer = useVirtualizer({
 		count: flatItems.length,
@@ -1134,8 +1122,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		overscan: 12,
 	});
 
+	// Brings a newly selected task into view once — as soon as its row exists —
+	// and then leaves the scroll to the person. Re-running on every list change
+	// pulled the list back to the selection while they scrolled.
+	const scrolledToSelectionRef = useRef<string | null>(null);
 	useLayoutEffect(() => {
-		if (!selectedWorkspaceId) {
+		if (!selectedWorkspaceId || scrolledToSelectionRef.current === selectedWorkspaceId) {
 			return;
 		}
 
@@ -1146,8 +1138,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			return;
 		}
 
+		scrolledToSelectionRef.current = selectedWorkspaceId;
 		virtualizer.scrollToIndex(targetIndex, { align: "auto" });
-	}, [selectedWorkspaceId, sectionOpenState, flatItems, virtualizer]);
+	}, [selectedWorkspaceId, flatItems, virtualizer]);
 
 	const toggleSection = useCallback((groupId: string) => {
 		setSectionOpenState((current) => ({
@@ -1263,9 +1256,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			}
 
 			if (item.kind === "child-task") {
+				// Live state is read here, not in the list: agents update every
+				// few seconds and the list must not change (or scroll) with them.
+				const [task] = withLiveTaskState([item.task], workspaceAgentActivities[item.workspaceId]);
 				return (
 					<SidebarChildTaskRow
-						task={item.task}
+						task={task!}
 						last={item.last}
 						selected={
 							selectedWorkspaceId === item.workspaceId &&
