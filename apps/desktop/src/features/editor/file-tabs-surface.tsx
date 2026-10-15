@@ -6,6 +6,7 @@ import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-
 import { cn } from "@/lib/utils";
 import type { DiffAnnotationPayload } from "./diff-types";
 import { useFileIndentation } from "./use-file-indentation";
+import { EditStateManager } from "@pierre/diffs/edit";
 import type {
 	DiffAnnotationRequest,
 	DiffAnnotationSubmit,
@@ -337,6 +338,28 @@ export function FileTabsSurface({
 		[activateTab, onClose, t],
 	);
 
+	// Each open file keeps its draft and undo history in the editor's store
+	// while its tab is open. A file that leaves the tabs drops it, so opening
+	// it again reads the disk instead of an old draft.
+	const openPathsRef = useRef<string[]>([]);
+	useEffect(() => {
+		const open = new Set(openFiles.map((file) => file.path));
+		for (const path of openPathsRef.current) {
+			if (!open.has(path)) clearFileEditState(workspaceRoot, path);
+		}
+		openPathsRef.current = [...open];
+	}, [openFiles, workspaceRoot]);
+	useEffect(
+		() => () => {
+			const paths = openPathsRef.current;
+			// After the editor has stored and released its last session.
+			window.setTimeout(() => {
+				for (const path of paths) clearFileEditState(workspaceRoot, path);
+			}, 0);
+		},
+		[workspaceRoot],
+	);
+
 	const pinTab = useCallback((filePath: string) => {
 		setOpenFiles((prev) =>
 			prev.map((file) =>
@@ -487,6 +510,7 @@ export function FileTabsSurface({
 	}, [activePath, openFiles, stateByPath]);
 
 	const editorPath = sharedEditorPayload?.path ?? activePath;
+	const editStateKey = fileEditStateKey(workspaceRoot, editorPath);
 	const editorContent =
 		sharedEditorPayload?.content ?? contentByPathRef.current.get(activePath) ?? "";
 	const indentation = useFileIndentation(workspaceRoot, editorPath, editorContent);
@@ -631,6 +655,7 @@ export function FileTabsSurface({
 							path={editorPath}
 							content={editorContent}
 							indentation={indentation}
+							editStateKey={editStateKey}
 							focusLine={sharedEditorPayload?.focusLine ?? null}
 							cursorLine={sharedEditorPayload?.cursorLine ?? null}
 							cursorColumn={sharedEditorPayload?.cursorColumn ?? null}
@@ -668,6 +693,14 @@ export function FileTabsSurface({
 			) : null}
 		</section>
 	);
+}
+
+function fileEditStateKey(workspaceRoot: string | null, path: string): string {
+	return `${workspaceRoot ?? ""}\u0000${path}`;
+}
+
+function clearFileEditState(workspaceRoot: string | null, path: string) {
+	EditStateManager.clear("file", fileEditStateKey(workspaceRoot, path));
 }
 
 function ChatTab({

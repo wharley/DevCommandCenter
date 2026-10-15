@@ -166,6 +166,7 @@ function triggerAnchor(target: HTMLElement | null): { top: number; left: number 
 function WorkspaceFileRenderer({
 	file,
 	readOnly,
+	editStateKey,
 	options,
 	editorOptions,
 	onEditChange,
@@ -174,6 +175,7 @@ function WorkspaceFileRenderer({
 }: {
 	file: { name: string; contents: string; cacheKey: string };
 	readOnly: boolean;
+	editStateKey?: string;
 	options: FileOptions<undefined, undefined>;
 	editorOptions: FileEditorOptions;
 	onEditChange: (event: EditorChangeEvent<"file", undefined, undefined>) => void;
@@ -192,6 +194,7 @@ function WorkspaceFileRenderer({
 		<File
 			file={file}
 			edit={!readOnly}
+			editStateKey={editStateKey}
 			editorOptions={editorOptions}
 			onEditChange={onEditChange}
 			disableWorkerPool
@@ -218,6 +221,11 @@ export const WorkspaceFileEditor = forwardRef<
 		onChange?: () => void;
 		/** How Enter and Tab indent, and how wide a tab is drawn. */
 		indentation?: FileIndentation;
+		/**
+		 * Keeps each file's draft and undo history while switching files in one
+		 * editor; the file view remounts per key to resume it.
+		 */
+		editStateKey?: string;
 	}
 >(function WorkspaceFileEditor(
 	{
@@ -232,6 +240,7 @@ export const WorkspaceFileEditor = forwardRef<
 		annotateLabel,
 		onChange,
 		indentation = DEFAULT_FILE_INDENTATION,
+		editStateKey,
 	},
 	ref,
 ) {
@@ -325,7 +334,7 @@ export const WorkspaceFileEditor = forwardRef<
 	// changes go through setOptions below.
 	const editorOptions = useMemo<FileEditorOptions>(
 		() => ({
-			historyMaxEntries: 32,
+			historyMaxEntries: 200,
 			roundedSelection: true,
 			matchBrackets: true,
 			enabledSelectionAction: Boolean(onAnnotateRef.current),
@@ -544,6 +553,8 @@ export const WorkspaceFileEditor = forwardRef<
 					config={{ overscrollSize: 600 }}
 				>
 					<WorkspaceFileRenderer
+						key={editStateKey ?? "file"}
+						editStateKey={editStateKey}
 						file={file}
 						readOnly={readOnly}
 						options={fileOptions}
