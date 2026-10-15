@@ -1,7 +1,11 @@
 import type { Delegation } from "@dcc/contracts";
 
 /** What a child task row says about where the task stands. */
-export type ChildTaskState = "proposed" | "open" | "waiting" | "review";
+/**
+ * `working` has a turn in progress; `idle` is open but stopped between turns;
+ * `waiting` is stopped on the person (approval, question).
+ */
+export type ChildTaskState = "proposed" | "working" | "idle" | "waiting" | "review";
 
 export type ChildTaskEntry = {
 	id: string;
@@ -13,8 +17,8 @@ export type ChildTaskEntry = {
 
 const STATE_BY_STATUS: Partial<Record<Delegation["status"], ChildTaskState>> = {
 	draft: "proposed",
-	queued: "open",
-	running: "open",
+	queued: "idle",
+	running: "idle",
 	review_pending: "review",
 };
 
@@ -42,15 +46,15 @@ export function childTasksByWorkspace(delegations: readonly Delegation[]): Map<s
 	return byWorkspace;
 }
 
-/** An open task whose conversation is blocked on the person says so. */
-export function withWaitingTasks(
+/** What each open task is doing right now, from its conversation's live turn. */
+export function withLiveTaskState(
 	tasks: readonly ChildTaskEntry[],
-	waitingSessionIds: readonly string[] | undefined,
+	live: { runningSessionIds?: readonly string[]; waitingSessionIds?: readonly string[] } | null | undefined,
 ): ChildTaskEntry[] {
-	if (!waitingSessionIds?.length) return [...tasks];
-	return tasks.map((task) =>
-		task.state === "open" && waitingSessionIds.includes(task.sessionId)
-			? { ...task, state: "waiting" }
-			: task,
-	);
+	return tasks.map((task) => {
+		if (task.state !== "idle") return task;
+		if (live?.waitingSessionIds?.includes(task.sessionId)) return { ...task, state: "waiting" };
+		if (live?.runningSessionIds?.includes(task.sessionId)) return { ...task, state: "working" };
+		return task;
+	});
 }

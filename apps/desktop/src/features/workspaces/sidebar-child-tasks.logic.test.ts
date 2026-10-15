@@ -1,6 +1,6 @@
 import type { Delegation } from "@dcc/contracts";
 import { describe, expect, it } from "vitest";
-import { childTasksByWorkspace, withWaitingTasks } from "./sidebar-child-tasks.logic";
+import { childTasksByWorkspace, withLiveTaskState } from "./sidebar-child-tasks.logic";
 
 function delegation(overrides: Partial<Delegation>): Delegation {
 	return {
@@ -37,7 +37,7 @@ describe("childTasksByWorkspace", () => {
 		]);
 		expect(tasks.get("w1")).toEqual([
 			{ id: "t0", title: "Fase 0", state: "review", sessionId: "c0" },
-			{ id: "t1", title: "Fase 1", state: "open", sessionId: "child" },
+			{ id: "t1", title: "Fase 1", state: "idle", sessionId: "child" },
 			// A proposal opens the parent, where its card waits.
 			{ id: "t2", title: "Fase 2", state: "proposed", sessionId: "parent" },
 		]);
@@ -54,18 +54,22 @@ describe("childTasksByWorkspace", () => {
 		expect(tasks.size).toBe(0);
 	});
 
-	it("marks an open task whose conversation waits on the person", () => {
+	it("says what each open task is doing right now", () => {
 		const tasks = childTasksByWorkspace([
 			delegation({ id: "t1", title: "Fase 1", childSessionId: "c1" }),
 			delegation({ id: "t2", title: "Fase 2", childSessionId: "c2" }),
-			delegation({ id: "t3", title: "Fase 3", status: "draft", childSessionId: null }),
+			delegation({ id: "t3", title: "Fase 3", childSessionId: "c3" }),
+			delegation({ id: "t4", title: "Fase 4", status: "draft", childSessionId: null }),
 		]).get("w1")!;
-		expect(withWaitingTasks(tasks, ["c2", "parent"]).map((task) => task.state)).toEqual([
-			"open",
+		const live = { runningSessionIds: ["c1", "c2", "parent"], waitingSessionIds: ["c2"] };
+		expect(withLiveTaskState(tasks, live).map((task) => task.state)).toEqual([
+			"working",
 			"waiting",
-			// A proposal opens the parent; the parent waiting does not make it a blocked task.
+			// Open but between turns: not running, so it does not look busy.
+			"idle",
+			// A proposal opens the parent; the parent working does not make it busy.
 			"proposed",
 		]);
-		expect(withWaitingTasks(tasks, undefined)).toEqual(tasks);
+		expect(withLiveTaskState(tasks, null)).toEqual(tasks);
 	});
 });

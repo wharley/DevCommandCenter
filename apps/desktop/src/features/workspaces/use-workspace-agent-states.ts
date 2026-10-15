@@ -35,6 +35,8 @@ export type WorkspaceAgentActivity = {
 	 * A task's child can wait while its parent is the conversation on screen.
 	 */
 	waitingSessionIds?: string[];
+	/** `active`/`waiting`: every conversation with a turn in progress. */
+	runningSessionIds?: string[];
 };
 
 /** The turn has not finished yet, whether the agent is working or waiting. */
@@ -271,8 +273,14 @@ export function deriveAgentActivityFromSessions(
 							.filter((summary) => summary !== running && waitingReason(summary))
 							.map((summary) => summary.session.id),
 					],
+					runningSessionIds: runningSessions.map((summary) => summary.session.id),
 				}
-			: { state: "active", startedAt, completedAt: null };
+			: {
+					state: "active",
+					startedAt,
+					completedAt: null,
+					runningSessionIds: runningSessions.map((summary) => summary.session.id),
+				};
 	}
 
 	const latest = summaries[0];

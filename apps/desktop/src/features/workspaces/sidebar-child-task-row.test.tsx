@@ -28,7 +28,7 @@ describe("SidebarChildTaskRow", () => {
 		await act(async () => {
 			root.render(
 				<>
-					<SidebarChildTaskRow task={{ id: "t1", title: "Fase 1: relay", state: "open", sessionId: "c1" }} onSelect={onSelect} />
+					<SidebarChildTaskRow task={{ id: "t1", title: "Fase 1: relay", state: "working", sessionId: "c1" }} onSelect={onSelect} />
 					<SidebarChildTaskRow task={{ id: "t2", title: "Fase 2: push", state: "proposed", sessionId: "p" }} last />
 				</>,
 			);

@@ -6,7 +6,8 @@ import type { ChildTaskEntry } from "./sidebar-child-tasks.logic";
 /**
  * A task the agent of this workspace proposed or started (`dcc_propose_task`),
  * nested under the workspace's row the way a coordinator's phases hang under
- * it. Amber when it waits on the person: a proposal to start, edits to review.
+ * it. Green while it works, grey while it is open but stopped, amber when it
+ * waits on the person: a proposal to start, an approval, edits to review.
  */
 export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 	task,
@@ -22,7 +23,8 @@ export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 	onSelect?: () => void;
 }) {
 	const { t } = useTranslation("common");
-	const waitsOnPerson = task.state !== "open";
+	const waitsOnPerson =
+		task.state === "proposed" || task.state === "waiting" || task.state === "review";
 	return (
 		<button
 			type="button"
@@ -48,7 +50,8 @@ export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 				aria-hidden
 				className={cn(
 					"size-1.5 shrink-0 rounded-full",
-					task.state === "open" && "bg-emerald-500/80",
+					task.state === "working" && "animate-pulse bg-emerald-500",
+					task.state === "idle" && "bg-muted-foreground/40",
 					(task.state === "review" || task.state === "waiting") && "bg-amber-500",
 					task.state === "waiting" && "animate-pulse",
 					task.state === "proposed" && "border border-amber-500 bg-transparent",

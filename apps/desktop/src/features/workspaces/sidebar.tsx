@@ -141,7 +141,7 @@ import { ProjectIdentityGlyph } from "./project-identity";
 import { ProviderIcon } from "@/features/providers/provider-icons";
 import { repositoryDisplayName } from "./repository-display-name";
 import { SidebarChildTaskRow } from "./sidebar-child-task-row";
-import { withWaitingTasks, type ChildTaskEntry } from "./sidebar-child-tasks.logic";
+import { withLiveTaskState, type ChildTaskEntry } from "./sidebar-child-tasks.logic";
 import { useChildTasksByWorkspace } from "./use-child-tasks";
 import {
 	formatDiskBytes,
@@ -930,9 +930,9 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
 		const pushChildTasks = (list: VirtualItem[], groupId: string, workspaceId: string) => {
-			const tasks = withWaitingTasks(
+			const tasks = withLiveTaskState(
 				childTasks.get(workspaceId) ?? [],
-				workspaceAgentActivities[workspaceId]?.waitingSessionIds,
+				workspaceAgentActivities[workspaceId],
 			);
 			tasks.forEach((task, index) => {
 				list.push({ kind: "child-task", groupId, workspaceId, task, last: index === tasks.length - 1 });
