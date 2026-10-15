@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	AlertTriangleIcon,
@@ -223,6 +223,7 @@ type SessionWorkbenchProps = {
 	composerFocusRequestKey?: number | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
+	sessionStageContent?: ReactNode;
 	onInspectorCollapsedChange?: (collapsed: boolean) => void;
 	/** Toggles the inspector open/closed — wired to the header control. */
 	onToggleInspector?: () => void;
@@ -316,6 +317,7 @@ export function SessionWorkbench({
 	onComposerPrefillConsumed,
 	composerFocusRequestKey = null,
 	inspectorCollapsed,
+	sessionStageContent,
 	onInspectorCollapsedChange,
 	onToggleInspector,
 	onReviewChanges,
@@ -1219,6 +1221,7 @@ export function SessionWorkbench({
 						debugEvidence={debugEvidenceController}
 						composerFocusRequestKey={composerFocusRequestKey}
 						inspectorCollapsed={inspectorCollapsed}
+						sessionStageContent={sessionStageContent}
 						onToggleInspector={onToggleInspector}
 						onReviewChanges={onReviewChanges}
 						onCompleteWorkspace={onCompleteWorkspace}

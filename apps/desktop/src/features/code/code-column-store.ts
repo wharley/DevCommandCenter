@@ -50,6 +50,15 @@ export function useCodeColumnTab(): CodeColumnTab {
 	return useSyncExternalStore(subscribeTab, () => tab, () => "files");
 }
 
+/** Shows one list, or closes the column when that list is already showing. */
+export function toggleCodeColumnTab(next: CodeColumnTab) {
+	if (open && tab === next) {
+		setCodeColumnOpen(false);
+		return;
+	}
+	showCodeColumn(next);
+}
+
 /** Opens the code column on one of its lists. */
 export function showCodeColumn(next: CodeColumnTab) {
 	setCodeColumnTab(next);

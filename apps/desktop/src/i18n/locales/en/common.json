@@ -4748,6 +4748,10 @@
       "overwrite": "Overwrite with mine"
     }
   },
+  "sessionStage": {
+    "title": "Session",
+    "open": "Session activity, context and spec"
+  },
   "codeColumn": {
     "ariaLabel": "Project code",
     "files": "Files",

@@ -26,4 +26,8 @@ export type WorkspaceSurfaceSelection =
 			requestId: number;
 			focusLine?: number | null;
 			focusColumn?: number | null;
+	  }
+	| {
+			/** The session's activity, context and spec, as a stage tab. */
+			kind: "session";
 	  };

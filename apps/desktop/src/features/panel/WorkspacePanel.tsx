@@ -1,5 +1,5 @@
 import { LocalBranchPicker } from "@/features/workspaces/local-branch-picker";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ import {
 } from "@/features/editor/diff-annotation";
 import { subscribeWorkspaceDiffAnnotation } from "@/features/editor/workspace-diff-annotation-command";
 import { FileTabsSurface } from "@/features/editor/file-tabs-surface";
+import { SessionStageSurface } from "./session-stage-surface";
 import { subscribeComposerFileMention } from "@/features/composer/composer-file-mention";
 import { resolveConfirmedFileSurfaceCloseHandler } from "@/features/editor/file-surface.logic";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
@@ -292,6 +293,8 @@ type WorkspacePanelProps = {
 	composerFocusRequestKey?: number | null;
 	/** Current inspector visibility — picks the open vs. close affordance. */
 	inspectorCollapsed?: boolean;
+	/** The session's activity, context and spec, shown as the Session stage tab. */
+	sessionStageContent?: ReactNode;
 	/** Toggles the inspector open/closed — wired to the header control. */
 	onToggleInspector?: () => void;
 	/** Reveals the inspector to review the current Git changes. */
@@ -383,6 +386,7 @@ export function WorkspacePanel({
 	debugEvidence = null,
 	composerFocusRequestKey = null,
 	inspectorCollapsed,
+	sessionStageContent = null,
 	onToggleInspector,
 	onReviewChanges,
 	onOpenMultiProjectDelivery,
@@ -1054,7 +1058,9 @@ export function WorkspacePanel({
 			? `file:${workspaceSurfaceSelection.requestId}`
 			: workspaceSurfaceSelection?.kind === "git-diff"
 				? `diff:${workspaceSurfaceSelection.file.group}:${workspaceSurfaceSelection.file.path}`
-				: null;
+				: workspaceSurfaceSelection?.kind === "session"
+					? "session"
+					: null;
 	const [stageChatActive, setStageChatActive] = useState(false);
 	const [stageChatUnread, setStageChatUnread] = useState(false);
 	useEffect(() => {
@@ -1867,6 +1873,12 @@ export function WorkspacePanel({
 				onEditInComposer={handleEditAnnotationInComposer}
 				onAddToReview={handleAddToReview}
 				stage={stageChat}
+			/>
+		) : workspaceSurfaceSelection?.kind === "session" ? (
+			<SessionStageSurface
+				stage={stageChat}
+				content={sessionStageContent}
+				onClose={onCloseSurface}
 			/>
 		) : null;
 	const secondarySurfaceContent =

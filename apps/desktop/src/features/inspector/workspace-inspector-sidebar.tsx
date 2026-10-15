@@ -1,7 +1,6 @@
 import type { TurnUndoWorkspace } from "@/features/panel/turn-undo-across-projects";
 import type { TurnReviewRequest } from "@/features/panel/turn-review-query";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
 import type { TFunction } from "i18next";
 import {
 	Activity,
@@ -12,12 +11,10 @@ import {
 	GitBranch,
 	Info,
 	Loader2,
-	MessageSquare,
 	PanelRightClose,
 	Pin,
 	PinOff,
 	Rabbit,
-	Search,
 	TerminalSquare,
 	Wrench,
 } from "lucide-react";
@@ -29,7 +26,6 @@ import {
 	useRef,
 	useState,
 	type MouseEvent as ReactMouseEvent,
-	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -97,7 +93,6 @@ import {
 	workspaceGitCommitPush,
 	workspaceGitCompleteMerge,
 	workspaceGitConflictState,
-	listGitTrackedFiles,
 	workspaceApplyDelegationWorktree,
 	workspaceGitStageAll,
 	workspaceGitMarkConflictResolved,
@@ -168,7 +163,6 @@ import { sessionStateLabel } from "@/i18n/session-state-label";
 import { InlineShortcutDisplay } from "@/features/shortcuts/InlineShortcutDisplay";
 import {
 	getInspectorGitModeShortcutKeys,
-	getQuickOpenShortcutKeys,
 	isInspectorGitModeShortcut,
 } from "@/features/shortcuts/shortcut-utils";
 import type { WorkspaceStatus } from "@/features/workspaces/types";
@@ -261,6 +255,12 @@ type WorkspaceInspectorSidebarProps = {
 	onTabChange: (tab: InspectorTab) => void;
 	mode: WorkspaceInspectorMode;
 	onModeChange: (mode: WorkspaceInspectorMode) => void;
+	/**
+	 * Where this renders: the right-side Inspector, the code column's Changes
+	 * tab (the Git review only), or the stage's Session tab (activity, context
+	 * and spec at full height).
+	 */
+	variant?: "inspector" | "changes" | "session";
 };
 
 const MIN_SECTION_HEIGHT = 128;
@@ -1214,9 +1214,13 @@ export function WorkspaceInspectorSidebar({
 	onContextualActionComplete,
 	activeTab,
 	onTabChange,
-	mode: inspectorMode,
+	mode: modeProp,
+	variant = "inspector",
 	onModeChange,
 }: WorkspaceInspectorSidebarProps) {
+	const inspectorMode: WorkspaceInspectorMode =
+		variant === "changes" ? "git" : modeProp;
+	const isSessionVariant = variant === "session";
 	const { t } = useTranslation("common");
 	const hasWorkspace = Boolean(workspaceId && workspaceName && workspaceBranch);
 	const [delegationReviewRoot, setDelegationReviewRoot] = useState<{
@@ -1730,6 +1734,8 @@ export function WorkspaceInspectorSidebar({
 	}, [onCompleteWorkspace, workspaceId]);
 
 	useEffect(() => {
+		// The Session tab mounts this too; only the Git review completes work.
+		if (isSessionVariant) return;
 		if (
 			workspaceStatus === "completed" ||
 			workspaceStatus === "archived"
@@ -2438,6 +2444,7 @@ export function WorkspaceInspectorSidebar({
 	);
 
 	useEffect(() => {
+		if (variant !== "inspector") return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			// Cmd/Ctrl+Shift+E belongs to the code column next to the sidebar.
 			if (isInspectorGitModeShortcut(event)) {
@@ -2447,7 +2454,7 @@ export function WorkspaceInspectorSidebar({
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [selectInspectorMode]);
+	}, [selectInspectorMode, variant]);
 	const planMessages = useMemo(
 		() => projectWorkspacePlanMessages([], sessionEvents, sessionId),
 		[sessionEvents, sessionId],
@@ -2967,6 +2974,7 @@ export function WorkspaceInspectorSidebar({
 				data-dcc-inspector-root
 				data-dcc-browser-occluder="true"
 			>
+				{variant === "inspector" ? (
 				<InspectorModeDock
 					mode={inspectorMode}
 					onModeChange={selectInspectorMode}
@@ -2974,7 +2982,9 @@ export function WorkspaceInspectorSidebar({
 					onPinnedChange={onPinnedChange}
 					onRequestClose={onRequestClose}
 				/>
-				{workspacePath &&
+				) : null}
+				{!isSessionVariant &&
+				workspacePath &&
 				gitStatusQuery.data &&
 				(workspaceRecap.state === "needs_attention" ||
 					workspaceRecap.state === "blocked") ? (
@@ -2985,7 +2995,7 @@ export function WorkspaceInspectorSidebar({
 						onAction={handleRecapAction}
 					/>
 				) : null}
-				{inspectorMode === "git" ? (
+				{isSessionVariant ? null : inspectorMode === "git" ? (
 					<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
 						<GitSectionHeader
 							title={gitBranch ?? workspaceBranch}
@@ -3251,16 +3261,22 @@ export function WorkspaceInspectorSidebar({
 					/>
 				)}
 
-			{inspectorMode === "code" && (sessionDockOpen ? (
+			{(isSessionVariant || (variant === "inspector" && inspectorMode === "code")) &&
+			(sessionDockOpen || isSessionVariant ? (
 			<>
-			<ResizeHandle
-				label={t("inspector.sessionDock.resize")}
-				onMouseDown={handleResizeDockStart}
-			/>
+			{isSessionVariant ? null : (
+				<ResizeHandle
+					label={t("inspector.sessionDock.resize")}
+					onMouseDown={handleResizeDockStart}
+				/>
+			)}
 
 			<section
-				className="flex min-h-0 shrink-0 flex-col overflow-hidden border-t border-border/40"
-				style={{ height: `${dockHeight}px` }}
+				className={cn(
+					"flex min-h-0 flex-col overflow-hidden",
+					isSessionVariant ? "flex-1" : "shrink-0 border-t border-border/40",
+				)}
+				style={isSessionVariant ? undefined : { height: `${dockHeight}px` }}
 			>
 				<Tabs
 					value={activeTab}
@@ -3288,16 +3304,18 @@ export function WorkspaceInspectorSidebar({
 							<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
 								{t("inspector.gitSection.eventsCount", { count: activityCount })}
 							</Badge>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-xs"
-								className="size-6 text-muted-foreground hover:text-foreground"
-								onClick={closeSessionDock}
-								aria-label={t("inspector.sessionDock.collapse")}
-							>
-								<ChevronUp className="size-4 rotate-180" />
-							</Button>
+							{isSessionVariant ? null : (
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-xs"
+									className="size-6 text-muted-foreground hover:text-foreground"
+									onClick={closeSessionDock}
+									aria-label={t("inspector.sessionDock.collapse")}
+								>
+									<ChevronUp className="size-4 rotate-180" />
+								</Button>
+							)}
 						</div>
 					</div>
 

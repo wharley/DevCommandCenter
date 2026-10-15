@@ -13,7 +13,8 @@ import { cn } from "@/lib/utils";
 import { CodeFilesTree } from "./code-files-tree";
 import { setCodeColumnTab, useCodeColumnTab, type CodeColumnTab } from "./code-column-store";
 
-export const CODE_COLUMN_WIDTH = 260;
+/** Files are a narrow list; changes carry stats, actions and review status. */
+const CODE_COLUMN_WIDTH: Record<CodeColumnTab, number> = { files: 260, changes: 340 };
 
 /**
  * The project's files and changes next to the tasks sidebar. Lists only:
@@ -54,7 +55,7 @@ export function CodeColumn({
 		<aside
 			aria-label={t("codeColumn.ariaLabel")}
 			className="flex h-full shrink-0 flex-col overflow-hidden border-r border-border/60 bg-sidebar"
-			style={{ width: CODE_COLUMN_WIDTH }}
+			style={{ width: CODE_COLUMN_WIDTH[activeTab] }}
 		>
 			<div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 pl-2 pr-1.5">
 				<div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5">

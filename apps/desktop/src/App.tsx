@@ -52,10 +52,7 @@ import { notePrompt, type ProjectNote } from "@/features/notes/notes-api";
 import { openInEditor } from "@/lib/shell-api";
 import { cn } from "@/lib/utils";
 import {
-	DEFAULT_REVIEW_SURFACE_WIDTH,
-	MAX_INSPECTOR_WIDTH,
 	MAX_SIDEBAR_WIDTH,
-	MIN_INSPECTOR_WIDTH,
 	MIN_SIDEBAR_WIDTH,
 	SIDEBAR_RESIZE_HIT_AREA,
 } from "./shell/layout";
@@ -73,14 +70,7 @@ import {
 	WorkspaceInspectorSidebar,
 	type WorkspaceInspectorMode,
 } from "./features/inspector";
-import {
-	isInlineGitDiffReview,
-	shouldReturnToGitFiles,
-} from "./features/inspector/git-diff-review-navigation";
-import {
-	shouldCollapseContextualInspector,
-	type InspectorPresentation,
-} from "./features/inspector/inspector-presentation";
+import { shouldReturnToGitFiles } from "./features/inspector/git-diff-review-navigation";
 import { SettingsDialog } from "./features/settings";
 import { ComputerUseApprovalHost } from "./features/computer-use/computer-use-approval-host";
 import { BrowserApprovalHost } from "./features/browser/browser-approval-host";
@@ -96,6 +86,7 @@ import {
 	isCommandPaletteShortcut,
 	isCodeColumnShortcut,
 	isFocusComposerShortcut,
+	isInspectorGitModeShortcut,
 	isQuickOpenShortcut,
 	isToggleTerminalShortcut,
 	isWorkspaceSearchShortcut,
@@ -320,12 +311,10 @@ import {
 } from "./features/spec/mission-spec-content";
 import { derivePlanFollowUpState } from "./features/panel/plan-follow-up";
 import { CodeColumn } from "./features/code/code-column";
-import { InspectorChangesSection } from "./features/inspector/inspector-changes-section";
-import { ReviewerFindingsProvider } from "./features/agents/reviewer-findings-context";
 import {
 	setCodeColumnOpen,
 	showCodeColumn,
-	toggleCodeColumn,
+	toggleCodeColumnTab,
 	useCodeColumnOpen,
 } from "./features/code/code-column-store";
 import { projectWorkspaceMessages } from "./features/panel/thread-projection";
@@ -459,6 +448,10 @@ async function assertImplementationDelegationWorkspaceReady(workspacePath: strin
 		`Commit, stash, or discard existing worktree changes before starting an implementation delegation (${changedFiles.length} changed: ${preview}${suffix}).`,
 	);
 }
+
+// The Inspector variants have no pin or close of their own.
+function noopInspectorPinned(_pinned: boolean) {}
+function noopInspectorClose() {}
 
 function ResizeSeparator({
 	side,
@@ -686,9 +679,7 @@ export default function App() {
 	const {
 		handleResizeKeyDown,
 		handleResizeStart,
-		inspectorWidth,
 		inspectorCollapsed,
-		isInspectorResizing,
 		isSidebarResizing,
 		sidebarCollapsed,
 		sidebarWidth,
@@ -1040,29 +1031,7 @@ export default function App() {
 	const [inspectorTab, setInspectorTab] = useState<
 		"activity" | "context" | "spec"
 	>("activity");
-	const [inspectorMode, setInspectorMode] =
-		useState<WorkspaceInspectorMode>("git");
-	const [inspectorPresentation, setInspectorPresentation] =
-		useState<InspectorPresentation>(() =>
-			inspectorCollapsed ? "contextual" : "pinned",
-		);
-	const inspectorWorkspaceIdRef = useRef(selectedWorkspaceId);
-	useEffect(() => {
-		const previousWorkspaceId = inspectorWorkspaceIdRef.current;
-		inspectorWorkspaceIdRef.current = selectedWorkspaceId;
-		if (
-			previousWorkspaceId &&
-			selectedWorkspaceId &&
-			previousWorkspaceId !== selectedWorkspaceId &&
-			inspectorPresentation === "contextual"
-		) {
-			setInspectorCollapsed(true);
-		}
-	}, [
-		inspectorPresentation,
-		selectedWorkspaceId,
-		setInspectorCollapsed,
-	]);
+	const [, setInspectorMode] = useState<WorkspaceInspectorMode>("git");
 	const [sessionSnapshotsById, setSessionSnapshotsById] = useState<
 		Record<string, RuntimeSessionSnapshot>
 	>({});
@@ -1949,43 +1918,20 @@ export default function App() {
 	// The code column's changes follow the session's worktree when it has one.
 	const codeColumnChangesRoot =
 		selectedSessionWorkspacePath?.trim() || selectedLocalWorkspacePath;
-	const openContextualInspector = useCallback(() => {
-		setGitDiffExpanded(false);
-		setInspectorPresentation((current) =>
-			!inspectorCollapsed && current === "pinned" ? current : "contextual",
-		);
-		setInspectorCollapsed(false);
-	}, [inspectorCollapsed, setInspectorCollapsed]);
-	const openPinnedInspector = useCallback(() => {
-		setGitDiffExpanded(false);
-		setInspectorPresentation("pinned");
-		setInspectorCollapsed(false);
-	}, [setInspectorCollapsed]);
-	const closeInspector = useCallback(() => {
-		// A manual close is an explicit override of the pin. The next opening
-		// should be contextual again unless the user pins it again.
-		if (surfaceSelectionRef.current?.kind === "git-diff") {
-			requestSurfaceSelection(null);
-		}
-		setInspectorPresentation("contextual");
-		setInspectorCollapsed(true);
-	}, [requestSurfaceSelection, setInspectorCollapsed]);
-	const handleInspectorContextualActionComplete = useCallback(() => {
-		if (
-			shouldCollapseContextualInspector(
-				inspectorPresentation,
-				inspectorCollapsed,
-			)
-		) {
-			setInspectorCollapsed(true);
-		}
-	}, [inspectorCollapsed, inspectorPresentation, setInspectorCollapsed]);
+	// What used to open the right-side Inspector: the Git review is the code
+	// column's Changes tab; activity, context and spec are the Session tab.
+	const openSessionTab = useCallback(
+		(tab?: "activity" | "context" | "spec") => {
+			if (tab) setInspectorTab(tab);
+			requestSurfaceSelection({ kind: "session" });
+		},
+		[requestSurfaceSelection],
+	);
 	const handleReviewDelegation = useCallback(
 		(delegationId: string, path?: string) => {
 			setTurnReviewRequest(null);
 			requestSurfaceSelection(null, () => {
-				setInspectorMode("git");
-				openContextualInspector();
+				showCodeColumn("changes");
 				setReviewDelegationRequest((current) => ({
 					delegationId,
 					nonce: (current?.nonce ?? 0) + 1,
@@ -1993,17 +1939,12 @@ export default function App() {
 				}));
 			});
 		},
-		[openContextualInspector, requestSurfaceSelection],
+		[requestSurfaceSelection],
 	);
 	const toggleGitInspector = useCallback(() => {
-		if (inspectorCollapsed) {
-			recordUxMetric("diff_discovered");
-			setInspectorMode("git");
-			openContextualInspector();
-			return;
-		}
-		closeInspector();
-	}, [closeInspector, inspectorCollapsed, openContextualInspector]);
+		recordUxMetric("diff_discovered");
+		toggleCodeColumnTab("changes");
+	}, []);
 	const openPlanSurface = useCallback(() => {
 		requestSurfaceSelection({ kind: "plan" });
 	}, [requestSurfaceSelection]);
@@ -2013,27 +1954,22 @@ export default function App() {
 			switch (command) {
 				case "inspector.changes":
 					recordUxMetric("diff_discovered");
-					setInspectorMode("git");
-					openPinnedInspector();
+					showCodeColumn("changes");
 					return;
 				case "inspector.files":
-					setCodeColumnOpen(true);
+					showCodeColumn("files");
 					return;
 				case "inspector.activity":
-					setInspectorMode("git");
-					setInspectorTab("activity");
-					openPinnedInspector();
+					openSessionTab("activity");
 					return;
 				case "inspector.details":
-					setInspectorMode("git");
-					setInspectorTab("context");
-					openPinnedInspector();
+					openSessionTab("context");
 					return;
 				default:
 					dispatchWorkbenchCommand(command);
 			}
 		},
-		[openPinnedInspector],
+		[openSessionTab],
 	);
 
 	useEffect(() => {
@@ -2109,7 +2045,13 @@ export default function App() {
 			}
 			if (isCodeColumnShortcut(event)) {
 				event.preventDefault();
-				toggleCodeColumn();
+				toggleCodeColumnTab("files");
+				return;
+			}
+			if (isInspectorGitModeShortcut(event)) {
+				event.preventDefault();
+				recordUxMetric("diff_discovered");
+				toggleCodeColumnTab("changes");
 				return;
 			}
 			// Quick Open (Cmd/Ctrl+P) is a navigation chord, so it wins even when a
@@ -3929,9 +3871,7 @@ export default function App() {
 			planMarkdown: string | null;
 		}) => {
 			const prompt = buildMissionValidationPrompt(input);
-			setInspectorMode("git");
-			openContextualInspector();
-			setInspectorTab("activity");
+			openSessionTab("activity");
 			void handleSubmitPrompt({
 				rawPrompt: prompt,
 				envelope: {
@@ -3942,7 +3882,7 @@ export default function App() {
 				},
 			});
 		},
-		[handleSubmitPrompt, openContextualInspector],
+		[handleSubmitPrompt, openSessionTab],
 	);
 
 	const handleReanchorMissionSpec = useCallback(
@@ -3964,9 +3904,7 @@ export default function App() {
 			}
 
 			const prompt = buildMissionReanchorPrompt(input);
-			setInspectorMode("git");
-			openContextualInspector();
-			setInspectorTab("activity");
+			openSessionTab("activity");
 			void handleSubmitPrompt({
 				rawPrompt: prompt,
 				envelope: {
@@ -3979,7 +3917,7 @@ export default function App() {
 		},
 		[
 			handleSubmitPrompt,
-			openContextualInspector,
+			openSessionTab,
 			queryClient,
 			registerMissionSpecAutoCompileAttempt,
 			selectedLocalWorkspacePath,
@@ -4006,9 +3944,7 @@ export default function App() {
 			}
 
 			const prompt = buildMissionContinueCriterionPrompt(input);
-			setInspectorMode("git");
-			openContextualInspector();
-			setInspectorTab("activity");
+			openSessionTab("activity");
 			void handleSubmitPrompt({
 				rawPrompt: prompt,
 				envelope: {
@@ -4021,7 +3957,7 @@ export default function App() {
 		},
 		[
 			handleSubmitPrompt,
-			openContextualInspector,
+			openSessionTab,
 			queryClient,
 			registerMissionSpecAutoCompileAttempt,
 			selectedLocalWorkspacePath,
@@ -4563,12 +4499,11 @@ export default function App() {
 			null,
 			returnToGitFiles
 				? () => {
-						setInspectorMode("git");
-						openContextualInspector();
+						showCodeColumn("changes");
 					}
 				: undefined,
 		);
-	}, [gitDiffExpanded, openContextualInspector, requestSurfaceSelection]);
+	}, [gitDiffExpanded, requestSurfaceSelection]);
 	const handleOpenAgentSession = useCallback(
 		(sessionId: string) => {
 			setSelectedSessionId(sessionId);
@@ -5423,14 +5358,79 @@ export default function App() {
 		: null;
 	const activeProjectColor = activeProjectRepository?.color ?? null;
 	const activeProjectSeed = activeProjectRepository?.rootPath ?? null;
-	const inlineGitDiffReview = isInlineGitDiffReview(
-		surfaceSelection?.kind ?? null,
-		gitDiffExpanded,
-	);
-	const visibleInspectorWidth = inspectorMode === "git" || inlineGitDiffReview
-		? DEFAULT_REVIEW_SURFACE_WIDTH
-		: inspectorWidth;
 
+	// The old right-side Inspector now lives in two places: its Git review in
+	// the code column's Changes tab and its session dock as the Session tab.
+	const renderInspectorVariant = (variant: "changes" | "session") => (
+		<WorkspaceInspectorSidebar
+			providerCatalog={providerCatalog}
+			sessionSnapshot={selectedSessionSnapshot}
+			sessionEvents={legacySessionEvents}
+			sessionActivityEvents={sessionActivityEvents}
+			currentRepository={
+				selectedWorkspace?.rootPath?.trim()
+					? repositoriesFromBackend.find(
+							(repository) =>
+								repository.rootPath.trim() ===
+								selectedWorkspace.rootPath!.trim(),
+						) ?? null
+					: null
+			}
+			workspaceId={selectedWorkspace?.id ?? null}
+			workspaceName={selectedWorkspace?.name ?? null}
+			workspaceBranch={selectedWorkspace?.branch ?? null}
+			workspacePath={selectedLocalWorkspacePath}
+			sessionWorkspacePath={selectedSessionWorkspacePath}
+			workspaceStatus={selectedWorkspace?.status ?? null}
+			workspaceHasOwnWorktree={Boolean(selectedWorkspace?.worktreePath)}
+			turnWorkspaces={turnUndoWorkspaces}
+			turnReviewWorkspaceId={activeWorkspace?.id ?? null}
+			selectedProviderLabel={selectedProvider?.label ?? null}
+			selectedModelLabel={selectedModel?.label ?? null}
+			sessionState={selectedSessionSnapshot?.state ?? "idle"}
+			sessionId={selectedSessionSnapshot?.sessionId ?? null}
+			selectedPreview={
+				surfaceSelection?.kind === "git-diff"
+					? surfaceSelection.file
+					: null
+			}
+			onSelectPreview={handleOpenEditorFile}
+			onSelectSession={handleSelectSession}
+			onPrefillComposer={handlePrefillComposer}
+			onOpenMergeConflictResolver={handleOpenMergeConflictResolver}
+			onOpenCodeFile={handleOpenFileFromQuickOpen}
+			selectedCodePath={
+				surfaceSelection?.kind === "file-edit"
+					? surfaceSelection.path
+					: null
+			}
+			onOpenQuickOpen={handleOpenQuickOpen}
+			onOpenMissionSpec={handleOpenMissionSpec}
+			onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
+			onValidateMissionSpec={handleValidateMissionSpec}
+			onReanchorMissionSpec={handleReanchorMissionSpec}
+			onContinueMissionCriterion={handleContinueMissionCriterion}
+			missionSpecAutoCompileFailures={missionSpecAutoCompileFailures}
+			onClearMissionSpecAutoCompileFailure={
+				clearMissionSpecAutoCompileFailure
+			}
+			onCompleteWorkspace={
+				isRemoteBackend ? undefined : handleCompleteWorkspace
+			}
+			isPinned={false}
+			onPinnedChange={noopInspectorPinned}
+			onRequestClose={noopInspectorClose}
+			onOpenExpandedPreview={handleExpandGitDiff}
+			reviewDelegationRequest={reviewDelegationRequest}
+			turnReviewRequest={turnReviewRequest}
+			onCloseTurnReview={() => setTurnReviewRequest(null)}
+			activeTab={inspectorTab}
+			onTabChange={setInspectorTab}
+			mode="git"
+			onModeChange={setInspectorMode}
+			variant={variant}
+		/>
+	);
 	return (
 		<AgentsProvider value={agentsState}>
 			<main
@@ -5566,30 +5566,7 @@ export default function App() {
 						<CodeColumn
 							workspaceRoot={selectedLocalWorkspacePath}
 							changesRoot={codeColumnChangesRoot}
-							changes={
-								<ReviewerFindingsProvider workspaceId={selectedWorkspace?.id ?? null}>
-									<InspectorChangesSection
-										turnReviewRequest={turnReviewRequest}
-										onCloseTurnReview={() => setTurnReviewRequest(null)}
-										workspaceRoot={codeColumnChangesRoot}
-										workspaceId={selectedWorkspace?.id ?? null}
-										sessionId={selectedSessionSnapshot?.sessionId ?? null}
-										selectedPreview={
-											surfaceSelection?.kind === "git-diff" ? surfaceSelection.file : null
-										}
-										onSelectPreview={handleOpenEditorFile}
-										onPrefillComposer={handlePrefillComposer}
-										targetSessionId={
-											codeColumnChangesRoot !== selectedLocalWorkspacePath
-												? (selectedSessionSnapshot?.sessionId ?? null)
-												: null
-										}
-										onOpenExpandedPreview={handleExpandGitDiff}
-										turnWorkspaces={turnUndoWorkspaces}
-										turnReviewWorkspaceId={activeWorkspace?.id ?? null}
-									/>
-								</ReviewerFindingsProvider>
-							}
+							changes={renderInspectorVariant("changes")}
 							selectedPath={
 								surfaceSelection?.kind === "file-edit" ? surfaceSelection.path : null
 							}
@@ -5870,7 +5847,8 @@ export default function App() {
 									onOpenPlanSurface={openPlanSurface}
 									onOpenFileReference={handleOpenConversationFile}
 									onImplementPlanInNewThread={handleImplementPlanInNewThread}
-									inspectorCollapsed={inspectorCollapsed}
+									inspectorCollapsed
+									sessionStageContent={renderInspectorVariant("session")}
 									onInspectorCollapsedChange={setInspectorCollapsed}
 									onToggleInspector={toggleGitInspector}
 									onReviewChanges={() => {
@@ -5912,113 +5890,6 @@ export default function App() {
 						</div>
 					</section>
 
-					{globalSurface === null && !inspectorCollapsed && (
-						<>
-							{inspectorPresentation === "contextual" ? (
-								<button
-									type="button"
-									aria-label={t("inspector.presentation.close")}
-									className="absolute inset-0 z-40 hidden cursor-default bg-black/20 backdrop-blur-[1px] max-[1180px]:block"
-									onClick={closeInspector}
-								/>
-							) : null}
-							{inspectorMode !== "git" ? (
-								<ResizeSeparator
-									side="right"
-									widthAt={visibleInspectorWidth}
-									ariaLabel={t("app.resizeInspectorAria")}
-									ariaMin={MIN_INSPECTOR_WIDTH}
-									ariaMax={MAX_INSPECTOR_WIDTH}
-									ariaNow={visibleInspectorWidth}
-									isActive={isInspectorResizing}
-									onMouseDown={handleResizeStart("inspector")}
-									onKeyDown={handleResizeKeyDown("inspector")}
-									hideOnCompact
-								/>
-							) : null}
-
-							<aside
-								aria-label={t("app.inspectorSidebarAria")}
-								className="inspector-enter relative z-40 h-full shrink-0 overflow-hidden border-l border-border/60 bg-sidebar max-[1180px]:absolute max-[1180px]:inset-y-0 max-[1180px]:right-0 max-[1180px]:z-50 max-[1180px]:shadow-2xl"
-								style={{
-									width: `min(${visibleInspectorWidth}px, calc(100vw - 32px))`,
-								}}
-							>
-								<WorkspaceInspectorSidebar
-									providerCatalog={providerCatalog}
-									sessionSnapshot={selectedSessionSnapshot}
-									sessionEvents={legacySessionEvents}
-									sessionActivityEvents={sessionActivityEvents}
-									currentRepository={
-										selectedWorkspace?.rootPath?.trim()
-											? repositoriesFromBackend.find(
-													(repository) =>
-														repository.rootPath.trim() ===
-														selectedWorkspace.rootPath!.trim(),
-												) ?? null
-											: null
-									}
-									workspaceId={selectedWorkspace?.id ?? null}
-									workspaceName={selectedWorkspace?.name ?? null}
-									workspaceBranch={selectedWorkspace?.branch ?? null}
-									workspacePath={selectedLocalWorkspacePath}
-									sessionWorkspacePath={selectedSessionWorkspacePath}
-									workspaceStatus={selectedWorkspace?.status ?? null}
-									workspaceHasOwnWorktree={Boolean(selectedWorkspace?.worktreePath)}
-									turnWorkspaces={turnUndoWorkspaces}
-									turnReviewWorkspaceId={activeWorkspace?.id ?? null}
-									selectedProviderLabel={selectedProvider?.label ?? null}
-									selectedModelLabel={selectedModel?.label ?? null}
-									sessionState={selectedSessionSnapshot?.state ?? "idle"}
-									sessionId={selectedSessionSnapshot?.sessionId ?? null}
-									selectedPreview={
-										surfaceSelection?.kind === "git-diff"
-											? surfaceSelection.file
-											: null
-									}
-									onSelectPreview={handleOpenEditorFile}
-									onSelectSession={handleSelectSession}
-									onPrefillComposer={handlePrefillComposer}
-									onOpenMergeConflictResolver={handleOpenMergeConflictResolver}
-									onOpenCodeFile={handleOpenFileFromQuickOpen}
-									selectedCodePath={
-										surfaceSelection?.kind === "file-edit"
-											? surfaceSelection.path
-											: null
-									}
-									onOpenQuickOpen={handleOpenQuickOpen}
-									onOpenMissionSpec={handleOpenMissionSpec}
-									onGeneratePlanFromSpec={handleGeneratePlanFromSpec}
-									onValidateMissionSpec={handleValidateMissionSpec}
-									onReanchorMissionSpec={handleReanchorMissionSpec}
-									onContinueMissionCriterion={handleContinueMissionCriterion}
-									missionSpecAutoCompileFailures={missionSpecAutoCompileFailures}
-									onClearMissionSpecAutoCompileFailure={
-										clearMissionSpecAutoCompileFailure
-									}
-									onCompleteWorkspace={
-										isRemoteBackend ? undefined : handleCompleteWorkspace
-									}
-									isPinned={inspectorPresentation === "pinned"}
-									onPinnedChange={(pinned) =>
-										setInspectorPresentation(pinned ? "pinned" : "contextual")
-									}
-									onRequestClose={closeInspector}
-									onOpenExpandedPreview={handleExpandGitDiff}
-									onContextualActionComplete={
-										handleInspectorContextualActionComplete
-									}
-									reviewDelegationRequest={reviewDelegationRequest}
-									turnReviewRequest={turnReviewRequest}
-									onCloseTurnReview={() => setTurnReviewRequest(null)}
-									activeTab={inspectorTab}
-									onTabChange={setInspectorTab}
-									mode={inspectorMode}
-									onModeChange={setInspectorMode}
-								/>
-							</aside>
-						</>
-					)}
 				</div>
 			</main>
 			<Dialog

@@ -4748,6 +4748,10 @@
       "overwrite": "Sobrescrever com a minha"
     }
   },
+  "sessionStage": {
+    "title": "Sessão",
+    "open": "Atividade, contexto e spec da sessão"
+  },
   "codeColumn": {
     "ariaLabel": "Código do projeto",
     "files": "Arquivos",
