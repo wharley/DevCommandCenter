@@ -35,6 +35,8 @@ export type GitSectionHeaderProps = {
   isRefreshing?: boolean;
   onCommit?: (message?: string, body?: string | null, stagedFingerprint?: string) => Promise<void> | void;
   onPrepareCommitMessage?: () => Promise<WorkspaceCommitMessageSuggestion>;
+  /** The repository has no remote: delivery stops at a local commit. */
+  localOnly?: boolean;
   onReviewConflictResolution?: () => void;
   prUrl?: string | null;
   prNumber?: number | null;
@@ -52,6 +54,7 @@ export function GitSectionHeader({
   isRefreshing = false,
   onCommit,
   onPrepareCommitMessage,
+  localOnly = false,
   onReviewConflictResolution,
   prUrl = null,
   prNumber = null,
@@ -140,6 +143,7 @@ export function GitSectionHeader({
             prProvider={prProvider}
             onCommit={onCommit}
             onPrepareCommitMessage={onPrepareCommitMessage}
+            localOnly={localOnly}
           />
         ) : null}
       </div>

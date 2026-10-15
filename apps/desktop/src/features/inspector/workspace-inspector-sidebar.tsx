@@ -93,6 +93,7 @@ import {
 	workspaceChangeRequestViewWeb,
 	workspaceChangeRequestCreate,
 	workspaceChangeRequestMerge,
+	workspaceGitCommit,
 	workspaceGitCommitPush,
 	workspaceGitCompleteMerge,
 	workspaceGitConflictState,
@@ -2320,6 +2321,31 @@ export function WorkspaceInspectorSidebar({
 				}
 				case "commit-and-push":
 				default: {
+					// Without a remote there is nowhere to push: commit locally,
+					// and skip the before-push checks that guard a push.
+					if (gitStatusQuery.data?.hasRemote === false) {
+						if ((gitStatusQuery.data?.staged.length ?? 0) === 0) {
+							await workspaceGitStageAll({ workspaceRoot: root, relativePath: "." });
+						}
+						const localSuggestion = commitMessage
+							? null
+							: await prepareWorkspaceCommitMessage(root);
+						await workspaceGitCommit({
+							workspaceRoot: root,
+							message: commitMessage
+								? sanitizeWorkspaceCommitSubject(commitMessage)
+								: localSuggestion?.subject ?? "",
+							body: commitMessage
+								? sanitizeWorkspaceCommitBody(commitBody)
+								: (localSuggestion?.body ?? null),
+							stagedFingerprint:
+								stagedFingerprint ?? localSuggestion?.stagedFingerprint ?? "",
+						});
+						toast.success(t("composer.executionDock.actions.committed"), {
+							id: loadingToast,
+						});
+						break;
+					}
 					toast.loading(t("automation.beforePushRunning"), { id: loadingToast });
 					if (!(await runBeforePushChecks(root))) {
 						toast.error(t("automation.beforePushBlocked"), { id: loadingToast });
@@ -3315,6 +3341,7 @@ export function WorkspaceInspectorSidebar({
 									? prepareInspectorCommitMessage
 									: undefined
 							}
+							localOnly={gitStatusQuery.data?.hasRemote === false}
 							onReviewConflictResolution={() => {
 								const root = workspacePath?.trim();
 								if (!root) return;

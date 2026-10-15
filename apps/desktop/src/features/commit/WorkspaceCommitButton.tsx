@@ -26,6 +26,8 @@ type WorkspaceCommitButtonProps = {
 		stagedFingerprint?: string,
 	) => Promise<void> | void;
 	onPrepareCommitMessage?: () => Promise<WorkspaceCommitMessageSuggestion>;
+	/** The repository has no remote: commit-and-push is offered as a plain commit. */
+	localOnly?: boolean;
 };
 
 export function WorkspaceCommitButton({
@@ -34,6 +36,7 @@ export function WorkspaceCommitButton({
 	disabled = false,
 	onCommit,
 	onPrepareCommitMessage,
+	localOnly = false,
 }: WorkspaceCommitButtonProps) {
 	const { t } = useTranslation("common");
 	const [status, setStatus] = useState<CommitButtonStatus>("idle");
@@ -43,8 +46,11 @@ export function WorkspaceCommitButton({
 	const [body, setBody] = useState("");
 	const requestLabel = prProvider === "gitlab" ? "MR" : "PR";
 	const label = useMemo(
-		() => t(commitTranslationKey(mode, status), { requestLabel }),
-		[mode, requestLabel, status, t],
+		() =>
+			localOnly && mode === "commit-and-push"
+				? t("composer.executionDock.actions.commit")
+				: t(commitTranslationKey(mode, status), { requestLabel }),
+		[localOnly, mode, requestLabel, status, t],
 	);
 	const isLocked = disabled || mode === "merged" || mode === "closed";
 
