@@ -3066,10 +3066,26 @@ pub async fn prepare_turn(
     state: State<'_, SessionCommandState>,
     input: SendTurnInput,
 ) -> Result<PrepareTurnOutput, String> {
-    let session = state
-        .prepare_provider_session_for_turn(&input)
+    let transition = state
+        .acquire_provider_transition(&input.session_id)
         .await
         .map_err(|error| error.to_string())?;
+    let session = state
+        .select_provider_session_for_turn_under_transition(&transition, &input)
+        .await
+        .map_err(|error| error.to_string())?;
+    // A provider that cannot start is not a preflight error: the send goes
+    // ahead and records the failure as an interrupted turn with the reason.
+    if let Err(error) = state
+        .attach_current_provider_session_under_transition(&transition, &session)
+        .await
+    {
+        eprintln!("[DCC] provider did not start in turn preflight: {error}");
+        return Ok(PrepareTurnOutput {
+            preflight: McpTurnPreflightState::Ready,
+        });
+    }
+    drop(transition);
     if state
         .session_mcp_oauth_support(&session.id)
         .map_err(|error| error.to_string())?
