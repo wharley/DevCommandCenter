@@ -394,3 +394,52 @@ export function triageWithAttention(
 		.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	return { needsYou, running, recent };
 }
+
+/** The workspaces of the project the home is scoped to; null is every project. */
+export type WorkspaceScope = ReadonlySet<string> | null;
+
+export function inScope(workspaceId: string | null | undefined, scope: WorkspaceScope): boolean {
+	return !scope || (!!workspaceId && scope.has(workspaceId));
+}
+
+/** The home's groups narrowed to one project's workspaces. */
+export function scopeTriage(
+	groups: { needsYou: NeedsYouRow[]; running: SessionSearchResult[]; recent: SessionSearchResult[] },
+	scope: WorkspaceScope,
+): { needsYou: NeedsYouRow[]; running: SessionSearchResult[]; recent: SessionSearchResult[] } {
+	if (!scope) return groups;
+	return {
+		needsYou: groups.needsYou.filter((row) => inScope(row.entry.workspaceId || row.thread?.workspaceId, scope)),
+		running: groups.running.filter((s) => inScope(s.workspaceId, scope)),
+		recent: groups.recent.filter((s) => inScope(s.workspaceId, scope)),
+	};
+}
+
+/** Short age for the trailing column of a row: "agora", "12 min", "3 h", "ontem", "4 d". */
+export function formatAgo(iso: string, now = Date.now()): string {
+	const time = new Date(iso).getTime();
+	if (!Number.isFinite(time)) return "";
+	const diffSec = Math.max(0, (now - time) / 1000);
+	if (diffSec < 60) return "agora";
+	if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min`;
+	if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} h`;
+	const days = Math.floor(diffSec / 86400);
+	if (days === 1) return "ontem";
+	if (days < 30) return `${days} d`;
+	return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
+/**
+ * A model id short enough for a row's trailing column: Claude ids lose the
+ * vendor prefix and the release date ("claude-opus-4-1-20250805" →
+ * "Opus 4.1"); other ids pass through as the agent reports them.
+ */
+export function shortModelName(model: string | null | undefined): string | null {
+	const id = model?.trim();
+	if (!id) return null;
+	const claude = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(?:-\d{8})?$/i.exec(id);
+	if (!claude) return id;
+	const [, family, major, minor] = claude;
+	const name = family!.charAt(0).toUpperCase() + family!.slice(1).toLowerCase();
+	return minor ? `${name} ${major}.${minor}` : `${name} ${major}`;
+}

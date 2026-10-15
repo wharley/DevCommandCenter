@@ -3,7 +3,7 @@
  * will use, so glass, blur, haptics and both schemes can be checked on a
  * device before the screens adopt them.
  */
-import { DitherHero, Chip, EdgeFade, GroupedList, Row, SheetHeader } from "@/ui/surfaces";
+import { DitherHero, Chip, EdgeFade, GroupedList, Row, SheetHeader, SheetScroll } from "@/ui/surfaces";
 import { Glass, GlassButton, GlassPill } from "@/ui/glass";
 import { haptic } from "@/ui/haptics";
 import { AgentMascot, ProjectGlyph } from "@/ui/sprites";
@@ -12,7 +12,7 @@ import { makeStyles, useTheme } from "@/theme";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 export default function UiGallery() {
 	const { color, scheme } = useTheme();
@@ -20,12 +20,16 @@ export default function UiGallery() {
 	const [worktree, setWorktree] = useState(true);
 	return (
 		<View style={styles.root}>
-			<SheetHeader
-				title="Componentes"
-				detail={<Mono style={styles.detail}>tema {scheme} · só em desenvolvimento</Mono>}
-				onClose={() => router.back()}
-			/>
-			<ScrollView contentContainerStyle={styles.content}>
+			<SheetScroll
+				contentStyle={styles.content}
+				header={
+					<SheetHeader
+						title="Componentes"
+						detail={<Mono style={styles.detail}>tema {scheme} · só em desenvolvimento</Mono>}
+						onClose={() => router.back()}
+					/>
+				}
+			>
 				<View style={styles.stage}>
 					<DitherHero tint="#2e4fd8" height={220} />
 					<View style={styles.stageBar}>
@@ -86,7 +90,7 @@ export default function UiGallery() {
 					</View>
 				</View>
 				<View style={{ height: 80 }} />
-			</ScrollView>
+			</SheetScroll>
 			<EdgeFade edge="bottom" height={60} />
 		</View>
 	);

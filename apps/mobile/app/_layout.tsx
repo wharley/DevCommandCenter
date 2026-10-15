@@ -122,7 +122,7 @@ function Routes() {
 			}}
 		>
 			<Stack.Protected guard={ready}>
-				<Stack.Screen name="(tabs)" />
+				<Stack.Screen name="(home)" />
 				<Stack.Screen name="thread/[id]" />
 				<Stack.Screen name="settings" options={{ presentation: "modal" }} />
 				<Stack.Screen name="notifications" options={{ presentation: "modal" }} />

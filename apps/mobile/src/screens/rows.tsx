@@ -1,9 +1,11 @@
-/** Rows shared by both tabs: an agent session and a "needs you" card. */
+/** The home's rows: live and resting tasks, and the "needs you" cards. */
 import {
 	attentionLabel,
+	formatAgo,
 	formatRelative,
 	normalizeProvider,
 	sessionTitle,
+	shortModelName,
 	workspaceLabel,
 	type LiveStatus,
 	type NeedsYouRow,
@@ -17,6 +19,7 @@ import { markWorkspaceSeen } from "../backend/seenResults";
 import { alpha, makeStyles, radius, useTheme, type Palette } from "../theme";
 import { Button, Mono } from "../ui/primitives";
 import { AgentMascot } from "../ui/sprites";
+import { Row } from "../ui/surfaces";
 
 function statusText(status: LiveStatus, color: Palette): { text: string; tint: string } {
 	switch (status) {
@@ -41,46 +44,75 @@ export function openNewTask(repositoryId?: string | null) {
 	router.push(repositoryId ? { pathname: "/new-task", params: { repositoryId } } : "/new-task");
 }
 
-export function SessionRow({ session, status }: { session: SessionSearchResult; status?: LiveStatus }) {
+/** A task with an agent working right now: the robot walks, the line under the title is green. */
+export function RunningRow({ session }: { session: SessionSearchResult }) {
 	const { color } = useTheme();
 	const styles = useStyles();
 	const place = workspaceLabel(session);
-	const label = status ? statusText(status, color) : null;
 	return (
-		<Pressable
+		<Row
 			onPress={() => openThread(session.sessionId)}
-			style={({ pressed }) => [styles.row, pressed && { backgroundColor: color.elevated }]}
-			accessibilityRole="button"
-			accessibilityLabel={`${sessionTitle(session)}${label ? `, ${label.text}` : ""}`}
-		>
-			<AgentMascot provider={session.providerId} model={session.model} state={status === "running" ? "working" : "idle"} size={28} />
-			<View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-				<View style={styles.titleLine}>
-					<Text style={styles.title} numberOfLines={1}>
-						{sessionTitle(session)}
-					</Text>
-					{session.providerId ? <ProviderTag providerId={session.providerId} /> : null}
-				</View>
-				{place ? (
-					<Mono style={styles.place} numberOfLines={1}>
-						{place}
-					</Mono>
-				) : null}
-				<Mono style={styles.meta}>
-					{label ? <Text style={{ color: label.tint }}>{label.text} · </Text> : null}
-					{formatRelative(session.updatedAt)}
+			accessibilityLabel={`${sessionTitle(session)}, rodando`}
+			leading={<AgentMascot provider={session.providerId} model={session.model} state="working" size={30} />}
+			title={sessionTitle(session)}
+			detail={
+				<Mono style={[styles.detail, { color: color.accent }]} numberOfLines={1}>
+					rodando{place ? ` · ${place}` : ""}
 				</Mono>
-			</View>
-			<Feather name="chevron-right" size={16} color={color.faint} />
-		</Pressable>
+			}
+			trailing={<RowMeta session={session} />}
+		/>
 	);
 }
 
-export function ProviderTag({ providerId }: { providerId: string }) {
+const DONE_ICON: Record<LiveStatus, keyof typeof Feather.glyphMap> = {
+	running: "loader",
+	completed: "check",
+	aborted: "slash",
+	limited: "clock",
+};
+
+/** A task at rest: how it ended, where it ran, when. The robot only shows for live work. */
+export function RecentRow({
+	session,
+	status,
+	onPress,
+}: {
+	session: SessionSearchResult;
+	status?: LiveStatus;
+	/** Defaults to opening the thread. */
+	onPress?: () => void;
+}) {
+	const { color } = useTheme();
 	const styles = useStyles();
+	const label = status ? statusText(status, color) : null;
 	return (
-		<View style={styles.tag}>
-			<Mono style={styles.tagText}>{normalizeProvider(providerId)}</Mono>
+		<Row
+			onPress={onPress ?? (() => openThread(session.sessionId))}
+			accessibilityLabel={`${sessionTitle(session)}${label ? `, ${label.text}` : ""}`}
+			leading={
+				<View style={styles.glyph}>
+					<Feather name={status ? DONE_ICON[status] : "message-square"} size={13} color={status === "aborted" ? color.danger : color.mute} />
+				</View>
+			}
+			title={sessionTitle(session)}
+			detail={workspaceLabel(session) || undefined}
+			trailing={<RowMeta session={session} />}
+		/>
+	);
+}
+
+function RowMeta({ session }: { session: SessionSearchResult }) {
+	const styles = useStyles();
+	const model = shortModelName(session.model) ?? (session.providerId ? normalizeProvider(session.providerId) : null);
+	return (
+		<View style={styles.trail}>
+			<Mono style={styles.metaText}>{formatAgo(session.updatedAt)}</Mono>
+			{model ? (
+				<Mono style={styles.metaText} numberOfLines={1}>
+					{model}
+				</Mono>
+			) : null}
 		</View>
 	);
 }
@@ -230,12 +262,13 @@ const useStyles = makeStyles((color) =>
 			borderColor: color.border,
 			backgroundColor: color.panel,
 		},
-		titleLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+		detail: { fontSize: 12 },
+		glyph: { width: 30, height: 30, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: color.chip },
+		trail: { alignItems: "flex-end", gap: 3, maxWidth: 96 },
+		metaText: { fontSize: 11, color: color.mute },
 		title: { color: color.fg, fontSize: 14, fontWeight: "500", flexShrink: 1 },
 		place: { color: color.faint, fontSize: 11 },
 		meta: { color: color.faint, fontSize: 11 },
-		tag: { borderWidth: 1, borderColor: color.border, backgroundColor: color.bg, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
-		tagText: { fontSize: 9, color: color.faint },
 		card: {
 			borderWidth: 1,
 			borderColor: alpha(color.waitFill, 0.4),

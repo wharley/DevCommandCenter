@@ -1,5 +1,5 @@
 /**
- * State behind both tabs: the triage scan (`@dcc/mobile-core`), the
+ * State behind the home and its project sheet: the triage scan (`@dcc/mobile-core`), the
  * workspaces, the desktop's catalog (projects, agents) and permission
  * answers. The scan refreshes when the stream (re)opens and when a lifecycle
  * event arrives; the catalog — which asks each agent runtime for its models —
@@ -20,6 +20,7 @@ import {
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 import { cachedCatalog, fetchCatalog } from "../backend/catalogCache";
+import { loadScope, saveScope } from "../backend/scopeStore";
 import { loadSeenResults, onSeenResults } from "../backend/seenResults";
 import { useBackend } from "../backend/session";
 import { errorMessage, isAlreadyResolved } from "../backend/types";
@@ -53,6 +54,9 @@ type HomeData = {
 	refreshing: boolean;
 	lastSynced: Date | null;
 	resolving: Set<string>;
+	/** The project the home shows (`ProjectGroup.key`); null is every project. */
+	scopeKey: string | null;
+	setScope(projectKey: string | null): void;
 	refresh(): Promise<void>;
 	respond(item: PendingItem, choice: string): Promise<void>;
 	showNotice(notice: string): void;
@@ -77,6 +81,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 	const [refreshing, setRefreshing] = useState(false);
 	const [lastSynced, setLastSynced] = useState<Date | null>(null);
 	const [resolving, setResolving] = useState<Set<string>>(() => new Set());
+	const [scopeKey, setScopeKey] = useState<string | null>(null);
 	const running = useRef(false);
 	const again = useRef(false);
 
@@ -115,7 +120,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 		try {
 			setCatalog(await fetchCatalog(backend));
 		} catch {
-			// Older desktops: the tab falls back to the projects seen through workspaces.
+			// Older desktops: the project sheet falls back to the projects seen through workspaces.
 		}
 	}, [backend]);
 
@@ -133,6 +138,21 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 			cancelled = true;
 			stop();
 		};
+	}, []);
+
+	useEffect(() => {
+		let cancelled = false;
+		void loadScope().then((key) => {
+			if (!cancelled) setScopeKey((current) => current ?? key);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const setScope = useCallback((projectKey: string | null) => {
+		setScopeKey(projectKey);
+		saveScope(projectKey);
 	}, []);
 
 	const attention = useMemo(
@@ -217,12 +237,14 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 			refreshing,
 			lastSynced,
 			resolving,
+			scopeKey,
+			setScope,
 			refresh: refreshAll,
 			respond,
 			showNotice: setNotice,
 			dismissNotice: () => setNotice(null),
 		}),
-		[scan, attention, combs, catalog, error, notice, refreshing, lastSynced, resolving, refreshAll, respond],
+		[scan, attention, combs, catalog, error, notice, refreshing, lastSynced, resolving, scopeKey, setScope, refreshAll, respond],
 	);
 	return <HomeDataContext value={value}>{children}</HomeDataContext>;
 }

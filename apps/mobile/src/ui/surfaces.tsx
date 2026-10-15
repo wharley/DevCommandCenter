@@ -7,7 +7,7 @@
 import Feather from "@expo/vector-icons/Feather";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import { Children, Fragment, useId, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import Svg, { Defs, LinearGradient, Mask, Pattern, Rect, Stop } from "react-native-svg";
 import { alpha, font, makeStyles, radius, useTheme, type Palette } from "../theme";
 import { haptic } from "./haptics";
@@ -135,18 +135,31 @@ export function Chip({
  * Background fading into the edge where content scrolls under floating
  * chrome. Place it absolutely, above the content and below the chrome.
  */
-export function EdgeFade({ edge, height }: { edge: "top" | "bottom"; height: number }) {
+export function EdgeFade({
+	edge,
+	height,
+	solid = 0.45,
+}: {
+	edge: "top" | "bottom";
+	height: number;
+	/** The share of the strip, from the edge, that stays fully opaque (under the chrome). */
+	solid?: number;
+}) {
 	const { color } = useTheme();
+	const styles = useStyles();
 	const id = useId().replace(/:/g, "");
-	// Top: solid behind the chrome, clearing toward the content; bottom mirrors it.
-	const [from, to] = edge === "top" ? [{ at: "0.45", o: 1 }, { at: "1", o: 0 }] : [{ at: "0", o: 0 }, { at: "0.6", o: 1 }];
+	// Opaque from the edge for `solid` of the height, then clearing toward the content.
+	const [from, to] =
+		edge === "top"
+			? [{ at: solid, o: 1 }, { at: 1, o: 0 }]
+			: [{ at: 0, o: 0 }, { at: 1 - solid, o: 1 }];
 	return (
-		<View pointerEvents="none" style={[StyleSheet.absoluteFill, edge === "top" ? { bottom: undefined } : { top: undefined }, { height }]}>
+		<View pointerEvents="none" style={[styles.band, edge === "top" ? { top: 0 } : { bottom: 0 }, { height }]}>
 			<Svg width="100%" height="100%">
 				<Defs>
 					<LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-						<Stop offset={from.at} stopColor={color.bg} stopOpacity={from.o} />
-						<Stop offset={to.at} stopColor={color.bg} stopOpacity={to.o} />
+						<Stop offset={String(from.at)} stopColor={color.bg} stopOpacity={from.o} />
+						<Stop offset={String(to.at)} stopColor={color.bg} stopOpacity={to.o} />
 					</LinearGradient>
 				</Defs>
 				<Rect width="100%" height="100%" fill={`url(#${id})`} />
@@ -161,10 +174,11 @@ export function EdgeFade({ edge, height }: { edge: "top" | "bottom"; height: num
  */
 export function DitherHero({ tint, height = 460 }: { tint: string; height?: number }) {
 	const { scheme } = useTheme();
+	const styles = useStyles();
 	const id = useId().replace(/:/g, "");
 	const strength = scheme === "dark" ? 0.34 : 0.22;
 	return (
-		<View pointerEvents="none" style={[StyleSheet.absoluteFill, { bottom: undefined, height }]}>
+		<View pointerEvents="none" style={[styles.band, { top: 0, height }]}>
 			<Svg width="100%" height="100%">
 				<Defs>
 					<Pattern id={`${id}fine`} width="6" height="6" patternUnits="userSpaceOnUse">
@@ -224,6 +238,30 @@ export function SheetHeader({ title, detail, onClose }: { title: string; detail?
 }
 
 /**
+ * The body of a sheet: the header rides inside the scroll view, pinned.
+ * The native sheet takes over the first scroll view it finds and pins its
+ * frame to the sheet's top edge, so a header placed above it ends up under
+ * the content.
+ */
+export function SheetScroll({
+	header,
+	children,
+	contentStyle,
+}: {
+	header: ReactNode;
+	children: ReactNode;
+	contentStyle?: StyleProp<ViewStyle>;
+}) {
+	const styles = useStyles();
+	return (
+		<ScrollView stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
+			<View style={styles.sheetPinned}>{header}</View>
+			<View style={contentStyle}>{children}</View>
+		</ScrollView>
+	);
+}
+
+/**
  * Route options for a sheet with two heights (half, full), as the system
  * draws it: liquid glass on iOS 26, a bottom sheet on Android.
  */
@@ -240,6 +278,9 @@ export function sheetOptions(color: Palette): NativeStackNavigationOptions {
 const useStyles = makeStyles((color) =>
 	StyleSheet.create({
 		group: { borderRadius: radius.lg, backgroundColor: color.panel, overflow: "hidden" },
+		// A strip pinned to one edge. Not `absoluteFill` + `top: undefined`: an
+		// undefined key does not clear the fill's 0, and the strip lands on top.
+		band: { position: "absolute", left: 0, right: 0 },
 		separator: { height: StyleSheet.hairlineWidth, backgroundColor: color.border },
 		row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 56 },
 		rowBody: { flex: 1, minWidth: 0, gap: 2 },
@@ -257,6 +298,7 @@ const useStyles = makeStyles((color) =>
 		chipOn: { backgroundColor: alpha(color.accent, 0.12) },
 		chipText: { fontSize: 13, fontWeight: "500" },
 		sheetHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 14 },
+		sheetPinned: { backgroundColor: color.bg },
 		sheetTitle: { color: color.fg, fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
 		sheetClose: {
 			width: 32,
