@@ -703,6 +703,20 @@ pub fn latest_turn_approval_policy(
     })
 }
 
+/// What a task that edits may do: exactly what its parent may. The person
+/// started it from the parent, so the delegation ceiling (auto at most) does
+/// not apply — under it, every write outside the task's folder stopped to ask
+/// while the parent ran with full access.
+pub fn task_approval_policy(
+    supported: &[ProviderApprovalPolicy],
+    parent: Option<ProviderApprovalPolicy>,
+) -> Option<ProviderApprovalPolicy> {
+    match parent {
+        Some(policy) if supported.contains(&policy) => Some(policy),
+        _ => child_approval_policy(supported, &DelegationMode::Implement, parent),
+    }
+}
+
 /// What a delegated child may do, mirroring T3 Code's rule that a child never
 /// runs with broader permissions than its parent, plus a mode ceiling:
 /// review/explain are read-only, implement is auto inside its isolated
@@ -979,11 +993,15 @@ pub async fn run_delegation(
         .await
         .ok()
         .and_then(|events| latest_turn_approval_policy(&events));
-    budget.approval_policy = child_approval_policy(
-        &provider_approval_policies(&target_provider_id),
-        &input.mode,
-        parent_policy,
-    );
+    budget.approval_policy = if is_task && allow_file_edits {
+        task_approval_policy(&provider_approval_policies(&target_provider_id), parent_policy)
+    } else {
+        child_approval_policy(
+            &provider_approval_policies(&target_provider_id),
+            &input.mode,
+            parent_policy,
+        )
+    };
 
     let sessions = state
         .list_workspace_sessions(&parent.workspace_id)
@@ -1721,7 +1739,8 @@ pub async fn message_task(
         .is_some();
     // Queued rather than steered: the message needs a turn of its own so
     // that turn's end is reported back.
-    let turn = hand_back_turn(&child_session_id, prompt);
+    let mut turn = hand_back_turn(&child_session_id, prompt);
+    turn.approval_policy = task.budget.approval_policy;
     if child_busy {
         run_queue_turn(state, state, QueueTurnInput { turn })
             .await
@@ -2589,6 +2608,25 @@ mod tests {
         assert_eq!(child_approval_policy(&no_read_only, &DelegationMode::Review, Some(Auto)), Some(Ask));
         // A provider that takes no policy gets none; the prompt carries the rule.
         assert_eq!(child_approval_policy(&[], &DelegationMode::Review, Some(Auto)), None);
+    }
+
+    #[test]
+    fn a_task_that_edits_runs_with_its_parents_access() {
+        use ProviderApprovalPolicy::*;
+        let codex = [ReadOnly, Ask, Auto, FullAccess];
+        assert_eq!(task_approval_policy(&codex, Some(FullAccess)), Some(FullAccess));
+        assert_eq!(task_approval_policy(&codex, Some(Ask)), Some(Ask));
+        // A delegation from the same parent stays under the auto ceiling.
+        assert_eq!(
+            child_approval_policy(&codex, &DelegationMode::Implement, Some(FullAccess)),
+            Some(Auto)
+        );
+        // A level the provider lacks falls back to the delegation rule.
+        assert_eq!(task_approval_policy(&[ReadOnly, Ask], Some(FullAccess)), Some(Ask));
+        assert_eq!(
+            task_approval_policy(&codex, None),
+            child_approval_policy(&codex, &DelegationMode::Implement, None)
+        );
     }
 
     #[test]
