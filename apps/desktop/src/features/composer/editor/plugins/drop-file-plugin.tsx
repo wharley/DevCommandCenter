@@ -13,10 +13,35 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { pathRelativeToWorkspace } from "@/lib/path-basename";
 import { $createFileBadgeNode } from "../file-badge-node";
 import { $createImageBadgeNode } from "../image-badge-node";
+import {
+	WORKTREE_FILE_DRAG_TYPE,
+	subscribeComposerFileMention,
+} from "../../composer-file-mention";
 
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|ico)$/i;
 
 const DROP_DEDUP_MS = 500;
+
+/** Appends workspace-relative file badges to the draft and puts the caret after them. */
+function $appendFileBadges(paths: readonly string[], imagesSupported: boolean) {
+	const root = $getRoot();
+	let lastChild = root.getLastChild();
+	if (!lastChild || !$isElementNode(lastChild)) {
+		lastChild = $createParagraphNode();
+		root.append(lastChild);
+	}
+	const paragraph = lastChild as ElementNode;
+	for (const path of paths) {
+		paragraph.append(
+			imagesSupported && IMAGE_EXT_RE.test(path)
+				? $createImageBadgeNode(path)
+				: $createFileBadgeNode(path),
+		);
+	}
+	const spacer = $createTextNode(" ");
+	paragraph.append(spacer);
+	spacer.select(1, 1);
+}
 
 export function DropFilePlugin({
 	workspaceRootPath,
@@ -38,10 +63,22 @@ export function DropFilePlugin({
 			DROP_COMMAND,
 			(event) => {
 				event.preventDefault();
+				// A file dragged from the code column's tree becomes a mention.
+				const dragged = event.dataTransfer?.getData(WORKTREE_FILE_DRAG_TYPE);
+				if (dragged && editor.isEditable()) {
+					editor.update(() => $appendFileBadges([dragged], imagesSupported));
+					editor.focus();
+				}
 				return true;
 			},
 			COMMAND_PRIORITY_CRITICAL,
 		);
+		// "Mention in chat" from the file tree.
+		const unsubscribeMention = subscribeComposerFileMention(({ path }) => {
+			if (!editor.isEditable()) return;
+			editor.update(() => $appendFileBadges([path], imagesSupported));
+			editor.focus();
+		});
 
 		unlistenRef.current?.();
 		unlistenRef.current = null;
@@ -70,29 +107,12 @@ export function DropFilePlugin({
 					lastDropRef.current = { key, ts: now };
 
 					editor.update(() => {
-						const root = $getRoot();
-						let lastChild = root.getLastChild();
-						if (!lastChild || !$isElementNode(lastChild)) {
-							lastChild = $createParagraphNode();
-							root.append(lastChild);
-						}
-						const paragraph = lastChild as ElementNode;
-
-						for (const absolutePath of paths) {
-							const stored = pathRelativeToWorkspace(
-								workspaceRootPath,
-								absolutePath,
-							);
-							if (imagesSupported && IMAGE_EXT_RE.test(absolutePath)) {
-								paragraph.append($createImageBadgeNode(stored));
-							} else {
-								paragraph.append($createFileBadgeNode(stored));
-							}
-						}
-
-						const spacer = $createTextNode(" ");
-						paragraph.append(spacer);
-						spacer.select(1, 1);
+						$appendFileBadges(
+							paths.map((absolutePath) =>
+								pathRelativeToWorkspace(workspaceRootPath, absolutePath),
+							),
+							imagesSupported,
+						);
 					});
 				}, { target: { kind: "Webview", label: getCurrentWebview().label } }).then((fn) => {
 					if (cancelledRef.current) {
@@ -109,6 +129,7 @@ export function DropFilePlugin({
 		return () => {
 			cancelledRef.current = true;
 			unregisterDrop();
+			unsubscribeMention();
 			unlistenRef.current?.();
 			unlistenRef.current = null;
 		};

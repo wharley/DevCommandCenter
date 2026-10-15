@@ -1,7 +1,8 @@
 import type { WorkspacePrReviewComment } from "@dcc/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
-import { ChevronRight, Loader2, MessageSquare, Search } from "lucide-react";
+import { AtSign, ChevronRight, Copy, Loader2, MessageSquare, Search } from "lucide-react";
+import { toast } from "sonner";
 import {
 	useCallback,
 	useEffect,
@@ -15,7 +16,17 @@ import {
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	ContextMenu,
+	ContextMenuContent,
+	ContextMenuItem,
+	ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+	WORKTREE_FILE_DRAG_TYPE,
+	mentionFileInComposer,
+} from "@/features/composer/composer-file-mention";
 import { InlineShortcutDisplay } from "@/features/shortcuts/InlineShortcutDisplay";
 import { getQuickOpenShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 import { listGitTrackedFiles } from "@/lib/workspace-api";
@@ -318,12 +329,13 @@ function CodeTreeRowButton({
 	onToggleFolder: () => void;
 	onOpenFile: () => void;
 }) {
+	const { t } = useTranslation("common");
 	const isFolder = row.kind === "folder";
 	// Folder clicks keep the editor's focus; keyboard focus still lands on rows.
 	const keepEditorFocus = (event: ReactMouseEvent | ReactPointerEvent) => {
 		if (isFolder) event.preventDefault();
 	};
-	return (
+	const button = (
 		<button
 			type="button"
 			role="treeitem"
@@ -335,6 +347,17 @@ function CodeTreeRowButton({
 			onPointerDown={keepEditorFocus}
 			onMouseDown={keepEditorFocus}
 			onClick={isFolder ? onToggleFolder : onOpenFile}
+			draggable={!isFolder}
+			onDragStart={
+				isFolder
+					? undefined
+					: (event) => {
+							// Dropped on the composer, the file becomes a mention.
+							event.dataTransfer.setData(WORKTREE_FILE_DRAG_TYPE, row.path);
+							event.dataTransfer.setData("text/plain", `@${row.path}`);
+							event.dataTransfer.effectAllowed = "copy";
+						}
+			}
 			className={cn(
 				"flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-left outline-none transition-colors focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring",
 				selected
@@ -387,5 +410,28 @@ function CodeTreeRowButton({
 				) : null}
 			</span>
 		</button>
+	);
+	if (isFolder) return button;
+	return (
+		<ContextMenu>
+			<ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+			<ContextMenuContent>
+				<ContextMenuItem onSelect={() => mentionFileInComposer({ path: row.path })}>
+					<AtSign className="size-3.5" strokeWidth={1.8} />
+					<span className="text-[12px]">{t("codeColumn.mentionInChat")}</span>
+				</ContextMenuItem>
+				<ContextMenuItem
+					onSelect={() => {
+						void navigator.clipboard
+							.writeText(row.path)
+							.then(() => toast.success(t("codeColumn.pathCopied")))
+							.catch(() => toast.error(t("codeColumn.copyFailed")));
+					}}
+				>
+					<Copy className="size-3.5" strokeWidth={1.8} />
+					<span className="text-[12px]">{t("codeColumn.copyPath")}</span>
+				</ContextMenuItem>
+			</ContextMenuContent>
+		</ContextMenu>
 	);
 }

@@ -4752,7 +4752,11 @@
     "ariaLabel": "Código do projeto",
     "files": "Arquivos",
     "open": "Mostrar arquivos do projeto",
-    "close": "Ocultar arquivos do projeto"
+    "close": "Ocultar arquivos do projeto",
+    "mentionInChat": "Mencionar no chat",
+    "copyPath": "Copiar caminho",
+    "pathCopied": "Caminho copiado",
+    "copyFailed": "Não foi possível copiar o caminho"
   },
   "fileTabs": {
     "close": "Fechar aba",

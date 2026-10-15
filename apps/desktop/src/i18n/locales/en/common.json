@@ -4752,7 +4752,11 @@
     "ariaLabel": "Project code",
     "files": "Files",
     "open": "Show project files",
-    "close": "Hide project files"
+    "close": "Hide project files",
+    "mentionInChat": "Mention in chat",
+    "copyPath": "Copy path",
+    "pathCopied": "Path copied",
+    "copyFailed": "Could not copy the path"
   },
   "fileTabs": {
     "close": "Close tab",

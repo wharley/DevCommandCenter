@@ -31,6 +31,7 @@ import {
 } from "@/features/editor/diff-annotation";
 import { subscribeWorkspaceDiffAnnotation } from "@/features/editor/workspace-diff-annotation-command";
 import { FileTabsSurface } from "@/features/editor/file-tabs-surface";
+import { subscribeComposerFileMention } from "@/features/composer/composer-file-mention";
 import { resolveConfirmedFileSurfaceCloseHandler } from "@/features/editor/file-surface.logic";
 import { WorkspaceMissionSpecSurface } from "@/features/editor/WorkspaceMissionSpecSurface";
 import { WorkspacePlanSurface } from "@/features/editor/WorkspacePlanSurface";
@@ -1071,6 +1072,8 @@ export function WorkspacePanel({
 		setStageChatUnread(false);
 	}, []);
 	const showStageFiles = useCallback(() => setStageChatActive(false), []);
+	// Mentioning a file means writing to the agent: bring the conversation forward.
+	useEffect(() => subscribeComposerFileMention(() => showStageChat()), [showStageChat]);
 	// Hoisted here (always mounted) so the execution dock stays accurate even while
 	// the inspector is collapsed. These queries share React Query's cache with the
 	// Inspector, so opening the panel does not create duplicate requests.
