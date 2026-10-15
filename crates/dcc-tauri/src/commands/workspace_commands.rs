@@ -8437,25 +8437,39 @@ pub async fn list_git_tracked_files(
     })
 }
 
-/// `git ls-files` of a worktree: sorted, repo-relative forward slashes. Empty
-/// when the root is blank, not a git worktree, or git fails. Shared by the
-/// desktop's `@` mention and the phone's file search.
+/// The worktree's files as git sees them: tracked files still on disk plus new
+/// files that are not ignored, so what an agent just created shows up before
+/// anyone stages it. Sorted, repo-relative forward slashes. Empty when the
+/// root is blank, not a git worktree, or git fails. Shared by the desktop's
+/// file tree and `@` mention and the phone's file search.
 pub fn git_tracked_files(workspace_root: &str) -> Result<Vec<String>, String> {
     let root = workspace_root.trim();
     if root.is_empty() {
         return Ok(Vec::new());
     }
 
-    let output = run_git_output(root, &["ls-files", "-z"])?;
+    let output = run_git_output(
+        root,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+    )?;
 
     if !output.status.success() {
         return Ok(Vec::new());
     }
 
+    let root_path = std::path::Path::new(root);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut paths: Vec<String> = stdout
         .split('\0')
         .filter(|line| !line.is_empty())
+        // `--cached` still lists tracked files deleted from the worktree.
+        .filter(|line| root_path.join(line).symlink_metadata().is_ok())
         .map(|line| line.to_string())
         .collect();
     paths.sort();
@@ -11342,6 +11356,27 @@ mod editor_workspace_file_tests {
         assert!(validate_git_relative_path("../secret").is_err());
         assert!(validate_git_relative_path("src/../secret").is_err());
         assert!(validate_git_relative_path("/tmp/secret").is_err());
+    }
+
+    #[test]
+    fn git_tracked_files_lists_new_files_and_drops_ignored_and_deleted_ones() {
+        let repo = TestDir::new("tracked-files");
+        initialize_branch_test_repository(repo.as_str(), "feature/tree");
+        fs::write(repo.path.join(".gitignore"), "ignored.log\n").expect("write gitignore");
+        fs::write(repo.path.join("kept.txt"), "kept\n").expect("write kept file");
+        fs::write(repo.path.join("gone.txt"), "gone\n").expect("write deleted file");
+        let add = run_git_output(repo.as_str(), &["add", "."]).expect("git add");
+        assert!(add.status.success());
+
+        fs::remove_file(repo.path.join("gone.txt")).expect("delete tracked file");
+        fs::write(repo.path.join("ignored.log"), "noise\n").expect("write ignored file");
+        fs::create_dir_all(repo.path.join("src")).expect("create src");
+        fs::write(repo.path.join("src/new.ts"), "export {};\n").expect("write new file");
+
+        assert_eq!(
+            git_tracked_files(repo.as_str()).expect("list files"),
+            vec![".gitignore", "kept.txt", "src/new.ts"],
+        );
     }
 
     #[test]

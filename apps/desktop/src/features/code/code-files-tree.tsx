@@ -6,7 +6,9 @@ import {
 	useCallback,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
+	type KeyboardEvent as ReactKeyboardEvent,
 	type MouseEvent as ReactMouseEvent,
 	type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -18,95 +20,55 @@ import { InlineShortcutDisplay } from "@/features/shortcuts/InlineShortcutDispla
 import { getQuickOpenShortcutKeys } from "@/features/shortcuts/shortcut-utils";
 import { listGitTrackedFiles } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
+import { useWorkspaceGitStatus } from "@/features/inspector/use-workspace-git-status";
+import {
+	ancestorFolderPaths,
+	buildCodeTree,
+	codeTreeGitStatus,
+	fileSetSignature,
+	visibleCodeTreeRows,
+	type CodeTreeGitStatus,
+	type CodeTreeRow,
+} from "./code-files-tree.logic";
 
 const EMPTY_CODE_FILE_PATHS: string[] = [];
 const EMPTY_REVIEW_COMMENTS = new Map<string, WorkspacePrReviewComment[]>();
+const EMPTY_CHANGES: { path: string; status: string }[] = [];
 /** Expanded folders per worktree, kept across remounts of the tree. */
 const codeTreeExpansionCache = new Map<string, Set<string>>();
+
+const GIT_TONE_CLASS: Record<CodeTreeGitStatus["tone"], string> = {
+	modified: "text-amber-500",
+	added: "text-emerald-500",
+	deleted: "text-red-500",
+	renamed: "text-sky-500",
+	conflict: "text-red-500",
+};
 
 function basename(path: string): string {
 	const slash = path.lastIndexOf("/");
 	return slash === -1 ? path : path.slice(slash + 1);
 }
 
-type CodeTreeNode = {
-	name: string;
-	path: string;
-	children: Map<string, CodeTreeNode>;
-	file?: string;
-};
-
-function buildCodeTree(paths: string[]): CodeTreeNode {
-	const root: CodeTreeNode = { name: "", path: "", children: new Map() };
-
-	for (const filePath of paths) {
-		const parts = filePath.split("/").filter(Boolean);
-		if (parts.length === 0) {
-			continue;
-		}
-		let current = root;
-		for (let index = 0; index < parts.length - 1; index += 1) {
-			const part = parts[index]!;
-			if (!current.children.has(part)) {
-				current.children.set(part, {
-					name: part,
-					path: parts.slice(0, index + 1).join("/"),
-					children: new Map(),
-				});
-			}
-			current = current.children.get(part)!;
-		}
-		const fileName = parts[parts.length - 1]!;
-		current.children.set(fileName, {
-			name: fileName,
-			path: filePath,
-			children: new Map(),
-			file: filePath,
-		});
-	}
-
-	return root;
-}
-
-function collectInitialCodeFolderPaths(node: CodeTreeNode): string[] {
-	const paths: string[] = [];
-	for (const child of node.children.values()) {
-		if (child.children.size > 0 && !child.file) {
-			paths.push(child.path);
-		}
-	}
-	return paths;
-}
-
-function sameStringSet(left: Set<string>, right: Set<string>): boolean {
-	if (left.size !== right.size) {
-		return false;
-	}
-	for (const item of left) {
-		if (!right.has(item)) {
-			return false;
-		}
-	}
-	return true;
-}
-
-function countReviewCommentsForNode(
-	node: CodeTreeNode,
+function countReviewComments(
+	row: CodeTreeRow,
 	commentsByPath: Map<string, WorkspacePrReviewComment[]>,
 ): number {
-	if (node.file) {
-		return commentsByPath.get(node.file)?.length ?? 0;
-	}
+	if (row.kind === "file") return commentsByPath.get(row.path)?.length ?? 0;
+	if (commentsByPath.size === 0) return 0;
+	const prefix = `${row.path}/`;
 	let count = 0;
-	for (const child of node.children.values()) {
-		count += countReviewCommentsForNode(child, commentsByPath);
+	for (const [path, comments] of commentsByPath) {
+		if (path.startsWith(prefix)) count += comments.length;
 	}
 	return count;
 }
 
 /**
- * The worktree's tracked files as a folder tree. The Inspector shows it with
- * its own header; the code column next to the sidebar brings its own chrome.
+ * The worktree's files as a folder tree: new files show up before they are
+ * staged, changed files carry their git status, the open file is revealed,
+ * and the arrow keys move through it. The Inspector shows it with its own
+ * header; the code column next to the sidebar brings its own chrome.
  */
 export function CodeFilesTree({
 	workspaceRoot,
@@ -134,73 +96,162 @@ export function CodeFilesTree({
 		},
 		enabled: Boolean(root),
 		staleTime: 30_000,
-		refetchOnWindowFocus: false,
+		refetchOnWindowFocus: true,
 	});
+	const gitStatusQuery = useWorkspaceGitStatus(root || null);
+	const staged = gitStatusQuery.data?.staged ?? EMPTY_CHANGES;
+	const unstaged = gitStatusQuery.data?.unstaged ?? EMPTY_CHANGES;
+	const gitStatus = useMemo(() => codeTreeGitStatus(staged, unstaged), [staged, unstaged]);
+
+	// Git status already polls; when it sees a file appear or go away, the
+	// list is stale (an agent created or deleted something).
+	const fileSet = useMemo(() => fileSetSignature(staged, unstaged), [staged, unstaged]);
+	const lastFileSetRef = useRef<string | null>(null);
+	const refetchFiles = filesQuery.refetch;
+	useEffect(() => {
+		if (!gitStatusQuery.data) return;
+		if (lastFileSetRef.current !== null && lastFileSetRef.current !== fileSet) {
+			void refetchFiles();
+		}
+		lastFileSetRef.current = fileSet;
+	}, [fileSet, gitStatusQuery.data, refetchFiles]);
+
 	const paths = filesQuery.data ?? EMPTY_CODE_FILE_PATHS;
 	const tree = useMemo(() => buildCodeTree(paths), [paths]);
 	const [expanded, setExpanded] = useState<Set<string>>(
 		() => new Set(codeTreeExpansionCache.get(root) ?? []),
 	);
-
 	useEffect(() => {
-		const cached = codeTreeExpansionCache.get(root);
-		const next = cached
-			? new Set(cached)
-			: new Set(collectInitialCodeFolderPaths(tree));
-		codeTreeExpansionCache.set(root, next);
-		setExpanded((current) => (sameStringSet(current, next) ? current : next));
-	}, [root, tree]);
-
-	const toggle = useCallback((path: string) => {
-		setExpanded((previous) => {
-			const next = new Set(previous);
-			if (next.has(path)) {
-				next.delete(path);
-			} else {
-				next.add(path);
-			}
-			codeTreeExpansionCache.set(root, next);
-			return next;
-		});
+		setExpanded(new Set(codeTreeExpansionCache.get(root) ?? []));
 	}, [root]);
+	const updateExpanded = useCallback(
+		(update: (previous: Set<string>) => Set<string>) => {
+			setExpanded((previous) => {
+				const next = update(previous);
+				if (next === previous) return previous;
+				codeTreeExpansionCache.set(root, next);
+				return next;
+			});
+		},
+		[root],
+	);
+	const setFolderOpen = useCallback(
+		(path: string, open: boolean) => {
+			updateExpanded((previous) => {
+				if (previous.has(path) === open) return previous;
+				const next = new Set(previous);
+				if (open) next.add(path);
+				else next.delete(path);
+				return next;
+			});
+		},
+		[updateExpanded],
+	);
+
+	const rows = useMemo(() => visibleCodeTreeRows(tree, expanded), [tree, expanded]);
+	const listRef = useRef<HTMLDivElement | null>(null);
+
+	// Reveal the open file: open the folders above it and bring it into view.
+	useEffect(() => {
+		if (!selectedPath) return;
+		updateExpanded((previous) => {
+			const missing = ancestorFolderPaths(selectedPath).filter((path) => !previous.has(path));
+			if (missing.length === 0) return previous;
+			return new Set([...previous, ...missing]);
+		});
+	}, [selectedPath, updateExpanded]);
+	// Scroll once per newly opened file (its row may only exist after the
+	// folders above it open), never again while the user browses folders.
+	const revealedPathRef = useRef<string | null>(null);
+	useEffect(() => {
+		if (!selectedPath || revealedPathRef.current === selectedPath) return;
+		const row = listRef.current?.querySelector<HTMLElement>(
+			`[data-tree-path="${CSS.escape(selectedPath)}"]`,
+		);
+		if (!row) return;
+		row.scrollIntoView({ block: "nearest" });
+		revealedPathRef.current = selectedPath;
+	}, [rows, selectedPath]);
+
+	const focusRow = (index: number) => {
+		const items = listRef.current?.querySelectorAll<HTMLElement>("[data-tree-path]");
+		if (!items || items.length === 0) return;
+		items[Math.max(0, Math.min(items.length - 1, index))]?.focus();
+	};
+	const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+		const path = (event.target as HTMLElement).dataset.treePath;
+		if (!path) return;
+		const index = rows.findIndex((row) => row.path === path);
+		const row = rows[index];
+		if (!row) return;
+		switch (event.key) {
+			case "ArrowDown":
+				focusRow(index + 1);
+				break;
+			case "ArrowUp":
+				focusRow(index - 1);
+				break;
+			case "Home":
+				focusRow(0);
+				break;
+			case "End":
+				focusRow(rows.length - 1);
+				break;
+			case "ArrowRight":
+				if (row.kind !== "folder") return;
+				if (!row.expanded) setFolderOpen(row.path, true);
+				else focusRow(index + 1);
+				break;
+			case "ArrowLeft":
+				if (row.kind === "folder" && row.expanded) {
+					setFolderOpen(row.path, false);
+				} else if (row.parentPath) {
+					focusRow(rows.findIndex((candidate) => candidate.path === row.parentPath));
+				}
+				break;
+			default:
+				return;
+		}
+		event.preventDefault();
+	};
 
 	return (
 		<section className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-border/60">
 			{showHeader ? (
-			<div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border/50 px-3">
-				<div className="min-w-0">
-					<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-						{t("inspector.codeSection.kicker")}
-					</p>
-					<p className="truncate text-[13px] font-medium leading-tight text-foreground">
-						{t("inspector.codeSection.title")}
-					</p>
-				</div>
-				<div className="flex shrink-0 items-center gap-1.5">
-					<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
-						{t("inspector.codeSection.filesCount", { count: paths.length })}
-					</Badge>
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								className="h-7 cursor-pointer gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-								onClick={onOpenQuickOpen}
-								aria-label={t("inspector.codeSection.quickOpen")}
-							>
-								<Search className="size-3.5" strokeWidth={1.8} />
+				<div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border/50 px-3">
+					<div className="min-w-0">
+						<p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+							{t("inspector.codeSection.kicker")}
+						</p>
+						<p className="truncate text-[13px] font-medium leading-tight text-foreground">
+							{t("inspector.codeSection.title")}
+						</p>
+					</div>
+					<div className="flex shrink-0 items-center gap-1.5">
+						<Badge variant="outline" className="h-6 px-2 text-[10px] font-normal">
+							{t("inspector.codeSection.filesCount", { count: paths.length })}
+						</Badge>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="h-7 cursor-pointer gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+									onClick={onOpenQuickOpen}
+									aria-label={t("inspector.codeSection.quickOpen")}
+								>
+									<Search className="size-3.5" strokeWidth={1.8} />
+									<InlineShortcutDisplay keys={quickOpenShortcutKeys} />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="bottom" className="gap-2">
+								<span>{t("inspector.codeSection.quickOpen")}</span>
 								<InlineShortcutDisplay keys={quickOpenShortcutKeys} />
-							</Button>
-						</TooltipTrigger>
-						<TooltipContent side="bottom" className="gap-2">
-							<span>{t("inspector.codeSection.quickOpen")}</span>
-							<InlineShortcutDisplay keys={quickOpenShortcutKeys} />
-						</TooltipContent>
-					</Tooltip>
+							</TooltipContent>
+						</Tooltip>
+					</div>
 				</div>
-			</div>
 			) : null}
 			<div
 				data-inspector-scroll-key="code-files"
@@ -225,144 +276,116 @@ export function CodeFilesTree({
 						{t("inspector.codeSection.empty")}
 					</p>
 				) : (
-					<CodeTreeNodeList
-						nodes={tree.children}
-						expanded={expanded}
-						onToggle={toggle}
-						depth={0}
-						selectedPath={selectedPath}
-						reviewCommentsByPath={reviewCommentsByPath}
-						onOpenFile={onOpenFile}
-					/>
+					<div
+						ref={listRef}
+						role="tree"
+						aria-label={t("codeColumn.files")}
+						onKeyDown={handleKeyDown}
+					>
+						{rows.map((row) => (
+							<CodeTreeRowButton
+								key={row.path}
+								row={row}
+								selected={row.kind === "file" && row.path === selectedPath}
+								gitStatus={row.kind === "file" ? gitStatus.byPath.get(row.path) : undefined}
+								folderChanged={row.kind === "folder" && gitStatus.changedFolders.has(row.path)}
+								reviewCount={countReviewComments(row, reviewCommentsByPath)}
+								onToggleFolder={() => row.kind === "folder" && setFolderOpen(row.path, !row.expanded)}
+								onOpenFile={() => onOpenFile({ path: row.path, name: basename(row.path) })}
+							/>
+						))}
+					</div>
 				)}
 			</div>
 		</section>
 	);
 }
 
-function CodeTreeNodeList({
-	nodes,
-	expanded,
-	onToggle,
-	depth,
-	selectedPath,
-	reviewCommentsByPath,
+function CodeTreeRowButton({
+	row,
+	selected,
+	gitStatus,
+	folderChanged,
+	reviewCount,
+	onToggleFolder,
 	onOpenFile,
 }: {
-	nodes: Map<string, CodeTreeNode>;
-	expanded: Set<string>;
-	onToggle: (path: string) => void;
-	depth: number;
-	selectedPath: string | null;
-	reviewCommentsByPath: Map<string, WorkspacePrReviewComment[]>;
-	onOpenFile: (input: { path: string; name: string }) => void;
+	row: CodeTreeRow;
+	selected: boolean;
+	gitStatus: CodeTreeGitStatus | undefined;
+	folderChanged: boolean;
+	reviewCount: number;
+	onToggleFolder: () => void;
+	onOpenFile: () => void;
 }) {
-	const sorted = [...nodes.values()].sort((left, right) => {
-		const leftIsFolder = left.children.size > 0 && !left.file;
-		const rightIsFolder = right.children.size > 0 && !right.file;
-		if (leftIsFolder !== rightIsFolder) {
-			return leftIsFolder ? -1 : 1;
-		}
-		return left.name.localeCompare(right.name);
-	});
-	const pad = depth * 12 + 8;
-	const keepEditorFocusOnMouseDown = (event: ReactMouseEvent<HTMLButtonElement>) => {
-		event.preventDefault();
+	const isFolder = row.kind === "folder";
+	// Folder clicks keep the editor's focus; keyboard focus still lands on rows.
+	const keepEditorFocus = (event: ReactMouseEvent | ReactPointerEvent) => {
+		if (isFolder) event.preventDefault();
 	};
-	const keepEditorFocusOnPointerDown = (
-		event: ReactPointerEvent<HTMLButtonElement>,
-	) => {
-		event.preventDefault();
-	};
-
 	return (
-		<div role={depth === 0 ? "tree" : "group"}>
-			{sorted.map((node) => {
-				const isFolder = node.children.size > 0 && !node.file;
-				if (isFolder) {
-					const isOpen = expanded.has(node.path);
-					const reviewCount = countReviewCommentsForNode(node, reviewCommentsByPath);
-					return (
-						<div key={node.path}>
-							<button
-								type="button"
-								role="treeitem"
-								aria-expanded={isOpen}
-								onPointerDown={keepEditorFocusOnPointerDown}
-								onMouseDown={keepEditorFocusOnMouseDown}
-								onClick={() => onToggle(node.path)}
-								className="flex h-6 w-full cursor-pointer items-center gap-1 rounded-sm pr-2 text-left text-[11.5px] text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring"
-								style={{ paddingLeft: pad }}
-							>
-								<ChevronRight
-									className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
-									strokeWidth={2}
-								/>
-								<img
-									src={getMaterialFolderIcon(node.name, isOpen || undefined)}
-									alt=""
-									className="size-3.5 shrink-0"
-								/>
-								<span className="min-w-0 truncate text-[12px] leading-6">{node.name}</span>
-								{reviewCount > 0 ? (
-									<span className="ml-auto inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full bg-primary/10 px-1 text-[9.5px] font-semibold text-primary">
-										<MessageSquare className="size-2.5" strokeWidth={2} />
-										{reviewCount}
-									</span>
-								) : null}
-							</button>
-							{isOpen ? (
-								<CodeTreeNodeList
-									nodes={node.children}
-									expanded={expanded}
-									onToggle={onToggle}
-									depth={depth + 1}
-									selectedPath={selectedPath}
-									reviewCommentsByPath={reviewCommentsByPath}
-									onOpenFile={onOpenFile}
-								/>
-							) : null}
-						</div>
-					);
+		<button
+			type="button"
+			role="treeitem"
+			data-tree-path={row.path}
+			aria-expanded={isFolder ? row.expanded : undefined}
+			aria-selected={selected}
+			aria-level={row.depth + 1}
+			title={row.path}
+			onPointerDown={keepEditorFocus}
+			onMouseDown={keepEditorFocus}
+			onClick={isFolder ? onToggleFolder : onOpenFile}
+			className={cn(
+				"flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-left outline-none transition-colors focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring",
+				selected
+					? "bg-muted/70 text-foreground"
+					: "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+			)}
+			style={{ paddingLeft: row.depth * 12 + (isFolder ? 6 : 20) }}
+		>
+			{isFolder ? (
+				<ChevronRight
+					className={cn("size-3 shrink-0 transition-transform", row.expanded && "rotate-90")}
+					strokeWidth={2}
+				/>
+			) : null}
+			<img
+				src={
+					isFolder
+						? getMaterialFolderIcon(basename(row.path), row.expanded || undefined)
+						: getMaterialFileIcon(row.label)
 				}
-
-				const filePath = node.file;
-				if (!filePath) {
-					return null;
-				}
-				const selected = selectedPath === filePath;
-				const reviewCount = reviewCommentsByPath.get(filePath)?.length ?? 0;
-				return (
-					<button
-						key={filePath}
-						type="button"
-						role="treeitem"
-						title={filePath}
-						onClick={() => onOpenFile({ path: filePath, name: basename(filePath) })}
+				alt=""
+				className="size-3.5 shrink-0"
+			/>
+			<span
+				className={cn(
+					"min-w-0 truncate text-[12px] leading-6",
+					gitStatus && GIT_TONE_CLASS[gitStatus.tone],
+				)}
+			>
+				{row.label}
+			</span>
+			<span className="ml-auto flex shrink-0 items-center gap-1.5">
+				{reviewCount > 0 ? (
+					<span className="inline-flex h-4 items-center gap-0.5 rounded-full bg-primary/10 px-1 text-[9.5px] font-semibold text-primary">
+						<MessageSquare className="size-2.5" strokeWidth={2} />
+						{reviewCount}
+					</span>
+				) : null}
+				{gitStatus ? (
+					<span
 						className={cn(
-							"flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-left text-[11.5px] outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
-							selected
-								? "bg-muted/70 text-foreground"
-								: "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+							"w-2.5 text-center font-mono text-[10px] font-semibold",
+							GIT_TONE_CLASS[gitStatus.tone],
 						)}
-						style={{ paddingLeft: depth * 12 + 22 }}
 					>
-						<img
-							src={getMaterialFileIcon(node.name)}
-							alt=""
-							className="size-3.5 shrink-0"
-						/>
-						<span className="min-w-0 truncate text-[12px] leading-6">{node.name}</span>
-						{reviewCount > 0 ? (
-							<span className="ml-auto inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full bg-primary/10 px-1 text-[9.5px] font-semibold text-primary">
-								<MessageSquare className="size-2.5" strokeWidth={2} />
-								{reviewCount}
-							</span>
-						) : null}
-					</button>
-				);
-			})}
-		</div>
+						{gitStatus.letter}
+					</span>
+				) : folderChanged ? (
+					<span className="size-1.5 rounded-full bg-amber-500/80" aria-hidden />
+				) : null}
+			</span>
+		</button>
 	);
 }
-
