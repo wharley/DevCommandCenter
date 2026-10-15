@@ -56,7 +56,14 @@ import { resolveFileSurfaceContentState } from "./file-surface.logic";
 import { useWorkspaceFileContent } from "./use-workspace-file-content";
 import { WorkspaceChangesDiffLoader } from "./WorkspaceChangesDiffLoader";
 import {
+	DEFAULT_FILE_INDENTATION,
+	indentUnit,
+	lineBreakInsertion,
+	type FileIndentation,
+} from "./indentation";
+import {
 	collapsedEditorState,
+	orderedSelection,
 	fullDocumentReplacement,
 	primaryHandlePosition,
 	snippetForOneBasedLines,
@@ -209,6 +216,8 @@ export const WorkspaceFileEditor = forwardRef<
 		onAnnotate?: (payload: DiffAnnotationPayload) => void;
 		annotateLabel: string;
 		onChange?: () => void;
+		/** How Enter and Tab indent, and how wide a tab is drawn. */
+		indentation?: FileIndentation;
 	}
 >(function WorkspaceFileEditor(
 	{
@@ -222,6 +231,7 @@ export const WorkspaceFileEditor = forwardRef<
 		onAnnotate,
 		annotateLabel,
 		onChange,
+		indentation = DEFAULT_FILE_INDENTATION,
 	},
 	ref,
 ) {
@@ -430,6 +440,62 @@ export const WorkspaceFileEditor = forwardRef<
 		});
 	}, [onAnnotate, renderSelectionAction]);
 
+	// Enter keeps the line's indentation (one level more after an opening
+	// bracket) and Tab types the project's indent. Only keys typed into the
+	// text itself, before the editor sees them; the find field keeps its own.
+	const indentationRef = useRef(indentation);
+	indentationRef.current = indentation;
+	useEffect(() => {
+		const host = hostRef.current;
+		if (!host || readOnly) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.defaultPrevented || event.isComposing) return;
+			if (event.metaKey || event.ctrlKey || event.altKey) return;
+			const isEnter = event.key === "Enter";
+			const isTab = event.key === "Tab" && !event.shiftKey;
+			if (!isEnter && !isTab) return;
+			const origin = event.composedPath()[0];
+			if (!(origin instanceof HTMLElement) || !origin.isContentEditable) return;
+			const editor = editorRef.current;
+			const selections = editor?.getViewState().selections;
+			if (!editor || !selections || selections.length !== 1) return;
+			const [start, end] = orderedSelection(selections[0]!);
+			const unit = indentUnit(indentationRef.current);
+			if (isTab) {
+				// Indenting a block of lines stays with the editor.
+				if (start.line !== end.line || start.character !== end.character) return;
+				event.preventDefault();
+				event.stopPropagation();
+				editor.applyEdits([{ range: { start, end }, newText: unit }]);
+				editor.focus({
+					lineNumber: start.line + 1,
+					character: start.character + unit.length,
+				});
+				return;
+			}
+			const text = editor.getText();
+			const lines = text.split("\n");
+			const lineAt = (line: number) => (lines[line] ?? "").replace(/\r$/, "");
+			const joined = lineAt(start.line).slice(0, start.character) + lineAt(end.line).slice(end.character);
+			const insertion = lineBreakInsertion(
+				joined,
+				start.character,
+				unit,
+				text.includes("\r\n") ? "\r\n" : "\n",
+			);
+			event.preventDefault();
+			event.stopPropagation();
+			editor.applyEdits([{ range: { start, end }, newText: insertion.text }]);
+			// Focusing a line places the caret and keeps it in view.
+			editor.focus({
+				lineNumber: start.line + insertion.caretLineOffset + 1,
+				character: insertion.caretCharacter,
+			});
+		};
+		host.addEventListener("keydown", onKeyDown, true);
+		return () => host.removeEventListener("keydown", onKeyDown, true);
+	}, [readOnly]);
+
 	useEffect(
 		() => () => {
 			editorRef.current = null;
@@ -466,7 +532,11 @@ export const WorkspaceFileEditor = forwardRef<
 		[annotateSelectedLines, onAnnotate, readOnly, theme],
 	);
 	return (
-		<div ref={hostRef} className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
+		<div
+			ref={hostRef}
+			className="relative flex min-h-0 flex-1 overflow-hidden bg-background"
+			style={{ ["--diffs-tab-size" as string]: String(indentation.size) }}
+		>
 			<EditProvider createEditor={createFileEditor}>
 				<Virtualizer
 					className="h-full min-h-0 min-w-0 flex-1 overflow-auto"

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
 import { cn } from "@/lib/utils";
 import type { DiffAnnotationPayload } from "./diff-types";
+import { useFileIndentation } from "./use-file-indentation";
 import type {
 	DiffAnnotationRequest,
 	DiffAnnotationSubmit,
@@ -485,6 +486,11 @@ export function FileTabsSurface({
 		}
 	}, [activePath, openFiles, stateByPath]);
 
+	const editorPath = sharedEditorPayload?.path ?? activePath;
+	const editorContent =
+		sharedEditorPayload?.content ?? contentByPathRef.current.get(activePath) ?? "";
+	const indentation = useFileIndentation(workspaceRoot, editorPath, editorContent);
+
 	return (
 		<section
 			aria-label={t("fileSurface.ariaLabel")}
@@ -622,12 +628,9 @@ export function FileTabsSurface({
 					>
 						<WorkspaceFileEditor
 							ref={sharedEditorRef}
-							path={sharedEditorPayload?.path ?? activePath}
-							content={
-								sharedEditorPayload?.content ??
-								contentByPathRef.current.get(activePath) ??
-								""
-							}
+							path={editorPath}
+							content={editorContent}
+							indentation={indentation}
 							focusLine={sharedEditorPayload?.focusLine ?? null}
 							cursorLine={sharedEditorPayload?.cursorLine ?? null}
 							cursorColumn={sharedEditorPayload?.cursorColumn ?? null}

@@ -1,4 +1,10 @@
-import type { EditorViewState, Position, Range, TextEdit } from "@pierre/diffs/edit";
+import type {
+	EditorSelection,
+	EditorViewState,
+	Position,
+	Range,
+	TextEdit,
+} from "@pierre/diffs/edit";
 
 export type FileEditorPosition = { lineNumber: number; column: number };
 
@@ -64,4 +70,12 @@ export function snippetForOneBasedLines(
 	const start = Math.max(1, Math.min(startLine, endLine));
 	const end = Math.max(start, Math.max(startLine, endLine));
 	return text.split("\n").slice(start - 1, end).join("\n");
+}
+
+/** A selection as [start, end] in document order, whatever its direction. */
+export function orderedSelection(selection: EditorSelection): [Position, Position] {
+	const { start, end } = selection;
+	const startFirst =
+		start.line < end.line || (start.line === end.line && start.character <= end.character);
+	return startFirst ? [start, end] : [end, start];
 }
