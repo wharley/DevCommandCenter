@@ -141,9 +141,9 @@ body { width: 1024px; height: 500px; position: relative; }
 const SHOTS = [
 	{ file: "01-agentes.png", title: "Veja quem <em>precisa de você</em>", sub: "Todos os agentes do seu computador, num relance" },
 	{ file: "02-aprovacao.png", title: "Aprove com <em>um toque</em>", sub: "Permissões e perguntas chegam no celular" },
-	{ file: "03-nova-tarefa.png", title: "Delegue de <em>qualquer lugar</em>", sub: "Escolha o agente e o nível de acesso" },
-	{ file: "04-workspaces.png", title: "Seus projetos, <em>à mão</em>", sub: "Workspaces e branches de cada projeto" },
-	{ file: "05-composer.png", title: "Cite arquivos com <em>@</em>", sub: "Anexe imagens ou dite a mensagem" },
+	{ file: "03-nova-tarefa.png", title: "Delegue de <em>qualquer lugar</em>", sub: "Escolha o agente, o acesso e o worktree" },
+	{ file: "04-projetos.png", title: "Seus projetos, <em>à mão</em>", sub: "O que espera e o que roda em cada um" },
+	{ file: "05-mudancas.png", title: "Revise o <em>diff</em> no bolso", sub: "Arquivo por arquivo, e commit dali mesmo" },
 ];
 
 /**

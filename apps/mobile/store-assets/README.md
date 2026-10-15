@@ -1,8 +1,8 @@
 # Materiais de loja
 
 Tudo aqui é PNG sem canal alpha (conferido com `sips -g hasAlpha`). Os prints
-vêm do modo demonstração ("Explorar demonstração"), num build Release no
-iPhone 17 Pro Max (iOS 26.5), com a barra de status fixada em
+vêm do modo demonstração ("Explorar demonstração"), no iPhone 17 Pro Max
+(iOS 26.5), tema escuro, com a barra de status fixada em
 `xcrun simctl status_bar … override` (09:41, bateria e sinal cheios).
 
 ## Google Play (`google-play/`)
@@ -30,11 +30,11 @@ sobre o fundo `#05091c` do ícone); o Android segue com `assets/icon.png`.
 
 | # | Tela | Legenda |
 | --- | --- | --- |
-| 01 | Agentes ("Precisa de você" / "Rodando") | Veja quem **precisa de você** |
+| 01 | Home "Tarefas" ("Precisa de você" / "Rodando") | Veja quem **precisa de você** |
 | 02 | Conversa com pedido de permissão | Aprove com **um toque** |
-| 03 | Nova tarefa (projeto, agente, modelo, acesso) | Delegue de **qualquer lugar** |
-| 04 | Workspaces com os bichos dos projetos | Seus projetos, **à mão** |
-| 05 | Composer com menção `@` a arquivo | Cite arquivos com **@** |
+| 03 | Nova tarefa (bicho do projeto, chips de agente, acesso, worktree) | Delegue de **qualquer lugar** |
+| 04 | Folha de projetos com os bichos e o estado de cada um | Seus projetos, **à mão** |
+| 05 | Mudanças com o diff de um arquivo aberto | Revise o **diff** no bolso |
 
 Recurso gráfico: wordmark DCC, "Seus agentes de IA, no seu bolso."
 
@@ -49,3 +49,6 @@ o WebKit do macOS num PNG opaco do tamanho exato. Para trocar legendas, edite
 ```bash
 PATH="$HOME/.nvm/versions/node/v22.21.1/bin:$PATH" node apps/mobile/store-assets/source/build.mjs
 ```
+
+Os prints crus saem do simulador com alpha; passe-os para RGB antes de salvar
+em `raw/` (por exemplo `Image.open(p).convert("RGB").save(p)` com Pillow).
