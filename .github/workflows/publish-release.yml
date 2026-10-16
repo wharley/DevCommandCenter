@@ -232,6 +232,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_VERSION: ${{ steps.publish-release-assets.outputs.appVersion }}
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.publish-release-assets.outputs.appVersion) }}
         run: |
           set -euo pipefail
@@ -252,7 +253,39 @@ jobs:
           ASSET_NAME="$(tr ' ' '.' <<<"${DMG_FILE_NAME}")"
           UPLOAD_DIR="$(mktemp -d "${RUNNER_TEMP}/dcc-dmg-upload.XXXXXX")"
           cp "${DMG_PATH}" "${UPLOAD_DIR}/${ASSET_NAME}"
-          gh release upload "${RELEASE_TAG}" "${UPLOAD_DIR}/${ASSET_NAME}#${DMG_FILE_NAME}" \
+          # Same stapled file again without the version, so the landing page
+          # can link to releases/latest/download/Dev.Command.Center_aarch64.dmg
+          # (or _x64.dmg) and never go stale.
+          STABLE_NAME="${ASSET_NAME/_${APP_VERSION}_/_}"
+          cp "${DMG_PATH}" "${UPLOAD_DIR}/${STABLE_NAME}"
+          gh release upload "${RELEASE_TAG}" \
+            "${UPLOAD_DIR}/${ASSET_NAME}#${DMG_FILE_NAME}" \
+            "${UPLOAD_DIR}/${STABLE_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+
+      - name: Upload the Linux package under a version-free name
+        if: matrix.platform == 'ubuntu-24.04'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_VERSION: ${{ steps.publish-release-assets.outputs.appVersion }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.publish-release-assets.outputs.appVersion) }}
+        run: |
+          set -euo pipefail
+
+          DEB_PATH="$(find target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          if [[ -z "${DEB_PATH}" ]]; then
+            echo "Missing .deb under target/release/bundle/deb."
+            exit 1
+          fi
+
+          # releases/latest/download/Dev.Command.Center_amd64.deb for the landing page.
+          ASSET_NAME="$(basename "${DEB_PATH}" | tr ' ' '.')"
+          STABLE_NAME="${ASSET_NAME/_${APP_VERSION}_/_}"
+          UPLOAD_DIR="$(mktemp -d "${RUNNER_TEMP}/dcc-deb-upload.XXXXXX")"
+          cp "${DEB_PATH}" "${UPLOAD_DIR}/${STABLE_NAME}"
+          gh release upload "${RELEASE_TAG}" "${UPLOAD_DIR}/${STABLE_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --clobber
 

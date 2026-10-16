@@ -63,6 +63,11 @@ macOS signing and notarization:
 6. For a release candidate (tag or manual `all`), review the generated GitHub
    Release draft. For each macOS architecture it must include a `.dmg`, an
    `.app.tar.gz`, its `.sig`, and the release's `latest.json` updater metadata.
+   It must also carry version-free copies of the installers, which the landing
+   page links to through `releases/latest/download/`:
+   `Dev.Command.Center_aarch64.dmg`, `Dev.Command.Center_x64.dmg` and
+   `Dev.Command.Center_amd64.deb`. Renaming or dropping them breaks the site's
+   download buttons.
 7. Publish the draft only after all jobs pass. `tauri-action` sends assets to a
    draft before the local macOS validation gate runs; if that gate fails,
    discard the draft and rerun the workflow rather than publishing or repairing
