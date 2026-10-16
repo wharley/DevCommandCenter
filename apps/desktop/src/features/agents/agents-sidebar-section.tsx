@@ -7,7 +7,7 @@ import { REPORTER_HOME_ATTRIBUTE } from "./reporter-offer";
 import { useReporterAway } from "./reporter-store";
 import type { AgentView } from "./use-agents";
 
-/** Resident agents in the sidebar: one compact row each, above the projects. */
+/** Resident agents in the sidebar: one row of avatars above the task list. */
 export function AgentsSidebarSection({
 	agents,
 	activeAgentId,
@@ -63,62 +63,80 @@ export function AgentsSidebarSection({
 		);
 	}
 
+	// One agent speaks for the row: the one that needs the person, else a
+	// result not opened yet, else one at work.
+	const lead =
+		agents.find((agent) => agent.state === "needsYou") ??
+		agents.find((agent) => agent.state === "done") ??
+		agents.find((agent) => agent.state === "working") ??
+		null;
+
 	return (
-		<section aria-label={t("agents.heading")} className="px-2 pb-3">
-			<h2 className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80">
-				{t("agents.heading")}
-			</h2>
-			<div className="space-y-px">
-				{agents.map((agent) => {
-					const active = activeAgentId === agent.id;
-					const away = agent.preset === "chronicler" && reporterAway;
-					return (
-						<button
-							key={agent.id}
-							type="button"
-							onClick={() => onOpenAgent(agent.id)}
-							aria-current={active ? "page" : undefined}
-							className={cn(
-								"flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left transition-colors",
-								active
-									? "bg-accent text-foreground shadow-sm"
-									: "text-foreground hover:bg-accent/50",
-							)}
-						>
-							<span
-								{...homeAttribute(agent)}
+		<section aria-label={t("agents.heading")} className="flex items-center gap-0.5 px-2.5 pb-3">
+			{agents.map((agent) => {
+				const active = activeAgentId === agent.id;
+				const away = agent.preset === "chronicler" && reporterAway;
+				return (
+					<Tooltip key={agent.id}>
+						<TooltipTrigger asChild>
+							<button
+								type="button"
+								onClick={() => onOpenAgent(agent.id)}
+								aria-current={active ? "page" : undefined}
+								aria-label={`${agent.name}: ${stateLabel(agent)}`}
+								data-agent-state={agent.state}
 								className={cn(
-									"inline-flex shrink-0 transition-opacity duration-300",
-									away && "opacity-25",
+									"relative grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg transition-colors",
+									active ? "bg-accent shadow-sm" : "hover:bg-accent/50",
 								)}
 							>
-								<AgentAvatar
-									avatar={agent.avatar}
-									state={agent.state}
-									size={22}
-								/>
-							</span>
-							<span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-								{agent.name}
-							</span>
-							{agent.state !== "idle" && (
 								<span
+									{...homeAttribute(agent)}
 									className={cn(
-										"shrink-0 text-[11px]",
-										agent.state === "needsYou"
-											? "text-amber-700 dark:text-amber-300"
-											: agent.state === "done"
-												? "text-emerald-700 dark:text-emerald-300"
-												: "text-muted-foreground",
+										"inline-flex transition-opacity duration-300",
+										away && "opacity-25",
 									)}
 								>
-									{stateLabel(agent)}
+									<AgentAvatar avatar={agent.avatar} state={agent.state} size={22} />
 								</span>
-							)}
-						</button>
-					);
-				})}
-			</div>
+								{agent.state === "needsYou" || agent.state === "done" ? (
+									<span
+										aria-hidden
+										className={cn(
+											"absolute right-0.5 top-0.5 size-2 rounded-full ring-2 ring-sidebar",
+											agent.state === "needsYou" ? "bg-amber-500" : "bg-sky-500",
+										)}
+									/>
+								) : null}
+							</button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">
+							{agent.state === "idle" ? agent.name : `${agent.name} · ${stateLabel(agent)}`}
+						</TooltipContent>
+					</Tooltip>
+				);
+			})}
+			{lead ? (
+				<button
+					type="button"
+					onClick={() => onOpenAgent(lead.id)}
+					className="ml-1 min-w-0 cursor-pointer truncate text-left"
+				>
+					{/* Sized on the span: a global font reset on button would undo it here. */}
+					<span
+						className={cn(
+							"text-[11px] font-medium",
+							lead.state === "needsYou"
+								? "text-amber-700 dark:text-amber-300"
+								: lead.state === "done"
+									? "text-sky-700 dark:text-sky-300"
+									: "text-muted-foreground",
+						)}
+					>
+						{lead.name}: {stateLabel(lead).toLocaleLowerCase()}
+					</span>
+				</button>
+			) : null}
 		</section>
 	);
 }
