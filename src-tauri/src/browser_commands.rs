@@ -31,6 +31,7 @@ use dcc_core::domain::session::SessionId;
 use dcc_tauri::state::SessionCommandState;
 
 const BROWSER_LABEL: &str = "dcc-browser";
+static BROWSER_VIEW_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 const DEFAULT_URL: &str = "https://www.google.com/";
 const BROWSER_LOCATION_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const MAX_BROWSER_LOCATION_URL_CHARS: usize = 2_048;
@@ -3958,7 +3959,13 @@ fn build_browser(
     let popup_registry = browser_popup_registry();
     #[cfg(not(target_os = "macos"))]
     let navigation_state = state.clone();
-    let builder = WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(url))
+    // A fresh label per native view: closing the previous one is asynchronous,
+    // so reusing the label could collide with a view that is still tearing down.
+    let label = format!(
+        "{BROWSER_LABEL}-{}",
+        BROWSER_VIEW_SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let builder = WebviewBuilder::new(label, WebviewUrl::External(url))
         // Approved Browser work continues while its parent DCC window is hidden.
         .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
         .on_navigation(move |url| {
@@ -4308,7 +4315,17 @@ pub async fn browser_open(
         );
     }
     set_active_scope(&state, &workspace_id, session_id.as_deref())?;
-    let should_navigate = requested_url || previous_scope.as_deref() != Some(key.as_str());
+    let scope_changed = previous_scope.as_deref() != Some(key.as_str());
+    let should_navigate = requested_url || scope_changed;
+    // One native view serves every task, so a view left by another task still
+    // shows that task's page (and keeps its back/forward history) until the
+    // new navigation commits, and forever if it fails. Another task never
+    // reuses the view: it gets a fresh one on the same shared website store.
+    let existing = existing && !(scope_changed && previous_scope.is_some());
+    if !existing {
+        discard_browser_view(&state)?;
+    }
+    let previous_main_url = if existing { previous_main_url } else { None };
     {
         let mut token = state
             .lifecycle_token
@@ -5839,6 +5856,24 @@ pub async fn browser_hide(
     let snapshot = current_snapshot(&state)?;
     emit_snapshot(&app, snapshot.clone());
     Ok(snapshot)
+}
+
+fn discard_browser_view(state: &BrowserState) -> Result<(), String> {
+    let previous = state
+        .webview
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?
+        .take();
+    if let Some(webview) = previous {
+        #[cfg(target_os = "macos")]
+        if let Ok(mut observers) = main_frame_navigation_observers().lock() {
+            observers.clear();
+        }
+        webview
+            .close()
+            .map_err(|error| format!("failed to close previous browser WebView: {error}"))?;
+    }
+    Ok(())
 }
 
 pub fn shutdown(state: &BrowserState) {

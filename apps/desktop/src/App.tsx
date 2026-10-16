@@ -75,6 +75,13 @@ import { SettingsDialog } from "./features/settings";
 import { ComputerUseApprovalHost } from "./features/computer-use/computer-use-approval-host";
 import { BrowserApprovalHost } from "./features/browser/browser-approval-host";
 import { acknowledgeBrowserOpen, type BrowserOpenRequest } from "./features/browser/browser-api";
+import {
+	browserOpenForTask,
+	enqueueBrowserOpen,
+	hasBrowserOpen,
+	removeBrowserOpen,
+	type BrowserOpenQueue,
+} from "./features/browser/browser-open-queue";
 import { SkillsDialog, getTotalSkillContextCount } from "./features/skills";
 import { resolveActiveSkillsCheckout } from "./features/skills/skills-path";
 import { compileSkills, detectSkillContext } from "./lib/skills-api";
@@ -1034,9 +1041,11 @@ export default function App() {
 		useState<PendingSessionClose | null>(null);
 	const [pendingSessionNavigation, setPendingSessionNavigation] =
 		useState<PendingSessionNavigation | null>(null);
-	const [pendingBrowserOpen, setPendingBrowserOpen] = useState<BrowserOpenRequest | null>(null);
-	const pendingBrowserOpenRef = useRef<BrowserOpenRequest | null>(null);
-	pendingBrowserOpenRef.current = pendingBrowserOpen;
+	// One approved open per task: approving a second task must not drop the
+	// first, which opens when the person reaches its task.
+	const [pendingBrowserOpens, setPendingBrowserOpens] = useState<BrowserOpenQueue>({});
+	const pendingBrowserOpensRef = useRef<BrowserOpenQueue>({});
+	pendingBrowserOpensRef.current = pendingBrowserOpens;
 	const [sessionActionSessionId, setSessionActionSessionId] = useState<string | null>(null);
 	const [inspectorTab, setInspectorTab] = useState<
 		"activity" | "context" | "spec"
@@ -2237,17 +2246,17 @@ export default function App() {
 		setGlobalSurface(null);
 		setIsSettingsOpen(false);
 		setPendingSessionNavigation({ workspaceId: request.workspaceId, sessionId: request.sessionId });
-		setPendingBrowserOpen(request);
+		setPendingBrowserOpens((current) => enqueueBrowserOpen(current, request));
 		requestWorkspaceSelection(request.workspaceId);
 	}, [requestWorkspaceSelection]);
 	const handleBrowserOpened = useCallback(async (request: BrowserOpenRequest, snapshot: { lifecycleToken: number }) => {
-		if (pendingBrowserOpenRef.current?.requestId !== request.requestId) return;
+		if (!hasBrowserOpen(pendingBrowserOpensRef.current, request.requestId)) return;
 		try {
 			await acknowledgeBrowserOpen({ requestId: request.requestId, workspaceId: request.workspaceId, sessionId: request.sessionId, lifecycleToken: snapshot.lifecycleToken });
-			setPendingBrowserOpen((current) => current?.requestId === request.requestId ? null : current);
+			setPendingBrowserOpens((current) => removeBrowserOpen(current, request.requestId));
 		} catch (error) {
-			if (pendingBrowserOpenRef.current?.requestId === request.requestId) {
-				setPendingBrowserOpen((current) => current?.requestId === request.requestId ? null : current);
+			if (hasBrowserOpen(pendingBrowserOpensRef.current, request.requestId)) {
+				setPendingBrowserOpens((current) => removeBrowserOpen(current, request.requestId));
 				void queryClient.invalidateQueries({ queryKey: ["browser", "pending-open-requests"] });
 				toast.error(error instanceof Error ? error.message : String(error));
 			}
@@ -5845,7 +5854,7 @@ export default function App() {
 									providerChoices={providerChoices}
 									sessions={workspaceSessions}
 									selectedSessionId={effectiveSelectedSessionId}
-									pendingBrowserOpen={pendingBrowserOpen?.workspaceId === selectedWorkspace.id && pendingBrowserOpen.sessionId === effectiveSelectedSessionId ? pendingBrowserOpen : null}
+									pendingBrowserOpen={browserOpenForTask(pendingBrowserOpens, selectedWorkspace.id, effectiveSelectedSessionId)}
 									onBrowserOpened={(request, snapshot) => { void handleBrowserOpened(request, snapshot); }}
 									isLoadingSessions={workspaceSessionsQuery.isPending}
 									sessionSnapshot={selectedSessionSnapshot}
