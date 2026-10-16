@@ -356,6 +356,12 @@
 		animation: none;
 	}
 
+	/* The reply that takes over from the startup row keeps its header and
+	   status line in place, so it is already on screen. */
+	[data-startup-handoff="true"] > .conversation-fade-in {
+		animation: none;
+	}
+
 	.inspector-enter {
 		animation: inspector-enter 200ms ease-out both;
 	}

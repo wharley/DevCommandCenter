@@ -1,11 +1,13 @@
 // Exercise real timeline transitions with synthetic events and no provider calls.
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import type { CoreEvent } from "@dcc/contracts";
+import type { CoreEvent, ProviderCatalog } from "@dcc/contracts";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ActiveThreadViewport } from "@/features/panel/ActiveThreadViewport";
 import { projectWorkspaceMessages } from "@/features/panel/thread-projection";
+import { startPromptClock } from "@/features/panel/startup-clock";
 import { visibleSessionPendingPrompt } from "@/features/sessions/pending-prompt";
 import "@/i18n/config";
 import "@/styles/app.css";
@@ -13,12 +15,17 @@ import "@/styles/app.css";
 const prompt = "Revise a autenticação do projeto e preserve as sessões existentes.";
 const sessionId = "b912712a-58d9-4e3d-bf13-a75de3ba350f";
 const started: CoreEvent = { sessionStarted: { session_id: sessionId, workspace_id: "ws", project_id: "project", provider_id: "codex" } };
-const accepted: CoreEvent = { sessionTurnStarted: { session_id: sessionId, turn_id: "turn-1", prompt } };
+const accepted = { sessionTurnStarted: { session_id: sessionId, turn_id: "turn-1", prompt, model: "gpt-6-astra" } } as CoreEvent;
+const providers = [
+	{ id: "codex", label: "Codex", models: [{ id: "gpt-6-astra", label: "GPT-6 Astra" }], capabilities: {} },
+] as unknown as ProviderCatalog["providers"];
+const stages = ["idle", "routing", "creating", "catalog", "hydrating", "sending", "accepted", "activity"];
 
 function Fixture() {
 	const { i18n } = useTranslation("common");
 	const [stage, setStage] = useState("idle");
-	const creating = stage === "creating";
+	const routing = stage === "routing";
+	const creating = stage === "creating" || routing;
 	const unanchored = creating || stage === "catalog";
 	const selectedSessionId = creating || stage === "idle" ? null : sessionId;
 	const running = ["accepted", "activity"].includes(stage);
@@ -35,7 +42,11 @@ function Fixture() {
 	return (
 		<main className="mx-auto flex h-screen max-w-3xl flex-col text-foreground">
 			<nav className="flex flex-wrap gap-3 border-b border-border p-4 text-xs">
-				{["idle", "creating", "catalog", "hydrating", "sending", "accepted", "activity"].map(value => <button key={value} onClick={() => setStage(value)}>{value}</button>)}
+				{stages.map(value => <button key={value} onClick={() => {
+					// Each run starts from a send, as the composer does.
+					if (stage === "idle" && value !== "idle") startPromptClock(null);
+					setStage(value);
+				}}>{value}</button>)}
 				<button onClick={() => void i18n.changeLanguage(i18n.language === "en" ? "pt-BR" : "en")}>Idioma</button>
 				<button onClick={() => document.documentElement.classList.toggle("dark")}>Tema</button>
 			</nav>
@@ -43,10 +54,15 @@ function Fixture() {
 				messages={messages} hasLoaded={stage !== "hydrating"} isEmpty={creating}
 				workspaceName={stage === "idle" ? "Nova tarefa" : prompt} sessionState="active" lastTurnState={running ? "running" : null}
 				pendingPrompt={pending} workspacePath={null} sessionId={selectedSessionId}
+				providers={providers} providerId="codex" startupModelId="gpt-6-astra" isModelRouting={routing}
 				planMessageId={null} planApproved={false} planReadOnly={false} onSelectSession={() => {}}
 			/>
 		</main>
 	);
 }
 
-createRoot(document.getElementById("root")!).render(<TooltipProvider><Fixture /></TooltipProvider>);
+// MCP statuses come from Tauri; here the query just stays empty.
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+createRoot(document.getElementById("root")!).render(
+	<QueryClientProvider client={queryClient}><TooltipProvider><Fixture /></TooltipProvider></QueryClientProvider>,
+);

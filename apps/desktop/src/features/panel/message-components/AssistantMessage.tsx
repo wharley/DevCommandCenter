@@ -83,7 +83,7 @@ type NativeSubagentSupervision = {
 
 
 
-function resolveModelLabel(
+export function resolveModelLabel(
 	model: string | null | undefined,
 	providers: ProviderCatalog["providers"] = [],
 ) {

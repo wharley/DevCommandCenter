@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
 	ConversationExecutionState,
-	ConversationStartingIndicator,
+	ConversationStartupStatus,
 	SessionStartingIndicator,
 } from "./ConversationExecutionState";
 import { ModelRouteDecisionCard, type ModelRouteDecision } from "./ModelRouteDecisionCard";
@@ -43,7 +43,13 @@ import {
 	conversationWindowStart,
 	INITIAL_CONVERSATION_MESSAGE_LIMIT,
 } from "./conversation-window";
-import { conversationStartingPhase, shouldShowConversationStarting, shouldShowInitialConversationStarting } from "./conversation-starting.logic";
+import { appendStartupPrompt, shouldShowConversationStarting } from "./conversation-starting.logic";
+import {
+	bindPromptClock,
+	turnStartedAtWithOrigin,
+	usePendingPromptClock,
+	useTurnClockOrigin,
+} from "./startup-clock";
 import { ComputerUsePreview } from "@/features/computer-use/computer-use-preview";
 import { useStableMessages } from "./stable-messages";
 import { ThreadVirtualRows, type ThreadRowsLocator } from "./thread-virtual-rows";
@@ -136,6 +142,7 @@ const AssistantMessageRow = memo(function AssistantMessageRow({
 	precedingTurnId: string | null;
 }) {
 	const incomplete = message.status?.type === "incomplete";
+	const clockOrigin = useTurnClockOrigin(message.turnId);
 	const onContinue = useMemo(
 		() =>
 			isLatestAssistant && incomplete && context.canContinue
@@ -167,7 +174,7 @@ const AssistantMessageRow = memo(function AssistantMessageRow({
 			streaming={message.streaming}
 			createdAt={message.createdAt}
 			turnId={message.turnId}
-			turnStartedAt={message.turnStartedAt}
+			turnStartedAt={turnStartedAtWithOrigin(message.turnStartedAt, clockOrigin)}
 			turnEndedAt={message.turnEndedAt}
 			status={message.status}
 			annotations={message.annotations}
@@ -291,6 +298,8 @@ type ActiveThreadViewportProps = {
 	>;
 	completionReviewActionsDismissed?: ReadonlySet<string>;
 	isModelRouting?: boolean;
+	/** The model the prompt being sent will run on, before its turn reports one. */
+	startupModelId?: string | null;
 	modelRouteDecision?: ModelRouteDecision | null;
 	onResolveModelRoute?: (modelId: string) => void;
 	modelLabel?: (modelId: string | null) => string;
@@ -335,12 +344,18 @@ export function ActiveThreadViewport({
 	completionReviews,
 	completionReviewActionsDismissed,
 	isModelRouting = false,
+	startupModelId = null,
 	modelRouteDecision = null,
 	onResolveModelRoute,
 	modelLabel = (modelId) => modelId ?? "—",
 }: ActiveThreadViewportProps) {
 	const { t } = useTranslation("common");
-	const messages = useStableMessages(projectedMessages);
+	const messages = useStableMessages(
+		useMemo(
+			() => appendStartupPrompt(projectedMessages, pendingPrompt),
+			[pendingPrompt, projectedMessages],
+		),
+	);
 	// Handlers change identity on every parent render; rows read the latest
 	// through a ref so memoized turns are not invalidated by them.
 	const handlersRef = useRef({
@@ -475,6 +490,15 @@ export function ActiveThreadViewport({
 		[messages],
 	);
 	const anchorStateRef = useRef<{ sessionId: string | null; baseline: number; active: boolean } | null>(null);
+	if (
+		anchorStateRef.current?.sessionId === null &&
+		sessionId !== null &&
+		anchorStateRef.current.active &&
+		pendingPrompt
+	) {
+		// The new conversation just got its session: same turn, same anchor.
+		anchorStateRef.current = { sessionId, baseline: userMessageCount, active: true };
+	}
 	if (anchorStateRef.current?.sessionId !== sessionId) {
 		anchorStateRef.current = {
 			sessionId,
@@ -496,9 +520,40 @@ export function ActiveThreadViewport({
 		}
 		return -1;
 	}, [anchorActive, visibleMessages]);
-	const startingPhase = isModelRouting
-		? "routing"
-		: conversationStartingPhase(sessionId, lastTurnState);
+	// The startup row and the reply's "Working" line count from the send.
+	const latestUserMessage = messages.findLast(
+		(message) => message.role === "user" && !message.delegationHandBack,
+	);
+	const latestUserTurnId = latestUserMessage?.turnId ?? null;
+	const latestUserCreatedAt = latestUserMessage?.createdAt;
+	const pendingPromptClock = usePendingPromptClock(sessionId);
+	const latestTurnClock = useTurnClockOrigin(latestUserTurnId);
+	useEffect(() => {
+		if (!latestUserTurnId || pendingPromptClock == null) return;
+		bindPromptClock({
+			turnId: latestUserTurnId,
+			sessionId,
+			turnStartedAt: latestUserCreatedAt,
+		});
+	}, [latestUserCreatedAt, latestUserTurnId, pendingPromptClock, sessionId]);
+	const startupVisible = showConversationStarting || isModelRouting;
+	const startupFallbackSinceRef = useRef<number | null>(null);
+	if (!startupVisible) startupFallbackSinceRef.current = null;
+	else startupFallbackSinceRef.current ??= Date.now();
+	const startupSince =
+		latestTurnClock ?? pendingPromptClock ?? startupFallbackSinceRef.current ?? Date.now();
+	// The reply that takes over from the startup row is not new: its header
+	// and status line were already on screen, so it must not fade in again.
+	const wasStartupVisibleRef = useRef(false);
+	const startupHandoffIdRef = useRef<string | null>(null);
+	if (wasStartupVisibleRef.current && !startupVisible) {
+		const latestUserIndex = messages.findLastIndex((message) => message.role === "user");
+		const reply = messages
+			.slice(latestUserIndex + 1)
+			.find((message) => message.role === "assistant");
+		if (reply) startupHandoffIdRef.current = reply.id;
+	}
+	wasStartupVisibleRef.current = startupVisible;
 	const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
 	const settlingAfterSwitch = settledSessionId !== sessionId;
 	const { contentRef, scrollRef, scrollToBottom, isAtBottom, stopScroll } = useStickToBottom({
@@ -615,6 +670,17 @@ export function ActiveThreadViewport({
 		return turns;
 	}, [messages]);
 
+	// A prompt keeps its row while it goes from sent to accepted (and changes
+	// id on the way), so it does not fade in a second time.
+	const userRowKeys = useMemo(() => {
+		const keys = new Map<string, string>();
+		let ordinal = 0;
+		for (const message of messages) {
+			if (message.role === "user") keys.set(message.id, `user-row-${ordinal++}`);
+		}
+		return keys;
+	}, [messages]);
+
 	const verificationByDelegation = useMemo(() => delegationVerifications(messages), [messages]);
 	const childTitleBySession = useMemo(
 		() => new Map((sessions ?? []).map((summary) => [summary.session.id, summary.thread.title])),
@@ -646,13 +712,13 @@ export function ActiveThreadViewport({
 	);
 	// Once a conversation is on screen it stays mounted: routing a model,
 	// choosing one or a rehydrate show below the last turn instead of
-	// replacing (and later remounting) the whole timeline. Only the first
-	// turn keeps its full preparation steps.
+	// replacing (and later remounting) the whole timeline. A prompt being
+	// sent is part of the thread from its first frame, first turn included.
+	const hasStartupPrompt = Boolean(pendingPrompt?.trim());
 	const threadSurfaceVisible =
-		hasLoaded &&
 		!startingSession &&
-		!(isEmpty || messages.length === 0) &&
-		!shouldShowInitialConversationStarting(messages, pendingPrompt, lastTurnState);
+		messages.length > 0 &&
+		(hasStartupPrompt || (hasLoaded && !isEmpty));
 
 	// A new turn sent from here scrolls its prompt to the anchor, even when
 	// the person was reading older messages.
@@ -844,49 +910,35 @@ export function ActiveThreadViewport({
 		);
 	}
 
-	if (!threadSurfaceVisible && isModelRouting) {
+	const startupStatusProps = {
+		sessionId,
+		lastTurnState,
+		isModelRouting,
+		providers,
+		providerId,
+		modelId: startupModelId,
+	};
+
+	if (!threadSurfaceVisible && (isModelRouting || (hasLoaded && lastTurnState === "running"))) {
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-				<ConversationExecutionState phase="routing" />
+				<ConversationExecutionState {...startupStatusProps} />
 			</div>
 		);
 	}
 
-	if (shouldShowInitialConversationStarting(messages, pendingPrompt, lastTurnState)) {
+	if (!threadSurfaceVisible && !hasLoaded) {
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-				<ConversationExecutionState phase={startingPhase} />
+				<EmptyState
+					title={t("conversation.loading.title")}
+					description={t("conversation.loading.description")}
+				/>
 			</div>
 		);
 	}
 
-	if (!hasLoaded) {
-		return (
-			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-				{pendingPrompt ? (
-					<ConversationExecutionState phase={startingPhase} />
-				) : (
-					<EmptyState
-						title={t("conversation.loading.title")}
-						description={t("conversation.loading.description")}
-					/>
-				)}
-			</div>
-		);
-	}
-
-	if (isEmpty || messages.length === 0) {
-		if (
-			pendingPrompt ||
-			lastTurnState === "running"
-		) {
-			return (
-				<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-					<ConversationExecutionState phase={startingPhase} />
-				</div>
-			);
-		}
-
+	if (!threadSurfaceVisible) {
 		return (
 			<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
 				<ConversationLaunchState workspaceName={workspaceName} />
@@ -938,7 +990,7 @@ export function ActiveThreadViewport({
 								if (message.role === "user") {
 									return (
 										<div
-											key={message.id}
+											key={userRowKeys.get(message.id) ?? message.id}
 											data-conversation-trail-id={message.id}
 											className={cn(
 												"scroll-mt-6 pb-4",
@@ -965,6 +1017,9 @@ export function ActiveThreadViewport({
 										<div
 											key={message.id}
 											data-conversation-trail-id={message.id}
+											data-startup-handoff={
+												message.id === startupHandoffIdRef.current ? "true" : undefined
+											}
 											className={cn(
 												"scroll-mt-6 pb-4",
 												focusedMessageId === message.id && "dcc-thread-find-focus",
@@ -1127,11 +1182,11 @@ export function ActiveThreadViewport({
 											/>
 										</div>
 									) : null;
-								const startingIndicator = routeDecision ?? (showConversationStarting || isModelRouting ? (
-								<div className="pb-4">
-									<ConversationStartingIndicator phase={startingPhase} />
-								</div>
-							) : null);
+								const startingIndicator = routeDecision ?? (startupVisible ? (
+									<div className="pb-4">
+										<ConversationStartupStatus {...startupStatusProps} since={startupSince} />
+									</div>
+								) : null);
 								const reviewStrip = onReviewDelegation ? (
 									<DelegationReviewStrip
 										workspaceId={workspaceId ?? null}

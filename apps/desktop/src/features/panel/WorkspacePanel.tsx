@@ -142,6 +142,7 @@ import {
 import type { WorkspaceSurfaceSelection } from "./workspace-surface";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import { buildSafeContinuationPrompt } from "./conversation-recovery";
+import { startPromptClock } from "./startup-clock";
 import {
 	canDockSecondarySurface,
 	clampSecondarySurfaceWidthForContainer,
@@ -461,6 +462,10 @@ export function WorkspacePanel({
 	const [inspectorPendingAnnotation, setInspectorPendingAnnotation] =
 		useState<InspectorPendingAnnotation | null>(null);
 	const [modelRouting, setModelRouting] = useState(false);
+	// The prompt stays on screen while Jev routes it; App only takes it over
+	// (as its pending prompt) once routing hands it on.
+	const [routingPrompt, setRoutingPrompt] = useState<string | null>(null);
+	const [startupModelId, setStartupModelId] = useState<string | null>(null);
 	const [pendingModelRoute, setPendingModelRoute] = useState<{
 		turn: ComposerSubmittedTurn;
 		options?: ModelRouteSubmitOptions;
@@ -514,6 +519,7 @@ export function WorkspacePanel({
 	useEffect(() => {
 		setIsApprovingPlan(false);
 		setModelRouting(false);
+		setRoutingPrompt(null);
 		setPendingModelRoute(null);
 		setCompletionReviewActionsDismissed(new Set());
 		planHandoffInFlightRef.current = false;
@@ -688,12 +694,20 @@ export function WorkspacePanel({
 			turn: ComposerSubmittedTurn,
 			options?: ModelRouteSubmitOptions,
 		): Promise<boolean> => {
+			startPromptClock(
+				options?.forceNewSession ? null : (options?.targetSessionId ?? effectiveSessionId ?? null),
+			);
+			const currentModel = selectedModelId ?? sessionSnapshot?.model ?? null;
 			if (options?.skipDecisionProviderModelRoute) {
+				setStartupModelId(options.modelOverride ?? currentModel);
 				return onSubmitPrompt(turn, options);
 			}
 			const providerId = selectedProviderId ?? sessionSnapshot?.providerId ?? null;
-			if (!providerId) return onSubmitPrompt(turn, options);
-			const currentModel = selectedModelId ?? sessionSnapshot?.model ?? null;
+			if (!providerId) {
+				setStartupModelId(options?.modelOverride ?? currentModel);
+				return onSubmitPrompt(turn, options);
+			}
+			setRoutingPrompt(turn.rawPrompt.trim() || null);
 			setModelRouting(true);
 			let route: DecisionProviderModelRouteOutput;
 			try {
@@ -721,6 +735,7 @@ export function WorkspacePanel({
 				};
 			}
 			setModelRouting(false);
+			setRoutingPrompt(null);
 
 			const selection: DecisionProviderModelRouteSelection = {
 				evaluation: route.evaluation,
@@ -744,11 +759,13 @@ export function WorkspacePanel({
 				setPendingModelRoute({ turn, options, route });
 				return false;
 			}
+			const routedModel = hasDifferentRecommendation
+				? route.recommendedModel
+				: options?.modelOverride ?? currentModel;
+			setStartupModelId(routedModel);
 			return onSubmitPrompt(turn, {
 				...options,
-				modelOverride: hasDifferentRecommendation
-					? route.recommendedModel
-					: options?.modelOverride ?? currentModel,
+				modelOverride: routedModel,
 				skipDecisionProviderModelRoute: true,
 				decisionProviderModelRoute: selection,
 			});
@@ -768,6 +785,13 @@ export function WorkspacePanel({
 			const pending = pendingModelRoute;
 			if (!pending) return;
 			setPendingModelRoute(null);
+			// Time spent choosing is the person's, not the agent's startup.
+			startPromptClock(
+				pending.options?.forceNewSession
+					? null
+					: (pending.options?.targetSessionId ?? effectiveSessionId ?? null),
+			);
+			setStartupModelId(modelId);
 			void onSubmitPrompt(pending.turn, {
 				...pending.options,
 				modelOverride: modelId,
@@ -787,7 +811,7 @@ export function WorkspacePanel({
 				},
 			});
 		},
-		[pendingModelRoute, onSubmitPrompt],
+		[effectiveSessionId, pendingModelRoute, onSubmitPrompt],
 	);
 
 	const modelLabel = useCallback(
@@ -1720,7 +1744,9 @@ export function WorkspacePanel({
 					workspaceName={workspaceName}
 					sessionState={sessionState}
 					lastTurnState={lastTurnState}
-					pendingPrompt={timelinePendingPrompt}
+					pendingPrompt={
+						timelinePendingPrompt ?? routingPrompt ?? pendingModelRoute?.turn.rawPrompt ?? null
+					}
 					startingSession={startingSession}
 					workspacePath={workspacePath}
 					workspaceId={workspaceId}
@@ -1752,6 +1778,7 @@ export function WorkspacePanel({
 					completionReviews={completionReviews}
 					completionReviewActionsDismissed={completionReviewActionsDismissed}
 					isModelRouting={modelRouting}
+					startupModelId={startupModelId ?? selectedModelId ?? sessionSnapshot?.model ?? null}
 					modelRouteDecision={pendingModelRoute ? {
 						currentModel: pendingModelRoute.route.currentModel,
 						recommendedModel: pendingModelRoute.route.recommendedModel!,

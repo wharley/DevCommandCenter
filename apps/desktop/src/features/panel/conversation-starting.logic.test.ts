@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { McpRuntimeStatus } from "@dcc/contracts";
 import type { WorkspaceMessage } from "./thread-projection";
-import { conversationStartingPhase, shouldShowConversationStarting, shouldShowInitialConversationStarting } from "./conversation-starting.logic";
+import {
+	appendStartupPrompt,
+	conversationStartupStage,
+	mcpStartupProgress,
+	shouldShowConversationStarting,
+} from "./conversation-starting.logic";
 
 function message(
 	id: string,
@@ -10,31 +16,69 @@ function message(
 	return { id, role, label: role, content: id, turnId };
 }
 
+function mcp(state: McpRuntimeStatus["state"], providerId = "codex"): McpRuntimeStatus {
+	return {
+		definitionId: `mcp-${state}`,
+		providerId,
+		providerVersion: "1",
+		sessionId: "session-1",
+		state,
+		checkedAt: "2026-10-16T12:00:00Z",
+		boundedError: null,
+	} as McpRuntimeStatus;
+}
+
+describe("appendStartupPrompt", () => {
+	it("shows the first prompt before a session exists", () => {
+		expect(appendStartupPrompt([], "  First prompt ")).toEqual([
+			{ id: "pending-user", role: "user", label: "User", content: "First prompt" },
+		]);
+	});
+
+	it("does not duplicate a prompt the projection already shows", () => {
+		const pending = { ...message("pending-user-s", "user"), content: "Next" };
+		expect(appendStartupPrompt([pending], "Next")).toEqual([pending]);
+		const accepted = { ...message("user-s-t", "user", "t"), content: "Next" };
+		expect(appendStartupPrompt([accepted], "Next")).toEqual([accepted]);
+	});
+
+	it("adds a repeated prompt once the earlier one was answered", () => {
+		const messages = [{ ...message("u", "user", "t"), content: "Again" }, message("a", "assistant", "t")];
+		expect(appendStartupPrompt(messages, "Again")).toHaveLength(3);
+		expect(appendStartupPrompt(messages, null)).toBe(messages);
+	});
+});
+
+describe("conversationStartupStage", () => {
+	const base = { isModelRouting: false, sessionId: "s", lastTurnState: null, mcp: null };
+	it("follows routing, session creation, acceptance and MCP startup", () => {
+		expect(conversationStartupStage({ ...base, isModelRouting: true })).toBe("routing");
+		expect(conversationStartupStage({ ...base, sessionId: null })).toBe("creating");
+		expect(conversationStartupStage(base)).toBe("sending");
+		expect(conversationStartupStage({ ...base, lastTurnState: "running" })).toBe("waiting");
+		expect(
+			conversationStartupStage({ ...base, lastTurnState: "running", mcp: { ready: 1, total: 3 } }),
+		).toBe("connecting");
+	});
+});
+
+describe("mcpStartupProgress", () => {
+	it("counts servers still coming up for the session's provider", () => {
+		expect(
+			mcpStartupProgress(
+				[mcp("connected"), mcp("attachingProvider"), mcp("probingServer"), mcp("failed"), mcp("disabled"), mcp("attachingProvider", "claude_code")],
+				"codex",
+			),
+		).toEqual({ ready: 2, total: 4 });
+	});
+
+	it("says nothing once every server settled", () => {
+		expect(mcpStartupProgress([mcp("connected"), mcp("failed")], "codex")).toBeNull();
+		expect(mcpStartupProgress([], "codex")).toBeNull();
+	});
+});
+
 describe("shouldShowConversationStarting", () => {
-	it("keeps the first prompt behind the steps from creation through acceptance", () => {
-		expect(shouldShowInitialConversationStarting([], "First prompt", null)).toBe(true);
-		expect(shouldShowInitialConversationStarting([message("pending", "user")], "First prompt", null)).toBe(true);
-		expect(shouldShowInitialConversationStarting([message("user", "user", "turn-1")], null, "running")).toBe(true);
-	});
-
-	it("reveals the first prompt alongside agent activity or a failure", () => {
-		const user = message("user", "user", "turn-1");
-		expect(shouldShowInitialConversationStarting([user, message("reply", "assistant")], "First prompt", "running")).toBe(false);
-		expect(shouldShowInitialConversationStarting([user, { ...message("error", "system"), label: "session.aborted" }], "First prompt", "aborted")).toBe(false);
-		expect(shouldShowInitialConversationStarting([], null, null)).toBe(false);
-	});
-
-	it("preserves the existing conversation while a follow-up starts", () => {
-		const messages = [message("previous", "user", "turn-1"), message("answer", "assistant"), message("pending", "user")];
-		expect(shouldShowInitialConversationStarting(messages, "Next prompt", "running")).toBe(false);
-		expect(shouldShowConversationStarting(messages, "Next prompt", "running")).toBe(true);
-	});
-
-	it("advances the preparation copy from actual session and turn state", () => {
-		expect(conversationStartingPhase(null, null)).toBe("creating");
-		expect(conversationStartingPhase("session-1", null)).toBe("sending");
-		expect(conversationStartingPhase("session-1", "running")).toBe("waiting");
-	});
 	it("shows while an optimistic prompt is being accepted", () => {
 		expect(
 			shouldShowConversationStarting(

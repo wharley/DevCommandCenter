@@ -25,7 +25,7 @@ const RUN_PAGE_SIZE = 30;
  * Ticks without React commits: the clock writes its own text node, so a
  * running turn does not re-render the transcript every second.
  */
-function ElapsedClock({ since }: { since: number }) {
+export function ElapsedClock({ since }: { since: number }) {
 	const ref = useRef<HTMLSpanElement>(null);
 	useEffect(() => {
 		const update = () => {

@@ -3873,26 +3873,13 @@
     "newActivity": "New activity",
     "starting": "Preparing the agent…",
     "startup": {
-      "creating": {
-        "step": "Prepare conversation",
-        "title": "Preparing the conversation…",
-        "description": "Your message is ready. Creating the session for this task."
-      },
-      "sending": {
-        "step": "Send message",
-        "title": "Sending your message…",
-        "description": "Preparing the task context for the agent."
-      },
-      "waiting": {
-        "step": "Start agent",
-        "title": "Waiting for the agent…",
-        "description": "Your request was received. Agent activity will appear here."
-      },
-      "routing": {
-        "step": "Analyze model",
-        "title": "Choosing a model…",
-        "description": "Jev is evaluating the best-fit model before the agent starts."
-      }
+      "routing": "Choosing the model",
+      "creating": "Starting {{provider}}",
+      "sending": "Preparing context",
+      "connecting": "Connecting tools · {{ready}} of {{total}}",
+      "waiting": "Waiting for the first response",
+      "slow": "This is taking longer than usual.",
+      "agentFallback": "the agent"
     },
     "sessionStartup": {
         "title": "Preparing the new chat…",
