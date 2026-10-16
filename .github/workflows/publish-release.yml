@@ -49,13 +49,13 @@ jobs:
                 echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"}]}' >> "$GITHUB_OUTPUT"
                 ;;
               macos-arm64)
-                echo 'matrix={"include":[{"name":"macos-arm64","platform":"macos-latest","args":"--target aarch64-apple-darwin --bundles app","rust_target":"aarch64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+                echo 'matrix={"include":[{"name":"macos-arm64","platform":"macos-latest","args":"--target aarch64-apple-darwin --bundles app,dmg","rust_target":"aarch64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
                 ;;
               macos-intel)
-                echo 'matrix={"include":[{"name":"macos-intel","platform":"macos-15-intel","args":"--target x86_64-apple-darwin --bundles app","rust_target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+                echo 'matrix={"include":[{"name":"macos-intel","platform":"macos-15-intel","args":"--target x86_64-apple-darwin --bundles app,dmg","rust_target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
                 ;;
               all)
-                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"},{"name":"macos-arm64","platform":"macos-latest","args":"--target aarch64-apple-darwin --bundles app","rust_target":"aarch64-apple-darwin"},{"name":"macos-intel","platform":"macos-15-intel","args":"--target x86_64-apple-darwin --bundles app","rust_target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"},{"name":"macos-arm64","platform":"macos-latest","args":"--target aarch64-apple-darwin --bundles app,dmg","rust_target":"aarch64-apple-darwin"},{"name":"macos-intel","platform":"macos-15-intel","args":"--target x86_64-apple-darwin --bundles app,dmg","rust_target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
                 ;;
               *)
                 echo "Unsupported workflow_dispatch target: ${{ inputs.target }}"
@@ -63,7 +63,7 @@ jobs:
                 ;;
             esac
           else
-            echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"},{"name":"macos-arm64","platform":"macos-latest","args":"--target aarch64-apple-darwin --bundles app","rust_target":"aarch64-apple-darwin"},{"name":"macos-intel","platform":"macos-15-intel","args":"--target x86_64-apple-darwin --bundles app","rust_target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"},{"name":"macos-arm64","platform":"macos-latest","args":"--target aarch64-apple-darwin --bundles app,dmg","rust_target":"aarch64-apple-darwin"},{"name":"macos-intel","platform":"macos-15-intel","args":"--target x86_64-apple-darwin --bundles app,dmg","rust_target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
           fi
 
   publish-tauri:
@@ -215,9 +215,46 @@ jobs:
           # A partial manual dispatch is diagnostic only: it must never replace
           # the full-release latest.json with metadata for one platform.
           uploadUpdaterJson: ${{ github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.target == 'all') }}
-          # Keep the detached signatures for the macOS updater archives.
+          # Keep updater archive signatures next to the DMG, which is the
+          # direct-download installer.
           uploadUpdaterSignatures: true
           args: ${{ matrix.args }}
+
+      # Tauri notarizes and staples only the .app. The DMG it uploaded is
+      # signed but has no ticket, so notarize and staple it here and replace
+      # the draft's asset with the stapled file.
+      - name: Notarize, staple and re-upload the macOS DMG
+        if: startsWith(matrix.platform, 'macos')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUST_TARGET: ${{ matrix.rust_target }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.publish-release-assets.outputs.appVersion) }}
+        run: |
+          set -euo pipefail
+
+          DMG_PATH="$(find "target/${RUST_TARGET}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          if [[ -z "${DMG_PATH}" ]]; then
+            echo "Missing DMG under target/${RUST_TARGET}/release/bundle/dmg."
+            exit 1
+          fi
+
+          scripts/notarize-macos-dmg.sh "${DMG_PATH}"
+
+          # tauri-action stores "Dev Command Center_x.dmg" as asset
+          # "Dev.Command.Center_x.dmg" labelled with the original file name.
+          # Upload under that exact name so --clobber replaces the unstapled
+          # one, and keep the same label.
+          DMG_FILE_NAME="$(basename "${DMG_PATH}")"
+          ASSET_NAME="$(tr ' ' '.' <<<"${DMG_FILE_NAME}")"
+          UPLOAD_DIR="$(mktemp -d "${RUNNER_TEMP}/dcc-dmg-upload.XXXXXX")"
+          cp "${DMG_PATH}" "${UPLOAD_DIR}/${ASSET_NAME}"
+          gh release upload "${RELEASE_TAG}" "${UPLOAD_DIR}/${ASSET_NAME}#${DMG_FILE_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
 
       # tauri-action sends assets to a draft before these local checks. Any
       # failure makes the workflow fail; discard that draft and re-run rather
@@ -232,9 +269,10 @@ jobs:
 
           BUNDLE_DIR="target/${RUST_TARGET}/release/bundle"
           APP_PATH="$(find "${BUNDLE_DIR}/macos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          DMG_PATH="$(find "${BUNDLE_DIR}/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
           UPDATER_ARCHIVE="$(find "${BUNDLE_DIR}/macos" -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"
 
-          for required_path in "${APP_PATH}" "${UPDATER_ARCHIVE}"; do
+          for required_path in "${APP_PATH}" "${DMG_PATH}" "${UPDATER_ARCHIVE}"; do
             if [[ -z "${required_path}" || ! -e "${required_path}" ]]; then
               echo "Missing expected macOS release artifact under ${BUNDLE_DIR}."
               find "${BUNDLE_DIR}" -maxdepth 3 -print || true
@@ -252,8 +290,10 @@ jobs:
           codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | tee /tmp/dcc-app-codesign.txt
           grep -q '^Authority=Developer ID Application:' /tmp/dcc-app-codesign.txt
 
-          echo "Verifying the stapled app notarization ticket..."
+          echo "Verifying the stapled app and DMG notarization tickets..."
           xcrun stapler validate "${APP_PATH}"
+          xcrun stapler validate "${DMG_PATH}"
+          spctl -a -vv -t open --context context:primary-signature "${DMG_PATH}"
 
           echo "Verifying the exact updater archive and signed app startup..."
           EXTRACT_DIR="$(mktemp -d "${RUNNER_TEMP}/dcc-release-check.XXXXXX")"

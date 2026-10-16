@@ -14,7 +14,11 @@ jobs:
   macos:
     name: macOS desktop validation
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    # Same secrets as publish-release.yml (Apple + updater signing key), so this
+    # manual run exercises the real signing/notarization path without touching
+    # any GitHub Release.
+    environment: release
 
     steps:
       - name: Checkout
@@ -107,7 +111,20 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: yarn exec tauri build -b app,dmg
+
+      - name: Notarize and staple the DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_PATH="$(find target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          scripts/notarize-macos-dmg.sh "${DMG_PATH}"
 
       - name: Validate bundle paths, executable bits and package artifacts
         shell: bash
