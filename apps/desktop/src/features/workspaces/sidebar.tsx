@@ -92,6 +92,7 @@ import {
 import {
 	projectGroupingKey,
 	projectWorkspaceRailGroups,
+	nextRunningTaskId,
 	projectWorkspaceTaskList,
 	type DccTaskListSectionId,
 } from "./workspace-rail-projection";
@@ -486,13 +487,16 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	});
 	// The header counts only agents at work; one waiting on the person is
 	// already under "Precisa de você" and is not running.
-	const workingCount = useMemo(
+	const runningWorkspaceIds = useMemo(
 		() =>
-			runningWorkspaceActivities(workspaces, workspaceAgentActivities).filter(
-				({ activity }) => activity.state === "active",
-			).length,
+			new Set(
+				runningWorkspaceActivities(workspaces, workspaceAgentActivities)
+					.filter(({ activity }) => activity.state === "active")
+					.map(({ workspace }) => workspace.id),
+			),
 		[workspaceAgentActivities, workspaces],
 	);
+	const workingCount = runningWorkspaceIds.size;
 	const seenResults = useSeenWorkspaceResults();
 	const blockersQuery = useWorkspaceBlockers(showAgentStates && sessionQueryScope === "local");
 	const childTasks = useChildTasksByWorkspace(showAgentStates && sessionQueryScope === "local");
@@ -994,6 +998,34 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		virtualizer.scrollToIndex(targetIndex, { align: "auto" });
 	}, [selectedWorkspaceId, flatItems, virtualizer]);
 
+	// "N rodando" takes the person to the next running task and marks it once.
+	const lastRunningJumpRef = useRef<string | null>(null);
+	const [runningFlash, setRunningFlash] = useState<{ id: string; turn: number } | null>(null);
+	const jumpToNextRunning = useCallback(() => {
+		const orderedIds = flatItems.flatMap((item) =>
+			item.kind === "row" ? [item.workspace.id] : [],
+		);
+		const targetId = nextRunningTaskId(orderedIds, runningWorkspaceIds, lastRunningJumpRef.current);
+		if (!targetId) {
+			return;
+		}
+		lastRunningJumpRef.current = targetId;
+		virtualizer.scrollToIndex(
+			flatItems.findIndex((item) => item.kind === "row" && item.workspace.id === targetId),
+			{ align: "center" },
+		);
+		// The mark alternates between two animations, so a second jump to the
+		// same task replays it.
+		setRunningFlash((current) => ({ id: targetId, turn: (current?.turn ?? 0) + 1 }));
+	}, [flatItems, runningWorkspaceIds, virtualizer]);
+	useEffect(() => {
+		if (!runningFlash) {
+			return;
+		}
+		const timeout = window.setTimeout(() => setRunningFlash(null), 1600);
+		return () => window.clearTimeout(timeout);
+	}, [runningFlash]);
+
 	const toggleSection = useCallback((groupId: string) => {
 		setSectionOpenState((current) => ({
 			...current,
@@ -1298,7 +1330,15 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					onEdit={onUpdateProjectIdentity ? setProjectEditTarget : undefined}
 					onRemove={projectMenuRemove}
 				>
-				<div>
+				<div
+					data-rail-flash={
+						runningFlash?.id === item.workspace.id
+							? runningFlash.turn % 2 === 0
+								? "even"
+								: "odd"
+							: undefined
+					}
+				>
 				<WorkspaceRailRowItem
 					workspace={item.workspace}
 					selected={selectedWorkspaceId === item.workspace.id}
@@ -1343,6 +1383,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		[
 			completedDiskUsage,
 			flashSectionId,
+			runningFlash,
 			i18n.resolvedLanguage,
 			isCreatingWorkspace,
 			isRemovingProject,
@@ -1894,13 +1935,19 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							{t("sidebar.tasksTitle")}
 						</h2>
 						{workingCount > 0 ? (
-							<span
-								className="inline-flex items-center gap-1 text-[10.5px] font-medium tabular-nums text-emerald-700 dark:text-emerald-300/90"
-								title={t("sidebar.runningTasks", { count: workingCount })}
+							<button
+								type="button"
+								onClick={jumpToNextRunning}
+								aria-label={t("sidebar.jumpToRunning", { count: workingCount })}
+								title={t("sidebar.jumpToRunning", { count: workingCount })}
+								className="-mx-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-emerald-700 transition-colors hover:bg-emerald-500/10 dark:text-emerald-300/90"
 							>
 								<span aria-hidden className="size-[6px] animate-pulse rounded-full bg-emerald-500" />
-								{t("sidebar.runningCount", { count: workingCount })}
-							</span>
+								{/* Sized on the span: see the button font reset note on the headers. */}
+								<span className="text-[10.5px] font-medium tabular-nums">
+									{t("sidebar.runningCount", { count: workingCount })}
+								</span>
+							</button>
 						) : null}
 					</div>
 					<div className="flex items-center gap-1 text-muted-foreground">

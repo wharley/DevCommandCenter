@@ -414,6 +414,7 @@
     "running": "Em execução",
     "runningTasks_one": "{{count}} tarefa em execução",
     "runningTasks_other": "{{count}} tarefas em execução",
+    "jumpToRunning": "Ir para a próxima tarefa rodando ({{count}} rodando)",
     "runningCount": "{{count}} rodando",
     "snooze": {
       "menu": "Adiar",

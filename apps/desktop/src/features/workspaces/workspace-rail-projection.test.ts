@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Repository } from "@dcc/contracts";
 import {
+	nextRunningTaskId,
 	projectWorkspaceRailGroups,
 	projectWorkspaceRepositories,
 	projectWorkspaceTaskList,
@@ -427,6 +428,26 @@ describe("projectWorkspaceTaskList", () => {
 			["pinned", ["pin-me"]],
 			["today", ["new", "a", "b"]],
 		]);
+	});
+});
+
+describe("nextRunningTaskId", () => {
+	const order = ["a", "b", "c", "d"];
+	const running = new Set(["b", "d"]);
+
+	it("starts at the first running task and moves one further per click, wrapping", () => {
+		expect(nextRunningTaskId(order, running, null)).toBe("b");
+		expect(nextRunningTaskId(order, running, "b")).toBe("d");
+		expect(nextRunningTaskId(order, running, "d")).toBe("b");
+	});
+
+	it("continues from where the last jump was even if that task stopped", () => {
+		expect(nextRunningTaskId(order, running, "c")).toBe("d");
+		expect(nextRunningTaskId(order, new Set(["a"]), "gone")).toBe("a");
+	});
+
+	it("returns nothing when no task is running", () => {
+		expect(nextRunningTaskId(order, new Set(), "a")).toBeNull();
 	});
 });
 

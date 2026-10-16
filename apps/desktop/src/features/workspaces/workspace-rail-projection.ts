@@ -302,6 +302,21 @@ export function projectWorkspaceTaskList(
 }
 
 /**
+ * The running task after the one the person last jumped to, in the rail's
+ * order, wrapping around: each click on "N running" moves one further.
+ */
+export function nextRunningTaskId(
+	orderedIds: readonly string[],
+	runningIds: ReadonlySet<string>,
+	lastId: string | null,
+): string | null {
+	const lastIndex = lastId ? orderedIds.indexOf(lastId) : -1;
+	const running = orderedIds.filter((id) => runningIds.has(id));
+	if (running.length === 0) return null;
+	return running.find((id) => orderedIds.indexOf(id) > lastIndex) ?? running[0]!;
+}
+
+/**
  * Most recent moment the task was touched: the user's last turn, or its own
  * creation/metadata update when it has no turns yet (a fresh task goes on top).
  */

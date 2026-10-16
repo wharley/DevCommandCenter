@@ -414,6 +414,7 @@
     "running": "Running",
     "runningTasks_one": "{{count}} running task",
     "runningTasks_other": "{{count}} running tasks",
+    "jumpToRunning": "Go to the next running task ({{count}} running)",
     "runningCount": "{{count}} running",
     "snooze": {
       "menu": "Snooze",
