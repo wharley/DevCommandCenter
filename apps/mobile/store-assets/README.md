@@ -20,6 +20,7 @@ Os prints do Play cortam a barra de status do iOS, para não parecerem de iPhone
 | Arquivo | Tamanho | Onde vai no App Store Connect |
 | --- | --- | --- |
 | `iphone-6.9/01…05-*.png` | 1320×2868 | App → versão → Pré-visualizações e capturas de tela → iPhone 6,9" |
+| `iphone-6.3/01…05-*.png` | 1206×2622 | App → versão → capturas → "iPhone with Dynamic Island (medium display)" (o slot que o App Store Connect pede hoje) |
 | `raw/01…05-*.png` | 1320×2868 | Prints crus sem legenda (também aceitos no iPhone 6,9"); fonte das versões com legenda |
 
 O ícone do App Store não sobe à parte: vem do build. `ios.icon` no `app.json`

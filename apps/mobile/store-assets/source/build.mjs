@@ -220,6 +220,8 @@ for (const shot of SHOTS) {
 	const raw = relative(work, rawPath);
 	const base = shot.file.replace(/\.png$/, "");
 	render(`ios-${base}`, captioned({ width: 1320, height: 2868, shot, raw, rawW, rawH, crop: 0, scale: 1 }), 1320, 2868, join(root, `app-store/iphone-6.9/${shot.file}`));
+	// App Store Connect's "iPhone with Dynamic Island (medium display)" slot takes 6.3" (1206×2622).
+	render(`ios63-${base}`, captioned({ width: 1206, height: 2622, shot, raw, rawW, rawH, crop: 0, scale: 1206 / 1320 }), 1206, 2622, join(root, `app-store/iphone-6.3/${shot.file}`));
 	// The Play set drops the iOS status bar (top 62 pt at 3×).
 	render(`play-${base}`, captioned({ width: 1080, height: 1920, shot, raw, rawW, rawH, crop: 186, scale: 1080 / 1320 }), 1080, 1920, join(root, `google-play/phone/${shot.file}`));
 }
