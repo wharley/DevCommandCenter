@@ -5847,15 +5847,51 @@ pub async fn browser_hide(
         .lock()
         .map_err(|_| "browser state lock poisoned".to_string())? = false;
     invalidate_semantic_map_for_scope(&state, &workspace_id, session_id.as_deref());
-    state
-        .lifecycle_token
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())
-        .map(|mut token| advance_lifecycle_token(&mut token))?;
+    let closed_token = {
+        let mut token = state
+            .lifecycle_token
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?;
+        advance_lifecycle_token(&mut token);
+        *token
+    };
     persist_current_context(&state);
     let snapshot = current_snapshot(&state)?;
     emit_snapshot(&app, snapshot.clone());
+    schedule_closed_browser_teardown(&state, closed_token);
     Ok(snapshot)
+}
+
+/// A closed Browser keeps its page running (background throttling is off so
+/// approved agent work survives a hidden DCC window). After a while closed it
+/// is released; reopening builds a fresh view at the scope's last URL.
+const CLOSED_BROWSER_TEARDOWN_DELAY: Duration = Duration::from_secs(5 * 60);
+
+/// Only the close that scheduled the teardown may release the view: any open
+/// since then (by the person or an agent) advances the token and keeps it.
+fn closed_browser_view_is_idle(
+    lifecycle_open: bool,
+    current_token: u64,
+    closed_token: u64,
+) -> bool {
+    !lifecycle_open && current_token == closed_token
+}
+
+fn schedule_closed_browser_teardown(state: &BrowserState, closed_token: u64) {
+    let state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(CLOSED_BROWSER_TEARDOWN_DELAY).await;
+        let _operation = state.operation_lock.lock().await;
+        let (Ok(open), Ok(token)) = (state.lifecycle_open.lock(), state.lifecycle_token.lock())
+        else {
+            return;
+        };
+        let idle = closed_browser_view_is_idle(*open, *token, closed_token);
+        drop((open, token));
+        if idle {
+            let _ = discard_browser_view(&state);
+        }
+    });
 }
 
 fn discard_browser_view(state: &BrowserState) -> Result<(), String> {
@@ -5898,7 +5934,7 @@ mod tests {
         browser_location_cache_matches_current, browser_location_cache_purge_expired,
         browser_location_cache_remove, browser_scroll_script, browser_semantic_action_script,
         browser_surface_matches_visibility_policy, clear_browser_control_grant,
-        click_target_is_compatible, consume_browser_evidence_anchor,
+        click_target_is_compatible, closed_browser_view_is_idle, consume_browser_evidence_anchor,
         consume_semantic_map_for_anchor, context_is_ready_for_url, control_grant_is_current,
         control_grant_status, fill_target_is_compatible, mark_context_loading,
         normalize_browser_bounds, normalize_browser_context_text,
@@ -7904,6 +7940,15 @@ mod tests {
             BrowserAuditOutcome::Failed,
         );
         assert!(read_browser_audit(&state, "workspace", None, 1).is_err());
+    }
+
+    #[test]
+    fn closed_browser_view_is_released_only_by_its_own_close() {
+        assert!(closed_browser_view_is_idle(false, 7, 7));
+        // Reopened (by the person or an agent) since the close.
+        assert!(!closed_browser_view_is_idle(true, 8, 7));
+        // Reopened and closed again: the newer close owns the teardown.
+        assert!(!closed_browser_view_is_idle(false, 9, 7));
     }
 }
 
