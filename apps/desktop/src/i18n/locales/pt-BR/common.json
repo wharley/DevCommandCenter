@@ -186,7 +186,10 @@
       "hint": "Nada roda até você começar. Vira uma conversa própria; o agente recebe um resumo a cada rodada que ela termina.",
       "dismissed": "Proposta descartada",
       "kind": "Tarefa",
-      "sharedCheckout": "direto no seu checkout"
+      "sharedCheckout": "direto no seu checkout",
+      "dirtyCheckout_one": "Esta tarefa nasce de um worktree novo, cortado do último commit. Há {{count}} arquivo versionado alterado e não commitado nesta pasta, que ficaria de fora. Commite ou guarde (stash) essa alteração e clique em Começar de novo.",
+      "dirtyCheckout_other": "Esta tarefa nasce de um worktree novo, cortado do último commit. Há {{count}} arquivos versionados alterados e não commitados nesta pasta, que ficariam de fora. Commite ou guarde (stash) essas alterações e clique em Começar de novo.",
+      "conflicts": "Resolva os conflitos de merge desta pasta antes de começar a tarefa."
     },
     "reviewStrip": {
       "message_one": "{{agent}} deixou {{count}} arquivo para você revisar",

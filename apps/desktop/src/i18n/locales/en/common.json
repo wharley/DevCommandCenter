@@ -186,7 +186,10 @@
       "hint": "Nothing runs until you start it. It becomes a conversation of its own; the agent hears back each time it ends a turn.",
       "dismissed": "Proposal dismissed",
       "kind": "Task",
-      "sharedCheckout": "edits your checkout"
+      "sharedCheckout": "edits your checkout",
+      "dirtyCheckout_one": "This task starts in a new worktree cut from the last commit. {{count}} tracked file in this folder has uncommitted changes that would be left out. Commit or stash it, then click Start again.",
+      "dirtyCheckout_other": "This task starts in a new worktree cut from the last commit. {{count}} tracked files in this folder have uncommitted changes that would be left out. Commit or stash them, then click Start again.",
+      "conflicts": "Resolve this folder's merge conflicts before starting the task."
     },
     "reviewStrip": {
       "message_one": "{{agent}} left {{count}} file for you to review",

@@ -186,6 +186,7 @@ pub(crate) fn prepare_apply_artifacts(
             MAX_ARTIFACT_FILES
         ));
     }
+    ensure_no_untracked_collision(destination_root, &paths)?;
 
     let transaction_dir = transaction_dir(artifact_root, transaction_id)?;
     if transaction_dir.exists() {
@@ -810,13 +811,26 @@ fn ensure_git_root(root: &Path, side: GitSide) -> Result<(), String> {
     Ok(())
 }
 
+/// Untracked files (build output, reports) do not block: the delegation
+/// worktree never saw them, and [`ensure_no_untracked_collision`] keeps the
+/// apply from writing over one.
 fn ensure_clean_repository(root: &Path, side: GitSide) -> Result<(), String> {
     let output = git_output(
         root,
-        &["status", "--porcelain=v1", "--untracked-files=all", "-z"],
+        &["status", "--porcelain=v1", "--untracked-files=no", "-z"],
     )?;
     if !output.is_empty() {
         return Err(format!("{} Git worktree is not clean", side_label(side)));
+    }
+    Ok(())
+}
+
+fn ensure_no_untracked_collision(destination_root: &Path, paths: &[String]) -> Result<(), String> {
+    let untracked: HashSet<String> = untracked_paths(destination_root)?.into_iter().collect();
+    if let Some(path) = paths.iter().find(|path| untracked.contains(*path)) {
+        return Err(format!(
+            "destination has an untracked file the delegation also writes: {path}"
+        ));
     }
     Ok(())
 }
@@ -1340,6 +1354,36 @@ mod tests {
             .unwrap(),
             ApplyClassification::AllPre
         );
+    }
+
+    #[test]
+    fn untracked_files_in_destination_do_not_block_apply() {
+        let (_keep, _other, source, destination, artifacts) = repo();
+        fs::create_dir_all(destination.join("output")).expect("output");
+        fs::write(destination.join("output/report.json"), b"{}").expect("report");
+        fs::write(source.join("tracked.txt"), b"after\n").expect("modify");
+        let prepared =
+            prepare_apply_artifacts(&id(), &destination, &source, &artifacts).expect("prepare");
+        apply_prepared_artifacts(
+            &prepared.transaction_id,
+            &destination,
+            &source,
+            &artifacts,
+            &prepared.manifest_digest,
+        )
+        .expect("apply");
+        assert_eq!(fs::read(destination.join("tracked.txt")).unwrap(), b"after\n");
+        assert_eq!(fs::read(destination.join("output/report.json")).unwrap(), b"{}");
+    }
+
+    #[test]
+    fn apply_refuses_to_overwrite_an_untracked_destination_file() {
+        let (_keep, _other, source, destination, artifacts) = repo();
+        fs::write(destination.join("notes.md"), b"mine").expect("untracked destination");
+        fs::write(source.join("notes.md"), b"theirs").expect("untracked source");
+        let error = prepare_apply_artifacts(&id(), &destination, &source, &artifacts)
+            .expect_err("collision");
+        assert!(error.contains("notes.md"), "{error}");
     }
 
     #[test]

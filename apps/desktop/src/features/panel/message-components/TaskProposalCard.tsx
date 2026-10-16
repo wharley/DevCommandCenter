@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { LoaderCircle } from "lucide-react";
 import type { Delegation, ProviderCatalog } from "@dcc/contracts";
@@ -11,6 +12,18 @@ import { delegationInstruction } from "@/features/sessions/delegation-lineage";
 import { AgentMascot } from "@/features/providers/agent-mascot";
 import { AssistantProse } from "./AssistantProse";
 import { MessageTimestamp } from "./message-metadata";
+
+/** Known start refusals from the Rust side, in the person's language. */
+function startErrorMessage(message: string, t: TFunction<"common">): string {
+	const dirty = /commit, stash, or discard (\d+) existing worktree change/.exec(message);
+	if (dirty) {
+		return t("delegation.proposal.dirtyCheckout", { count: Number(dirty[1]) });
+	}
+	if (/conflicts? before creating a delegation worktree/.test(message)) {
+		return t("delegation.proposal.conflicts");
+	}
+	return message;
+}
 
 /**
  * A task the parent agent proposed with `dcc_propose_task`. Nothing runs until
@@ -68,7 +81,7 @@ export function TaskProposalCard({
 			}
 			await queryClient.invalidateQueries({ queryKey: ["delegations", workspaceId] });
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(startErrorMessage(cause instanceof Error ? cause.message : String(cause), t));
 		} finally {
 			setPending(null);
 		}

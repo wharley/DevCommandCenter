@@ -4956,7 +4956,15 @@ pub async fn workspace_prepare_delegation_worktree_with_state(
                     if status.conflict_count == 1 { "" } else { "s" },
                 ));
             }
-            let changed_count = status.staged.len() + status.unstaged.len();
+            // Untracked files (reports, build output) stay behind in the parent
+            // checkout and never collide on apply; only tracked edits would be
+            // missing from a worktree cut at HEAD.
+            let changed_count = status.staged.len()
+                + status
+                    .unstaged
+                    .iter()
+                    .filter(|entry| entry.status != "?")
+                    .count();
             if changed_count > 0 {
                 return Err(format!(
                     "commit, stash, or discard {changed_count} existing worktree change{} before creating a delegation worktree",
