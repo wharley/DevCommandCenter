@@ -241,14 +241,15 @@ import {
 	getProviderActionBlockReason,
 	getProviderUnhealthyReason,
 	getProjectComposerSelection,
-	getSessionComposerSelection,
 	isProviderEnabled,
+	readSessionComposerSelections,
 	resolveSelectedProviderId,
 	resolveSelectedModelId,
 	resolveProjectComposerSelection,
 	resolveSessionComposerSelection,
 	setProjectComposerSelection,
 	setSessionComposerSelection,
+	type SessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
 import type {
 	ComposerSubmittedTurn,
@@ -990,20 +991,25 @@ export default function App() {
 		}
 		return ids;
 	}, [delegationsQuery.data]);
-	const [selectedProviderId, setSelectedProviderId] = useState<string | null>(() => {
+	// The composer of a new task (and the default in Settings). An open task
+	// never writes here: its composer reads its own pick, see below.
+	const [draftProviderId, setDraftProviderId] = useState<string | null>(() => {
 		if (typeof window === "undefined") {
 			return null;
 		}
 
 		return window.localStorage.getItem(SELECTED_PROVIDER_STORAGE_KEY);
 	});
-	const [selectedModelId, setSelectedModelId] = useState<string | null>(() => {
+	const [draftModelId, setDraftModelId] = useState<string | null>(() => {
 		if (typeof window === "undefined") {
 			return null;
 		}
 
 		return window.localStorage.getItem(SELECTED_MODEL_STORAGE_KEY);
 	});
+	const [sessionComposerPicks, setSessionComposerPicks] = useState(
+		readSessionComposerSelections,
+	);
 	const [providerRuntimeSettings, setProviderRuntimeSettings] =
 		useState<ProviderRuntimeSettings>(() => readProviderRuntimeSettings());
 	// Executable paths set in Settings are checked here: the backend
@@ -1066,23 +1072,6 @@ export default function App() {
 	// Fork-by-message snapshots wait for the first turn the person sends in
 	// the new thread; they are consumed exactly once and never persisted.
 	const pendingForkReanchorsRef = useRef(new PendingForkReanchors());
-	useEffect(() => {
-		const scope = {
-			workspaceId: selectedWorkspaceId ?? "",
-			sessionId: selectedSessionId,
-			providerId: selectedProviderId,
-		};
-		if (selectedWorkspaceId) {
-			contextAttachmentLedgerRef.current.syncScope(scope);
-		} else {
-			contextAttachmentLedgerRef.current.clear();
-		}
-		return () => {
-			// The handoff handler may temporarily activate a target provider/session
-			// scope different from the render scope. Always clear on effect cleanup.
-			contextAttachmentLedgerRef.current.clear();
-		};
-	}, [selectedProviderId, selectedSessionId, selectedWorkspaceId]);
 
 
 	const purgeThroughTurnEventsRef = useRef<
@@ -1636,6 +1625,62 @@ export default function App() {
 		},
 		[t],
 	);
+	const visibleWorkspaceSessions = useMemo(
+		() => visibleSessions(workspaceSessions),
+		[workspaceSessions],
+	);
+	// Opening a workspace lands on its own conversation, not on a child that
+	// is newer only because it is the one working.
+	const effectiveSelectedSessionId =
+		selectedSessionId &&
+		visibleWorkspaceSessions.some(
+			(summary) => summary.session.id === selectedSessionId,
+		)
+			? selectedSessionId
+			: ((
+					visibleWorkspaceSessions.find(
+						(summary) => !parentSessionByChild.has(summary.session.id),
+					) ?? visibleWorkspaceSessions[0]
+				)?.session.id ?? null);
+	const selectedSessionSummary = useMemo(
+		() =>
+			workspaceSessions.find(
+				(session) => session.session.id === effectiveSelectedSessionId,
+			) ??
+			null,
+		[effectiveSelectedSessionId, workspaceSessions],
+	);
+	const selectedSessionSnapshot = useMemo(() => {
+		if (!effectiveSelectedSessionId) {
+			return null;
+		}
+
+		return (
+			sessionSnapshotsById[effectiveSelectedSessionId] ??
+			(selectedSessionSummary
+				? workspaceSessionSnapshotFromSummary(selectedSessionSummary)
+				: null)
+		);
+	}, [effectiveSelectedSessionId, selectedSessionSummary, sessionSnapshotsById]);
+	// What the composer shows is derived from the task on screen, never copied
+	// into shared state on a switch: copying is how one task's model leaked
+	// into another.
+	const sessionComposerSelection = useMemo(
+		() =>
+			selectedSessionSnapshot
+				? resolveSessionComposerSelection(
+						providerChoices,
+						sessionComposerPicks[selectedSessionSnapshot.sessionId] ?? null,
+						{
+							providerId: selectedSessionSnapshot.providerId ?? null,
+							model: selectedSessionSnapshot.model ?? null,
+						},
+					)
+				: null,
+		[providerChoices, selectedSessionSnapshot, sessionComposerPicks],
+	);
+	const selectedProviderId = sessionComposerSelection?.providerId ?? draftProviderId;
+	const selectedModelId = sessionComposerSelection?.modelId ?? draftModelId;
 	const selectedProvider = useMemo(
 		() =>
 			providerChoices.find((provider) => provider.id === selectedProviderId) ??
@@ -1675,23 +1720,23 @@ export default function App() {
 		},
 		[selectedProvider, selectedWorkspace?.additionalWorkspaceIds?.length, t],
 	);
-	const visibleWorkspaceSessions = useMemo(
-		() => visibleSessions(workspaceSessions),
-		[workspaceSessions],
-	);
-	// Opening a workspace lands on its own conversation, not on a child that
-	// is newer only because it is the one working.
-	const effectiveSelectedSessionId =
-		selectedSessionId &&
-		visibleWorkspaceSessions.some(
-			(summary) => summary.session.id === selectedSessionId,
-		)
-			? selectedSessionId
-			: ((
-					visibleWorkspaceSessions.find(
-						(summary) => !parentSessionByChild.has(summary.session.id),
-					) ?? visibleWorkspaceSessions[0]
-				)?.session.id ?? null);
+	useEffect(() => {
+		const scope = {
+			workspaceId: selectedWorkspaceId ?? "",
+			sessionId: selectedSessionId,
+			providerId: selectedProviderId,
+		};
+		if (selectedWorkspaceId) {
+			contextAttachmentLedgerRef.current.syncScope(scope);
+		} else {
+			contextAttachmentLedgerRef.current.clear();
+		}
+		return () => {
+			// The handoff handler may temporarily activate a target provider/session
+			// scope different from the render scope. Always clear on effect cleanup.
+			contextAttachmentLedgerRef.current.clear();
+		};
+	}, [selectedProviderId, selectedSessionId, selectedWorkspaceId]);
 	const providerAccountsQuery = useQuery({
 		queryKey: PROVIDER_ACCOUNTS_QUERY_KEY,
 		queryFn: listProviderAccounts,
@@ -1817,14 +1862,6 @@ export default function App() {
 			removeSessionFrontendQueries(queryClient, [previous]);
 		}
 	}, [effectiveSelectedSessionId, queryClient]);
-	const selectedSessionSummary = useMemo(
-		() =>
-			workspaceSessions.find(
-				(session) => session.session.id === effectiveSelectedSessionId,
-			) ??
-			null,
-		[effectiveSelectedSessionId, workspaceSessions],
-	);
 	const persistAutomaticTaskTitle = useCallback(
 		async (workspaceId: string, sessionId: string, title: string) => {
 			const titled = await applyTaskTitle({
@@ -1898,18 +1935,6 @@ export default function App() {
 			console.error("[dcc] automatic task title repair failed:", error);
 		});
 	}, [persistAutomaticTaskTitle, selectedSessionSummary, selectedWorkspace]);
-	const selectedSessionSnapshot = useMemo(() => {
-		if (!effectiveSelectedSessionId) {
-			return null;
-		}
-
-		return (
-			sessionSnapshotsById[effectiveSelectedSessionId] ??
-			(selectedSessionSummary
-				? workspaceSessionSnapshotFromSummary(selectedSessionSummary)
-				: null)
-		);
-	}, [effectiveSelectedSessionId, selectedSessionSummary, sessionSnapshotsById]);
 	const frontendErrorContext: FrontendErrorContext = {
 		appVersion: appCurrentVersion,
 		workspaceId: selectedWorkspace?.id ?? null,
@@ -2003,47 +2028,46 @@ export default function App() {
 			return;
 		}
 
-		setSelectedProviderId((current) => {
+		setDraftProviderId((current) => {
 			return resolveSelectedProviderId(providerChoices, current);
 		});
 	}, [providerChoices]);
 
+	const draftProvider = useMemo(
+		() => providerChoices.find((provider) => provider.id === draftProviderId) ?? null,
+		[providerChoices, draftProviderId],
+	);
 	useEffect(() => {
-		if (selectedProvider) {
-			setSelectedModelId((current) =>
-				resolveSelectedModelId(selectedProvider, current),
-			);
+		if (draftProvider) {
+			setDraftModelId((current) => resolveSelectedModelId(draftProvider, current));
 		}
-	}, [selectedProvider]);
+	}, [draftProvider]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
 			return;
 		}
 
-		if (selectedProviderId) {
-			window.localStorage.setItem(
-				SELECTED_PROVIDER_STORAGE_KEY,
-				selectedProviderId,
-			);
+		if (draftProviderId) {
+			window.localStorage.setItem(SELECTED_PROVIDER_STORAGE_KEY, draftProviderId);
 			return;
 		}
 
 		window.localStorage.removeItem(SELECTED_PROVIDER_STORAGE_KEY);
-	}, [selectedProviderId]);
+	}, [draftProviderId]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
 			return;
 		}
 
-		if (selectedModelId) {
-			window.localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, selectedModelId);
+		if (draftModelId) {
+			window.localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, draftModelId);
 			return;
 		}
 
 		window.localStorage.removeItem(SELECTED_MODEL_STORAGE_KEY);
-	}, [selectedModelId]);
+	}, [draftModelId]);
 
 	useEffect(() => {
 		writeProviderRuntimeSettings(providerRuntimeSettings);
@@ -2114,65 +2138,6 @@ export default function App() {
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [selectedWorkspacePath]);
 
-	/** Task whose composer the person changed by hand since opening it. */
-	const sessionComposerPickRef = useRef<string | null>(null);
-
-	/** Restore provider/model for this session, else follow backend snapshot. */
-	useEffect(() => {
-		if (providerChoices.length === 0) {
-			return;
-		}
-		const sessionId = selectedSessionSnapshot?.sessionId;
-		if (!sessionId) {
-			return;
-		}
-
-		// Whatever the composer holds now belongs to the task left behind; only
-		// a pick made in this task may be saved for it.
-		sessionComposerPickRef.current = null;
-		const selection = resolveSessionComposerSelection(
-			providerChoices,
-			getSessionComposerSelection(sessionId),
-			{
-				providerId: selectedSessionSnapshot.providerId ?? null,
-				model: selectedSessionSnapshot.model ?? null,
-			},
-		);
-		if (selection) {
-			setSelectedProviderId(selection.providerId);
-			setSelectedModelId(selection.modelId);
-		}
-	}, [
-		providerChoices,
-		selectedSessionSnapshot?.sessionId,
-		selectedSessionSnapshot?.providerId,
-		selectedSessionSnapshot?.model,
-	]);
-
-	useEffect(() => {
-		const sessionId = selectedSessionSnapshot?.sessionId;
-		const sessionProviderId = selectedSessionSnapshot?.providerId;
-		if (
-			!sessionId ||
-			sessionComposerPickRef.current !== sessionId ||
-			!sessionProviderId ||
-			!selectedProviderId ||
-			!selectedModelId
-		) {
-			return;
-		}
-		setSessionComposerSelection(sessionId, {
-			providerId: selectedProviderId,
-			modelId: selectedModelId,
-			sessionProviderId,
-		});
-	}, [
-		selectedSessionSnapshot?.sessionId,
-		selectedSessionSnapshot?.providerId,
-		selectedProviderId,
-		selectedModelId,
-	]);
-
 	const selectedProjectKey = selectedWorkspace
 		? (selectedWorkspace.projectId ?? selectedWorkspace.id)
 		: null;
@@ -2190,19 +2155,9 @@ export default function App() {
 		if (!selection) {
 			return;
 		}
-		setSelectedProviderId(selection.providerId);
-		setSelectedModelId(selection.modelId);
+		setDraftProviderId(selection.providerId);
+		setDraftModelId(selection.modelId);
 	}, [providerChoices, selectedProjectKey, hasSelectedSession]);
-
-	useEffect(() => {
-		if (!selectedProjectKey || !selectedProviderId || !selectedModelId) {
-			return;
-		}
-		setProjectComposerSelection(selectedProjectKey, {
-			providerId: selectedProviderId,
-			modelId: selectedModelId,
-		});
-	}, [selectedProjectKey, selectedProviderId, selectedModelId]);
 
 	useEffect(() => {
 		setSelectedSessionId(null);
@@ -4000,8 +3955,39 @@ export default function App() {
 		],
 	);
 
-	const handleSelectProvider = useCallback(
-		(providerId: string) => {
+	// The model picker calls onSelectProvider then onSelectModel in one click,
+	// before React re-renders: the model half must land on the provider just
+	// picked, not on the one still on screen.
+	const pickedProviderRef = useRef<string | null>(null);
+	const selectedComposerSessionId = selectedSessionSnapshot?.sessionId ?? null;
+	const selectedComposerSessionProviderId = selectedSessionSnapshot?.providerId ?? null;
+
+	/**
+	 * Only an explicit pick writes. It becomes the open task's pick, and the
+	 * default for new tasks in this project and elsewhere (Settings passes
+	 * `taskScoped: false` to change only that default).
+	 */
+	const applyComposerPick = useCallback(
+		(pick: SessionComposerSelection, taskScoped: boolean) => {
+			if (taskScoped && selectedComposerSessionId && selectedComposerSessionProviderId) {
+				const stored = { ...pick, sessionProviderId: selectedComposerSessionProviderId };
+				setSessionComposerSelection(selectedComposerSessionId, stored);
+				setSessionComposerPicks((current) => ({
+					...current,
+					[selectedComposerSessionId]: stored,
+				}));
+			}
+			setDraftProviderId(pick.providerId);
+			setDraftModelId(pick.modelId);
+			if (taskScoped && selectedProjectKey) {
+				setProjectComposerSelection(selectedProjectKey, pick);
+			}
+		},
+		[selectedComposerSessionId, selectedComposerSessionProviderId, selectedProjectKey],
+	);
+
+	const selectProvider = useCallback(
+		(providerId: string, taskScoped: boolean) => {
 			const provider = providerChoices.find((candidate) => candidate.id === providerId);
 			if (!provider || !isProviderEnabled(provider)) {
 				if (provider) {
@@ -4011,10 +3997,17 @@ export default function App() {
 				}
 				return;
 			}
-			sessionComposerPickRef.current = selectedSessionSnapshot?.sessionId ?? null;
-			setSelectedProviderId(providerId);
-			setSelectedModelId(resolveSelectedModelId(provider ?? null, null));
+			const modelId = resolveSelectedModelId(provider, null);
+			if (!modelId) {
+				return;
+			}
+			pickedProviderRef.current = providerId;
+			queueMicrotask(() => {
+				pickedProviderRef.current = null;
+			});
+			applyComposerPick({ providerId, modelId }, taskScoped);
 			if (
+				taskScoped &&
 				selectedSessionSnapshot &&
 				selectedSessionSnapshot.turnCount > 0 &&
 				selectedSessionSnapshot.providerId &&
@@ -4023,18 +4016,40 @@ export default function App() {
 				toast.info(t("composer.followUp.providerHandoffNotice"));
 			}
 		},
-		[providerChoices, selectedSessionSnapshot, t],
+		[applyComposerPick, providerChoices, selectedSessionSnapshot, t],
 	);
 
-	const handleSelectModel = useCallback((modelId: string) => {
-		// Do NOT re-derive the provider from the model id here: model ids such
-		// as "auto" are not unique across providers (droid and cursor both
-		// expose "auto"), so scanning every provider would pick the wrong one.
-		// The provider is already set explicitly via handleSelectProvider, which
-		// the model picker always calls before onSelectModel.
-		sessionComposerPickRef.current = selectedSessionSnapshot?.sessionId ?? null;
-		setSelectedModelId(modelId);
-	}, [selectedSessionSnapshot?.sessionId]);
+	const selectModel = useCallback(
+		(modelId: string, taskScoped: boolean) => {
+			// Do NOT re-derive the provider from the model id here: model ids such
+			// as "auto" are not unique across providers (droid and cursor both
+			// expose "auto"), so scanning every provider would pick the wrong one.
+			const providerId =
+				pickedProviderRef.current ?? (taskScoped ? selectedProviderId : draftProviderId);
+			if (!providerId) {
+				return;
+			}
+			applyComposerPick({ providerId, modelId }, taskScoped);
+		},
+		[applyComposerPick, draftProviderId, selectedProviderId],
+	);
+
+	const handleSelectProvider = useCallback(
+		(providerId: string) => selectProvider(providerId, true),
+		[selectProvider],
+	);
+	const handleSelectModel = useCallback(
+		(modelId: string) => selectModel(modelId, true),
+		[selectModel],
+	);
+	const handleSelectDefaultProvider = useCallback(
+		(providerId: string) => selectProvider(providerId, false),
+		[selectProvider],
+	);
+	const handleSelectDefaultModel = useCallback(
+		(modelId: string) => selectModel(modelId, false),
+		[selectModel],
+	);
 
 	const handleChangeProviderRuntime = useCallback(
 		(providerId: string, draft: ProviderRuntimeDraft) => {
@@ -6071,10 +6086,10 @@ export default function App() {
 				density={density}
 				onDensityChange={setDensity}
 				providerCatalog={providerCatalog}
-				selectedProviderId={selectedProviderId}
-				selectedModelId={selectedModelId}
-				onSelectProvider={handleSelectProvider}
-				onSelectModel={handleSelectModel}
+				selectedProviderId={draftProviderId}
+				selectedModelId={draftModelId}
+				onSelectProvider={handleSelectDefaultProvider}
+				onSelectModel={handleSelectDefaultModel}
 				providerRuntimeSettings={providerRuntimeSettings}
 				onChangeProviderRuntime={handleChangeProviderRuntime}
 				onClearProviderRuntime={handleClearProviderRuntime}

@@ -65,6 +65,14 @@ export function getProviderActionBlockReason(
 	return isProviderEnabled(provider) ? null : disabledReason;
 }
 
+/** Every task's saved pick, keyed by session id. */
+export function readSessionComposerSelections(): Record<
+	string,
+	StoredSessionComposerSelection
+> {
+	return readSessionComposerMap();
+}
+
 function readSessionComposerMap(): Record<string, StoredSessionComposerSelection> {
 	if (typeof window === "undefined") {
 		return {};
