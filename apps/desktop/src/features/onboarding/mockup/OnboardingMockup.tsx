@@ -2,6 +2,7 @@ import {
 	BarChart3,
 	CircleQuestionMark,
 	FolderOpen,
+	FolderPlus,
 	Globe,
 	Plus,
 	Settings2,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { ProjectIdentityGlyph } from "@/features/workspaces/project-identity";
 import type { OnboardingStep } from "../OnboardingWizard.logic";
 
 /**
@@ -30,22 +32,39 @@ export function OnboardingMockup({ step }: { step: OnboardingStep }) {
 				<Region lit={sidebarLit}>
 					<div className="flex h-full flex-col">
 						<div className="flex items-center justify-between px-1">
-							<span className="text-[12px] font-medium text-foreground">{t("sidebar.title")}</span>
-							<Plus className="size-3.5 text-muted-foreground" aria-hidden />
+							<span className="text-[12px] font-medium text-foreground">{t("sidebar.tasksTitle")}</span>
+							<span className="flex items-center gap-1.5 text-muted-foreground">
+								<FolderPlus
+									className={cn("size-3.5", step === "project" && "text-foreground")}
+									aria-hidden
+								/>
+								<Plus className="size-3.5" aria-hidden />
+							</span>
 						</div>
 
-						<div className="mt-3 space-y-2">
-							<ProjectRow name="minha-api" lit={step === "project"} />
-							<div className="space-y-1 pl-3">
-								<TaskRow
-									name="feat/checkout-stripe"
-									status={t("sidebar.running")}
-									lit={step === "task"}
-									tone="running"
-								/>
-								<TaskRow name="fix/login-500" status={t("sidebar.waiting")} tone="waiting" />
-							</div>
-							<ProjectRow name="web-app" />
+						<p className="mt-3 px-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
+							{t("sidebar.taskSection.today")}
+						</p>
+						<div className="mt-1 space-y-1">
+							<TaskRow
+								name="feat/checkout-stripe"
+								project="minha-api"
+								status={t("sidebar.agentState.active")}
+								lit={step === "task"}
+								tone="running"
+							/>
+							<TaskRow
+								name="fix/login-500"
+								project="minha-api"
+								status={t("sidebar.agentState.waiting")}
+								tone="waiting"
+							/>
+							<TaskRow
+								name="feat/landing-hero"
+								project="web-app"
+								status={t("sidebar.agentState.completed")}
+								tone="done"
+							/>
 						</div>
 
 						{step === "project" ? (
@@ -175,47 +194,50 @@ function Region({ lit, children }: { lit: boolean; children: React.ReactNode }) 
 	);
 }
 
-function ProjectRow({ name, lit }: { name: string; lit?: boolean }) {
-	return (
-		<div
-			className={cn(
-				"flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[12px]",
-				lit ? "border-foreground/30 bg-background text-foreground" : "border-border/50 bg-background/60 text-foreground/90",
-			)}
-		>
-			<FolderOpen className="size-3.5 text-muted-foreground" aria-hidden />
-			<span className="truncate">{name}</span>
-		</div>
-	);
-}
-
+/** A task row as the rail draws it: the project's animal, the title, project · state. */
 function TaskRow({
 	name,
+	project,
 	status,
 	lit,
 	tone,
 }: {
 	name: string;
+	project: string;
 	status: string;
 	lit?: boolean;
-	tone: "running" | "waiting";
+	tone: "running" | "waiting" | "done";
 }) {
 	return (
 		<div
 			className={cn(
-				"flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[11px]",
-				lit ? "border-foreground/30 bg-background text-foreground" : "border-transparent text-foreground/80",
+				"flex items-start gap-2 rounded-lg border px-2 py-1.5",
+				lit ? "border-foreground/30 bg-background" : "border-transparent",
 			)}
 		>
-			<span className="truncate font-mono">{name}</span>
-			<span className="flex shrink-0 items-center gap-1 text-muted-foreground">
-				<span
-					className={cn(
-						"size-1.5 rounded-full",
-						tone === "running" ? "bg-emerald-500" : "bg-amber-500",
-					)}
-				/>
-				{status}
+			<ProjectIdentityGlyph
+				seed={`/mockup/${project}`}
+				active={tone === "running"}
+				size="sm"
+				className="mt-px size-4"
+			/>
+			<span className="min-w-0 flex-1">
+				<span className="block truncate text-[11px] font-medium text-foreground/90">{name}</span>
+				<span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+					<span className="truncate">{project}</span>
+					<span aria-hidden className="opacity-40">
+						·
+					</span>
+					<span
+						className={cn(
+							"shrink-0",
+							tone === "running" && "text-emerald-700 dark:text-emerald-300/90",
+							tone === "waiting" && "text-amber-700 dark:text-amber-300/90",
+						)}
+					>
+						{status}
+					</span>
+				</span>
 			</span>
 		</div>
 	);
