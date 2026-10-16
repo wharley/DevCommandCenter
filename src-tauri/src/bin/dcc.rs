@@ -1,13 +1,10 @@
 use dev_command_center_tauri::daemon_client::{
-    default_app_data_dir, read_runtime_info, rpc_with_db_path_timeout, rpc_with_info,
-    sidecar_binary_candidates, DaemonRuntimeInfo,
+    default_app_data_dir, ensure_daemon_version, rpc_with_info, sidecar_binary_candidates,
+    sidecar_command, DaemonRuntimeInfo,
 };
 use serde_json::Value;
 use std::io::{self, BufRead, Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
 
 fn locate_sidecar_binary() -> Option<PathBuf> {
     let mut candidates = Vec::new();
@@ -27,58 +24,18 @@ fn locate_sidecar_binary() -> Option<PathBuf> {
     candidates.into_iter().find(|candidate| candidate.exists())
 }
 
-fn wait_for_runtime_info(app_data_dir: &Path, timeout: Duration) -> Option<DaemonRuntimeInfo> {
-    let started = Instant::now();
-    while started.elapsed() < timeout {
-        if let Some(info) = read_runtime_info(app_data_dir) {
-            return Some(info);
-        }
-        thread::sleep(Duration::from_millis(150));
-    }
-    None
-}
-
+/// Reuses any healthy daemon: a `dcc mcp` left running from an older bundle
+/// must not fight the app over which build of dccd runs. The app replaces a
+/// daemon of another build when it starts.
 fn ensure_daemon_running() -> Result<DaemonRuntimeInfo, String> {
     let app_data_dir = default_app_data_dir();
-    if let Some(info) = read_runtime_info(&app_data_dir) {
-        if rpc_with_db_path_timeout(
-            std::path::Path::new(&info.db_path),
-            "daemon.getStatus",
-            serde_json::json!({}),
-            Duration::from_secs(2),
-        )
-        .is_ok()
-        {
-            return Ok(info);
-        }
-    }
-
     let db_path = app_data_dir.join("database.sqlite");
-    let mut command = if let Some(binary) = locate_sidecar_binary() {
-        Command::new(binary)
-    } else {
-        let mut cargo = Command::new("cargo");
-        cargo
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .env(
-                "CARGO_TARGET_DIR",
-                std::env::temp_dir().join("dcc-sidecar-target"),
-            )
-            .args(["run", "--quiet", "--bin", "dccd", "--"]);
-        cargo
-    };
-    let child = command
-        .env("DCC_DAEMON_DB_PATH", &db_path)
-        .env("DCC_DAEMON_APP_DATA_DIR", &app_data_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let _ = child.id();
-
-    wait_for_runtime_info(&app_data_dir, Duration::from_secs(30))
-        .ok_or_else(|| "daemon started but did not publish runtime info".to_string())
+    ensure_daemon_version(
+        None,
+        &db_path,
+        &app_data_dir,
+        sidecar_command(locate_sidecar_binary()),
+    )
 }
 
 fn call_daemon(method: &str, params: Value) -> Result<Value, String> {

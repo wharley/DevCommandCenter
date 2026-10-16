@@ -12,7 +12,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use sysinfo::{Pid, ProcessRefreshKind, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, Signal, System};
+
+/// Build version of this dccd binary. The app compares it with its own
+/// package version and replaces a daemon left running by an older bundle.
+pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Set by the app when it spawns dccd so it can tell the runtime file this
+/// daemon writes apart from a stale one left by a previous daemon.
+pub const LAUNCH_ID_ENV: &str = "DCC_DAEMON_LAUNCH_ID";
 
 const APP_SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
 
@@ -220,6 +228,9 @@ pub struct DaemonService {
     active_runs: Arc<Mutex<HashMap<String, RunningTask>>>,
     managed_processes: Arc<Mutex<HashMap<String, ManagedProcess>>>,
     system: Arc<Mutex<System>>,
+    /// `Some(resume_processes)` once `daemon.shutdown` was requested; the
+    /// request loop acts on it after the response row is written.
+    shutdown_request: Arc<Mutex<Option<bool>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -907,6 +918,7 @@ impl DaemonService {
             active_runs: Arc::new(Mutex::new(HashMap::new())),
             managed_processes: Arc::new(Mutex::new(HashMap::new())),
             system: Arc::new(Mutex::new(System::new_all())),
+            shutdown_request: Arc::new(Mutex::new(None)),
         }))
     }
 
@@ -1417,6 +1429,9 @@ impl DaemonService {
         // Restart processes após backoff
         for (runtime, backoff_seconds, restart_count) in to_restart {
             thread::sleep(Duration::from_secs(backoff_seconds as u64));
+            if !self.running.load(Ordering::Relaxed) {
+                break;
+            }
 
             // Re-criar o processo
             match self.restart_managed_process(runtime.clone(), restart_count, backoff_seconds) {
@@ -1611,6 +1626,7 @@ impl DaemonService {
         Ok(serde_json::json!({
             "ok": true,
             "mode": "sidecar",
+            "version": DAEMON_VERSION,
             "running": self.running.load(Ordering::Relaxed),
             "startedAt": self.started_at.clone(),
             "lastTickAt": last_tick_at,
@@ -2086,9 +2102,350 @@ impl DaemonService {
     }
 }
 
+/// What a restarted daemon does with a supervised-process row it did not
+/// start itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessRecovery {
+    Leave,
+    /// Start it again: the previous daemon asked for it on shutdown
+    /// ("restarting"), or it died and left the process orphaned.
+    Resume,
+    /// The row claims "running" but nothing is: reboot or crash.
+    MarkStopped,
+}
+
+fn process_recovery(status: &str, orphan_alive: bool) -> ProcessRecovery {
+    match status {
+        "restarting" => ProcessRecovery::Resume,
+        "running" if orphan_alive => ProcessRecovery::Resume,
+        "running" => ProcessRecovery::MarkStopped,
+        _ => ProcessRecovery::Leave,
+    }
+}
+
+/// `daemon-task-{project}-{task}-{pid}` / `daemon-process-...-{pid}`.
+fn pid_from_pty_id(pty_id: &str) -> Option<u32> {
+    pty_id.rsplit('-').next()?.parse().ok()
+}
+
+/// Whether a process that started at `start_secs` (unix seconds) is the one
+/// recorded at `recorded_at` (RFC 3339). Guards against pid reuse.
+fn started_near(start_secs: u64, recorded_at: &str, tolerance_secs: i64) -> bool {
+    DateTime::parse_from_rfc3339(recorded_at)
+        .map(|recorded| (recorded.timestamp() - start_secs as i64).abs() <= tolerance_secs)
+        .unwrap_or(false)
+}
+
+pub(crate) fn process_alive(system: &mut System, pid: u32) -> bool {
+    let pid = Pid::from_u32(pid);
+    system.refresh_process(pid)
+        && system
+            .process(pid)
+            .is_some_and(|process| process.status() != ProcessStatus::Zombie)
+}
+
+fn orphan_started_at(system: &mut System, pid: u32, recorded_at: Option<&str>) -> bool {
+    let Some(recorded_at) = recorded_at else {
+        return false;
+    };
+    process_alive(system, pid)
+        && system
+            .process(Pid::from_u32(pid))
+            .is_some_and(|process| started_near(process.start_time(), recorded_at, 10))
+}
+
+/// SIGTERM (where supported), then SIGKILL once `grace` runs out. Returns
+/// whether the process is gone. Not for this process's own children: their
+/// zombies look alive until reaped (see `terminate_child_tree`).
+pub(crate) fn terminate_process(system: &mut System, pid: u32, grace: Duration) -> bool {
+    terminate_pids(system, &[pid], grace, |system, pid| {
+        process_alive(system, pid)
+    })
+}
+
+/// `root` and every descendant: a task runs as `$SHELL -ilc <command>`, and
+/// the dev server it starts outlives the shell unless it is killed too.
+fn process_tree(system: &mut System, root: u32) -> Vec<u32> {
+    system.refresh_processes();
+    let mut tree = vec![root];
+    let mut index = 0;
+    while index < tree.len() {
+        let parent = Pid::from_u32(tree[index]);
+        for (pid, process) in system.processes() {
+            let pid = pid.as_u32();
+            if process.parent() == Some(parent) && !tree.contains(&pid) {
+                tree.push(pid);
+            }
+        }
+        index += 1;
+    }
+    tree
+}
+
+/// Orphan left by a previous daemon, with everything it started.
+fn terminate_process_tree(system: &mut System, root: u32, grace: Duration) -> bool {
+    let tree = process_tree(system, root);
+    terminate_pids(system, &tree, grace, |system, pid| {
+        process_alive(system, pid)
+    })
+}
+
+/// A child of this daemon, with everything it started; reaps the child.
+fn terminate_child_tree(system: &mut System, child: &mut Child, grace: Duration) -> bool {
+    let root = child.id();
+    let tree = process_tree(system, root);
+    terminate_pids(system, &tree, grace, |system, pid| {
+        if pid == root {
+            matches!(child.try_wait(), Ok(None))
+        } else {
+            process_alive(system, pid)
+        }
+    })
+}
+
+fn terminate_pids(
+    system: &mut System,
+    pids: &[u32],
+    grace: Duration,
+    mut alive: impl FnMut(&mut System, u32) -> bool,
+) -> bool {
+    let mut wait_until_gone = |system: &mut System, limit: Duration| {
+        let started = std::time::Instant::now();
+        loop {
+            if !pids.iter().any(|pid| alive(system, *pid)) {
+                return true;
+            }
+            if started.elapsed() >= limit {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    };
+    let send = |system: &mut System, signal: Option<Signal>| {
+        for pid in pids {
+            if !system.refresh_process(Pid::from_u32(*pid)) {
+                continue;
+            }
+            if let Some(process) = system.process(Pid::from_u32(*pid)) {
+                let sent = signal.and_then(|signal| process.kill_with(signal));
+                if sent != Some(true) {
+                    process.kill();
+                }
+            }
+        }
+    };
+    send(system, Some(Signal::Term));
+    if wait_until_gone(system, grace) {
+        return true;
+    }
+    // Interactive shells ignore SIGTERM.
+    send(system, None);
+    wait_until_gone(system, Duration::from_secs(2))
+}
+
+fn mark_task_interrupted(
+    conn: &Connection,
+    runtime: &RepoTaskRuntime,
+    reason: &str,
+) -> Result<(), String> {
+    let cwd_mode = normalize_task_cwd_mode(runtime.task.cwd_mode.as_deref());
+    let mut row =
+        read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?.unwrap_or_default();
+    row.status = "failed".to_string();
+    row.attached = false;
+    row.last_error = Some(reason.to_string());
+    upsert_daemon_task_state(
+        conn,
+        runtime,
+        &row,
+        &cwd_mode,
+        runtime.task.enabled.unwrap_or(true),
+    )
+}
+
+impl DaemonService {
+    pub fn request_shutdown(&self, resume_processes: bool) -> Result<Value, String> {
+        *self
+            .shutdown_request
+            .lock()
+            .map_err(|_| "daemon lock poisoned".to_string())? = Some(resume_processes);
+        Ok(serde_json::json!({
+            "pid": std::process::id(),
+            "resumeProcesses": resume_processes,
+        }))
+    }
+
+    /// Kills the task runs and supervised processes this daemon started, so a
+    /// replaced daemon leaves no orphans. With `resume_processes` the process
+    /// rows become "restarting" and the next daemon starts them again.
+    fn stop_children(&self, resume_processes: bool) {
+        self.running.store(false, Ordering::Relaxed);
+        let processes: Vec<ManagedProcess> = self
+            .managed_processes
+            .lock()
+            .map(|mut managed| managed.drain().map(|(_, process)| process).collect())
+            .unwrap_or_default();
+        let tasks: Vec<RunningTask> = self
+            .active_runs
+            .lock()
+            .map(|mut active| active.drain().map(|(_, task)| task).collect())
+            .unwrap_or_default();
+
+        let mut system = System::new();
+        let stopped_at = local_now_string();
+        for mut process in processes {
+            if !terminate_child_tree(&mut system, &mut process.child, Duration::from_secs(3)) {
+                let _ = process.child.kill();
+                let _ = process.child.wait();
+            }
+            let runtime = &process.runtime;
+            let _ = self.with_conn(|conn| {
+                let cwd_mode = normalize_task_cwd_mode(runtime.process.cwd_mode.as_deref());
+                let mut row =
+                    read_daemon_process_state(conn, &runtime.project_id, &runtime.process.id)?
+                        .unwrap_or_default();
+                row.status = if resume_processes {
+                    "restarting"
+                } else {
+                    "stopped"
+                }
+                .to_string();
+                row.pid = None;
+                row.stopped_at = Some(stopped_at.clone());
+                upsert_daemon_process_state(
+                    conn,
+                    runtime,
+                    &row,
+                    &cwd_mode,
+                    runtime.process.auto_restart.unwrap_or(true),
+                )
+            });
+        }
+        for mut task in tasks {
+            if !terminate_child_tree(&mut system, &mut task.child, Duration::from_secs(3)) {
+                let _ = task.child.kill();
+                let _ = task.child.wait();
+            }
+            let _ = self.with_conn(|conn| {
+                mark_task_interrupted(conn, &task.runtime, "interrupted by daemon shutdown")
+            });
+        }
+    }
+
+    /// Runs once at startup, before any request is served. Rows still marked
+    /// running belong to a previous daemon: resume the supervised processes it
+    /// handed over (or left orphaned, killing the orphan first), mark the rest
+    /// stopped, and fail task runs that were cut short so the scheduler moves on.
+    fn recover_after_restart(&self) -> Result<(), String> {
+        let processes = self.load_processes()?;
+        let tasks = self.load_tasks()?;
+        let mut to_resume = Vec::new();
+        {
+            let mut system = self
+                .system
+                .lock()
+                .map_err(|_| "system lock poisoned".to_string())?;
+            self.with_conn(|conn| {
+                for runtime in &processes {
+                    let Some(mut row) =
+                        read_daemon_process_state(conn, &runtime.project_id, &runtime.process.id)?
+                    else {
+                        continue;
+                    };
+                    let orphan = row.pid.filter(|pid| {
+                        orphan_started_at(&mut system, *pid, row.started_at.as_deref())
+                    });
+                    match process_recovery(&row.status, orphan.is_some()) {
+                        ProcessRecovery::Leave => {}
+                        ProcessRecovery::Resume => {
+                            if let Some(pid) = orphan {
+                                terminate_process_tree(&mut system, pid, Duration::from_secs(3));
+                            }
+                            to_resume.push(runtime.clone());
+                        }
+                        ProcessRecovery::MarkStopped => {
+                            let cwd_mode =
+                                normalize_task_cwd_mode(runtime.process.cwd_mode.as_deref());
+                            row.status = "stopped".to_string();
+                            row.pid = None;
+                            row.stopped_at = Some(local_now_string());
+                            upsert_daemon_process_state(
+                                conn,
+                                runtime,
+                                &row,
+                                &cwd_mode,
+                                runtime.process.auto_restart.unwrap_or(true),
+                            )?;
+                        }
+                    }
+                }
+
+                for runtime in &tasks {
+                    let Some(row) =
+                        read_daemon_task_state(conn, &runtime.project_id, &runtime.task.id)?
+                    else {
+                        continue;
+                    };
+                    if row.status != "running" {
+                        continue;
+                    }
+                    if let Some(pid) = row.pty_id.as_deref().and_then(pid_from_pty_id) {
+                        if orphan_started_at(&mut system, pid, row.last_run_at.as_deref()) {
+                            terminate_process_tree(&mut system, pid, Duration::from_secs(3));
+                        }
+                    }
+                    mark_task_interrupted(conn, runtime, "interrupted by daemon restart")?;
+                }
+                Ok(())
+            })?;
+        }
+
+        for runtime in to_resume {
+            eprintln!(
+                "[DCC][dccd] resuming process {} after daemon restart",
+                runtime.process.name
+            );
+            if let Err(error) = self.create_managed_process(runtime.clone()) {
+                let _ = self.with_conn(|conn| {
+                    let cwd_mode = normalize_task_cwd_mode(runtime.process.cwd_mode.as_deref());
+                    let mut row =
+                        read_daemon_process_state(conn, &runtime.project_id, &runtime.process.id)?
+                            .unwrap_or_default();
+                    row.status = "failed".to_string();
+                    row.pid = None;
+                    row.last_error = Some(format!("resume after daemon restart failed: {error}"));
+                    upsert_daemon_process_state(
+                        conn,
+                        &runtime,
+                        &row,
+                        &cwd_mode,
+                        runtime.process.auto_restart.unwrap_or(true),
+                    )
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 fn handle_rpc(service: &DaemonService, request: RpcRequest) -> RpcResponse {
     let result = match request.method.as_str() {
         "daemon.health" => service.health(),
+        "daemon.shutdown" => {
+            let resume_processes = request
+                .params
+                .get("resumeProcesses")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            // A request left pending for a daemon that is already gone must
+            // not stop the one that replaced it.
+            match request.params.get("pid").and_then(|value| value.as_u64()) {
+                Some(pid) if pid != u64::from(std::process::id()) => {
+                    Err(format!("shutdown addressed to daemon {pid}"))
+                }
+                _ => service.request_shutdown(resume_processes),
+            }
+        }
         "daemon.getStatus" => service.status(),
         "daemon.listTasks" => service.list_tasks(),
         "daemon.runTask" => {
@@ -2530,13 +2887,48 @@ fn execute_trigger(
     Ok(())
 }
 
-fn request_loop(service: Arc<DaemonService>) {
+fn request_loop(service: Arc<DaemonService>, runtime_file: PathBuf) {
     while service.running.load(Ordering::Relaxed) {
         if let Err(error) = service.process_pending_requests() {
             eprintln!("[DCC][dccd] request error: {error}");
         }
+        let shutdown = service
+            .shutdown_request
+            .lock()
+            .ok()
+            .and_then(|mut request| request.take());
+        if let Some(resume_processes) = shutdown {
+            eprintln!("[DCC][dccd] shutdown requested (resume processes: {resume_processes})");
+            service.stop_children(resume_processes);
+            remove_runtime_file_if_owned(&runtime_file);
+            std::process::exit(0);
+        }
         thread::sleep(Duration::from_millis(200));
     }
+}
+
+fn remove_runtime_file_if_owned(runtime_file: &Path) {
+    let owned = fs::read_to_string(runtime_file)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|value| value.get("pid").and_then(|pid| pid.as_u64()))
+        == Some(u64::from(std::process::id()));
+    if owned {
+        let _ = fs::remove_file(runtime_file);
+    }
+}
+
+/// Pid in the runtime file when it belongs to another daemon that is still
+/// alive (two daemons on one database must not touch each other's children).
+fn other_live_daemon_pid(runtime_file: &Path, system: &mut System) -> Option<u32> {
+    let pid = fs::read_to_string(runtime_file)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|value| value.get("pid").and_then(|pid| pid.as_u64()))? as u32;
+    if pid == std::process::id() {
+        return None;
+    }
+    process_alive(system, pid).then_some(pid)
 }
 
 fn sweep_loop(service: Arc<DaemonService>) {
@@ -2550,10 +2942,27 @@ fn sweep_loop(service: Arc<DaemonService>) {
 
 pub fn serve(service: Arc<DaemonService>, runtime_file: &Path) -> Result<(), String> {
     service.running.store(true, Ordering::Relaxed);
+    let other_daemon = service
+        .system
+        .lock()
+        .ok()
+        .and_then(|mut system| other_live_daemon_pid(runtime_file, &mut system));
+    match other_daemon {
+        Some(pid) => {
+            eprintln!("[DCC][dccd] daemon {pid} is still alive; skipping recovery of its processes")
+        }
+        None => {
+            if let Err(error) = service.recover_after_restart() {
+                eprintln!("[DCC][dccd] recovery error: {error}");
+            }
+        }
+    }
     let runtime = serde_json::json!({
         "pid": std::process::id(),
         "startedAt": service.started_at.clone(),
         "dbPath": service.db_path.to_string_lossy(),
+        "version": DAEMON_VERSION,
+        "launchId": std::env::var(LAUNCH_ID_ENV).ok(),
     });
     eprintln!("[DCC][dccd] runtime file: {}", runtime_file.display());
     if let Some(parent) = runtime_file.parent() {
@@ -2566,7 +2975,8 @@ pub fn serve(service: Arc<DaemonService>, runtime_file: &Path) -> Result<(), Str
     .map_err(|e| e.to_string())?;
 
     let request_service = service.clone();
-    thread::spawn(move || request_loop(request_service));
+    let request_runtime_file = runtime_file.to_path_buf();
+    thread::spawn(move || request_loop(request_service, request_runtime_file));
 
     let sweep_service = service.clone();
     thread::spawn(move || sweep_loop(sweep_service));
@@ -2574,5 +2984,221 @@ pub fn serve(service: Arc<DaemonService>, runtime_file: &Path) -> Result<(), Str
     eprintln!("[DCC][dccd] sidecar running");
     loop {
         thread::sleep(Duration::from_secs(60));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn service_with_process(dir: &Path, command: &str) -> Arc<DaemonService> {
+        let service = DaemonService::new(dir.join("database.sqlite")).unwrap();
+        let repo_config = serde_json::json!({
+            "processes": [{
+                "id": "web",
+                "name": "web",
+                "command": command,
+                "cwdMode": "project",
+                "autoRestart": true,
+            }]
+        });
+        service
+            .with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO projects (id, name, path, repo_config) VALUES ('p1', 'p1', ?1, ?2)",
+                    params![dir.to_string_lossy(), repo_config.to_string()],
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(())
+            })
+            .unwrap();
+        service
+    }
+
+    fn seed_process_row(service: &DaemonService, status: &str, pid: Option<u32>) {
+        let runtime = service.load_processes().unwrap().remove(0);
+        service
+            .with_conn(|conn| {
+                let state = DaemonProcessState {
+                    status: status.to_string(),
+                    pid,
+                    started_at: Some(local_now_string()),
+                    backoff_seconds: 1,
+                    ..Default::default()
+                };
+                upsert_daemon_process_state(conn, &runtime, &state, "project", true)
+            })
+            .unwrap();
+    }
+
+    fn process_row(service: &DaemonService) -> DaemonProcessState {
+        service
+            .with_conn(|conn| read_daemon_process_state(conn, "p1", "web"))
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn health_reports_build_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = DaemonService::new(dir.path().join("database.sqlite")).unwrap();
+        let health = service.health().unwrap();
+        assert_eq!(health["version"], DAEMON_VERSION);
+    }
+
+    #[test]
+    fn shutdown_addressed_to_another_pid_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = DaemonService::new(dir.path().join("database.sqlite")).unwrap();
+        let refused = handle_rpc(
+            &service,
+            RpcRequest {
+                method: "daemon.shutdown".into(),
+                params: serde_json::json!({ "pid": std::process::id() + 1 }),
+            },
+        );
+        assert!(!refused.ok);
+        assert_eq!(*service.shutdown_request.lock().unwrap(), None);
+
+        let accepted = handle_rpc(
+            &service,
+            RpcRequest {
+                method: "daemon.shutdown".into(),
+                params: serde_json::json!({
+                    "pid": std::process::id(),
+                    "resumeProcesses": true,
+                }),
+            },
+        );
+        assert!(accepted.ok);
+        assert_eq!(*service.shutdown_request.lock().unwrap(), Some(true));
+    }
+
+    #[test]
+    fn recovery_resumes_handed_over_and_orphaned_processes_only() {
+        assert_eq!(
+            process_recovery("restarting", false),
+            ProcessRecovery::Resume
+        );
+        assert_eq!(process_recovery("running", true), ProcessRecovery::Resume);
+        assert_eq!(
+            process_recovery("running", false),
+            ProcessRecovery::MarkStopped
+        );
+        assert_eq!(process_recovery("stopped", false), ProcessRecovery::Leave);
+        assert_eq!(process_recovery("failed", true), ProcessRecovery::Leave);
+    }
+
+    #[test]
+    fn pid_is_read_from_pty_id() {
+        assert_eq!(pid_from_pty_id("daemon-task-p-1-build-4242"), Some(4242));
+        assert_eq!(pid_from_pty_id("daemon-task-p-build-"), None);
+    }
+
+    #[test]
+    fn start_time_must_match_the_recorded_one() {
+        let recorded = "2026-10-16T07:59:00-03:00";
+        let at = DateTime::parse_from_rfc3339(recorded).unwrap().timestamp() as u64;
+        assert!(started_near(at - 1, recorded, 10));
+        assert!(!started_near(at - 3600, recorded, 10));
+        assert!(!started_near(at, "not a date", 10));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminating_a_tree_kills_grandchildren() {
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 30 & wait"])
+            .spawn()
+            .unwrap();
+        let mut system = System::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let tree = loop {
+            let tree = process_tree(&mut system, child.id());
+            if tree.len() > 1 || std::time::Instant::now() > deadline {
+                break tree;
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+        assert!(tree.len() > 1, "sleep never showed up under sh");
+
+        assert!(terminate_child_tree(
+            &mut system,
+            &mut child,
+            Duration::from_secs(2)
+        ));
+        assert!(child.try_wait().unwrap().is_some());
+        for pid in &tree[1..] {
+            assert!(!process_alive(&mut system, *pid), "pid {pid} survived");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restart_resumes_processes_handed_over_on_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = service_with_process(dir.path(), "sleep 30");
+        seed_process_row(&service, "restarting", None);
+
+        service.recover_after_restart().unwrap();
+        let row = process_row(&service);
+        assert_eq!(row.status, "running");
+        let pid = row.pid.unwrap();
+        assert!(service
+            .managed_processes
+            .lock()
+            .unwrap()
+            .contains_key(&process_key("p1", "web")));
+
+        service.stop_children(true);
+        let row = process_row(&service);
+        assert_eq!(row.status, "restarting");
+        assert_eq!(row.pid, None);
+        assert!(!process_alive(&mut System::new(), pid));
+        assert!(service.managed_processes.lock().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restart_replaces_a_process_orphaned_by_the_previous_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = service_with_process(dir.path(), "sleep 30");
+        // `sh` exits right away, so the sleep is reparented like the children
+        // of a daemon that was killed without stopping them.
+        let output = Command::new("sh")
+            .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+            .output()
+            .unwrap();
+        let orphan: u32 = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .unwrap();
+        seed_process_row(&service, "running", Some(orphan));
+
+        service.recover_after_restart().unwrap();
+        let row = process_row(&service);
+        assert_eq!(row.status, "running");
+        assert_ne!(row.pid, Some(orphan));
+        assert!(!process_alive(&mut System::new(), orphan));
+
+        service.stop_children(false);
+        assert_eq!(process_row(&service).status, "stopped");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restart_marks_dead_running_processes_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = service_with_process(dir.path(), "sleep 30");
+        let mut gone = Command::new("true").spawn().unwrap();
+        let gone_pid = gone.id();
+        gone.wait().unwrap();
+        seed_process_row(&service, "running", Some(gone_pid));
+
+        service.recover_after_restart().unwrap();
+        let row = process_row(&service);
+        assert_eq!(row.status, "stopped");
+        assert_eq!(row.pid, None);
+        assert!(service.managed_processes.lock().unwrap().is_empty());
     }
 }
