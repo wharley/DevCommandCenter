@@ -3,7 +3,7 @@
  * and which are just recent. Transport-agnostic — the native app passes the
  * encrypted relay channel.
  */
-import type { AttentionEntry } from "./attention.ts";
+import type { AttentionEntry, RunningTask } from "./attention.ts";
 import { pendingQuestions } from "./questions.ts";
 import { permissionQuestion, type RawSessionEvent } from "./threadEvents.ts";
 
@@ -181,13 +181,45 @@ export function classifySession(
 }
 
 /**
- * One sweep that powers all three triage groups. We fetch the session
- * index, then fan out events only for threads touched in the last 48h
- * (capped) — the same budget the old permission counter spent, now reused
- * to also detect which agents are mid-turn.
+ * The home's scan from the desktop's own state (`/api/v1/mobile/attention`
+ * with `running` and `requests`): the same rule as the desktop's sidebar,
+ * one running row per task, and no session history read at all.
+ */
+export function scanFromSnapshot(
+	sessionsRaw: SessionSearchResult[],
+	combs: Comb[],
+	running: RunningTask[],
+	requests: RawSessionEvent[],
+): Scan {
+	const sessions = liveSessions(sessionsRaw, combs);
+	const byId = new Map(sessions.map((s) => [s.sessionId, s]));
+	const statuses = new Map<string, LiveStatus>();
+	for (const task of running) statuses.set(task.sessionId, "running");
+	const bySession = new Map<string, RawSessionEvent[]>();
+	for (const event of requests) {
+		const list = bySession.get(event.sessionId) ?? [];
+		list.push(event);
+		bySession.set(event.sessionId, list);
+	}
+	const needsYou: PendingItem[] = [];
+	for (const [sessionId, events] of bySession) {
+		const thread = byId.get(sessionId);
+		if (thread) needsYou.push(...classifySession(thread, events).needsYou);
+	}
+	needsYou.sort((a, b) => b.at.localeCompare(a.at));
+	return { sessions, statuses, needsYou };
+}
+
+/**
+ * Older desktops (no `running` in the attention list): one sweep that powers
+ * all three triage groups. We fetch the session index, then fan out events
+ * only for threads touched in the last 48h (capped). A history that fails to
+ * arrive keeps what `previous` knew about that thread: a slow channel must
+ * never turn a running agent into an idle one.
  */
 export async function runScan(
 	fetchJson: JsonFetcher,
+	previous: Scan | null = null,
 ): Promise<{ scan: Scan; combs: Comb[] }> {
 	const [sessRaw, combs] = await Promise.all([
 		fetchJson<SessionSearchResult[]>("/api/v1/sessions/search?limit=60"),
@@ -200,18 +232,66 @@ export async function runScan(
 				`/api/v1/sessions/${encodeURIComponent(thread.sessionId)}/events`,
 			)
 				.then((events) => ({ thread, events }))
-				.catch(() => ({ thread, events: [] as RawSessionEvent[] })),
+				.catch(() => ({ thread, events: null })),
 		),
 	);
 	const statuses = new Map<string, LiveStatus>();
 	const needsYou: PendingItem[] = [];
 	for (const { thread, events } of sweeps) {
+		if (events === null) {
+			const known = previous?.statuses.get(thread.sessionId);
+			if (known) statuses.set(thread.sessionId, known);
+			needsYou.push(...(previous?.needsYou.filter((p) => p.thread.sessionId === thread.sessionId) ?? []));
+			continue;
+		}
 		const result = classifySession(thread, events);
 		if (result.status) statuses.set(thread.sessionId, result.status);
 		needsYou.push(...result.needsYou);
 	}
 	needsYou.sort((a, b) => b.at.localeCompare(a.at));
 	return { scan: { sessions, statuses, needsYou }, combs };
+}
+
+/**
+ * Whether a lifecycle event leaves its session working (true), not working
+ * (false: done, stopped, or waiting on the person) or says nothing (null).
+ */
+export function liveRunning(kindType: string | null): boolean | null {
+	switch (kindType) {
+		case "turn_started":
+		case "turn_permission_resolved":
+		case "turn_user_input_resolved":
+			return true;
+		case "turn_completed":
+		case "turn_aborted":
+		case "session_completed":
+		case "session_aborted":
+		case "turn_permission_requested":
+		case "turn_user_input_requested":
+			return false;
+		default:
+			return null;
+	}
+}
+
+/** sessionId → what the latest lifecycle event said, and its order of arrival. */
+export type LiveOverlay = ReadonlyMap<string, { running: boolean; seq: number }>;
+
+/**
+ * The scan as the stream has moved it since it was read: a turn that started
+ * shows as running, one that ended or waits on the person stops, before the
+ * next read confirms it. Sessions outside the scan wait for that read.
+ */
+export function withLiveOverlay(scan: Scan, overlay: LiveOverlay): Scan {
+	if (overlay.size === 0) return scan;
+	const known = new Set(scan.sessions.map((s) => s.sessionId));
+	const statuses = new Map(scan.statuses);
+	for (const [sessionId, { running }] of overlay) {
+		if (!known.has(sessionId)) continue;
+		if (running) statuses.set(sessionId, "running");
+		else if (statuses.get(sessionId) === "running") statuses.delete(sessionId);
+	}
+	return { ...scan, statuses };
 }
 
 export function triageGroups(scan: Scan, workspaceFilter: string | null = null): TriageGroups {

@@ -295,8 +295,20 @@ pub(super) async fn enqueue_fixture_agent_request(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct AttentionQuery {
+    /// The `snapshotId` the client already holds.
+    after: Option<String>,
+}
+
+/// The home's state in one small read: what needs the person, what runs and
+/// the open requests to answer. Like an ETag, `snapshotId` names the content:
+/// a client that sends it back as `after` gets `{unchanged, snapshotId}`
+/// while nothing changed, so polling costs a few bytes over the relay.
 pub(super) async fn workspace_attention(
     State(backend): State<Arc<HttpBackend>>,
+    Query(query): Query<AttentionQuery>,
 ) -> Result<Json<Value>, HttpApiError> {
     let output = dcc_tauri::commands::workspace_attention::workspace_attention_with_state(
         &backend.workspace,
@@ -304,9 +316,22 @@ pub(super) async fn workspace_attention(
     )
     .await
     .map_err(HttpApiError::internal)?;
-    Ok(Json(serde_json::to_value(output).map_err(|error| {
-        HttpApiError::internal(error.to_string())
-    })?))
+    let value =
+        serde_json::to_value(output).map_err(|error| HttpApiError::internal(error.to_string()))?;
+    Ok(Json(conditional_snapshot(value, query.after.as_deref())))
+}
+
+/// `value` with its `snapshotId`, or only that when it is `after`.
+fn conditional_snapshot(mut value: Value, after: Option<&str>) -> Value {
+    let digest = Sha256::digest(value.to_string().as_bytes());
+    let snapshot_id: String = digest[..12].iter().map(|byte| format!("{byte:02x}")).collect();
+    if after == Some(snapshot_id.as_str()) {
+        return json!({ "unchanged": true, "snapshotId": snapshot_id });
+    }
+    if let Some(object) = value.as_object_mut() {
+        object.insert("snapshotId".into(), Value::String(snapshot_id));
+    }
+    value
 }
 
 /// Which blockers notify, and how.
@@ -434,4 +459,26 @@ pub(super) fn watch_blockers(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_known_snapshot_answers_unchanged_and_a_new_one_in_full() {
+        let full = conditional_snapshot(json!({ "items": [], "running": [] }), None);
+        let id = full["snapshotId"].as_str().expect("snapshot id").to_string();
+        assert_eq!(full["running"], json!([]));
+
+        let same = conditional_snapshot(json!({ "items": [], "running": [] }), Some(&id));
+        assert_eq!(same, json!({ "unchanged": true, "snapshotId": id }));
+
+        let moved = conditional_snapshot(
+            json!({ "items": [], "running": [{ "workspaceId": "w" }] }),
+            Some(&id),
+        );
+        assert_ne!(moved["snapshotId"], json!(id));
+        assert_eq!(moved["running"][0]["workspaceId"], "w");
+    }
 }

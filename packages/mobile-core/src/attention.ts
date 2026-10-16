@@ -8,6 +8,7 @@
  * desktop's (`workspace-seen-results.ts`, copied in `isResultUnread`).
  */
 import { t } from "./labels.ts";
+import type { RawSessionEvent } from "./threadEvents.ts";
 
 export type AttentionReason =
 	| "permission"
@@ -69,6 +70,66 @@ export function parseAttention(data: unknown): AttentionEntry[] {
 			},
 		];
 	});
+}
+
+/** A task whose agent is working, as the desktop's sidebar counts it. */
+export type RunningTask = {
+	workspaceId: string;
+	/** The running session the row opens. */
+	sessionId: string;
+	sessionIds: string[];
+	startedAt: string | null;
+};
+
+/**
+ * `GET /api/v1/mobile/attention[?after=<snapshotId>]`. Current desktops also
+ * send what runs, the open requests and a `snapshotId` naming the content;
+ * sent back as `after`, it answers `unchanged` while nothing moved. Older
+ * desktops send `items` only: `running` and `requests` are then null and the
+ * phone reads statuses from the histories as before.
+ */
+export type HomeSnapshot =
+	| { unchanged: true; snapshotId: string }
+	| {
+			unchanged: false;
+			snapshotId: string | null;
+			entries: AttentionEntry[];
+			running: RunningTask[] | null;
+			requests: RawSessionEvent[] | null;
+	  };
+
+export function parseHomeSnapshot(data: unknown, requestedSnapshotId: string | null = null): HomeSnapshot {
+	const body = (data ?? {}) as Record<string, unknown>;
+	const snapshotId = typeof body.snapshotId === "string" && body.snapshotId ? body.snapshotId : null;
+	// Only an answer to the id this phone asked about means "keep what you have".
+	if (body.unchanged === true && snapshotId && snapshotId === requestedSnapshotId) {
+		return { unchanged: true, snapshotId };
+	}
+	const running = Array.isArray(body.running)
+		? body.running.flatMap((raw): RunningTask[] => {
+				const task = (raw ?? {}) as Record<string, unknown>;
+				if (typeof task.workspaceId !== "string" || typeof task.sessionId !== "string") return [];
+				const ids = Array.isArray(task.sessionIds) ? task.sessionIds.filter((id): id is string => typeof id === "string") : [];
+				return [
+					{
+						workspaceId: task.workspaceId,
+						sessionId: task.sessionId,
+						sessionIds: ids.length > 0 ? ids : [task.sessionId],
+						startedAt: typeof task.startedAt === "string" ? task.startedAt : null,
+					},
+				];
+			})
+		: null;
+	const requests = Array.isArray(body.requests)
+		? body.requests.filter(
+				(raw): raw is RawSessionEvent =>
+					!!raw &&
+					typeof raw === "object" &&
+					typeof (raw as RawSessionEvent).sessionId === "string" &&
+					typeof (raw as RawSessionEvent).kind?.type === "string",
+			)
+		: null;
+	return { unchanged: false, snapshotId, entries: parseAttention(data), running, requests };
 }
 
 export function attentionLabel(entry: Pick<AttentionEntry, "reason" | "count">): string {

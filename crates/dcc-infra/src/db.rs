@@ -1805,6 +1805,89 @@ impl SqliteWorkspaceRepo {
     }
 }
 
+/// The event-derived half of a `WorkspaceSessionSummary`.
+#[derive(Clone, Debug)]
+struct EventSummary {
+    /// `None` for a session without events: the summary builds a fresh one.
+    projection: Option<SessionProjection>,
+    last_turn_prompt: Option<String>,
+    last_turn_state: Option<String>,
+    last_turn_started_at: Option<String>,
+    last_turn_completed_at: Option<String>,
+    last_turn_awaiting_user: Option<String>,
+    last_turn_awaiting_since: Option<String>,
+    usage_limit: Option<dcc_core::domain::usage_limit::SessionUsageLimit>,
+}
+
+impl EventSummary {
+    fn from_events(events: &[SessionEventRecord]) -> Self {
+        let mut last_turn_prompt = None;
+        let mut last_turn_state = None;
+        let mut last_turn_id = None;
+        let mut last_turn_started_at = None;
+        let mut last_turn_completed_at = None;
+        // The sidebar summarizes the conversation as it stands after rewinds.
+        for event in &dcc_core::domain::session::visible_session_events(events) {
+            match &event.kind {
+                SessionEventKind::TurnStarted {
+                    turn_id, prompt, ..
+                } => {
+                    last_turn_id = Some(turn_id.clone());
+                    last_turn_prompt = Some(prompt.clone());
+                    last_turn_state = Some("running".to_string());
+                    last_turn_started_at = Some(event.occurred_at.clone());
+                    last_turn_completed_at = None;
+                }
+                SessionEventKind::TurnCompleted { turn_id }
+                    if last_turn_id.as_ref() == Some(turn_id) =>
+                {
+                    last_turn_state = Some("completed".to_string());
+                    last_turn_completed_at = Some(event.occurred_at.clone());
+                }
+                SessionEventKind::TurnAborted { turn_id, .. }
+                    if last_turn_id.as_ref() == Some(turn_id) =>
+                {
+                    last_turn_state = Some("aborted".to_string());
+                    last_turn_completed_at = Some(event.occurred_at.clone());
+                }
+                SessionEventKind::SessionCompleted => {
+                    if last_turn_state.is_none() {
+                        last_turn_state = Some("completed".to_string());
+                    }
+                }
+                SessionEventKind::SessionAborted { .. } => {
+                    if last_turn_state.is_none() {
+                        last_turn_state = Some("aborted".to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+        Self {
+            projection: SessionProjection::fold(events),
+            last_turn_prompt,
+            last_turn_state,
+            last_turn_started_at,
+            last_turn_completed_at,
+            last_turn_awaiting_user: dcc_core::domain::session::last_turn_awaiting_user(events),
+            last_turn_awaiting_since: dcc_core::domain::session::last_turn_awaiting_since(events),
+            usage_limit: dcc_core::domain::usage_limit::session_usage_limit(events),
+        }
+    }
+}
+
+const EVENT_SUMMARY_CACHE_LIMIT: usize = 4096;
+
+type EventSummaryCache = HashMap<(String, String), ((i64, i64, i64), EventSummary)>;
+
+/// (database path, session id) → the events' stamp (count, highest
+/// sequence, newest rowid) and what they folded to. Process-wide because
+/// repos are opened per call.
+fn event_summary_cache() -> &'static Mutex<EventSummaryCache> {
+    static CACHE: std::sync::OnceLock<Mutex<EventSummaryCache>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 #[derive(Clone)]
 pub struct SqliteSessionRepo {
     pub(crate) conn: Arc<Mutex<Connection>>,
@@ -5864,51 +5947,8 @@ impl SqliteSessionRepo {
     }
 
     fn build_summary(&self, session: Session, thread: Thread) -> Result<WorkspaceSessionSummary> {
-        let events = self.list_events_by_session_sync(&session.id)?;
-        let mut last_turn_prompt = None;
-        let mut last_turn_state = None;
-        let mut last_turn_id = None;
-        let mut last_turn_started_at = None;
-        let mut last_turn_completed_at = None;
-        // The sidebar summarizes the conversation as it stands after rewinds.
-        for event in &dcc_core::domain::session::visible_session_events(&events) {
-            match &event.kind {
-                SessionEventKind::TurnStarted {
-                    turn_id, prompt, ..
-                } => {
-                    last_turn_id = Some(turn_id.clone());
-                    last_turn_prompt = Some(prompt.clone());
-                    last_turn_state = Some("running".to_string());
-                    last_turn_started_at = Some(event.occurred_at.clone());
-                    last_turn_completed_at = None;
-                }
-                SessionEventKind::TurnCompleted { turn_id }
-                    if last_turn_id.as_ref() == Some(turn_id) =>
-                {
-                    last_turn_state = Some("completed".to_string());
-                    last_turn_completed_at = Some(event.occurred_at.clone());
-                }
-                SessionEventKind::TurnAborted { turn_id, .. }
-                    if last_turn_id.as_ref() == Some(turn_id) =>
-                {
-                    last_turn_state = Some("aborted".to_string());
-                    last_turn_completed_at = Some(event.occurred_at.clone());
-                }
-                SessionEventKind::SessionCompleted => {
-                    if last_turn_state.is_none() {
-                        last_turn_state = Some("completed".to_string());
-                    }
-                }
-                SessionEventKind::SessionAborted { .. } => {
-                    if last_turn_state.is_none() {
-                        last_turn_state = Some("aborted".to_string());
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let projection = SessionProjection::fold(&events).unwrap_or_else(|| {
+        let derived = self.event_summary(&session.id)?;
+        let projection = derived.projection.clone().unwrap_or_else(|| {
             SessionProjection::new(
                 session.id.clone(),
                 session.project_id.clone(),
@@ -5919,23 +5959,69 @@ impl SqliteSessionRepo {
             )
         });
 
-        let last_turn_awaiting_user = dcc_core::domain::session::last_turn_awaiting_user(&events);
-        let last_turn_awaiting_since =
-            dcc_core::domain::session::last_turn_awaiting_since(&events);
-        let usage_limit = dcc_core::domain::usage_limit::session_usage_limit(&events);
-
         Ok(WorkspaceSessionSummary {
             session,
             thread,
             projection,
-            last_turn_prompt,
-            last_turn_state,
-            last_turn_started_at,
-            last_turn_completed_at,
-            last_turn_awaiting_user,
-            last_turn_awaiting_since,
-            usage_limit,
+            last_turn_prompt: derived.last_turn_prompt,
+            last_turn_state: derived.last_turn_state,
+            last_turn_started_at: derived.last_turn_started_at,
+            last_turn_completed_at: derived.last_turn_completed_at,
+            last_turn_awaiting_user: derived.last_turn_awaiting_user,
+            last_turn_awaiting_since: derived.last_turn_awaiting_since,
+            usage_limit: derived.usage_limit,
         })
+    }
+
+    /// What a summary reads from the session's events. Folding a long
+    /// history costs tens of milliseconds and the sidebar and the phone ask
+    /// for every task's summaries often, so the result is kept until the
+    /// session's events change: their count, highest sequence and newest
+    /// row, all read from the index (appends, rewinds and a history written
+    /// again each move one of them).
+    fn event_summary(&self, session_id: &SessionId) -> Result<EventSummary> {
+        let (key, stamp) = {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            let stamp: (i64, i64, i64) = conn
+                .query_row(
+                    "SELECT COUNT(*), COALESCE(MAX(sequence), 0), COALESCE(MAX(rowid), 0)
+                       FROM dcc_session_events WHERE session_id = ?1",
+                    params![session_id.0.clone()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            // In-memory databases have no path to tell them apart: no cache.
+            let key = conn
+                .path()
+                .filter(|path| !path.is_empty())
+                .map(|path| (path.to_string(), session_id.0.clone()));
+            (key, stamp)
+        };
+        if let Some(key) = &key {
+            let cached = event_summary_cache().lock().ok().and_then(|cache| {
+                cache
+                    .get(key)
+                    .filter(|(at, _)| *at == stamp)
+                    .map(|(_, summary)| summary.clone())
+            });
+            if let Some(summary) = cached {
+                return Ok(summary);
+            }
+        }
+        let events = self.list_events_by_session_sync(session_id)?;
+        let summary = EventSummary::from_events(&events);
+        if let Some(key) = key {
+            if let Ok(mut cache) = event_summary_cache().lock() {
+                if cache.len() >= EVENT_SUMMARY_CACHE_LIMIT {
+                    cache.clear();
+                }
+                cache.insert(key, (stamp, summary.clone()));
+            }
+        }
+        Ok(summary)
     }
 
     fn session_search_result_from_row(row: &Row<'_>) -> rusqlite::Result<SessionSearchResult> {
@@ -11018,7 +11104,11 @@ mod tests {
 
     #[test]
     fn sqlite_session_repo_persists_session_thread_and_events() {
-        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        // On disk, so the summaries go through their cache: the second
+        // listing below must see the events appended after the first.
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let repo = SqliteSessionRepo::open(&directory.path().join("summaries.sqlite"))
+            .expect("create repo");
         let session = Session {
             id: SessionId("session-1".to_string()),
             project_id: ProjectId("project-1".to_string()),

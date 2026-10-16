@@ -649,10 +649,31 @@ pub struct WorkspaceAttentionEntry {
     pub session_id: Option<String>,
 }
 
+/// A task with its agent at work: the desktop sidebar's "N rodando" counts
+/// these, one per task however many of its sessions run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningTask {
+    pub workspace_id: String,
+    /// The session to open: the running one, newest first.
+    pub session_id: String,
+    /// Every running session of the task.
+    pub session_ids: Vec<String>,
+    pub started_at: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceAttentionOutput {
     pub items: Vec<WorkspaceAttentionEntry>,
+    /// Tasks whose agent is working (not waiting on the person), newest
+    /// start first.
+    #[serde(default)]
+    pub running: Vec<RunningTask>,
+    /// The open permission and question events of the tasks waiting on the
+    /// person, so a client answers them without reading whole histories.
+    #[serde(default)]
+    pub requests: Vec<dcc_core::domain::session::SessionEventRecord>,
 }
 
 fn blockers_cache() -> &'static Mutex<Option<(Instant, Vec<WorkspaceBlocker>)>> {
@@ -692,6 +713,8 @@ pub async fn workspace_attention_with_state(
     let mut tasks = Vec::new();
     let mut activities = HashMap::new();
     let mut sessions_to_open = HashMap::new();
+    let mut running = Vec::new();
+    let mut requests = Vec::new();
     for workspace in &workspaces {
         if matches!(workspace.state, WorkspaceState::Archived | WorkspaceState::Completed) {
             continue;
@@ -709,11 +732,46 @@ pub async fn workspace_attention_with_state(
         if let Some(summary) = summaries.get(open) {
             sessions_to_open.insert(workspace.id.0.clone(), summary.session.id.0.clone());
         }
+        for (summary, input) in summaries.iter().zip(&inputs) {
+            if input.is_running() && input.waiting_reason().is_some() {
+                let events = repo
+                    .list_events_by_session_sync(&summary.session.id)
+                    .map_err(|error| error.to_string())?;
+                requests.extend(
+                    dcc_core::domain::session::open_turn_request_events(&events)
+                        .into_iter()
+                        .cloned(),
+                );
+            }
+        }
         if let Some(activity) = derive_agent_activity(&inputs) {
+            if activity.state == AgentActivityState::Active {
+                let session_ids: Vec<String> = summaries
+                    .iter()
+                    .zip(&inputs)
+                    .filter(|(_, input)| input.is_running())
+                    .map(|(summary, _)| summary.session.id.0.clone())
+                    .collect();
+                if let Some(session_id) = session_ids.first().cloned() {
+                    running.push(RunningTask {
+                        workspace_id: workspace.id.0.clone(),
+                        session_id,
+                        session_ids,
+                        started_at: activity.started_at.clone(),
+                    });
+                }
+            }
             activities.insert(workspace.id.0.clone(), activity);
         }
         tasks.push(AttentionWorkspace::from_workspace(workspace));
     }
+    running.sort_by(|left, right| {
+        let left_ms = timestamp_ms(left.started_at.as_deref()).unwrap_or(0);
+        let right_ms = timestamp_ms(right.started_at.as_deref()).unwrap_or(0);
+        right_ms
+            .cmp(&left_ms)
+            .then_with(|| left.workspace_id.cmp(&right.workspace_id))
+    });
     let blockers = recent_attention_blockers(state, blockers_max_age).await?;
     let items = attention_items(&tasks, &activities, &blockers, chrono::Utc::now().timestamp_millis())
         .into_iter()
@@ -722,7 +780,11 @@ pub async fn workspace_attention_with_state(
             item,
         })
         .collect();
-    Ok(WorkspaceAttentionOutput { items })
+    Ok(WorkspaceAttentionOutput {
+        items,
+        running,
+        requests,
+    })
 }
 
 #[tauri::command]

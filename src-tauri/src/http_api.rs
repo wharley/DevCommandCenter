@@ -1427,6 +1427,41 @@ async fn shell_default_handler() -> Json<Value> {
 #[serde(rename_all = "camelCase")]
 struct EventsStreamQuery {
     session_id: Option<String>,
+    /// `lifecycle`: only the events that change what a task is doing (turns
+    /// starting and ending, requests, delegations), never the streamed text
+    /// or tool output. The phone's home and banners need nothing else, and
+    /// over the relay the deltas of every running agent add up.
+    kinds: Option<String>,
+}
+
+/// The events `kinds=lifecycle` keeps: those that move a task between
+/// running, waiting on the person and done, plus new tasks and delegations.
+fn is_lifecycle_event(event: &CoreEvent) -> bool {
+    matches!(
+        event,
+        CoreEvent::WorkspacePrepared { .. }
+            | CoreEvent::WorkspaceReady { .. }
+            | CoreEvent::SessionStarted { .. }
+            | CoreEvent::SessionCompleted { .. }
+            | CoreEvent::SessionAborted { .. }
+            | CoreEvent::SessionResumed { .. }
+            | CoreEvent::SessionObjectivePaused { .. }
+            | CoreEvent::SessionUsageLimitReached { .. }
+            | CoreEvent::SessionUsageLimitResumed { .. }
+            | CoreEvent::SessionConversationRewound { .. }
+            | CoreEvent::SessionTurnStarted { .. }
+            | CoreEvent::SessionTurnCompleted { .. }
+            | CoreEvent::SessionTurnAborted { .. }
+            | CoreEvent::SessionTurnUserInputRequested { .. }
+            | CoreEvent::SessionTurnUserInputResolved { .. }
+            | CoreEvent::SessionTurnPermissionRequested { .. }
+            | CoreEvent::SessionTurnPermissionResolved { .. }
+            | CoreEvent::SessionDelegationRequested { .. }
+            | CoreEvent::SessionDelegationStarted { .. }
+            | CoreEvent::SessionDelegationCompleted { .. }
+            | CoreEvent::SessionDelegationFailed { .. }
+            | CoreEvent::SessionDelegationCancelled { .. }
+    )
 }
 
 /// Turns one broadcast item into an SSE frame. A session event carries its
@@ -1436,6 +1471,7 @@ struct EventsStreamQuery {
 fn events_stream_frame(
     message: Result<HttpStreamItem, BroadcastStreamRecvError>,
     session_filter: Option<&str>,
+    lifecycle_only: bool,
 ) -> Option<Event> {
     match message {
         Ok(item) => {
@@ -1451,6 +1487,9 @@ fn events_stream_frame(
                 }
             };
             if session_filter.is_some() && event.session_id() != session_filter {
+                return None;
+            }
+            if lifecycle_only && !is_lifecycle_event(event) {
                 return None;
             }
             let payload = serde_json::to_string(event).ok()?;
@@ -1477,8 +1516,10 @@ async fn events_stream_handler(
 > {
     let receiver = backend.events.subscribe();
     let session_filter = query.session_id.filter(|id| !id.is_empty());
-    let stream = BroadcastStream::new(receiver)
-        .filter_map(move |message| events_stream_frame(message, session_filter.as_deref()).map(Ok));
+    let lifecycle_only = query.kinds.as_deref() == Some("lifecycle");
+    let stream = BroadcastStream::new(receiver).filter_map(move |message| {
+        events_stream_frame(message, session_filter.as_deref(), lifecycle_only).map(Ok)
+    });
 
     Ok(Sse::new(stream).keep_alive(
         KeepAlive::new()
@@ -3093,6 +3134,30 @@ mod tests {
         assert!(!seen.contains("other"), "{seen}");
         assert!(seen.contains("id: 7"), "{seen}");
         assert!(seen.contains("event: core-event"), "{seen}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn lifecycle_stream_skips_streamed_text() {
+        let fixture = embedded_fixture().await;
+        let mut body = open_stream(&fixture.app, "/api/v1/events/stream?kinds=lifecycle").await;
+        let item = |event| HttpStreamItem::core(event, None);
+        let events = &fixture.backend.events;
+        events
+            .send(item(CoreEvent::SessionTurnDelta {
+                session_id: "s".into(),
+                turn_id: "t".into(),
+                content: "token-text".into(),
+            }))
+            .unwrap();
+        events
+            .send(item(CoreEvent::SessionTurnCompleted {
+                session_id: "s".into(),
+                turn_id: "t".into(),
+            }))
+            .unwrap();
+
+        let seen = read_until(&mut body, "sessionTurnCompleted").await;
+        assert!(!seen.contains("token-text"), "{seen}");
     }
 
     #[tokio::test(flavor = "current_thread")]

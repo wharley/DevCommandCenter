@@ -929,6 +929,36 @@ pub fn last_turn_awaiting_since(events: &[SessionEventRecord]) -> Option<String>
         .map(str::to_string)
 }
 
+/// The request events (permissions and questions) the running turn still
+/// waits on, in history order: what a client needs to answer them without
+/// reading the whole history.
+pub fn open_turn_request_events(events: &[SessionEventRecord]) -> Vec<&SessionEventRecord> {
+    let Some(pending) = open_turn_requests(events) else {
+        return Vec::new();
+    };
+    let open: Vec<&str> = pending
+        .permissions
+        .iter()
+        .chain(pending.inputs.iter())
+        .map(|(request_id, _)| *request_id)
+        .collect();
+    // Only the running turn's own requests, even if an older turn reused an id.
+    let turn_start = events
+        .iter()
+        .rposition(|event| matches!(event.kind, SessionEventKind::TurnStarted { .. }))
+        .unwrap_or(0);
+    events[turn_start..]
+        .iter()
+        .filter(|event| match &event.kind {
+            SessionEventKind::TurnPermissionRequested { request_id, .. }
+            | SessionEventKind::TurnUserInputRequested { request_id, .. } => {
+                open.contains(&request_id.as_str())
+            }
+            _ => false,
+        })
+        .collect()
+}
+
 /// Open requests of the turn still running, as (request id, requested at).
 struct OpenTurnRequests<'a> {
     permissions: Vec<(&'a str, &'a str)>,
@@ -1122,6 +1152,34 @@ mod tests {
 
         let stale_request = vec![turn_started(1, "t2"), permission_requested(2, "t1", "p1")];
         assert_eq!(last_turn_awaiting_user(&stale_request), None);
+    }
+
+    #[test]
+    fn open_request_events_are_the_running_turns_unanswered_ones() {
+        let events = vec![
+            turn_started(1, "t1"),
+            permission_requested(2, "t1", "old"),
+            turn_started(3, "t2"),
+            permission_requested(4, "t2", "p1"),
+            permission_resolved(5, "t2", "p1"),
+            input_requested(6, "t2", "q1"),
+            permission_requested(7, "t2", "p2"),
+        ];
+        let open: Vec<u64> = open_turn_request_events(&events)
+            .iter()
+            .map(|event| event.sequence)
+            .collect();
+        assert_eq!(open, vec![6, 7]);
+
+        let mut ended = events.clone();
+        ended.push(event(
+            8,
+            "2026-09-30T10:00:09Z",
+            SessionEventKind::TurnCompleted {
+                turn_id: TurnId("t2".to_string()),
+            },
+        ));
+        assert!(open_turn_request_events(&ended).is_empty());
     }
 
     #[test]

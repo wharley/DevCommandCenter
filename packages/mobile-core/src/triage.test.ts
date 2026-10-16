@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { RawSessionEvent } from "./threadEvents.ts";
 import {
 	classifySession,
+	liveRunning,
 	liveSessions,
 	runScan,
+	scanFromSnapshot,
 	triageGroups,
+	withLiveOverlay,
 	type Comb,
 	type SessionSearchResult,
 } from "./triage.ts";
@@ -131,5 +134,61 @@ describe("triage with the desktop's attention list", () => {
 		]);
 		expect(groups.running.map((s) => s.sessionId)).toEqual(["c"]);
 		expect(groups.recent.map((s) => s.sessionId)).toEqual([]);
+	});
+});
+
+describe("scan from the desktop's snapshot", () => {
+	it("runs what the desktop says runs and answers its open requests inline", () => {
+		const a = session("a", { workspaceId: "wa" });
+		const b = session("b", { workspaceId: "wb" });
+		const c = session("c", { workspaceId: "wc" });
+		const scan = scanFromSnapshot(
+			[a, b, c],
+			[],
+			[{ workspaceId: "wb", sessionId: "b", sessionIds: ["b"], startedAt: null }],
+			[{ ...ev("turn_permission_requested", { turnId: "t", requestId: "r1", command: "yarn test" }), sessionId: "a" }],
+		);
+		expect([...scan.statuses]).toEqual([["b", "running"]]);
+		expect(scan.needsYou.map((p) => [p.thread.sessionId, p.requestId])).toEqual([["a", "r1"]]);
+		const groups = triageGroups(scan);
+		expect(groups.running.map((s) => s.sessionId)).toEqual(["b"]);
+		expect(groups.recent.map((s) => s.sessionId)).toEqual(["c"]);
+	});
+});
+
+describe("history sweep on older desktops", () => {
+	it("keeps what it knew about a thread whose history did not arrive", async () => {
+		let failing = false;
+		const fetchJson = async <T,>(path: string): Promise<T> => {
+			if (path.startsWith("/api/v1/sessions/search")) return [session("a"), session("b")] as T;
+			if (path === "/api/v1/combs") return [] as T;
+			if (failing) throw new Error("timed out");
+			return [ev("turn_started", { turnId: "t" })] as T;
+		};
+		const first = await runScan(fetchJson);
+		expect(triageGroups(first.scan).running).toHaveLength(2);
+		failing = true;
+		const second = await runScan(fetchJson, first.scan);
+		expect(triageGroups(second.scan).running.map((s) => s.sessionId)).toEqual(["a", "b"]);
+	});
+});
+
+describe("live overlay", () => {
+	it("moves a task in and out of running before the next read", () => {
+		expect(liveRunning("turn_started")).toBe(true);
+		expect(liveRunning("turn_permission_requested")).toBe(false);
+		expect(liveRunning("turn_completed")).toBe(false);
+		expect(liveRunning("session_started")).toBeNull();
+		const scan = { sessions: [session("a"), session("b")], statuses: new Map([["b", "running" as const]]), needsYou: [] };
+		const moved = withLiveOverlay(
+			scan,
+			new Map([
+				["a", { running: true, seq: 1 }],
+				["b", { running: false, seq: 2 }],
+				["unknown", { running: true, seq: 3 }],
+			]),
+		);
+		expect([...moved.statuses]).toEqual([["a", "running"]]);
+		expect([...scan.statuses]).toEqual([["b", "running"]]);
 	});
 });

@@ -21,7 +21,7 @@ import {
 /** The slice of `RemoteClient` this module uses (a fake in tests). */
 export type ChannelClient = {
 	readonly isOpen: boolean;
-	request(method: string, path: string, init?: { body?: unknown }): Promise<RemoteResponse>;
+	request(method: string, path: string, init?: { body?: unknown; signal?: AbortSignal }): Promise<RemoteResponse>;
 	subscribe(
 		path: string,
 		handlers: { onEvent: (event: StreamEvent) => void; onEnd?: (error?: string) => void },
@@ -117,10 +117,14 @@ export class RemoteBackend implements Backend {
 
 	async request<T>(method: string, path: string, body?: unknown, options?: { timeoutMs?: number }): Promise<T> {
 		const client = await this.online();
+		// On timeout the desktop is told to stop too: a late answer would only
+		// hold up the channel for the requests after it.
+		const abort = new AbortController();
 		const response = await withTimeout(
-			client.request(method, path, body === undefined ? {} : { body }),
+			client.request(method, path, body === undefined ? { signal: abort.signal } : { body, signal: abort.signal }),
 			options?.timeoutMs ?? this.options.requestTimeoutMs,
 			"O computador demorou para responder. Uma ação enviada pode ainda estar em andamento.",
+			() => abort.abort(),
 		);
 		return parseResponse<T>(response);
 	}
@@ -293,9 +297,12 @@ function offlineMessage(state: ConnectionState): string {
 	return "Sem conexão com o computador.";
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string, onTimeout?: () => void): Promise<T> {
 	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error(message)), ms);
+		const timer = setTimeout(() => {
+			reject(new Error(message));
+			onTimeout?.();
+		}, ms);
 		promise.then(
 			(value) => {
 				clearTimeout(timer);

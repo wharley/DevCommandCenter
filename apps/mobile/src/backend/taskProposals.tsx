@@ -53,7 +53,7 @@ function Live({ backend, children }: { backend: Backend; children: ReactNode }) 
 
 	useEffect(() => {
 		refresh();
-		const stop = backend.subscribe(() => "/api/v1/events/stream", {
+		const stop = backend.subscribe(() => "/api/v1/events/stream?kinds=lifecycle", {
 			onOpen: (reopened) => {
 				if (reopened) refresh();
 			},

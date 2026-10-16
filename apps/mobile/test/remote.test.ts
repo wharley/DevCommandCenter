@@ -140,6 +140,23 @@ describe("RemoteBackend", () => {
 		backend.dispose();
 	});
 
+	it("tells the desktop to stop a request it gave up waiting for", async () => {
+		const client = fakeClient();
+		let signal: AbortSignal | undefined;
+		client.request = (_method, _path, init) => {
+			signal = init?.signal;
+			return new Promise(() => {});
+		};
+		const backend = new RemoteBackend({ initial: client, connect: async () => fakeClient(), requestTimeoutMs: 1_000 });
+		const result = backend.request("GET", "/api/v1/sessions/s/events").catch((e: unknown) => e);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(signal?.aborted).toBe(false);
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(await result).toBeInstanceOf(Error);
+		expect(signal?.aborted).toBe(true);
+		backend.dispose();
+	});
+
 	it("waits for the channel instead of failing a request while reconnecting", async () => {
 		const clients: FakeClient[] = [];
 		const backend = new RemoteBackend({

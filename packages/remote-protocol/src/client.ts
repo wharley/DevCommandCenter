@@ -125,6 +125,11 @@ export type RequestInit = {
 	headers?: Headers;
 	/** A string or bytes is sent as is; anything else as JSON. */
 	body?: unknown;
+	/**
+	 * Gives up on the request: the promise rejects and the desktop is told to
+	 * stop (`cancel`), so an answer nobody waits for stops taking the channel.
+	 */
+	signal?: AbortSignal;
 };
 
 export type StreamHandlers = {
@@ -241,14 +246,27 @@ export class RemoteClient {
 			body = JSON.stringify(init.body);
 			headers["content-type"] ??= "application/json";
 		}
+		const signal = init.signal;
+		if (signal?.aborted) throw new RemoteChannelError("request cancelled");
+		let onAbort: (() => void) | null = null;
 		const frame = await new Promise<ResponseFrame>((resolve, reject) => {
 			this.pending.set(id, { resolve, reject });
+			if (signal) {
+				onAbort = () => {
+					if (!this.pending.delete(id)) return;
+					if (this.isOpen) this.send({ t: "cancel", id });
+					reject(new RemoteChannelError("request cancelled"));
+				};
+				signal.addEventListener("abort", onAbort, { once: true });
+			}
 			try {
 				this.send({ t: "req", id, method, path, headers, ...bodyFields(body) });
 			} catch (error) {
 				this.pending.delete(id);
 				reject(error as Error);
 			}
+		}).finally(() => {
+			if (signal && onAbort) signal.removeEventListener("abort", onAbort);
 		});
 		const bytes = bodyBytes(frame);
 		return {

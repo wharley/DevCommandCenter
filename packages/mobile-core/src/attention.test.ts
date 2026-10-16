@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attentionLabel, isResultUnread, needsYouEntries, parseAttention, withSeenResult } from "./attention.ts";
+import { attentionLabel, isResultUnread, needsYouEntries, parseAttention, parseHomeSnapshot, withSeenResult } from "./attention.ts";
 
 const wire = {
 	items: [
@@ -33,5 +33,32 @@ describe("attention", () => {
 		// Results from before the phone started tracking are not news; no baseline, nothing unread.
 		expect(isResultUnread("2026-10-12T08:00:00Z", undefined, baseline)).toBe(false);
 		expect(isResultUnread("2026-10-12T10:00:00Z", undefined, null)).toBe(false);
+	});
+});
+
+describe("parseHomeSnapshot", () => {
+	it("reads what runs, the open requests and the snapshot id", () => {
+		const snapshot = parseHomeSnapshot({
+			...wire,
+			snapshotId: "abc",
+			running: [{ workspaceId: "w9", sessionId: "s9", sessionIds: ["s9", "s8"], startedAt: "2026-10-16T13:04:06Z" }, { bad: true }],
+			requests: [{ eventId: "e", sessionId: "s1", sequence: 3, occurredAt: "x", kind: { type: "turn_permission_requested" } }, null],
+		});
+		expect(snapshot.unchanged).toBe(false);
+		if (snapshot.unchanged) return;
+		expect(snapshot.snapshotId).toBe("abc");
+		expect(snapshot.running).toEqual([{ workspaceId: "w9", sessionId: "s9", sessionIds: ["s9", "s8"], startedAt: "2026-10-16T13:04:06Z" }]);
+		expect(snapshot.requests).toHaveLength(1);
+		expect(snapshot.entries.map((e) => e.workspaceId)).toEqual(["w1", "w2", "w3"]);
+	});
+
+	it("takes unchanged only as the answer to the id it asked about", () => {
+		expect(parseHomeSnapshot({ unchanged: true, snapshotId: "abc" }, "abc")).toEqual({ unchanged: true, snapshotId: "abc" });
+		expect(parseHomeSnapshot({ unchanged: true, snapshotId: "abc" }, "old").unchanged).toBe(false);
+	});
+
+	it("leaves running and requests null on desktops that predate them", () => {
+		const snapshot = parseHomeSnapshot(wire);
+		expect(snapshot).toMatchObject({ unchanged: false, snapshotId: null, running: null, requests: null });
 	});
 });
