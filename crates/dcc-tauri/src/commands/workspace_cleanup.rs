@@ -6,6 +6,10 @@
 //! task's branch are the thing a person may not remember is there. Each
 //! worktree gets a verdict from local git state alone — no network, no
 //! model — so the cleanup list can preselect only what is safe.
+//!
+//! A task's child tasks work in worktrees of their own, removed with it. They
+//! count toward its size and its verdict: an edit a child never applied to
+//! the task is lost the same way.
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -16,8 +20,14 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::State;
 
-use dcc_core::{domain::workspace::WorkspaceId, ports::WorkspaceRepo};
-use dcc_infra::db::SqliteWorkspaceRepo;
+use dcc_core::{
+    domain::{
+        delegation_apply::DelegationApplyTransactionState,
+        delegation_worktree::DelegationWorktreeOperationState, workspace::WorkspaceId,
+    },
+    ports::{DelegationApplyTransactionRepo, DelegationWorktreeOperationRepo, WorkspaceRepo},
+};
+use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 
 use crate::{
     commands::workspace_support::directory_logical_size, git::run_git_output,
@@ -144,13 +154,82 @@ fn worktree_verdict(worktree: &Path, base_branch: &str) -> Verdict {
     Verdict::only(WorkspaceCleanupSafety::Safe)
 }
 
-/// Size and safety of each task's own worktree. Unknown ids are skipped.
+/// How much a verdict stands in the way of deleting: the worst one of a task
+/// and its children decides.
+fn severity(safety: WorkspaceCleanupSafety) -> u8 {
+    match safety {
+        WorkspaceCleanupSafety::NoWorktree => 0,
+        WorkspaceCleanupSafety::Safe => 1,
+        WorkspaceCleanupSafety::Unpushed => 2,
+        WorkspaceCleanupSafety::Unknown => 3,
+        WorkspaceCleanupSafety::Uncommitted => 4,
+    }
+}
+
+fn combine(task: Verdict, child: Verdict) -> Verdict {
+    let safety = if severity(child.safety) > severity(task.safety) {
+        child.safety
+    } else {
+        task.safety
+    };
+    Verdict {
+        safety,
+        changed_files: if safety == WorkspaceCleanupSafety::Uncommitted {
+            task.changed_files.saturating_add(child.changed_files)
+        } else {
+            0
+        },
+        unpushed_commits: if safety == WorkspaceCleanupSafety::Unpushed {
+            task.unpushed_commits.saturating_add(child.unpushed_commits)
+        } else {
+            0
+        },
+    }
+}
+
+/// A child task's worktree that deleting the task would remove.
+struct ChildWorktree {
+    path: PathBuf,
+    /// Its edits were applied to the task, so leftovers in it are copies.
+    applied: bool,
+}
+
+async fn child_worktrees(
+    session_repo: &SqliteSessionRepo,
+    workspace_id: &WorkspaceId,
+) -> Result<Vec<ChildWorktree>, String> {
+    let operations = session_repo
+        .list_delegation_worktree_operations_by_workspace(workspace_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut children = Vec::new();
+    for operation in operations {
+        if operation.state == DelegationWorktreeOperationState::Removed {
+            continue;
+        }
+        let applied = session_repo
+            .get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .is_some_and(|apply| apply.state == DelegationApplyTransactionState::Applied);
+        children.push(ChildWorktree {
+            path: PathBuf::from(operation.worktree_path),
+            applied,
+        });
+    }
+    Ok(children)
+}
+
+/// Size and safety of each task's worktree and its child tasks' worktrees.
+/// Unknown ids are skipped.
 #[tauri::command]
 pub async fn workspace_cleanup_scan(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceCleanupScanInput,
 ) -> Result<WorkspaceCleanupScanOutput, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let session_repo =
+        SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let mut seen_ids = BTreeSet::new();
     let mut targets = Vec::new();
     for workspace_id in input.workspace_ids {
@@ -170,15 +249,16 @@ pub async fn workspace_cleanup_scan(
             .map(str::trim)
             .filter(|path| !path.is_empty() && *path != workspace.root_path.trim())
             .map(PathBuf::from);
-        targets.push((workspace_id, worktree, workspace.base_branch));
+        let children = child_worktrees(&session_repo, &workspace.id).await?;
+        targets.push((workspace_id, worktree, workspace.base_branch, children));
     }
 
     tauri::async_runtime::spawn_blocking(move || {
         // Two tasks can share a worktree path; measure and inspect it once.
         let mut measured = HashMap::<PathBuf, (u64, Verdict)>::new();
         let mut workspaces = Vec::with_capacity(targets.len());
-        for (workspace_id, worktree, base_branch) in targets {
-            let (bytes, verdict) = match worktree {
+        for (workspace_id, worktree, base_branch, children) in targets {
+            let (mut bytes, mut verdict) = match worktree {
                 None => (0, Verdict::only(WorkspaceCleanupSafety::NoWorktree)),
                 Some(path) => match measured.get(&path) {
                     Some(known) => *known,
@@ -192,6 +272,26 @@ pub async fn workspace_cleanup_scan(
                     }
                 },
             };
+            for child in children {
+                if !child.path.exists() {
+                    continue;
+                }
+                let (child_bytes, child_verdict) = match measured.get(&child.path) {
+                    Some(known) => *known,
+                    None => {
+                        let child_verdict = if child.applied {
+                            Verdict::only(WorkspaceCleanupSafety::Safe)
+                        } else {
+                            worktree_verdict(&child.path, &base_branch)
+                        };
+                        let known = (directory_logical_size(&child.path)?, child_verdict);
+                        measured.insert(child.path, known);
+                        known
+                    }
+                };
+                bytes = bytes.saturating_add(child_bytes);
+                verdict = combine(verdict, child_verdict);
+            }
             workspaces.push(WorkspaceCleanupEntry {
                 workspace_id,
                 bytes,
@@ -271,6 +371,37 @@ mod tests {
             ],
         );
         (base, worktree)
+    }
+
+    #[test]
+    fn a_child_task_with_unapplied_edits_makes_its_task_unsafe() {
+        let local_task = Verdict::only(WorkspaceCleanupSafety::NoWorktree);
+        let child = Verdict {
+            safety: WorkspaceCleanupSafety::Uncommitted,
+            changed_files: 8,
+            unpushed_commits: 0,
+        };
+        assert_eq!(combine(local_task, child), child);
+
+        let task = Verdict {
+            safety: WorkspaceCleanupSafety::Unpushed,
+            changed_files: 0,
+            unpushed_commits: 2,
+        };
+        assert_eq!(
+            combine(task, child).safety,
+            WorkspaceCleanupSafety::Uncommitted
+        );
+        assert_eq!(combine(task, child).unpushed_commits, 0);
+        // A clean child never hides what the task itself holds.
+        assert_eq!(
+            combine(task, Verdict::only(WorkspaceCleanupSafety::Safe)),
+            task
+        );
+        assert_eq!(
+            combine(local_task, Verdict::only(WorkspaceCleanupSafety::Safe)).safety,
+            WorkspaceCleanupSafety::Safe
+        );
     }
 
     #[test]

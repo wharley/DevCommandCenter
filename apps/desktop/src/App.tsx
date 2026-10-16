@@ -5156,6 +5156,7 @@ export default function App() {
 				deleteRemoteBranch?: boolean;
 				expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null;
 				expectedRemoteTargets?: WorkspaceRemoteBranchDeletionTarget[];
+				discardDelegationChanges?: boolean;
 			} = {},
 		) => {
 			const workspace = allWorkspaces.find((candidate) => candidate.id === workspaceId);

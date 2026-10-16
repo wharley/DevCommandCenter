@@ -906,6 +906,21 @@ pub async fn approve_delegation_with_state(
     )
     .await?;
     crate::delegation_runtime::notify_parent_of_review_outcome(state, &updated, true);
+    if updated.budget.allow_file_edits || matches!(updated.mode, DelegationMode::Implement) {
+        // The edits live in the parent now; the child's checkout only costs
+        // disk. In the background: removing node_modules can take a while.
+        let cleanup_state = state.clone();
+        let delegation_id = updated.id.clone();
+        tokio::spawn(async move {
+            crate::delegation_runtime::remove_delegation_worktree(
+                &cleanup_state,
+                Some(&delegation_id),
+                None,
+                false,
+            )
+            .await;
+        });
+    }
 
     Ok(ApproveDelegationOutput {
         delegation: updated,

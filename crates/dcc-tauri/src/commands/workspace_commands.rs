@@ -662,6 +662,10 @@ pub struct WorkspaceRemoveDelegationWorktreeInput {
     pub operation_id: Option<String>,
     #[serde(default)]
     pub remove_branch: bool,
+    /// The person chose to throw away edits that never reached the parent.
+    /// Without it, uncommitted unapplied edits keep the worktree in place.
+    #[serde(default)]
+    pub discard_changes: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -5106,7 +5110,14 @@ pub async fn workspace_remove_delegation_worktree_with_state(
         _ => return Err("delegation_id or operation_id is required".to_string()),
     }
     .ok_or_else(|| "delegation worktree journal entry was not found".to_string())?;
-    remove_journaled_delegation_worktree(&state, &journal_repo, &requested_root, operation).await
+    remove_journaled_delegation_worktree(
+        &state,
+        &journal_repo,
+        &requested_root,
+        operation,
+        input.discard_changes,
+    )
+    .await
 }
 
 async fn remove_journaled_delegation_worktree(
@@ -5114,6 +5125,7 @@ async fn remove_journaled_delegation_worktree(
     journal_repo: &SqliteSessionRepo,
     requested_root: &str,
     mut operation: DelegationWorktreeOperation,
+    discard_changes: bool,
 ) -> Result<(), String> {
     validate_delegation_operation_workspace_scope(state, requested_root, &operation).await?;
     if matches!(operation.state, DelegationWorktreeOperationState::Removed) {
@@ -5125,11 +5137,14 @@ async fn remove_journaled_delegation_worktree(
         .join("transactions");
     let _operation_lock = try_lock_apply_operation(&artifact_root, &operation.operation_id.0)?
         .ok_or_else(|| "delegation operation is owned by another live process".to_string())?;
+    // Edits already applied to the parent are not lost when the worktree goes.
+    let mut edits_reached_parent = false;
     if let Some(apply) = journal_repo
         .get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
         .await
         .map_err(|error| error.to_string())?
     {
+        edits_reached_parent = apply.state == DelegationApplyTransactionState::Applied;
         match apply.state {
             DelegationApplyTransactionState::Preparing
             | DelegationApplyTransactionState::Prepared
@@ -5155,6 +5170,21 @@ async fn remove_journaled_delegation_worktree(
         .expected_branch_oid
         .clone()
         .ok_or_else(|| "delegation worktree journal has no expected branch OID".to_string())?;
+    let keep_unapplied_edits = !discard_changes
+        && !edits_reached_parent
+        && !matches!(operation.state, DelegationWorktreeOperationState::Preparing);
+    // Checked before the journal records destructive intent: a refusal must
+    // leave an open task exactly as it was, still reviewable and applicable.
+    if keep_unapplied_edits && worktree_path.exists() {
+        let probe = worktree_path.clone();
+        let files =
+            tauri::async_runtime::spawn_blocking(move || delegation_uncommitted_files(&probe))
+                .await
+                .map_err(|error| error.to_string())??;
+        if files > 0 {
+            return Err(unapplied_delegation_edits_error(files));
+        }
+    }
     if matches!(operation.state, DelegationWorktreeOperationState::Preparing) {
         operation.state = DelegationWorktreeOperationState::CleanupRequired;
         operation.last_error = Some("delegation worktree preparation was interrupted".to_string());
@@ -5233,6 +5263,7 @@ async fn remove_journaled_delegation_worktree(
                         trusted_worktree,
                         &expected_branch,
                         &expected_oid,
+                        keep_unapplied_edits,
                     )
                 },
             )
@@ -5241,7 +5272,12 @@ async fn remove_journaled_delegation_worktree(
     } else {
         state
             .run_git_workspace_mutation_blocking(requested_root, move |trusted_root| {
-                delete_delegation_branch_ref(trusted_root, &expected_branch, &expected_oid)
+                release_delegation_branch(
+                    trusted_root,
+                    &expected_branch,
+                    &expected_oid,
+                    keep_unapplied_edits,
+                )
             })
             .await
             .map_err(workspace_mutation_error)
@@ -5360,20 +5396,117 @@ fn delete_delegation_branch_ref(
     }
 }
 
+/// Prefix of the error a cleanup returns instead of deleting edits that never
+/// reached the parent. The frontend reads it to offer "discard" explicitly.
+pub(crate) const UNAPPLIED_DELEGATION_EDITS: &str = "unapplied_delegation_edits:";
+
+fn unapplied_delegation_edits_error(files: u32) -> String {
+    format!(
+        "{UNAPPLIED_DELEGATION_EDITS}{files} uncommitted file(s) in a child task's worktree were never applied to the parent"
+    )
+}
+
+/// Uncommitted files, untracked included: what `worktree remove --force` loses.
+fn delegation_uncommitted_files(worktree_path: &Path) -> Result<u32, String> {
+    let worktree = worktree_path
+        .to_str()
+        .ok_or_else(|| "delegation worktree path is not valid UTF-8".to_string())?;
+    let output = run_git_output(
+        worktree,
+        &[
+            "status",
+            "--porcelain=v1",
+            "--no-renames",
+            "--untracked-files=normal",
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(git_output_err("git status", &output.stderr));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count() as u32)
+}
+
+/// Whether `oid` is in the history of any branch or remote-tracking ref other
+/// than the delegation's own: then deleting that branch loses nothing.
+fn delegation_tip_reachable_elsewhere(root: &str, branch: &str, oid: &str) -> Result<bool, String> {
+    let output = run_git_output(
+        root,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "--contains",
+            oid,
+            "refs/heads",
+            "refs/remotes",
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(git_output_err(
+            "git for-each-ref --contains",
+            &output.stderr,
+        ));
+    }
+    let own = format!("refs/heads/{branch}");
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .any(|reference| !reference.is_empty() && reference != own))
+}
+
+/// Drops the delegation branch once its worktree is gone. A branch that moved
+/// past its journaled OID holds the child's own commits: it is deleted when
+/// they live on elsewhere or the person discarded them, and kept otherwise,
+/// so freeing the disk never costs a commit.
+fn release_delegation_branch(
+    root: &Path,
+    branch: &str,
+    expected_oid: &str,
+    keep_unapplied_edits: bool,
+) -> Result<(), String> {
+    if !branch.starts_with("dcc/delegation/") {
+        return Err("refusing to remove a non-DCC delegation branch".to_string());
+    }
+    let root_str = root
+        .to_str()
+        .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
+    validate_branch_for_fetch(root_str, branch)?;
+    let reference = format!("refs/heads/{branch}");
+    let observed = run_git_output(root_str, &["rev-parse", "--verify", "--quiet", &reference])?;
+    if !observed.status.success() {
+        if observed.status.code() == Some(1) {
+            return Ok(());
+        }
+        return Err(git_output_err("git rev-parse --verify", &observed.stderr));
+    }
+    let observed_oid = String::from_utf8_lossy(&observed.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if observed_oid == expected_oid.trim().to_ascii_lowercase() {
+        return delete_delegation_branch_ref(root, branch, expected_oid);
+    }
+    if keep_unapplied_edits && !delegation_tip_reachable_elsewhere(root_str, branch, &observed_oid)?
+    {
+        return Ok(());
+    }
+    delete_delegation_branch_ref(root, branch, &observed_oid)
+}
+
 fn remove_journaled_delegation_worktree_inner(
     root: &Path,
     worktree_path: &Path,
     expected_branch: &str,
     expected_oid: &str,
+    keep_unapplied_edits: bool,
 ) -> Result<(), String> {
     let worktree = worktree_path
         .to_str()
         .ok_or_else(|| "delegation worktree path is not valid UTF-8".to_string())?;
-    let observed_branch = resolve_current_branch_name(worktree)?;
-    let observed_oid = resolve_current_commit_sha(worktree)?
-        .filter(|oid| !oid.trim().is_empty())
-        .ok_or_else(|| "failed to resolve delegation branch OID".to_string())?;
-    if observed_branch != expected_branch || observed_oid != expected_oid {
+    // A different branch checked out means the folder is no longer the
+    // child's; commits on the child's own branch are handled below.
+    if resolve_current_branch_name(worktree)? != expected_branch {
         return Err(
             "delegation worktree branch identity changed after it was journaled".to_string(),
         );
@@ -5382,6 +5515,12 @@ fn remove_journaled_delegation_worktree_inner(
     if worktree_path.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str()) {
         return Err("delegation worktree path does not match its journaled branch".to_string());
     }
+    if keep_unapplied_edits {
+        let files = delegation_uncommitted_files(worktree_path)?;
+        if files > 0 {
+            return Err(unapplied_delegation_edits_error(files));
+        }
+    }
     remove_worktree(root, worktree_path).map_err(|error| error.to_string())?;
     if worktree_path.exists() {
         return Err(format!(
@@ -5389,7 +5528,7 @@ fn remove_journaled_delegation_worktree_inner(
             worktree_path.display()
         ));
     }
-    delete_delegation_branch_ref(root, expected_branch, expected_oid)
+    release_delegation_branch(root, expected_branch, expected_oid, keep_unapplied_edits)
 }
 
 #[cfg(test)]
@@ -8341,7 +8480,9 @@ pub async fn delete_workspace_bundle(
 
     let mut delegation_cleanup_errors = Vec::new();
     for workspace in created_workspaces.iter().rev() {
-        if let Err(error) = cleanup_delegation_worktrees(&state, &session_repo, workspace).await {
+        if let Err(error) =
+            cleanup_delegation_worktrees(&state, &session_repo, workspace, false).await
+        {
             delegation_cleanup_errors.push(format!("{} delegations: {error}", workspace.id.0));
         }
     }
@@ -11618,6 +11759,168 @@ mod editor_workspace_file_tests {
         );
     }
 
+    /// A parent repository and a journaled-style child worktree on
+    /// `dcc/delegation/<suffix>`, plus the base OID the journal would hold.
+    fn journaled_child(label: &str) -> (TestDir, TestDir, String, String) {
+        let parent = TestDir::new(&format!("{label}-parent"));
+        initialize_branch_test_repository(parent.as_str(), "feature/parent");
+        let child = TestDir::new("delegation-journaled");
+        fs::remove_dir_all(&child.path).expect("reserve child destination");
+        let suffix = child
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_prefix("dcc-delegation-"))
+            .expect("DCC delegation test path")
+            .to_string();
+        let branch = format!("dcc/delegation/{suffix}");
+        let base_oid = resolve_current_commit_sha(parent.as_str())
+            .expect("read parent HEAD")
+            .expect("parent HEAD");
+        create_worktree_branch_from_ref(&parent.path, &child.path, &branch, &base_oid)
+            .expect("create delegation worktree");
+        (parent, child, branch, base_oid)
+    }
+
+    fn commit_all(root: &str, message: &str) {
+        assert!(run_git_output(root, &["add", "-A"])
+            .expect("git add")
+            .status
+            .success());
+        let commit = run_git_output(
+            root,
+            &[
+                "-c",
+                "user.name=DCC Tests",
+                "-c",
+                "user.email=dcc@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                message,
+            ],
+        )
+        .expect("git commit");
+        assert!(commit.status.success(), "commit {message}");
+    }
+
+    fn branch_oid(root: &str, branch: &str) -> Option<String> {
+        let output = run_git_output(
+            root,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ],
+        )
+        .expect("rev-parse");
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    #[test]
+    fn journaled_removal_keeps_unapplied_edits_until_the_person_discards_them() {
+        let (parent, child, branch, base_oid) = journaled_child("delegation-unapplied");
+        fs::write(child.path.join("draft.txt"), "child work\n").expect("write child edit");
+
+        let refused = remove_journaled_delegation_worktree_inner(
+            &parent.path,
+            &child.path,
+            &branch,
+            &base_oid,
+            true,
+        )
+        .expect_err("unapplied edits block the cleanup");
+        assert!(refused.starts_with(UNAPPLIED_DELEGATION_EDITS), "{refused}");
+        assert!(child.path.join("draft.txt").exists(), "nothing was removed");
+        assert!(branch_oid(parent.as_str(), &branch).is_some());
+
+        remove_journaled_delegation_worktree_inner(
+            &parent.path,
+            &child.path,
+            &branch,
+            &base_oid,
+            false,
+        )
+        .expect("discarding removes the worktree");
+        assert!(!child.path.exists());
+        assert!(branch_oid(parent.as_str(), &branch).is_none());
+    }
+
+    #[test]
+    fn journaled_removal_frees_a_child_whose_commit_already_reached_the_base() {
+        let (parent, child, branch, base_oid) = journaled_child("delegation-merged");
+        fs::write(child.path.join("feature.txt"), "done\n").expect("write child edit");
+        commit_all(child.as_str(), "child commit");
+        let merge = run_git_output(parent.as_str(), &["merge", "--ff-only", "-q", &branch])
+            .expect("merge child branch");
+        assert!(merge.status.success());
+
+        remove_journaled_delegation_worktree_inner(
+            &parent.path,
+            &child.path,
+            &branch,
+            &base_oid,
+            true,
+        )
+        .expect("a merged child commit no longer blocks the cleanup");
+        assert!(!child.path.exists());
+        assert!(branch_oid(parent.as_str(), &branch).is_none());
+    }
+
+    #[test]
+    fn journaled_removal_keeps_the_branch_holding_unmerged_child_commits() {
+        let (parent, child, branch, base_oid) = journaled_child("delegation-unmerged");
+        fs::write(child.path.join("feature.txt"), "only here\n").expect("write child edit");
+        commit_all(child.as_str(), "child commit");
+        let child_oid = branch_oid(parent.as_str(), &branch).expect("child branch");
+        assert_ne!(child_oid, base_oid);
+
+        remove_journaled_delegation_worktree_inner(
+            &parent.path,
+            &child.path,
+            &branch,
+            &base_oid,
+            true,
+        )
+        .expect("the folder goes, the commit stays");
+        assert!(!child.path.exists());
+        assert_eq!(
+            branch_oid(parent.as_str(), &branch),
+            Some(child_oid.clone())
+        );
+
+        // A retry after the folder is gone keeps the branch too.
+        release_delegation_branch(&parent.path, &branch, &base_oid, true)
+            .expect("retry keeps the branch");
+        assert_eq!(branch_oid(parent.as_str(), &branch), Some(child_oid));
+        release_delegation_branch(&parent.path, &branch, &base_oid, false)
+            .expect("discarding drops it");
+        assert!(branch_oid(parent.as_str(), &branch).is_none());
+    }
+
+    #[test]
+    fn journaled_removal_refuses_a_worktree_on_another_branch() {
+        let (parent, child, branch, base_oid) = journaled_child("delegation-foreign");
+        let switch = run_git_output(child.as_str(), &["switch", "-q", "-c", "someone-else"])
+            .expect("switch branch");
+        assert!(switch.status.success());
+
+        let refused = remove_journaled_delegation_worktree_inner(
+            &parent.path,
+            &child.path,
+            &branch,
+            &base_oid,
+            false,
+        )
+        .expect_err("a foreign branch is never removed");
+        assert!(refused.contains("branch identity changed"), "{refused}");
+        assert!(child.path.exists());
+    }
+
     #[test]
     fn delegation_branch_compare_delete_is_idempotent_and_preserves_successors() {
         let repo = TestDir::new("delegation-ref-cas");
@@ -12947,6 +13250,9 @@ pub struct DeleteWorkspaceInput {
     pub delete_remote_branch: bool,
     #[serde(default)]
     pub expected_remote_target: Option<WorkspaceRemoteBranchDeletionTarget>,
+    /// The person confirmed losing child-task edits that never reached this task.
+    #[serde(default)]
+    pub discard_delegation_changes: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Type)]
@@ -13206,7 +13512,23 @@ pub async fn delete_workspace(
         .await
         .map_err(|error| format!("memory export must finish before deleting this task: {error}"))?;
     ensure_workspace_history_deletable(&session_repo, std::slice::from_ref(&workspace))?;
-    cleanup_delegation_worktrees(&state, &session_repo, &workspace).await?;
+    if !input.discard_delegation_changes {
+        // Before anything is removed, so a refusal leaves the task whole.
+        let pending = unapplied_delegation_edits(&session_repo, &workspace).await?;
+        if !pending.is_empty() {
+            return Err(format!(
+                "{UNAPPLIED_DELEGATION_EDITS}{}",
+                serde_json::to_string(&pending).map_err(|error| error.to_string())?
+            ));
+        }
+    }
+    cleanup_delegation_worktrees(
+        &state,
+        &session_repo,
+        &workspace,
+        input.discard_delegation_changes,
+    )
+    .await?;
     if input.delete_remote_branch {
         let expected_target = input.expected_remote_target.ok_or_else(|| {
             "The remote branch was not confirmed. Reopen the deletion dialog and try again."
@@ -13269,10 +13591,75 @@ pub async fn delete_workspace(
     Ok(())
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnappliedDelegationEdits {
+    title: String,
+    files: u32,
+}
+
+/// Child tasks whose uncommitted edits never reached this task: what deleting
+/// it would throw away. Read-only, so it runs before anything is removed.
+async fn unapplied_delegation_edits(
+    session_repo: &SqliteSessionRepo,
+    workspace: &Workspace,
+) -> Result<Vec<UnappliedDelegationEdits>, String> {
+    let active_root = resolve_workspace_active_root(workspace).to_string();
+    let operations = session_repo
+        .list_delegation_worktree_operations_by_workspace(&workspace.id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut pending = Vec::new();
+    for operation in operations {
+        if matches!(
+            operation.state,
+            DelegationWorktreeOperationState::Removed | DelegationWorktreeOperationState::Preparing
+        ) {
+            continue;
+        }
+        let applied = session_repo
+            .get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
+            .await
+            .map_err(|e| e.to_string())?
+            .is_some_and(|apply| apply.state == DelegationApplyTransactionState::Applied);
+        if applied {
+            continue;
+        }
+        let Ok(worktree_path) =
+            validate_delegation_worktree_path(&active_root, &operation.worktree_path)
+        else {
+            continue;
+        };
+        if !worktree_path.exists() {
+            continue;
+        }
+        let files = tauri::async_runtime::spawn_blocking(move || {
+            delegation_uncommitted_files(&worktree_path)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        if files == 0 {
+            continue;
+        }
+        let title = match operation.delegation_id.as_ref() {
+            Some(delegation_id) => DelegationRepo::get_delegation(session_repo, delegation_id)
+                .await
+                .map_err(|e| e.to_string())?
+                .and_then(|delegation| delegation.title)
+                .filter(|title| !title.trim().is_empty()),
+            None => None,
+        }
+        .unwrap_or_else(|| operation.branch.clone());
+        pending.push(UnappliedDelegationEdits { title, files });
+    }
+    Ok(pending)
+}
+
 async fn cleanup_delegation_worktrees(
     state: &WorkspaceCommandState,
     session_repo: &SqliteSessionRepo,
     workspace: &Workspace,
+    discard_changes: bool,
 ) -> Result<(), String> {
     let operations = session_repo
         .list_delegation_worktree_operations_by_workspace(&workspace.id)
@@ -13280,7 +13667,14 @@ async fn cleanup_delegation_worktrees(
         .map_err(|e| e.to_string())?;
     let active_root = resolve_workspace_active_root(workspace);
     for operation in operations {
-        remove_journaled_delegation_worktree(state, session_repo, active_root, operation).await?;
+        remove_journaled_delegation_worktree(
+            state,
+            session_repo,
+            active_root,
+            operation,
+            discard_changes,
+        )
+        .await?;
     }
 
     Ok(())
@@ -13613,9 +14007,14 @@ pub async fn reconcile_delegation_worktree_operations(
             ) && operation.delegation_id.is_none());
         if should_remove {
             let source_root = operation.source_root.clone();
-            if let Err(error) =
-                remove_journaled_delegation_worktree(state, &journal_repo, &source_root, operation)
-                    .await
+            if let Err(error) = remove_journaled_delegation_worktree(
+                state,
+                &journal_repo,
+                &source_root,
+                operation,
+                true,
+            )
+            .await
             {
                 warnings.push(error);
             }
@@ -13716,7 +14115,7 @@ pub(crate) async fn delete_repository_with_workspaces(
     ensure_workspace_history_deletable(session_repo, &workspaces)?;
 
     for workspace in &workspaces {
-        cleanup_delegation_worktrees(state, session_repo, workspace).await?;
+        cleanup_delegation_worktrees(state, session_repo, workspace, false).await?;
         cleanup_workspace_files(workspace)?;
     }
 

@@ -1003,6 +1003,8 @@ export type DeleteWorkspaceInput = {
 	workspaceId: string,
 	deleteRemoteBranch?: boolean,
 	expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null,
+	// The person confirmed losing child-task edits that never reached this task.
+	discardDelegationChanges?: boolean,
 };
 
 export type DisableMcpIntegrationInput = {
@@ -3766,6 +3768,11 @@ export type WorkspaceRemoveDelegationWorktreeInput = {
 	delegationId?: DelegationId | null,
 	operationId?: string | null,
 	removeBranch?: boolean,
+	/**
+	 *  The person chose to throw away edits that never reached the parent.
+	 *  Without it, uncommitted unapplied edits keep the worktree in place.
+	 */
+	discardChanges?: boolean,
 };
 
 export type WorkspaceReviewStateInput = {

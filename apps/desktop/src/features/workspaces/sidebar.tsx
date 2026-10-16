@@ -140,6 +140,10 @@ import {
 	formatDiskBytes,
 	workspaceDiskUsageIds,
 } from "./workspace-disk-usage";
+import {
+	parseUnappliedDelegationEdits,
+	type UnappliedDelegationEdits,
+} from "./unapplied-delegation-edits";
 
 type VirtualItem =
 	| {
@@ -378,6 +382,7 @@ type WorkspacesSidebarProps = {
 			deleteRemoteBranch?: boolean;
 			expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null;
 			expectedRemoteTargets?: WorkspaceRemoteBranchDeletionTarget[];
+			discardDelegationChanges?: boolean;
 		},
 	) => void | Promise<void>;
 	onDeleteProject?: (input: {
@@ -645,6 +650,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		useState<WorkspaceSummary | null>(null);
 	const [deleteRemoteBranch, setDeleteRemoteBranch] = useState(false);
 	const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
+	// Child tasks whose unapplied edits the backend refused to delete.
+	const [unappliedDelegationEdits, setUnappliedDelegationEdits] = useState<
+		UnappliedDelegationEdits[] | null
+	>(null);
 	const [isCleanupOpen, setIsCleanupOpen] = useState(false);
 	const completedScan = useCompletedCleanupScan(completedRows, showCompletedDiskUsage);
 	const hasCompletedRows = showCompletedDiskUsage && completedRows.length > 0;
@@ -1091,6 +1100,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			}
 			setWorkspaceDeletionTarget(workspace);
 			setDeleteRemoteBranch(false);
+			setUnappliedDelegationEdits(null);
 		},
 		[workspaces],
 	);
@@ -1106,8 +1116,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				deleteRemoteBranch,
 				expectedRemoteTarget: remoteTargets[0] ?? null,
 				expectedRemoteTargets: remoteTargets,
+				// Only after the dialog listed them and the person confirmed again.
+				discardDelegationChanges: unappliedDelegationEdits !== null,
 			});
 			setWorkspaceDeletionTarget(null);
+			setUnappliedDelegationEdits(null);
 		} catch (error) {
 			const message =
 				error instanceof Error
@@ -1115,14 +1128,23 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					: typeof error === "string"
 						? error
 						: "";
+			const unapplied = parseUnappliedDelegationEdits(message);
+			if (unapplied.list) {
+				// Nothing was removed: keep the dialog and ask about the edits.
+				setUnappliedDelegationEdits(unapplied.list);
+				return;
+			}
 			toast.error(
 				message.includes("Undo recovery is still active")
 					? t("sidebar.deleteWorkspaceUndoRecoveryActive")
-					: message || t("sidebar.deleteWorkspaceError"),
+					: unapplied.blocked
+						? t("sidebar.deleteWorkspaceUnappliedEditsBlocked")
+						: message || t("sidebar.deleteWorkspaceError"),
 			);
 			// The backend may already have removed a remote branch or worktree.
 			// Closing forces the next confirmation to use the refreshed target.
 			setWorkspaceDeletionTarget(null);
+			setUnappliedDelegationEdits(null);
 		} finally {
 			setIsDeletingWorkspace(false);
 		}
@@ -1130,6 +1152,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		deleteRemoteBranch,
 		onDeleteWorkspace,
 		t,
+		unappliedDelegationEdits,
 		workspaceDeletionTarget,
 	]);
 
@@ -2287,6 +2310,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				onOpenChange={(open) => {
 					if (!open && !isDeletingWorkspace) {
 						setWorkspaceDeletionTarget(null);
+						setUnappliedDelegationEdits(null);
 					}
 				}}
 			>
@@ -2362,12 +2386,42 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							{t("sidebar.noRemoteBranchToDelete")}
 						</p>
 					)}
+					{unappliedDelegationEdits ? (
+						<div className="min-w-0 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm">
+							<p className="font-medium text-foreground">
+								{t("sidebar.deleteWorkspaceUnappliedEditsTitle")}
+							</p>
+							<ul className="mt-1.5 space-y-0.5 text-muted-foreground">
+								{unappliedDelegationEdits.map((child, index) => (
+									<li
+										key={`${child.title}-${index}`}
+										className="flex min-w-0 items-baseline justify-between gap-3"
+									>
+										<span className="min-w-0 truncate" title={child.title}>
+											{child.title}
+										</span>
+										<span className="shrink-0 text-xs tabular-nums">
+											{t("sidebar.deleteWorkspaceUnappliedEditsFiles", {
+												count: child.files,
+											})}
+										</span>
+									</li>
+								))}
+							</ul>
+							<p className="mt-2 text-muted-foreground">
+								{t("sidebar.deleteWorkspaceUnappliedEdits")}
+							</p>
+						</div>
+					) : null}
 					<DialogFooter className="min-w-0">
 						<Button
 							type="button"
 							variant="outline"
 							disabled={isDeletingWorkspace}
-							onClick={() => setWorkspaceDeletionTarget(null)}
+							onClick={() => {
+								setWorkspaceDeletionTarget(null);
+								setUnappliedDelegationEdits(null);
+							}}
 						>
 							{t("sidebar.cancel")}
 						</Button>
@@ -2388,6 +2442,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 									<Loader2 className="size-3.5 animate-spin" aria-hidden />
 									{t("sidebar.deletingWorkspace")}
 								</>
+							) : unappliedDelegationEdits ? (
+								t("sidebar.deleteWorkspaceDiscardEdits")
 							) : (
 								t("sidebar.deleteWorkspaceConfirm")
 							)}

@@ -1354,14 +1354,8 @@ export function WorkspaceInspectorSidebar({
 							) ?? current,
 					);
 				}
+				// Approving removes the child's worktree in the background.
 				options?.onApplied?.();
-				await workspaceRemoveDelegationWorktree({
-					workspaceRoot: root,
-					delegationId: delegation.id,
-					removeBranch: true,
-				}).catch((cleanupError) => {
-					console.error("[inspector] delegation worktree cleanup failed", cleanupError);
-				});
 				await queryClient.invalidateQueries({
 					queryKey: ["delegations", workspaceId],
 				});
@@ -1407,6 +1401,7 @@ export function WorkspaceInspectorSidebar({
 					workspaceRoot: root,
 					delegationId: delegation.id,
 					removeBranch: true,
+					discardChanges: true,
 				});
 				await cancelDelegation({
 					delegationId: delegation.id,

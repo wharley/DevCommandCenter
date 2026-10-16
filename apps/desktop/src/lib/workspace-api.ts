@@ -204,6 +204,7 @@ export function deleteWorkspace(
 	options: {
 		deleteRemoteBranch?: boolean;
 		expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null;
+		discardDelegationChanges?: boolean;
 	} = {},
 ) {
 	return invoke<void>(WORKSPACE_METHODS.deleteWorkspace, {
@@ -211,6 +212,7 @@ export function deleteWorkspace(
 			workspaceId,
 			deleteRemoteBranch: options.deleteRemoteBranch ?? false,
 			expectedRemoteTarget: options.expectedRemoteTarget ?? null,
+			discardDelegationChanges: options.discardDelegationChanges ?? false,
 		},
 	});
 }

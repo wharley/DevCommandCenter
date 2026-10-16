@@ -831,10 +831,13 @@ fn resolve_target_provider(
         .ok_or_else(|| "no enabled provider can take this delegation".to_string())
 }
 
-async fn remove_delegation_worktree(
+/// Best effort: a failure is logged and the journal keeps the worktree for a
+/// later cleanup. Without `discard_changes`, unapplied uncommitted edits stay.
+pub(crate) async fn remove_delegation_worktree(
     state: &SessionCommandState,
     delegation_id: Option<&DelegationId>,
     operation_id: Option<&str>,
+    discard_changes: bool,
 ) {
     let operation = match (delegation_id, operation_id) {
         (Some(delegation_id), _) => {
@@ -867,6 +870,7 @@ async fn remove_delegation_worktree(
         },
         operation_id: operation_id.map(str::to_string),
         remove_branch: true,
+        discard_changes,
     };
     if let Err(error) = workspace_remove_delegation_worktree_with_state(
         &WorkspaceCommandState::from_session(state),
@@ -1171,7 +1175,7 @@ pub async fn run_delegation(
     let (running, child_session_id, prompt) = match launched {
         Ok(launched) => launched,
         Err(error) => {
-            remove_delegation_worktree(state, None, operation_id.as_deref()).await;
+            remove_delegation_worktree(state, None, operation_id.as_deref(), true).await;
             return Err(error);
         }
     };
@@ -1267,7 +1271,7 @@ async fn finish_failed(state: &SessionCommandState, delegation: Delegation, reas
         }
     };
     if is_edit_capable(&failed) {
-        remove_delegation_worktree(state, Some(&failed.id), None).await;
+        remove_delegation_worktree(state, Some(&failed.id), None, true).await;
     }
     if failed.origin == DelegationOrigin::Agent {
         deliver_result(state, &failed, delegation_result_turn(&failed, Some(reason))).await;
@@ -2406,7 +2410,7 @@ pub async fn cancel_delegation_for_parent(
         }
     }
     if is_edit_capable(&cancelled) {
-        remove_delegation_worktree(state, Some(&cancelled.id), None).await;
+        remove_delegation_worktree(state, Some(&cancelled.id), None, true).await;
     }
     Ok(cancelled)
 }

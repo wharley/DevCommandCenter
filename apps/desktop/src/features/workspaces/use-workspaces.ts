@@ -520,6 +520,7 @@ export function useWorkspacesPanel(workspaces: WorkspaceSummary[] = []) {
 				deleteRemoteBranch?: boolean;
 				expectedRemoteTarget?: WorkspaceRemoteBranchDeletionTarget | null;
 				expectedRemoteTargets?: WorkspaceRemoteBranchDeletionTarget[];
+				discardDelegationChanges?: boolean;
 			} = {},
 		) => {
 			const workspace = workspaceListRef.current.find(
