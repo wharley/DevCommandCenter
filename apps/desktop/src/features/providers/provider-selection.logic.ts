@@ -25,6 +25,15 @@ export type SessionComposerSelection = {
 	modelId: string;
 };
 
+/**
+ * A pick the person made inside a task, plus the provider the task ran on
+ * when they made it. Once the task runs on another provider, the pick is
+ * stale and the task's own provider wins.
+ */
+export type StoredSessionComposerSelection = SessionComposerSelection & {
+	sessionProviderId?: string;
+};
+
 export function isProviderEnabled(
 	provider: ProviderCatalog["providers"][number],
 ): boolean {
@@ -56,7 +65,7 @@ export function getProviderActionBlockReason(
 	return isProviderEnabled(provider) ? null : disabledReason;
 }
 
-function readSessionComposerMap(): Record<string, SessionComposerSelection> {
+function readSessionComposerMap(): Record<string, StoredSessionComposerSelection> {
 	if (typeof window === "undefined") {
 		return {};
 	}
@@ -69,7 +78,7 @@ function readSessionComposerMap(): Record<string, SessionComposerSelection> {
 		if (!parsed || typeof parsed !== "object") {
 			return {};
 		}
-		return parsed as Record<string, SessionComposerSelection>;
+		return parsed as Record<string, StoredSessionComposerSelection>;
 	} catch {
 		return {};
 	}
@@ -77,7 +86,7 @@ function readSessionComposerMap(): Record<string, SessionComposerSelection> {
 
 export function getSessionComposerSelection(
 	sessionId: string,
-): SessionComposerSelection | null {
+): StoredSessionComposerSelection | null {
 	const entry = readSessionComposerMap()[sessionId];
 	if (
 		!entry ||
@@ -91,7 +100,7 @@ export function getSessionComposerSelection(
 
 export function setSessionComposerSelection(
 	sessionId: string,
-	selection: SessionComposerSelection,
+	selection: StoredSessionComposerSelection,
 ) {
 	if (typeof window === "undefined") {
 		return;
@@ -172,6 +181,33 @@ export function resolveProjectComposerSelection(
 	}
 	const modelId = resolveSelectedModelId(provider, stored.modelId);
 	return modelId ? { providerId: provider.id, modelId } : null;
+}
+
+/**
+ * The provider/model a task's composer shows: the person's own pick while the
+ * task still runs on the provider it was made on, else what the task runs on.
+ * Picks saved without that provider (older builds) cannot be trusted: they
+ * were often written with the previous task's model while switching tasks.
+ */
+export function resolveSessionComposerSelection(
+	providers: ProviderCatalog["providers"],
+	stored: StoredSessionComposerSelection | null,
+	session: { providerId: string | null; model: string | null },
+): SessionComposerSelection | null {
+	if (stored && session.providerId && stored.sessionProviderId === session.providerId) {
+		const provider = providers.find((entry) => entry.id === stored.providerId);
+		const modelId = resolveSelectedModelId(provider ?? null, stored.modelId);
+		if (provider && modelId) {
+			return { providerId: provider.id, modelId };
+		}
+	}
+	if (!session.providerId) {
+		return null;
+	}
+	const provider = providers.find((entry) => entry.id === session.providerId);
+	// A task started without an explicit model runs on the provider's default.
+	const modelId = resolveSelectedModelId(provider ?? null, session.model);
+	return provider && modelId ? { providerId: provider.id, modelId } : null;
 }
 
 export function resolveSelectedProviderId(

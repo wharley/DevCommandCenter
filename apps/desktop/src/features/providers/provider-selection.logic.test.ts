@@ -7,6 +7,7 @@ import {
 	isProviderEnabled,
 	isProviderReady,
 	resolveProjectComposerSelection,
+	resolveSessionComposerSelection,
 	setProjectComposerSelection,
 	resolveSelectedModelId,
 	resolveSelectedProviderId,
@@ -275,5 +276,54 @@ describe("project composer selection", () => {
 			.toBeNull();
 		expect(resolveProjectComposerSelection([ready], { providerId: "missing", modelId: "m" })).toBeNull();
 		expect(resolveProjectComposerSelection([ready], null)).toBeNull();
+	});
+});
+
+describe("session composer selection", () => {
+	const alpha = makeProvider("alpha", true);
+	const beta = makeProvider("beta", true);
+	const session = { providerId: "beta", model: "beta-default" };
+
+	it("shows what the task runs on when nothing trustworthy was saved", () => {
+		expect(resolveSessionComposerSelection([alpha, beta], null, session))
+			.toEqual({ providerId: "beta", modelId: "beta-default" });
+		// Saved by an older build while switching tasks: the previous task's model.
+		expect(
+			resolveSessionComposerSelection(
+				[alpha, beta],
+				{ providerId: "alpha", modelId: "alpha-default" },
+				session,
+			),
+		).toEqual({ providerId: "beta", modelId: "beta-default" });
+	});
+
+	it("keeps the person's pick while the task is still on the provider it was made on", () => {
+		expect(
+			resolveSessionComposerSelection(
+				[alpha, beta],
+				{ providerId: "alpha", modelId: "alpha-default", sessionProviderId: "beta" },
+				session,
+			),
+		).toEqual({ providerId: "alpha", modelId: "alpha-default" });
+	});
+
+	it("drops the pick once the task runs on another provider", () => {
+		const gamma = makeProvider("gamma", true);
+		expect(
+			resolveSessionComposerSelection(
+				[alpha, beta, gamma],
+				{ providerId: "beta", modelId: "beta-default", sessionProviderId: "alpha" },
+				{ providerId: "gamma", model: "gamma-default" },
+			),
+		).toEqual({ providerId: "gamma", modelId: "gamma-default" });
+	});
+
+	it("uses the provider's default model for a task started without one", () => {
+		expect(resolveSessionComposerSelection([alpha, beta], null, { providerId: "beta", model: null }))
+			.toEqual({ providerId: "beta", modelId: "beta-default" });
+		expect(resolveSessionComposerSelection([alpha], null, { providerId: "beta", model: null }))
+			.toBeNull();
+		expect(resolveSessionComposerSelection([alpha], null, { providerId: null, model: null }))
+			.toBeNull();
 	});
 });

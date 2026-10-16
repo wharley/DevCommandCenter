@@ -246,6 +246,7 @@ import {
 	resolveSelectedProviderId,
 	resolveSelectedModelId,
 	resolveProjectComposerSelection,
+	resolveSessionComposerSelection,
 	setProjectComposerSelection,
 	setSessionComposerSelection,
 } from "./features/providers/provider-selection.logic";
@@ -2113,6 +2114,9 @@ export default function App() {
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [selectedWorkspacePath]);
 
+	/** Task whose composer the person changed by hand since opening it. */
+	const sessionComposerPickRef = useRef<string | null>(null);
+
 	/** Restore provider/model for this session, else follow backend snapshot. */
 	useEffect(() => {
 		if (providerChoices.length === 0) {
@@ -2123,26 +2127,20 @@ export default function App() {
 			return;
 		}
 
-		const stored = getSessionComposerSelection(sessionId);
-		if (stored) {
-			const provider = providerChoices.find((p) => p.id === stored.providerId);
-			const modelId = resolveSelectedModelId(provider ?? null, stored.modelId);
-			if (provider && modelId) {
-				setSelectedProviderId(stored.providerId);
-				setSelectedModelId(modelId);
-				return;
-			}
-		}
-
-		const sp = selectedSessionSnapshot.providerId;
-		const sm = selectedSessionSnapshot.model;
-		if (sp && sm) {
-			const provider = providerChoices.find((p) => p.id === sp);
-			const modelId = resolveSelectedModelId(provider ?? null, sm);
-			if (provider && modelId) {
-				setSelectedProviderId(sp);
-				setSelectedModelId(modelId);
-			}
+		// Whatever the composer holds now belongs to the task left behind; only
+		// a pick made in this task may be saved for it.
+		sessionComposerPickRef.current = null;
+		const selection = resolveSessionComposerSelection(
+			providerChoices,
+			getSessionComposerSelection(sessionId),
+			{
+				providerId: selectedSessionSnapshot.providerId ?? null,
+				model: selectedSessionSnapshot.model ?? null,
+			},
+		);
+		if (selection) {
+			setSelectedProviderId(selection.providerId);
+			setSelectedModelId(selection.modelId);
 		}
 	}, [
 		providerChoices,
@@ -2153,14 +2151,27 @@ export default function App() {
 
 	useEffect(() => {
 		const sessionId = selectedSessionSnapshot?.sessionId;
-		if (!sessionId || !selectedProviderId || !selectedModelId) {
+		const sessionProviderId = selectedSessionSnapshot?.providerId;
+		if (
+			!sessionId ||
+			sessionComposerPickRef.current !== sessionId ||
+			!sessionProviderId ||
+			!selectedProviderId ||
+			!selectedModelId
+		) {
 			return;
 		}
 		setSessionComposerSelection(sessionId, {
 			providerId: selectedProviderId,
 			modelId: selectedModelId,
+			sessionProviderId,
 		});
-	}, [selectedSessionSnapshot?.sessionId, selectedProviderId, selectedModelId]);
+	}, [
+		selectedSessionSnapshot?.sessionId,
+		selectedSessionSnapshot?.providerId,
+		selectedProviderId,
+		selectedModelId,
+	]);
 
 	const selectedProjectKey = selectedWorkspace
 		? (selectedWorkspace.projectId ?? selectedWorkspace.id)
@@ -4000,6 +4011,7 @@ export default function App() {
 				}
 				return;
 			}
+			sessionComposerPickRef.current = selectedSessionSnapshot?.sessionId ?? null;
 			setSelectedProviderId(providerId);
 			setSelectedModelId(resolveSelectedModelId(provider ?? null, null));
 			if (
@@ -4020,8 +4032,9 @@ export default function App() {
 		// expose "auto"), so scanning every provider would pick the wrong one.
 		// The provider is already set explicitly via handleSelectProvider, which
 		// the model picker always calls before onSelectModel.
+		sessionComposerPickRef.current = selectedSessionSnapshot?.sessionId ?? null;
 		setSelectedModelId(modelId);
-	}, []);
+	}, [selectedSessionSnapshot?.sessionId]);
 
 	const handleChangeProviderRuntime = useCallback(
 		(providerId: string, draft: ProviderRuntimeDraft) => {
