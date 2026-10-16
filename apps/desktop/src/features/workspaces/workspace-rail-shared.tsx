@@ -1,15 +1,8 @@
-import { Folder } from "lucide-react";
-import type { DccWorkspaceRailGroup } from "./workspace-rail-projection";
 import type { DccWorkspaceRailRow } from "./workspace-rail-projection";
 import type { WorkspaceSummary } from "./types";
-import { cn } from "@/lib/utils";
 
 export const WAITING_SECTION_ID = "dccWaiting";
 export const COMPLETED_SECTION_ID = "dccCompleted";
-/** Subdivisions of the project list, shown only when a project is pinned. */
-export const PINNED_SECTION_ID = "dccPinned";
-export const RECENT_SECTION_ID = "dccRecent";
-export const IDLE_SECTION_ID = "dccIdle";
 
 /** Branch / workflow chroma aligned to shell tokens (maps DCC coarse status → rail hints). */
 export type WorkspaceRailBranchTone =
@@ -84,18 +77,11 @@ export function workspaceRailStatusTakesRecapSlot(
 
 export function findSelectedRailSectionId(
 	selectedWorkspaceId: string | null | undefined,
-	groups: DccWorkspaceRailGroup[],
 	waitingRows: DccWorkspaceRailRow[],
 	completedRows: DccWorkspaceRailRow[],
 ): string | null {
 	if (!selectedWorkspaceId) {
 		return null;
-	}
-
-	for (const group of groups) {
-		if (group.rows.some((row) => row.id === selectedWorkspaceId)) {
-			return group.id;
-		}
 	}
 
 	if (waitingRows.some((row) => row.id === selectedWorkspaceId)) {
@@ -131,14 +117,4 @@ export function initialsFromWorkspaceLabel(label: string): string {
 	);
 
 	return alphanumeric.slice(0, 2).join("").toUpperCase() || "WS";
-}
-
-export function ProjectGroupGlyph({ className }: { className?: string }) {
-	return (
-		<Folder
-			className={cn("size-[14px] shrink-0 text-muted-foreground", className)}
-			strokeWidth={2}
-			aria-hidden
-		/>
-	);
 }

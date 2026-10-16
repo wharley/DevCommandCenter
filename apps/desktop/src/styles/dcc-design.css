@@ -85,41 +85,20 @@
 		background: color-mix(in oklab, var(--foreground) 7%, transparent);
 	}
 }
+/* Task rows are a dense list, not cards: no frame until hovered. Selection is
+   neutral on purpose — green means a running agent, nothing else. */
 .dcc-task-card {
-	border-radius: 12px;
-	background: color-mix(in oklab, var(--background) 28%, transparent);
-	box-shadow: inset 0 0 0 1px var(--dcc-surface-edge);
+	border-radius: var(--dcc-radius-control);
 	transition:
 		background var(--dcc-motion-fast),
-		box-shadow var(--dcc-motion-fast),
 		opacity var(--dcc-motion-fast);
 }
 .dcc-task-card:hover,
 .dcc-task-card:focus-visible {
-	background: var(--popover);
-	box-shadow:
-		inset 0 0 0 1px var(--border),
-		var(--dcc-shadow-card);
+	background: color-mix(in oklab, var(--foreground) 5%, transparent);
 }
 .dcc-task-card[data-active="true"] {
-	background: color-mix(
-		in oklab,
-		var(--popover) 94%,
-		var(--dcc-accent-calm) 6%
-	);
-	box-shadow:
-		inset 0 0 0 1px
-			color-mix(in oklab, var(--dcc-accent-calm) 28%, var(--border)),
-		var(--dcc-shadow-card);
-}
-.dcc-task-card .dcc-task-selection {
-	background: var(--dcc-accent-calm);
-	left: 1px;
-}
-.dcc-task-card[data-status="completed"] {
-	background: transparent;
-	box-shadow: inset 0 0 0 1px
-		color-mix(in oklab, var(--border) 45%, transparent);
+	background: color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 .dcc-running-panel {
 	/* Neutral on purpose: amber is reserved for rows that need the user. */

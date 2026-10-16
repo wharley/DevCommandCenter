@@ -67,7 +67,7 @@ import { ProjectIdentityGlyph } from "./project-identity";
 import { ProviderIcon } from "@/features/providers/provider-icons";
 
 const rowVariants = cva(
-	"dcc-task-card group/dccRailRow relative min-h-[70px] select-none cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
+	"dcc-task-card group/dccRailRow relative select-none cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
 	{
 		variants: {
 			active: {
@@ -123,15 +123,6 @@ const recapToneClass: Record<WorkspaceRecapTone, string> = {
 	ready: "text-foreground/70",
 	done: "text-muted-foreground/80",
 };
-
-function WorkspaceRailBranch({ branch }: { branch: string }) {
-	return (
-		<span className="flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted-foreground/70">
-			<GitBranch className="size-2.5 shrink-0" aria-hidden />
-			<span className="truncate">{branch}</span>
-		</span>
-	);
-}
 
 const PR_STATE_CLASS: Record<WorkspaceRailPullRequestState, string> = {
 	open: "text-emerald-700 dark:text-emerald-300/90",
@@ -450,6 +441,17 @@ export const WorkspaceRailRowItem = memo(
 					: workspace.status === "ready" && !activity && !recapMessage
 						? t("sidebar.workspaceState.readyToStart")
 						: null;
+		// The agent at work, or blocked on the person, keeps the line; between
+		// turns it goes to what the task needs next (checks, PR, review).
+		const showsNextAction =
+			!compact &&
+			Boolean(nextActionMessage) &&
+			!hasPriorityWorkspaceStatus &&
+			activity?.state !== "active" &&
+			activity?.state !== "waiting" &&
+			activity?.state !== "limited" &&
+			!awaitsDelegatedReview;
+		const projectName = projectLabel?.trim() || pathLeaf(workspace.rootPath);
 		const [pendingAction, setPendingAction] = useState<
 			"restore" | "complete" | "archive" | null
 		>(null);
@@ -572,7 +574,6 @@ export const WorkspaceRailRowItem = memo(
 					}}
 					className={cn(
 						rowVariants({ active: selected }),
-						compact && "min-h-0",
 						"w-full text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
 						(workspace.status === "archived" || workspace.status === "completed") &&
 							!selected &&
@@ -580,18 +581,24 @@ export const WorkspaceRailRowItem = memo(
 						isPending && "pointer-events-none opacity-60",
 					)}
 				>
-					{selected ? (
-						<span
-							aria-hidden
-							className="dcc-task-selection absolute inset-y-2 left-0 w-0.5 rounded-full bg-sidebar-primary"
-						/>
-					) : null}
 					<div className="flex min-w-0 items-start gap-2">
-						<WorkspaceRailAvatar
-							title={displayTitle}
-							subtitle={workspace.name}
-							providerId={providerId}
-						/>
+						{projectSeed ? (
+							<ProjectIdentityGlyph
+								icon={projectIcon}
+								color={projectColor}
+								seed={projectSeed}
+								active={activity?.state === "active"}
+								size="sm"
+								title={projectName ?? undefined}
+								className="mt-0.5 size-[18px]"
+							/>
+						) : (
+							<WorkspaceRailAvatar
+								title={displayTitle}
+								subtitle={workspace.name}
+								providerId={providerId}
+							/>
+						)}
 						<Tooltip
 							open={!isEditing && identityOpen}
 							onOpenChange={setIdentityOpen}
@@ -678,60 +685,59 @@ export const WorkspaceRailRowItem = memo(
 								) : null}
 							</div>
 							<div className="mt-px flex min-w-0 items-center justify-between gap-2">
-								{snoozedUntilLabel ? (
-									<span className="flex min-w-0 items-center gap-1.5 text-[10.5px] font-medium leading-4 text-muted-foreground">
-										<AlarmClock className="size-3 shrink-0" aria-hidden />
-										<span className="truncate">
-											{t("sidebar.snooze.until", { time: snoozedUntilLabel })}
-										</span>
-									</span>
-								) : workspaceStatusMessage && !compact ? (
-									<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-										<span
-											aria-hidden
-											className={cn(
-												"size-[6px] shrink-0 rounded-full",
-												workspace.status === "initializing" &&
-													"animate-pulse bg-muted-foreground/45",
-												workspace.status === "setup_pending" &&
-													"bg-amber-500/80",
-												workspace.status === "ready" &&
-													"bg-muted-foreground/35",
-											)}
+								<div className="flex min-w-0 items-center gap-1 overflow-hidden text-[10.5px] font-medium leading-4 text-muted-foreground">
+									{projectName ? (
+										<>
+											<span className="min-w-[2.5rem] max-w-[45%] shrink truncate">
+												{projectName}
+											</span>
+											<span aria-hidden className="shrink-0 opacity-40">
+												·
+											</span>
+										</>
+									) : null}
+									{providerId ? (
+										<ProviderIcon
+											provider={providerId}
+											className="size-[11px] shrink-0 opacity-75"
 										/>
+									) : null}
+									{snoozedUntilLabel ? (
+										<span className="flex min-w-0 items-center gap-1">
+											<AlarmClock className="size-3 shrink-0" aria-hidden />
+											<span className="truncate">
+												{t("sidebar.snooze.until", { time: snoozedUntilLabel })}
+											</span>
+										</span>
+									) : workspaceStatusMessage && !compact ? (
 										<span
 											className={cn(
-												"truncate text-[10.5px] font-medium leading-4 text-muted-foreground",
+												"truncate",
+												workspace.status === "initializing" && "animate-pulse",
 												workspace.status === "setup_pending" &&
 													"text-amber-700 dark:text-amber-300/90",
 											)}
 										>
 											{workspaceStatusMessage}
 										</span>
-									</div>
-								) : activity?.state === "limited" &&
-								  activity.usageLimit &&
-								  !hasPriorityWorkspaceStatus &&
-								  !compact ? (
-									<WorkspaceUsageLimitState limit={activity.usageLimit} />
-								) : activity && !hasPriorityWorkspaceStatus && !compact ? (
-									<div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+									) : activity?.state === "limited" &&
+									  activity.usageLimit &&
+									  !hasPriorityWorkspaceStatus &&
+									  !compact ? (
+										<WorkspaceUsageLimitState limit={activity.usageLimit} />
+									) : showsNextAction && railRecap ? (
+										// Between turns the next step says more than "Completed".
 										<span
-											aria-hidden
-											className={cn(
-												"size-[6px] shrink-0 rounded-full",
-												activity.state === "active" &&
-													"bg-emerald-500 animate-pulse",
-												(activity.state === "waiting" || awaitsDelegatedReview) && "bg-amber-500",
-												activity.state === "completed" &&
-													!awaitsDelegatedReview &&
-													(unseenResult ? "bg-sky-500" : "bg-muted-foreground/45"),
-												activity.state === "aborted" && "bg-destructive",
-											)}
-										/>
-										<span className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[10.5px] font-medium leading-4 text-muted-foreground">
+											className={cn("truncate", recapToneClass[railRecap.recap.tone])}
+											title={recapMessage ?? undefined}
+										>
+											{nextActionMessage}
+										</span>
+									) : activity && !hasPriorityWorkspaceStatus && !compact ? (
+										<span className="flex min-w-0 items-center gap-1 whitespace-nowrap">
 											<span
 												className={cn(
+													"truncate",
 													activity.state === "active" &&
 														"text-emerald-700 dark:text-emerald-300/90",
 													(activity.state === "waiting" || awaitsDelegatedReview) &&
@@ -758,30 +764,12 @@ export const WorkspaceRailRowItem = memo(
 											</span>
 											<WorkspaceActivityTime activity={activity} />
 										</span>
-									</div>
-								) : branchLabel ? (
-									<WorkspaceRailBranch branch={branchLabel} />
-								) : (
-									<span />
-								)}
+									) : branchLabel ? (
+										<span className="truncate text-muted-foreground/70">{branchLabel}</span>
+									) : null}
+								</div>
 								{railMeta ? <WorkspaceRailMetaChips meta={railMeta} /> : null}
 							</div>
-							{compact ? null : nextActionMessage && railRecap && !hasPriorityWorkspaceStatus ? (
-								<p
-									className={cn(
-										"mt-px min-w-0 truncate text-[10.5px] leading-4",
-										recapToneClass[railRecap.recap.tone],
-									)}
-									title={recapMessage ?? undefined}
-								>
-									{nextActionMessage}
-								</p>
-							) : branchLabel &&
-							  (workspaceStatusMessage || (activity && !hasPriorityWorkspaceStatus)) ? (
-								<div className="mt-px">
-									<WorkspaceRailBranch branch={branchLabel} />
-								</div>
-							) : null}
 								</div>
 							</TooltipTrigger>
 							<TooltipContent
@@ -1062,6 +1050,8 @@ export const WorkspaceRailRowItem = memo(
 	},
 	(previous, next) =>
 		previous.selected === next.selected &&
+		previous.compact === next.compact &&
+		previous.providerId === next.providerId &&
 		previous.activity?.state === next.activity?.state &&
 		previous.activity?.waitingFor === next.activity?.waitingFor &&
 		previous.activity?.usageLimit?.resetsAt === next.activity?.usageLimit?.resetsAt &&

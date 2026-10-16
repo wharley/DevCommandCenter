@@ -9,19 +9,15 @@ import {
 	ChevronRight,
 	Clock3,
 	FolderPlus,
-	GitBranch,
 	GitPullRequest,
 	Loader2,
-	MoreHorizontal,
 	PanelLeft,
 	PanelRight,
 	Pin,
-	PinOff,
 	Plus,
 	Settings2,
 	Sparkles,
 	StickyNote,
-	Trash2,
 } from "lucide-react";
 import {
 	memo,
@@ -94,20 +90,15 @@ import {
 	writeStoredRailSectionState,
 } from "./workspace-rail-open-state";
 import {
-	freezeRailGroupOrder,
 	projectGroupingKey,
 	projectWorkspaceRailGroups,
-	splitIdleRailGroups,
-	workspaceRailGroupSignal,
+	projectWorkspaceTaskList,
+	type DccTaskListSectionId,
 } from "./workspace-rail-projection";
 import {
 	COMPLETED_SECTION_ID,
 	findSelectedRailSectionId,
-	IDLE_SECTION_ID,
 	initialsFromWorkspaceLabel,
-	PINNED_SECTION_ID,
-	ProjectGroupGlyph,
-	RECENT_SECTION_ID,
 	WAITING_SECTION_ID,
 	workspaceRailDisplayTitle,
 } from "./workspace-rail-shared";
@@ -141,6 +132,7 @@ import { ProjectIdentityGlyph } from "./project-identity";
 import { ProviderIcon } from "@/features/providers/provider-icons";
 import { repositoryDisplayName } from "./repository-display-name";
 import { SidebarChildTaskRow } from "./sidebar-child-task-row";
+import { SidebarProjectMenu } from "./sidebar-project-menu";
 import { withLiveTaskState, type ChildTaskEntry } from "./sidebar-child-tasks.logic";
 import { useChildTasksByWorkspace } from "./use-child-tasks";
 import {
@@ -153,27 +145,19 @@ type VirtualItem =
 			kind: "group-header";
 			groupId: string;
 			label: string;
-			sourceKey?: string;
 			rowCount: number;
 			canCollapse: boolean;
-			headerVariant: "project" | "waiting" | "completed";
+			headerVariant: "waiting" | "completed";
 	  }
 	| { kind: "row"; groupId: string; workspace: WorkspaceSummary }
 	| { kind: "child-task"; groupId: string; workspaceId: string; task: ChildTaskEntry; last: boolean }
-	| {
-			kind: "section-label";
-			sectionId: typeof PINNED_SECTION_ID | typeof RECENT_SECTION_ID;
-			label: string;
-			groupIds: string[];
-	  }
-	| { kind: "idle-toggle"; count: number; isOpen: boolean }
+	| { kind: "day-label"; sectionId: DccTaskListSectionId }
 	| { kind: "group-gap"; size: number }
 	| { kind: "bottom-padding" };
 
 const HEADER_HEIGHT = 42;
-const SECTION_LABEL_HEIGHT = 24;
-const IDLE_TOGGLE_HEIGHT = 30;
-const ROW_HEIGHT = 76;
+const DAY_LABEL_HEIGHT = 26;
+const ROW_HEIGHT = 54;
 const COMPACT_ROW_HEIGHT = 54;
 const CHILD_TASK_HEIGHT = 26;
 const GROUP_GAP = 10;
@@ -467,7 +451,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	onDeleteWorkspace,
 	onDeleteProject,
 	onUpdateProjectIdentity,
-	onSetProjectPinned,
 	linkedFoldersByRepositoryId,
 	contextPathsByRepositoryId,
 	onSaveLinkedFolders,
@@ -568,7 +551,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			),
 		[lastInteractionSignature],
 	);
-	const { activeGroups, waitingRows, completedRows } = useMemo(
+	const { activeGroups, activeRows, waitingRows, completedRows } = useMemo(
 		() => projectWorkspaceRailGroups(workspaces, repositories, lastInteractionAt, now),
 		[lastInteractionAt, repositories, workspaces],
 	);
@@ -611,18 +594,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		const timeout = window.setTimeout(() => setFlashSectionId(null), 1600);
 		return () => window.clearTimeout(timeout);
 	}, [flashSectionId]);
-	// Projects reorder by recency, but never while the pointer is over the rail.
-	const [frozenProjectOrder, setFrozenProjectOrder] = useState<string[] | null>(null);
-	const displayedGroups = useMemo(
-		() =>
-			frozenProjectOrder
-				? freezeRailGroupOrder(activeGroups, frozenProjectOrder)
-				: activeGroups,
-		[activeGroups, frozenProjectOrder],
-	);
-	const { visibleGroups: railGroups, idleGroups } = useMemo(
-		() => splitIdleRailGroups(displayedGroups, new Set(frozenProjectOrder ?? [])),
-		[displayedGroups, frozenProjectOrder],
+	// Tasks reorder by the user's interaction, but never while the pointer is
+	// over the rail: the list it showed on entry holds until it leaves.
+	const [frozenTaskOrder, setFrozenTaskOrder] = useState<
+		{ id: string; section: DccTaskListSectionId }[] | null
+	>(null);
+	const taskSections = useMemo(
+		() => projectWorkspaceTaskList(activeRows, lastInteractionAt, now, frozenTaskOrder),
+		[activeRows, frozenTaskOrder, lastInteractionAt, now],
 	);
 	const repositoriesBySourceKey = useMemo(
 		() =>
@@ -630,20 +609,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				repositories.map((repository) => [repository.rootPath.trim(), repository]),
 			),
 		[repositories],
-	);
-	const groupSignals = useMemo(
-		() =>
-			new Map(
-				activeGroups.map((group) => [
-					group.id,
-					workspaceRailGroupSignal(group.rows, workspaceAgentActivities),
-				]),
-			),
-		[activeGroups, workspaceAgentActivities],
-	);
-	const selectedProjectSourceKey = useMemo(
-		() => workspaces.find((workspace) => workspace.id === selectedWorkspaceId)?.rootPath?.trim(),
-		[workspaces, selectedWorkspaceId],
 	);
 	const projectLabelsBySourceKey = useMemo(
 		() => new Map(activeGroups.map((group) => [group.sourceKey, group.label])),
@@ -842,7 +807,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 	}, [completedDiskUsage, workspaceDeletionTarget]);
 
 	const [sectionOpenState, setSectionOpenState] = useState(() => ({
-		...createInitialRailSectionState(activeGroups),
+		...createInitialRailSectionState(),
 		...readStoredRailSectionState(),
 	}));
 
@@ -850,22 +815,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		setSectionOpenState((current) => {
 			const next: Record<string, boolean> = {};
 			let changed = false;
-
-			for (const group of activeGroups) {
-				const nextValue = current[group.id] ?? true;
-				next[group.id] = nextValue;
-				if (current[group.id] !== nextValue) {
-					changed = true;
-				}
-			}
-
-			for (const sectionId of [PINNED_SECTION_ID, RECENT_SECTION_ID]) {
-				const sectionValue = current[sectionId] ?? true;
-				next[sectionId] = sectionValue;
-				if (current[sectionId] !== sectionValue) {
-					changed = true;
-				}
-			}
 
 			const waitingValue = current[WAITING_SECTION_ID] ?? false;
 			next[WAITING_SECTION_ID] = waitingValue;
@@ -885,7 +834,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 			return changed ? next : current;
 		});
-	}, [activeGroups]);
+	}, []);
 
 	useEffect(() => {
 		writeStoredRailSectionState(sectionOpenState);
@@ -899,7 +848,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 		const selectedSectionId = findSelectedRailSectionId(
 			selectedWorkspaceId,
-			activeGroups,
 			waitingRows,
 			completedRows,
 		);
@@ -909,23 +857,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		}
 
 		lastAutoExpandedIdRef.current = selectedWorkspaceId;
-		const selectedGroup = activeGroups.find((group) => group.id === selectedSectionId);
-		const parentSectionId =
-			selectedGroup && activeGroups.some((group) => group.pinnedAt)
-				? selectedGroup.pinnedAt
-					? PINNED_SECTION_ID
-					: RECENT_SECTION_ID
-				: null;
 		setSectionOpenState((current) =>
-			current[selectedSectionId] && (!parentSectionId || current[parentSectionId] !== false)
-				? current
-				: {
-						...current,
-						[selectedSectionId]: true,
-						...(parentSectionId ? { [parentSectionId]: true } : {}),
-					},
+			current[selectedSectionId] ? current : { ...current, [selectedSectionId]: true },
 		);
-	}, [activeGroups, completedRows, selectedWorkspaceId, waitingRows]);
+	}, [completedRows, selectedWorkspaceId, waitingRows]);
 
 	const flatItems = useMemo(() => {
 		const items: VirtualItem[] = [];
@@ -935,96 +870,17 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				list.push({ kind: "child-task", groupId, workspaceId, task, last: index === tasks.length - 1 });
 			});
 		};
-		const visibleGroups = railGroups;
-		const hasPinnedGroups = visibleGroups.some((group) => group.pinnedAt);
-
-		for (let gi = 0; gi < visibleGroups.length; gi++) {
-			const group = visibleGroups[gi]!;
-			const startsPinned = hasPinnedGroups && gi === 0;
-			const startsRecent =
-				hasPinnedGroups && !group.pinnedAt && Boolean(visibleGroups[gi - 1]?.pinnedAt);
-			if (startsPinned || startsRecent) {
-				const sectionId = startsPinned ? PINNED_SECTION_ID : RECENT_SECTION_ID;
-				if (startsRecent) {
-					items.push({ kind: "group-gap", size: GROUP_GAP });
-				}
-				items.push({
-					kind: "section-label",
-					sectionId,
-					label: t(startsPinned ? "sidebar.pinnedSection" : "sidebar.recentSection"),
-					groupIds: visibleGroups
-						.filter((candidate) => Boolean(candidate.pinnedAt) === startsPinned)
-						.map((candidate) => candidate.id),
-				});
+		for (const section of taskSections) {
+			if (items.length > 0) {
+				items.push({ kind: "group-gap", size: GROUP_GAP });
 			}
-			if (
-				hasPinnedGroups &&
-				sectionOpenState[group.pinnedAt ? PINNED_SECTION_ID : RECENT_SECTION_ID] === false
-			) {
-				continue;
-			}
-			if (!startsPinned && !startsRecent && gi > 0) {
-				const previousGroup = visibleGroups[gi - 1]!;
-				items.push({
-					kind: "group-gap",
-					size: getGroupGapSize(
-						previousGroup.rows.length > 0,
-						group.rows.length > 0,
-					),
-				});
-			}
-
-			const canCollapse = group.rows.length > 0;
-			items.push({
-				kind: "group-header",
-				groupId: group.id,
-				label: group.label,
-				sourceKey: group.sourceKey,
-				rowCount: group.rows.length,
-				canCollapse,
-				headerVariant: "project",
-			});
-
-			if (sectionOpenState[group.id] !== false && group.rows.length > 0) {
-				for (const row of group.rows) {
-					items.push({
-						kind: "row",
-						groupId: group.id,
-						workspace: row,
-					});
-					pushChildTasks(items, group.id, row.id);
-				}
+			items.push({ kind: "day-label", sectionId: section.id });
+			for (const row of section.rows) {
+				items.push({ kind: "row", groupId: section.id, workspace: row });
+				pushChildTasks(items, section.id, row.id);
 			}
 		}
-
-		let previousHasRows = (visibleGroups.at(-1)?.rows.length ?? 0) > 0;
-		// Projects without tasks wait behind one line at the end of Recent.
-		const recentCollapsed =
-			hasPinnedGroups &&
-			visibleGroups.some((group) => !group.pinnedAt) &&
-			sectionOpenState[RECENT_SECTION_ID] === false;
-		if (idleGroups.length > 0 && !recentCollapsed) {
-			const isOpen = sectionOpenState[IDLE_SECTION_ID] ?? visibleGroups.length === 0;
-			if (visibleGroups.length > 0) {
-				items.push({ kind: "group-gap", size: getGroupGapSize(previousHasRows, false) });
-			}
-			items.push({ kind: "idle-toggle", count: idleGroups.length, isOpen });
-			if (isOpen) {
-				for (const group of idleGroups) {
-					items.push({ kind: "group-gap", size: EMPTY_GROUP_GAP });
-					items.push({
-						kind: "group-header",
-						groupId: group.id,
-						label: group.label,
-						sourceKey: group.sourceKey,
-						rowCount: 0,
-						canCollapse: false,
-						headerVariant: "project",
-					});
-				}
-			}
-			previousHasRows = false;
-		}
+		let previousHasRows = taskSections.length > 0;
 
 		const specialSections = [
 			{
@@ -1076,7 +932,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 		items.push({ kind: "bottom-padding" });
 		return items;
-	}, [childTasks, completedRows, idleGroups, railGroups, sectionOpenState, t, waitingRows]);
+	}, [childTasks, completedRows, sectionOpenState, t, taskSections, waitingRows]);
 
 	const virtualizer = useVirtualizer({
 		count: flatItems.length,
@@ -1086,10 +942,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			switch (item.kind) {
 				case "group-header":
 					return HEADER_HEIGHT;
-				case "section-label":
-					return SECTION_LABEL_HEIGHT;
-				case "idle-toggle":
-					return IDLE_TOGGLE_HEIGHT;
+				case "day-label":
+					return DAY_LABEL_HEIGHT;
 				case "row":
 					return isCompactRailSection(item.groupId) ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
 				case "child-task":
@@ -1105,10 +959,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			switch (item.kind) {
 				case "group-header":
 					return `header-${item.groupId}`;
-				case "section-label":
-					return `section-${item.sectionId}`;
-				case "idle-toggle":
-					return "idle-toggle";
+				case "day-label":
+					return `day-${item.sectionId}`;
 				case "row":
 					return `row-${item.groupId}-${item.workspace.id}`;
 				case "child-task":
@@ -1249,6 +1101,44 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		workspaceDeletionTarget,
 	]);
 
+	const projectMenuNewTask = useMemo(
+		() =>
+			onCreateWorkspaceFromProject && !isCreatingWorkspace
+				? (repository: Repository) =>
+						onCreateWorkspaceFromProject({
+							projectId: repository.projectId,
+							workspaceRoot: repository.rootPath,
+							baseBranch: repository.baseBranch,
+							label: repositoryDisplayName(repository),
+						})
+				: undefined,
+		[isCreatingWorkspace, onCreateWorkspaceFromProject],
+	);
+	const projectMenuOpenBranch = useMemo(
+		() =>
+			onOpenBranchFromProject && !isCreatingWorkspace
+				? (repository: Repository) =>
+						onOpenBranchFromProject({
+							projectId: repository.projectId,
+							workspaceRoot: repository.rootPath,
+							baseBranch: repository.baseBranch,
+							label: repositoryDisplayName(repository),
+						})
+				: undefined,
+		[isCreatingWorkspace, onOpenBranchFromProject],
+	);
+	const projectMenuRemove = useMemo(
+		() =>
+			onDeleteProject && !isRemovingProject
+				? (repository: Repository) =>
+						openProjectRemovalDialog(
+							repository.rootPath.trim(),
+							repositoryDisplayName(repository),
+						)
+				: undefined,
+		[isRemovingProject, onDeleteProject, openProjectRemovalDialog],
+	);
+
 	const renderItem = useCallback(
 		(item: VirtualItem) => {
 			if (item.kind === "group-gap" || item.kind === "bottom-padding") {
@@ -1277,127 +1167,22 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				);
 			}
 
-			if (item.kind === "section-label") {
-				const isOpen = sectionOpenState[item.sectionId] !== false;
-				// Collapsed, the label carries what its projects would have said.
-				const sectionSignals = item.groupIds.map((groupId) => groupSignals.get(groupId) ?? null);
-				const sectionSignal = sectionSignals.includes("attention")
-					? "attention"
-					: sectionSignals.includes("running")
-						? "running"
-						: null;
+			if (item.kind === "day-label") {
 				return (
-					<button
-						type="button"
-						data-rail-section={item.sectionId}
-						aria-expanded={isOpen}
-						onClick={() => toggleSection(item.sectionId)}
-						className="group/dccRailSection flex h-full w-full cursor-pointer select-none items-end gap-1 px-3 pb-1 text-muted-foreground/70 transition-colors hover:text-foreground"
+					<div
+						data-rail-day={item.sectionId}
+						className="flex h-full items-end gap-1 px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70"
 					>
-						{/* Sized on the span: see the button font reset note on project headers. */}
-						<span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em]">
-							<ChevronRight
-								className={cn(
-									"size-2.5 shrink-0 transition-transform duration-150",
-									isOpen && "rotate-90",
-								)}
-								strokeWidth={2.4}
-								aria-hidden
-							/>
-							{item.sectionId === PINNED_SECTION_ID ? (
-								<Pin className="size-2.5 rotate-[-12deg]" strokeWidth={2.2} aria-hidden />
-							) : null}
-							{item.label}
-						</span>
-						{!isOpen ? (
-							<span className="ml-1 flex items-center gap-1.5 pb-px text-[10px] font-medium tabular-nums">
-								{item.groupIds.length}
-								{sectionSignal ? (
-									<span
-										role="img"
-										data-group-signal={sectionSignal}
-										aria-label={t(`sidebar.groupSignal.${sectionSignal}`)}
-										title={t(`sidebar.groupSignal.${sectionSignal}`)}
-										className={cn(
-											"size-[6px] rounded-full",
-											sectionSignal === "attention"
-												? "bg-amber-500"
-												: "animate-pulse bg-emerald-500",
-										)}
-									/>
-								) : null}
-							</span>
+						{item.sectionId === "pinned" ? (
+							<Pin className="size-2.5 rotate-[-12deg]" strokeWidth={2.2} aria-hidden />
 						) : null}
-					</button>
-				);
-			}
-
-			if (item.kind === "idle-toggle") {
-				return (
-					<button
-						type="button"
-						data-rail-section={IDLE_SECTION_ID}
-						aria-expanded={item.isOpen}
-						onClick={() =>
-							setSectionOpenState((current) => ({
-								...current,
-								[IDLE_SECTION_ID]: !item.isOpen,
-							}))
-						}
-						className="flex h-full w-full cursor-pointer select-none items-center gap-1.5 px-3 text-muted-foreground/70 transition-colors hover:text-foreground"
-					>
-						{/* Sized on the span: see the button font reset note on project headers. */}
-						<span className="flex items-center gap-1.5 text-[12px]">
-							<ChevronRight
-								className={cn(
-									"size-3 shrink-0 transition-transform duration-150",
-									item.isOpen && "rotate-90",
-								)}
-								strokeWidth={2.2}
-								aria-hidden
-							/>
-							{t("sidebar.idleProjects", { count: item.count })}
-						</span>
-					</button>
+						{t(`sidebar.taskSection.${item.sectionId}`)}
+					</div>
 				);
 			}
 
 			if (item.kind === "group-header") {
-				const isOpen =
-					item.headerVariant === "project"
-						? (sectionOpenState[item.groupId] ?? true)
-						: (sectionOpenState[item.groupId] ?? false);
-				const isEmptyGroup = item.rowCount === 0;
-				const groupSignal =
-					item.headerVariant === "project"
-						? (groupSignals.get(item.groupId) ?? null)
-						: null;
-				const repository =
-					item.headerVariant === "project" && item.sourceKey
-						? repositoriesBySourceKey.get(item.sourceKey) ?? null
-						: null;
-				const canOpenProjectBranch =
-					item.headerVariant === "project" &&
-					repository !== null &&
-					Boolean(onOpenBranchFromProject) &&
-					!isCreatingWorkspace;
-				const canRemoveProject =
-					item.headerVariant === "project" &&
-					Boolean(item.sourceKey) &&
-					Boolean(onDeleteProject) &&
-					!isRemovingProject;
-				const canEditProject =
-					item.headerVariant === "project" &&
-					repository !== null &&
-					Boolean(onUpdateProjectIdentity);
-				const canPinProject =
-					item.headerVariant === "project" &&
-					repository !== null &&
-					Boolean(onSetProjectPinned);
-				const canManageProject =
-					canEditProject ||
-					canPinProject ||
-					canRemoveProject;
+				const isOpen = sectionOpenState[item.groupId] ?? false;
 				const canCleanUpCompleted =
 					item.headerVariant === "completed" &&
 					item.rowCount > 0 &&
@@ -1406,12 +1191,8 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 
 				return (
 					<div
-						className={cn(
-							"dcc-project-heading group/dccRailHeader flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent/50",
-						)}
-						data-empty-group={isEmptyGroup ? "true" : "false"}
+						className="dcc-project-heading group/dccRailHeader flex items-center gap-1 rounded-md pr-1 transition-colors hover:bg-accent/50"
 						data-flash={flashSectionId === item.groupId ? "true" : undefined}
-						data-current={item.headerVariant === "project" && item.sourceKey === selectedProjectSourceKey ? "true" : "false"}
 					>
 						<button
 							type="button"
@@ -1436,23 +1217,12 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 										strokeWidth={1.9}
 										aria-hidden
 									/>
-								) : item.headerVariant === "completed" ? (
+								) : (
 									<CircleCheckBig
 										className="size-[13px] shrink-0 text-muted-foreground/75"
 										strokeWidth={1.9}
 										aria-hidden
 									/>
-								) : repository ? (
-									<ProjectIdentityGlyph
-										icon={projectIconValue(repository)}
-										color={repository.color}
-										seed={repository.rootPath}
-										active={groupSignal === "running"}
-										size="sm"
-										className="size-[18px]"
-									/>
-								) : (
-									<ProjectGroupGlyph className="size-[13px] text-muted-foreground/75" />
 								)}
 								{/* Sized on the span: an unlayered `button { font: inherit }` reset in
 								    color-theme.css overrides text utilities on the button itself. */}
@@ -1480,29 +1250,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</span>
 
 							{item.rowCount > 0 ? (
-								<span className="ml-1.5 flex shrink-0 items-center gap-1.5">
-									{groupSignal ? (
-										<span
-											role="img"
-											data-group-signal={groupSignal}
-											aria-label={t(`sidebar.groupSignal.${groupSignal}`)}
-											title={t(`sidebar.groupSignal.${groupSignal}`)}
-											className={cn(
-												"size-[6px] rounded-full",
-												groupSignal === "attention"
-													? "bg-amber-500"
-													: "animate-pulse bg-emerald-500",
-											)}
-										/>
-									) : null}
-									<span
-										className="flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-foreground/[0.06] px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground"
-										title={t("sidebar.workspaceCount", {
-											count: item.rowCount,
-										})}
-									>
-										{item.rowCount}
-									</span>
+								<span
+									className="ml-1.5 flex h-[17px] min-w-[17px] shrink-0 items-center justify-center rounded-full bg-foreground/[0.06] px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground"
+									title={t("sidebar.workspaceCount", {
+										count: item.rowCount,
+									})}
+								>
+									{item.rowCount}
 								</span>
 							) : null}
 						</button>
@@ -1528,107 +1282,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 							</Tooltip>
 						) : null}
 
-						{canOpenProjectBranch ? (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("sidebar.openBranchFromProject", {
-											label: item.label,
-										})}
-										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
-										onClick={(event) => {
-											event.stopPropagation();
-											onOpenBranchFromProject?.({
-												projectId: repository.projectId,
-												workspaceRoot: repository.rootPath,
-												baseBranch: repository.baseBranch,
-												label: repositoryDisplayName(repository),
-											});
-										}}
-									>
-										<GitBranch className="size-3.5" strokeWidth={2} aria-hidden />
-									</Button>
-								</TooltipTrigger>
-								<TooltipContent side="top">
-									{t("sidebar.openBranch")}
-								</TooltipContent>
-							</Tooltip>
-						) : null}
-
-						{canManageProject ? (
-							<DropdownMenu>
-								<DropdownMenuTrigger asChild>
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("sidebar.projectActions")}
-										className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/dccRailHeader:opacity-100 group-focus-within/dccRailHeader:opacity-100"
-										onClick={(event) => {
-											event.stopPropagation();
-										}}
-									>
-										<MoreHorizontal className="size-4" strokeWidth={2} aria-hidden />
-									</Button>
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="end" sideOffset={6}>
-									{canPinProject ? (
-										<DropdownMenuItem
-											className="gap-2 text-[13px]"
-											onSelect={(event) => {
-												event.preventDefault();
-												void onSetProjectPinned?.(
-													repository.id,
-													!repository.pinnedAt,
-												).catch((error) =>
-													toast.error(
-														error instanceof Error
-															? error.message
-															: t("sidebar.pinProjectError"),
-													),
-												);
-											}}
-										>
-											{repository.pinnedAt ? (
-												<PinOff className="size-3.5" strokeWidth={1.9} aria-hidden />
-											) : (
-												<Pin className="size-3.5" strokeWidth={1.9} aria-hidden />
-											)}
-											{repository.pinnedAt
-												? t("sidebar.unpinProject")
-												: t("sidebar.pinProject")}
-										</DropdownMenuItem>
-									) : null}
-									{canEditProject ? (
-										<DropdownMenuItem
-											className="gap-2 text-[13px]"
-											onSelect={(event) => {
-												event.preventDefault();
-												setProjectEditTarget(repository);
-											}}
-										>
-											<Settings2 className="size-3.5" strokeWidth={1.9} aria-hidden />
-											{t("sidebar.editProject")}
-										</DropdownMenuItem>
-									) : null}
-									{canRemoveProject ? (
-										<DropdownMenuItem
-											className="gap-2 text-[13px] text-destructive focus:text-destructive"
-											onSelect={(event) => {
-												event.preventDefault();
-												openProjectRemovalDialog(item.sourceKey!, item.label);
-											}}
-										>
-											<Trash2 className="size-3.5" strokeWidth={2} aria-hidden />
-											{t("sidebar.removeProject")}
-										</DropdownMenuItem>
-									) : null}
-								</DropdownMenuContent>
-							</DropdownMenu>
-						) : null}
 					</div>
 				);
 			}
@@ -1638,6 +1291,14 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				: null;
 
 			return (
+				<SidebarProjectMenu
+					repository={workspaceRepository}
+					onNewTask={projectMenuNewTask}
+					onOpenBranch={projectMenuOpenBranch}
+					onEdit={onUpdateProjectIdentity ? setProjectEditTarget : undefined}
+					onRemove={projectMenuRemove}
+				>
+				<div>
 				<WorkspaceRailRowItem
 					workspace={item.workspace}
 					selected={selectedWorkspaceId === item.workspace.id}
@@ -1675,12 +1336,13 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					}
 					onSetWorkspacePinned={onSetWorkspacePinned}
 				/>
+				</div>
+				</SidebarProjectMenu>
 			);
 		},
 		[
 			completedDiskUsage,
 			flashSectionId,
-			groupSignals,
 			i18n.resolvedLanguage,
 			isCreatingWorkspace,
 			isRemovingProject,
@@ -1688,10 +1350,10 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			onSnoozeWorkspace,
 			onRenameWorkspace,
 			onCompleteWorkspace,
-			onOpenBranchFromProject,
-			onDeleteProject,
 			onUpdateProjectIdentity,
-			onSetProjectPinned,
+			projectMenuNewTask,
+			projectMenuOpenBranch,
+			projectMenuRemove,
 			onSetWorkspacePinned,
 			onDeleteWorkspace,
 			onRestoreWorkspace,
@@ -1702,7 +1364,6 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 			openWorkspaceDeletionDialog,
 			repositoriesBySourceKey,
 			sectionOpenState,
-			selectedProjectSourceKey,
 			showCompletedDiskUsage,
 			selectedWorkspaceId,
 			t,
@@ -2230,7 +1891,7 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 				<div className="flex items-center justify-between px-3">
 					<div className="flex min-w-0 items-center gap-2">
 						<h2 className="text-[14px] font-medium tracking-[-0.01em] text-muted-foreground">
-							{t("sidebar.title")}
+							{t("sidebar.tasksTitle")}
 						</h2>
 						{workingCount > 0 ? (
 							<span
@@ -2298,16 +1959,38 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 					ref={scrollContainerRef}
 					data-slot="workspace-groups-scroll"
 					onPointerEnter={() =>
-						setFrozenProjectOrder(
-							railGroups.filter((group) => !group.pinnedAt).map((group) => group.id),
+						setFrozenTaskOrder(
+							taskSections.flatMap((section) =>
+								section.rows.map((row) => ({ id: row.id, section: section.id })),
+							),
 						)
 					}
-					onPointerLeave={() => setFrozenProjectOrder(null)}
+					onPointerLeave={() => setFrozenTaskOrder(null)}
 					className="scrollbar-stable min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-width:thin]"
 				>
-					{activeGroups.length === 0 &&
+					{activeRows.length === 0 &&
 					waitingRows.length === 0 &&
-					completedRows.length === 0 ? (
+					completedRows.length === 0 &&
+					repositories.length > 0 ? (
+						<div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+							<p className="text-[12px] leading-5 text-muted-foreground">
+								{t("sidebar.noActiveTasks")}
+							</p>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								className="gap-1.5"
+								disabled={isCreatingWorkspace}
+								onClick={onNewTask}
+							>
+								<Plus className="size-3.5" strokeWidth={2} aria-hidden />
+								{t("sidebar.newWorkspace")}
+							</Button>
+						</div>
+					) : activeRows.length === 0 &&
+					  waitingRows.length === 0 &&
+					  completedRows.length === 0 ? (
 						<div className="flex h-full min-h-full flex-col items-center justify-center px-4 py-8 text-center">
 							<div className="mb-3 flex size-11 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-muted-foreground">
 								<FolderPlus className="size-5" strokeWidth={1.9} aria-hidden />

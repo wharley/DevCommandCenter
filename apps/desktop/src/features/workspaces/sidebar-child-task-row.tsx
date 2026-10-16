@@ -35,17 +35,17 @@ export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 			onClick={onSelect}
 			title={task.title}
 			className={cn(
-				"group/dccChildTask relative flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pl-9 pr-3 text-left transition-colors hover:bg-accent/60 hover:text-foreground disabled:cursor-default",
+				"group/dccChildTask relative flex h-full w-full min-w-0 cursor-pointer items-center gap-2 rounded-md pl-11 pr-3 text-left transition-colors hover:bg-accent/60 hover:text-foreground disabled:cursor-default",
 				selected ? "bg-accent text-foreground" : "text-muted-foreground",
 			)}
 		>
-			{/* The guide from the workspace row down through its tasks, with a tick to each. */}
+			{/* The guide from under the project glyph of the row down through its tasks, with a tick to each. */}
 			<span
 				aria-hidden
 				data-guide={last ? "last" : "through"}
-				className={cn("absolute left-[22px] top-0 w-px bg-border", last ? "h-1/2" : "h-full")}
+				className={cn("absolute left-[30px] top-0 w-px bg-border", last ? "h-1/2" : "h-full")}
 			/>
-			<span aria-hidden className="absolute left-[22px] top-1/2 h-px w-2.5 bg-border" />
+			<span aria-hidden className="absolute left-[30px] top-1/2 h-px w-2.5 bg-border" />
 			<span
 				aria-hidden
 				className={cn(

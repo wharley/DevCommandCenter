@@ -399,10 +399,6 @@
       "review": "review",
       "open": "open"
     },
-    "groupSignal": {
-      "running": "An agent is running in this project",
-      "attention": "Something in this project needs you"
-    },
     "activeTerminals_one": "{{count}} active process in this task",
     "activeTerminals_other": "{{count}} active processes in this task",
     "terminalLifecycle": {
@@ -533,14 +529,19 @@
     "openUsage": "Open DCC Usage",
     "openProjectMenu": "Open project menu",
     "projectActions": "Project actions",
+    "tasksTitle": "Tasks",
+    "noActiveTasks": "No tasks in progress.",
+    "taskSection": {
+      "pinned": "Pinned",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "week": "This week",
+      "older": "Older"
+    },
+    "projectMenu": {
+      "newTask": "New task in this project"
+    },
     "workspaceActions": "Task actions",
-    "pinProject": "Pin project",
-    "unpinProject": "Unpin project",
-    "pinnedSection": "Pinned",
-    "recentSection": "Recent",
-    "idleProjects_one": "{{count}} project without tasks",
-    "idleProjects_other": "{{count}} projects without tasks",
-    "pinProjectError": "The pinned project could not be changed.",
     "pinWorkspace": "Pin task",
     "unpinWorkspace": "Unpin task",
     "pinnedWorkspace": "Pinned task",

@@ -399,10 +399,6 @@
       "review": "revisar",
       "open": "aberta"
     },
-    "groupSignal": {
-      "running": "Agente rodando neste projeto",
-      "attention": "Algo neste projeto precisa de você"
-    },
     "activeTerminals_one": "{{count}} processo ativo nesta tarefa",
     "activeTerminals_other": "{{count}} processos ativos nesta tarefa",
     "terminalLifecycle": {
@@ -533,14 +529,19 @@
     "openUsage": "Abrir DCC Usage",
     "openProjectMenu": "Menu de abrir projeto",
     "projectActions": "Ações do projeto",
+    "tasksTitle": "Tarefas",
+    "noActiveTasks": "Nenhuma tarefa em andamento.",
+    "taskSection": {
+      "pinned": "Fixadas",
+      "today": "Hoje",
+      "yesterday": "Ontem",
+      "week": "Esta semana",
+      "older": "Mais antigas"
+    },
+    "projectMenu": {
+      "newTask": "Nova tarefa neste projeto"
+    },
     "workspaceActions": "Ações da tarefa",
-    "pinProject": "Fixar projeto",
-    "unpinProject": "Desafixar projeto",
-    "pinnedSection": "Fixados",
-    "recentSection": "Recentes",
-    "idleProjects_one": "{{count}} projeto sem tarefas",
-    "idleProjects_other": "{{count}} projetos sem tarefas",
-    "pinProjectError": "Não foi possível alterar o projeto fixado.",
     "pinWorkspace": "Fixar tarefa",
     "unpinWorkspace": "Desafixar tarefa",
     "pinnedWorkspace": "Tarefa fixada",

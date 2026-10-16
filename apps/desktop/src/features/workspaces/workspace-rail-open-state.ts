@@ -1,19 +1,10 @@
-import {
-	COMPLETED_SECTION_ID,
-	PINNED_SECTION_ID,
-	RECENT_SECTION_ID,
-	WAITING_SECTION_ID,
-} from "./workspace-rail-shared";
-import type { DccWorkspaceRailGroup } from "./workspace-rail-projection";
+import { COMPLETED_SECTION_ID, WAITING_SECTION_ID } from "./workspace-rail-shared";
 
 export const DCC_WORKBENCH_RAIL_SECTION_STATE_KEY =
 	"dcc.workbenchRail.sectionOpenState";
 
-export function createInitialRailSectionState(groups: DccWorkspaceRailGroup[]) {
+export function createInitialRailSectionState() {
 	return Object.fromEntries([
-		...groups.map((group) => [group.id, true]),
-		[PINNED_SECTION_ID, true],
-		[RECENT_SECTION_ID, true],
 		[WAITING_SECTION_ID, false],
 		[COMPLETED_SECTION_ID, false],
 	]) as Record<string, boolean>;
@@ -41,8 +32,6 @@ export function readStoredRailSectionState(): Record<string, boolean> | null {
 			[WAITING_SECTION_ID]:
 				stored[WAITING_SECTION_ID] ?? stored.dccArchived ?? false,
 			[COMPLETED_SECTION_ID]: stored[COMPLETED_SECTION_ID] ?? false,
-			[PINNED_SECTION_ID]: stored[PINNED_SECTION_ID] ?? true,
-			[RECENT_SECTION_ID]: stored[RECENT_SECTION_ID] ?? true,
 		};
 	} catch {
 		return null;

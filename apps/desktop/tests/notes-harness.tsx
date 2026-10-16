@@ -70,6 +70,7 @@ const workspaces: WorkspaceSummary[] = [
 		branch: "dcc/main",
 		rootPath: "/fixture/dcc",
 		status: "ready",
+		createdAt: now,
 	},
 	{
 		id: "workspace-notes",
@@ -94,6 +95,7 @@ const workspaces: WorkspaceSummary[] = [
 		branch: "orbit/search",
 		rootPath: "/fixture/orbit",
 		status: "ready",
+		createdAt: now,
 	},
 	{
 		id: "workspace-done",
@@ -262,6 +264,7 @@ function Harness() {
 								setLaunch(false);
 							}}
 							onNewTask={() => setLaunch(true)}
+							onCreateWorkspaceFromProject={() => setLaunch(true)}
 							onCreateWorkspace={() => setSettings(true)}
 							onCloneWorkspace={() => setSettings(true)}
 							onOpenSettings={() => setSettings(true)}

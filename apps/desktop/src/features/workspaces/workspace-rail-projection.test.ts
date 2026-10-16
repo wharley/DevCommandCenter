@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Repository } from "@dcc/contracts";
 import {
-	freezeRailGroupOrder,
 	projectWorkspaceRailGroups,
 	projectWorkspaceRepositories,
-	splitIdleRailGroups,
-	workspaceRailGroupSignal,
+	projectWorkspaceTaskList,
 } from "./workspace-rail-projection";
 
 describe("projectWorkspaceRailGroups", () => {
@@ -226,55 +224,6 @@ describe("projectWorkspaceRailGroups", () => {
 		]);
 	});
 
-	it("freezes unpinned project order while keeping pins live and new projects on top", () => {
-		const group = (id: string, pinnedAt: string | null = null) => ({
-			id,
-			label: id,
-			sourceKey: id,
-			pinnedAt,
-			rows: [],
-		});
-
-		const frozen = freezeRailGroupOrder(
-			[group("pin", "2026-04-01T10:00:00.000Z"), group("new"), group("c"), group("a"), group("b")],
-			["a", "b", "c", "pin"],
-		);
-
-		expect(frozen.map((entry) => entry.id)).toEqual(["pin", "new", "a", "b", "c"]);
-	});
-
-	it("tucks recent projects without tasks away, keeping pins and what is on screen", () => {
-		const task = {
-			id: "t",
-			name: "t",
-			branch: "main",
-			status: "ready" as const,
-			rootPath: "/projects/busy",
-		};
-		const group = (id: string, pinnedAt: string | null, rows: (typeof task)[] = []) => ({
-			id,
-			label: id,
-			sourceKey: id,
-			pinnedAt,
-			rows,
-		});
-		const groups = [
-			group("pinned-empty", "2026-04-01T10:00:00.000Z"),
-			group("busy", null, [task]),
-			group("just-emptied", null),
-			group("idle", null),
-		];
-
-		const { visibleGroups, idleGroups } = splitIdleRailGroups(groups, new Set(["just-emptied"]));
-
-		expect(visibleGroups.map((entry) => entry.id)).toEqual(["pinned-empty", "busy", "just-emptied"]);
-		expect(idleGroups.map((entry) => entry.id)).toEqual(["idle"]);
-		expect(splitIdleRailGroups(groups).idleGroups.map((entry) => entry.id)).toEqual([
-			"just-emptied",
-			"idle",
-		]);
-	});
-
 	it("builds repository-level options for quick workspace creation", () => {
 		const repositories = projectWorkspaceRepositories([
 			{
@@ -393,53 +342,91 @@ describe("task order inside a project", () => {
 	});
 });
 
-describe("workspaceRailGroupSignal", () => {
-	const row = (id: string, status: "ready" | "setup_pending" = "ready") => ({
+describe("projectWorkspaceTaskList", () => {
+	// Wednesday afternoon, local time.
+	const now = new Date(2026, 9, 14, 15, 0).getTime();
+	const at = (day: number, hour: number) => new Date(2026, 9, day, hour).toISOString();
+	const task = (id: string, rootPath: string, createdAt: string, pinnedAt: string | null = null) => ({
 		id,
 		name: id,
 		branch: "main",
-		status,
+		status: "ready" as const,
+		rootPath,
+		createdAt,
+		pinnedAt,
 	});
-	const running = {
-		state: "active" as const,
-		startedAt: "2026-09-30T10:00:00.000Z",
-		completedAt: null,
-	};
+	const ids = (sections: ReturnType<typeof projectWorkspaceTaskList>) =>
+		sections.map((section) => [section.id, section.rows.map((row) => row.id)]);
 
-	it("stays quiet when nothing in the project is running or blocked", () => {
-		expect(
-			workspaceRailGroupSignal([row("a")], {
-				a: { state: "completed", startedAt: null, completedAt: null },
-			}),
-		).toBeNull();
-	});
-
-	it("reports a running agent", () => {
-		expect(workspaceRailGroupSignal([row("a"), row("b")], { b: running })).toBe(
-			"running",
+	it("lists tasks of different projects together, newest interaction first, split by day", () => {
+		const sections = projectWorkspaceTaskList(
+			[
+				task("old", "/checkout", at(1, 9)),
+				task("week", "/painel", at(10, 9)),
+				task("yesterday", "/checkout", at(13, 9)),
+				task("painel-today", "/painel", at(14, 8)),
+				task("checkout-today", "/checkout", at(14, 10)),
+			],
+			{},
+			now,
 		);
+
+		expect(ids(sections)).toEqual([
+			["today", ["checkout-today", "painel-today"]],
+			["yesterday", ["yesterday"]],
+			["week", ["week"]],
+			["older", ["old"]],
+		]);
 	});
 
-	it("treats an agent waiting on the user as needing attention", () => {
-		expect(
-			workspaceRailGroupSignal([row("a"), row("b")], {
-				a: running,
-				b: {
-					state: "waiting",
-					startedAt: null,
-					completedAt: null,
-					waitingFor: "input",
-				},
-			}),
-		).toBe("attention");
+	it("moves a task up only for the user's own turn, not for agent or metadata updates", () => {
+		const updatedByAgent = { ...task("busy-agent", "/a", at(12, 9)), updatedAt: at(14, 14) };
+		const sections = projectWorkspaceTaskList(
+			[updatedByAgent, task("talked-to", "/b", at(12, 8))],
+			{ "talked-to": at(14, 12) },
+			now,
+		);
+
+		expect(ids(sections)).toEqual([
+			["today", ["talked-to"]],
+			["week", ["busy-agent"]],
+		]);
 	});
 
-	it("lets something that needs the user win over a running agent", () => {
-		expect(
-			workspaceRailGroupSignal([row("a"), row("b", "setup_pending")], {
-				a: running,
-			}),
-		).toBe("attention");
+	it("keeps pinned tasks on top in pin order", () => {
+		const sections = projectWorkspaceTaskList(
+			[
+				task("fresh", "/a", at(14, 10)),
+				task("second-pin", "/a", at(1, 9), at(5, 9)),
+				task("first-pin", "/b", at(14, 11), at(2, 9)),
+			],
+			{},
+			now,
+		);
+
+		expect(ids(sections)).toEqual([
+			["pinned", ["first-pin", "second-pin"]],
+			["today", ["fresh"]],
+		]);
+	});
+
+	it("holds the order while frozen, puts new tasks on top and still applies a pin", () => {
+		const rows = [
+			task("a", "/a", at(14, 9)),
+			task("b", "/b", at(14, 10)),
+			task("pin-me", "/a", at(13, 9), at(14, 12)),
+			task("new", "/b", at(14, 13)),
+		];
+		const frozen = [
+			{ id: "a", section: "today" as const },
+			{ id: "b", section: "today" as const },
+			{ id: "pin-me", section: "yesterday" as const },
+		];
+
+		expect(ids(projectWorkspaceTaskList(rows, { a: at(14, 14) }, now, frozen))).toEqual([
+			["pinned", ["pin-me"]],
+			["today", ["new", "a", "b"]],
+		]);
 	});
 });
 

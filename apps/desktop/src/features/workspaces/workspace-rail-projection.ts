@@ -1,7 +1,6 @@
 import { isSnoozed } from "./workspace-snooze";
 import type { Repository } from "@dcc/contracts";
 import type { WorkspaceSummary } from "./types";
-import type { WorkspaceAgentActivity } from "./use-workspace-agent-states";
 import { repositoryDisplayName } from "./repository-display-name";
 
 export type DccWorkspaceRailRow = WorkspaceSummary;
@@ -104,6 +103,8 @@ export function projectWorkspaceRailGroups(
 	now: number = Date.now(),
 ): {
 	activeGroups: DccWorkspaceRailGroup[];
+	/** The tasks the single list shows: neither on hold nor completed. */
+	activeRows: DccWorkspaceRailRow[];
 	waitingRows: DccWorkspaceRailRow[];
 	completedRows: DccWorkspaceRailRow[];
 } {
@@ -183,7 +184,7 @@ export function projectWorkspaceRailGroups(
 		})
 		.map(({ group }) => group);
 
-	return { activeGroups, waitingRows, completedRows };
+	return { activeGroups, activeRows: active, waitingRows, completedRows };
 }
 
 /**
@@ -205,46 +206,99 @@ function projectRecencyMs(
 	return latest;
 }
 
+/** Where a task sits in the rail's single list: pinned first, then by day. */
+export type DccTaskListSectionId = "pinned" | "today" | "yesterday" | "week" | "older";
+
+export type DccTaskListSection = {
+	id: DccTaskListSectionId;
+	rows: DccWorkspaceRailRow[];
+};
+
+const TASK_LIST_SECTION_ORDER: readonly DccTaskListSectionId[] = [
+	"pinned",
+	"today",
+	"yesterday",
+	"week",
+	"older",
+];
+
 /**
- * Holds the unpinned projects in the order they had when the pointer entered
- * the rail, so nothing moves under the cursor. Pinning stays live (it is the
- * user's own click); projects that appear meanwhile go on top, as the newest.
+ * When the user last worked on the task: their newest turn, or its creation.
+ * Agent progress and backend metadata updates do not count, so a task only
+ * moves up because of something the user did.
  */
-export function freezeRailGroupOrder(
-	groups: readonly DccWorkspaceRailGroup[],
-	frozenIds: readonly string[],
-): DccWorkspaceRailGroup[] {
-	const frozenIndex = new Map(frozenIds.map((id, index) => [id, index]));
-	const pinned = groups.filter((group) => group.pinnedAt);
-	const unpinned = groups.filter((group) => !group.pinnedAt);
-	const fresh = unpinned.filter((group) => !frozenIndex.has(group.id));
-	const known = unpinned
-		.filter((group) => frozenIndex.has(group.id))
-		.sort((a, b) => frozenIndex.get(a.id)! - frozenIndex.get(b.id)!);
-	return [...pinned, ...fresh, ...known];
+export function taskInteractionMs(
+	workspace: WorkspaceSummary,
+	lastInteractionAt: string | null | undefined,
+): number {
+	let latest = Number.NEGATIVE_INFINITY;
+	for (const value of [lastInteractionAt, workspace.createdAt]) {
+		const ms = value ? Date.parse(value) : Number.NaN;
+		if (!Number.isNaN(ms) && ms > latest) latest = ms;
+	}
+	return latest;
+}
+
+function startOfLocalDay(ms: number): number {
+	const date = new Date(ms);
+	date.setHours(0, 0, 0, 0);
+	return date.getTime();
+}
+
+export function taskListSectionFor(
+	workspace: WorkspaceSummary,
+	interactionMs: number,
+	now: number,
+): DccTaskListSectionId {
+	if (workspace.pinnedAt) return "pinned";
+	const today = startOfLocalDay(now);
+	if (interactionMs >= today) return "today";
+	const yesterday = startOfLocalDay(today - 1);
+	if (interactionMs >= yesterday) return "yesterday";
+	if (interactionMs >= startOfLocalDay(today - 6 * 24 * 60 * 60 * 1000)) return "week";
+	return "older";
 }
 
 /**
- * Recent projects without an active task step aside behind one "no tasks"
- * line, so the rail lists where work is. Pinned projects always stay: the pin
- * is the user asking for them. `keepIds` holds projects that were on screen
- * when the pointer entered the rail, so one that just ran out of tasks does
- * not vanish under the cursor.
+ * The rail's spine: every active task in one list, whatever its project,
+ * newest interaction first and split by day. Pinned tasks stay on top in pin
+ * order. `frozen` holds the list as it was when the pointer entered the rail,
+ * so nothing moves under the cursor: known tasks keep their place, tasks that
+ * appear meanwhile go on top of their section, and a pin (the user's own
+ * click) still takes effect.
  */
-export function splitIdleRailGroups(
-	groups: readonly DccWorkspaceRailGroup[],
-	keepIds: ReadonlySet<string> = new Set(),
-): { visibleGroups: DccWorkspaceRailGroup[]; idleGroups: DccWorkspaceRailGroup[] } {
-	const visibleGroups: DccWorkspaceRailGroup[] = [];
-	const idleGroups: DccWorkspaceRailGroup[] = [];
-	for (const group of groups) {
-		if (group.pinnedAt || group.rows.length > 0 || keepIds.has(group.id)) {
-			visibleGroups.push(group);
-		} else {
-			idleGroups.push(group);
-		}
-	}
-	return { visibleGroups, idleGroups };
+export function projectWorkspaceTaskList(
+	rows: readonly DccWorkspaceRailRow[],
+	lastInteractionAt: Readonly<Record<string, string | null | undefined>> = {},
+	now: number = Date.now(),
+	frozen: readonly { id: string; section: DccTaskListSectionId }[] | null = null,
+): DccTaskListSection[] {
+	const ranked = rows
+		.map((row) => ({ row, ms: taskInteractionMs(row, lastInteractionAt[row.id]) }))
+		.sort((a, b) => {
+			if (a.row.pinnedAt && b.row.pinnedAt) {
+				return a.row.pinnedAt.localeCompare(b.row.pinnedAt) || a.row.id.localeCompare(b.row.id);
+			}
+			return b.ms - a.ms || a.row.id.localeCompare(b.row.id);
+		});
+	const frozenIndex = new Map(frozen?.map((entry, index) => [entry.id, { ...entry, index }]));
+	const bySection = new Map<DccTaskListSectionId, { row: DccWorkspaceRailRow; rank: number }[]>();
+	ranked.forEach(({ row, ms }, position) => {
+		const live = taskListSectionFor(row, ms, now);
+		const known = frozenIndex.get(row.id);
+		// A pin change is the user's click and applies at once.
+		const keepsPlace = known && (known.section === "pinned") === (live === "pinned");
+		const section = keepsPlace ? known.section : live;
+		const rank = keepsPlace ? known.index : position - ranked.length;
+		const list = bySection.get(section);
+		if (list) list.push({ row, rank });
+		else bySection.set(section, [{ row, rank }]);
+	});
+	return TASK_LIST_SECTION_ORDER.flatMap((id) => {
+		const entries = bySection.get(id);
+		if (!entries?.length) return [];
+		return [{ id, rows: entries.sort((a, b) => a.rank - b.rank).map((entry) => entry.row) }];
+	});
 }
 
 /**
@@ -259,31 +313,6 @@ function workspaceRecencyMs(
 		.map((value) => (value ? Date.parse(value) : Number.NaN))
 		.filter((value) => !Number.isNaN(value));
 	return candidates.length ? Math.max(...candidates) : Number.NEGATIVE_INFINITY;
-}
-
-/**
- * What a project header must still say when its rows are collapsed or scrolled
- * away. Amber is reserved for "needs you"; a running agent only earns green.
- */
-export type DccWorkspaceRailGroupSignal = "attention" | "running" | null;
-
-export function workspaceRailGroupSignal(
-	rows: readonly DccWorkspaceRailRow[],
-	activities: Readonly<Record<string, WorkspaceAgentActivity | null | undefined>>,
-): DccWorkspaceRailGroupSignal {
-	if (
-		rows.some(
-			(row) =>
-				row.status === "setup_pending" ||
-				activities[row.id]?.state === "waiting",
-		)
-	) {
-		return "attention";
-	}
-	if (rows.some((row) => activities[row.id]?.state === "active")) {
-		return "running";
-	}
-	return null;
 }
 
 function hashId(key: string): string {

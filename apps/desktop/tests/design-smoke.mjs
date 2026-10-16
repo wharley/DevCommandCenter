@@ -95,7 +95,9 @@ try {
 		await page.evaluate(() => window.designTaskMode),
 		"protectedWorktree",
 	);
-	await page.locator('.dcc-project-heading[data-current="true"]').waitFor();
+	await page
+		.locator('[data-workspace-id][aria-current="location"]')
+		.waitFor();
 	await checkFooter();
 	await screenshot("workbench-light");
 	await page.getByRole("button", { name: "Trocar tema" }).click();
