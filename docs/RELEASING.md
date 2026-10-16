@@ -43,6 +43,43 @@ macOS signing and notarization:
 6. Follow the bootstrap checklist in [docs/GITHUB_RELEASE_BOOTSTRAP.md](docs/GITHUB_RELEASE_BOOTSTRAP.md).
 7. Run the publish workflow manually or push a tag like `v0.1.1`.
 
+## Use a local build before releasing (macOS)
+
+Run the next version as an installed production app, on the real data, for
+as long as it takes to trust it, then cut the release:
+
+```bash
+yarn app:local
+```
+
+1. It builds a release bundle (`--bundles app`) versioned
+   `<next patch>-local.g<commit>`, for example `0.1.99-local.g677c33b`, with
+   `.dirty` appended when tracked files have uncommitted changes. It skips
+   notarization and the updater archive, and signs with the keychain's
+   `Developer ID Application` identity when there is one, so macOS keeps
+   granted permissions between builds.
+2. It quits Dev Command Center and stops every helper running from the
+   installed bundle. `dccd` and `ai-memory` outlive the window, and the new
+   app would otherwise keep using the old daemon binary.
+3. It snapshots the database (APFS clones of `database.sqlite`, `-wal` and
+   `-shm`) and the app it replaces into `~/.dcc/local-builds/snapshots/`,
+   keeping the last three.
+4. It installs the build into `/Applications` and opens it. Settings shows the
+   local version.
+
+`yarn app:local --skip-build` reinstalls the last build. `yarn app:rollback`
+puts back the app the last install replaced; `--with-db` also restores the
+database as it was right before that install, which drops everything recorded
+since. The app and database being replaced go to
+`~/.dcc/local-builds/rolled-back/`.
+
+The local version sorts above the published release and below the next one,
+so the updater never offers a downgrade and swaps the local build for the
+real release once it is published. The build uses the release data directory
+(`com.devcommandcenter.app`), unlike `yarn dev` (`com.devcommandcenter.app.dev`).
+Do not run `yarn dev` alongside the installed app: both bind the local HTTP
+API port (9876) and the quick-composer shortcut.
+
 ## Publish flow
 
 1. Update the application version.

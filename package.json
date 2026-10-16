@@ -18,6 +18,8 @@
     "dev:tauri": "node scripts/dev-tauri.mjs",
     "dev:desktop": "yarn workspace @dcc/desktop dev",
     "build": "tauri build",
+    "app:local": "node scripts/app-local.mjs install",
+    "app:rollback": "node scripts/app-local.mjs rollback",
     "build:contracts": "yarn workspace @dcc/contracts build",
     "build:desktop": "yarn workspace @dcc/desktop build",
     "build:sidecars": "node scripts/build-sidecars.mjs",
