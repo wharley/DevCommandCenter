@@ -2347,7 +2347,10 @@ export type RunDelegationInput = {
 	kind?: DelegationKind,
 	// Starts this waiting task proposal instead of a new record.
 	proposalId?: DelegationId | null,
-	// A task that edits works straight in the parent's checkout.
+	/**
+	 *  A child that edits works straight in the parent's checkout, so its
+	 *  edits are there when it reports back: no worktree, no review step.
+	 */
 	sharedCheckout?: boolean,
 };
 

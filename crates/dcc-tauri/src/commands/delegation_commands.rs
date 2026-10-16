@@ -368,9 +368,6 @@ pub async fn create_delegation_with_state(
         reported_turn_id: None,
     };
 
-    if delegation.budget.shared_checkout && delegation.kind != DelegationKind::Task {
-        return Err("only a task can edit the parent's checkout directly".to_string());
-    }
     let edit_capable = (matches!(delegation.mode, DelegationMode::Implement)
         || delegation.budget.allow_file_edits)
         && !delegation.budget.shared_checkout;
