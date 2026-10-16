@@ -1,4 +1,4 @@
-use crate::daemon_runtime::{process_alive, terminate_process, LAUNCH_ID_ENV};
+use crate::daemon_runtime::{process_alive, terminate_process, DAEMON_VERSION, LAUNCH_ID_ENV};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -420,8 +420,11 @@ pub fn ensure_sidecar_running(
     db_path: &Path,
     app_data_dir: &Path,
 ) -> Result<DaemonRuntimeInfo, String> {
+    // dccd is built from this crate, so compare crate versions. The bundle
+    // version can differ from it: `yarn app:local` stamps 0.1.99-local.g<sha>,
+    // which would never match and restart the daemon on every launch.
     ensure_daemon_version(
-        Some(&app.package_info().version.to_string()),
+        Some(DAEMON_VERSION),
         db_path,
         app_data_dir,
         sidecar_command(locate_sidecar_binary(app)),
