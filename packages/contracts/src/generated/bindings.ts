@@ -1247,6 +1247,12 @@ export type ListGitTrackedFilesInput = {
 
 export type ListGitTrackedFilesOutput = {
 	paths: string[],
+	/**
+	 *  Files on disk that `.gitignore` hides (`.env`, a symlinked config), so
+	 *  the file tree can still show them. Folders ignored as a whole
+	 *  (`node_modules/`, `target/`) are left out.
+	 */
+	ignoredPaths: string[],
 };
 
 export type ListLocalBranchesInput = {

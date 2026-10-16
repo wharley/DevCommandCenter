@@ -42,7 +42,7 @@ import {
 	type CodeTreeRow,
 } from "./code-files-tree.logic";
 
-const EMPTY_CODE_FILE_PATHS: string[] = [];
+const EMPTY_CODE_FILES = { paths: [] as string[], ignored: new Set<string>() };
 const EMPTY_REVIEW_COMMENTS = new Map<string, WorkspacePrReviewComment[]>();
 const EMPTY_CHANGES: { path: string; status: string }[] = [];
 /** Expanded folders per worktree, kept across remounts of the tree. */
@@ -103,7 +103,11 @@ export function CodeFilesTree({
 		queryKey: ["inspectorCodeFiles", root],
 		queryFn: async () => {
 			const result = await listGitTrackedFiles({ workspaceRoot: root });
-			return result.paths;
+			// Ignored files (`.env`) show too, dimmed, the way editors do.
+			return {
+				paths: [...result.paths, ...result.ignoredPaths],
+				ignored: new Set(result.ignoredPaths),
+			};
 		},
 		enabled: Boolean(root),
 		staleTime: 30_000,
@@ -127,7 +131,7 @@ export function CodeFilesTree({
 		lastFileSetRef.current = fileSet;
 	}, [fileSet, gitStatusQuery.data, refetchFiles]);
 
-	const paths = filesQuery.data ?? EMPTY_CODE_FILE_PATHS;
+	const { paths, ignored: ignoredPaths } = filesQuery.data ?? EMPTY_CODE_FILES;
 	const tree = useMemo(() => buildCodeTree(paths), [paths]);
 	const [expanded, setExpanded] = useState<Set<string>>(
 		() => new Set(codeTreeExpansionCache.get(root) ?? []),
@@ -298,6 +302,7 @@ export function CodeFilesTree({
 								key={row.path}
 								row={row}
 								selected={row.kind === "file" && row.path === selectedPath}
+								ignored={row.kind === "file" && ignoredPaths.has(row.path)}
 								gitStatus={row.kind === "file" ? gitStatus.byPath.get(row.path) : undefined}
 								folderChanged={row.kind === "folder" && gitStatus.changedFolders.has(row.path)}
 								reviewCount={countReviewComments(row, reviewCommentsByPath)}
@@ -315,6 +320,7 @@ export function CodeFilesTree({
 function CodeTreeRowButton({
 	row,
 	selected,
+	ignored,
 	gitStatus,
 	folderChanged,
 	reviewCount,
@@ -323,6 +329,7 @@ function CodeTreeRowButton({
 }: {
 	row: CodeTreeRow;
 	selected: boolean;
+	ignored: boolean;
 	gitStatus: CodeTreeGitStatus | undefined;
 	folderChanged: boolean;
 	reviewCount: number;
@@ -343,7 +350,7 @@ function CodeTreeRowButton({
 			aria-expanded={isFolder ? row.expanded : undefined}
 			aria-selected={selected}
 			aria-level={row.depth + 1}
-			title={row.path}
+			title={ignored ? `${row.path} · ${t("codeColumn.ignoredFile")}` : row.path}
 			onPointerDown={keepEditorFocus}
 			onMouseDown={keepEditorFocus}
 			onClick={isFolder ? onToggleFolder : onOpenFile}
@@ -363,6 +370,7 @@ function CodeTreeRowButton({
 				selected
 					? "bg-muted/70 text-foreground"
 					: "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+				ignored && "italic opacity-55",
 			)}
 			style={{ paddingLeft: row.depth * 12 + (isFolder ? 6 : 20) }}
 		>

@@ -325,6 +325,10 @@ pub struct ListGitTrackedFilesInput {
 #[serde(rename_all = "camelCase")]
 pub struct ListGitTrackedFilesOutput {
     pub paths: Vec<String>,
+    /// Files on disk that `.gitignore` hides (`.env`, a symlinked config), so
+    /// the file tree can still show them. Folders ignored as a whole
+    /// (`node_modules/`, `target/`) are left out.
+    pub ignored_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -3338,13 +3342,40 @@ fn resolve_worktree_file_path(root: &str, rel: &str) -> Result<Option<PathBuf>, 
     let canonical = candidate
         .canonicalize()
         .map_err(|error| error.to_string())?;
-    if !is_path_inside(&canonical, &root_canonical) {
+    if !is_symlink_target_allowed(root, &canonical, &root_canonical) {
         return Err("path escapes workspace".to_string());
     }
     if !canonical.is_file() {
         return Ok(None);
     }
     Ok(Some(canonical))
+}
+
+/// A path that resolves inside the worktree, or inside the repository's main
+/// checkout: a worktree often links `.env` back to main (`ln -sf`), and that
+/// file belongs to the same repository. Links anywhere else stay refused, so
+/// a cloned repo cannot point the editor at `~/.ssh`.
+fn is_symlink_target_allowed(root: &str, canonical: &Path, root_canonical: &Path) -> bool {
+    if is_path_inside(canonical, root_canonical) {
+        return true;
+    }
+    main_checkout_root(root).is_some_and(|main| is_path_inside(canonical, &main))
+}
+
+/// The main checkout of the repository `root` belongs to: the folder holding
+/// the shared `.git`. `None` for a bare repository or when Git cannot tell.
+fn main_checkout_root(root: &str) -> Option<PathBuf> {
+    let output = run_git_output(
+        root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .ok()
+    .filter(|output| output.status.success())?;
+    let common_dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if common_dir.file_name()? != ".git" {
+        return None;
+    }
+    common_dir.parent()?.canonicalize().ok()
 }
 
 fn resolve_worktree_write_path(root: &str, rel: &str) -> Result<PathBuf, String> {
@@ -3360,7 +3391,7 @@ fn resolve_worktree_write_path(root: &str, rel: &str) -> Result<PathBuf, String>
             let canonical = candidate
                 .canonicalize()
                 .map_err(|error| error.to_string())?;
-            if !is_path_inside(&canonical, &root_canonical) {
+            if !is_symlink_target_allowed(root, &canonical, &root_canonical) {
                 return Err("path escapes workspace".to_string());
             }
             if !canonical.is_file() {
@@ -8434,7 +8465,53 @@ pub async fn list_git_tracked_files(
 
     Ok(ListGitTrackedFilesOutput {
         paths: git_tracked_files(&input.workspace_root)?,
+        ignored_paths: git_ignored_files(&input.workspace_root)?,
     })
+}
+
+/// Most ignored files the tree lists; past this the ignore rules are matching
+/// build output, not the few local files someone wants to open.
+const GIT_IGNORED_FILES_LIMIT: usize = 2_000;
+
+/// Ignored files outside wholly ignored folders: `--directory` reports
+/// `node_modules/` as one entry instead of walking it, and those folder
+/// entries are dropped. Sorted, repo-relative forward slashes. Empty when the
+/// root is blank, not a git worktree, or git fails.
+pub fn git_ignored_files(workspace_root: &str) -> Result<Vec<String>, String> {
+    let root = workspace_root.trim();
+    if root.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let output = run_git_output(
+        root,
+        &[
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+        ],
+    )?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let root_path = std::path::Path::new(root);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut paths: Vec<String> = stdout
+        .split('\0')
+        .filter(|line| !line.is_empty() && !line.ends_with('/'))
+        .filter(|line| !line.ends_with(".DS_Store"))
+        // A symlinked folder is reported without the trailing slash.
+        .filter(|line| !root_path.join(line).is_dir())
+        .map(|line| line.to_string())
+        .take(GIT_IGNORED_FILES_LIMIT)
+        .collect();
+    paths.sort();
+    Ok(paths)
 }
 
 /// The worktree's files as git sees them: tracked files still on disk plus new
@@ -11376,6 +11453,56 @@ mod editor_workspace_file_tests {
         assert_eq!(
             git_tracked_files(repo.as_str()).expect("list files"),
             vec![".gitignore", "kept.txt", "src/new.ts"],
+        );
+    }
+
+    #[test]
+    fn git_ignored_files_lists_ignored_files_but_not_ignored_folders() {
+        let repo = TestDir::new("ignored-files");
+        initialize_branch_test_repository(repo.as_str(), "feature/tree");
+        fs::write(repo.path.join(".gitignore"), ".env\nnode_modules/\n*.log\n")
+            .expect("write gitignore");
+        fs::write(repo.path.join(".env"), "TOKEN=1\n").expect("write env");
+        fs::write(repo.path.join(".DS_Store"), "").expect("write finder file");
+        fs::create_dir_all(repo.path.join("node_modules/pkg")).expect("create node_modules");
+        fs::write(repo.path.join("node_modules/pkg/index.js"), "").expect("write dependency");
+        fs::create_dir_all(repo.path.join("apps/web")).expect("create app");
+        fs::write(repo.path.join("apps/web/page.ts"), "").expect("write app file");
+        fs::write(repo.path.join("apps/web/debug.log"), "").expect("write log");
+
+        assert_eq!(
+            git_ignored_files(repo.as_str()).expect("list ignored files"),
+            vec![".env", "apps/web/debug.log"],
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_file_helpers_follow_a_worktree_symlink_into_the_main_checkout() {
+        use std::os::unix::fs::symlink;
+
+        let main = TestDir::new("symlink-main-checkout");
+        initialize_branch_test_repository(main.as_str(), "main-line");
+        fs::write(main.path.join(".env"), "TOKEN=1\n").expect("write main env");
+        let worktrees = TestDir::new("symlink-worktrees");
+        let worktree = worktrees.path.join("feature");
+        let worktree_str = worktree.to_str().expect("utf-8 worktree");
+        let output = run_git_output(
+            main.as_str(),
+            &["worktree", "add", "--detach", worktree_str, "HEAD"],
+        )
+        .expect("git worktree add");
+        assert!(output.status.success());
+        symlink(main.path.join(".env"), worktree.join(".env")).expect("link env");
+
+        let content = read_worktree_file_text(worktree_str, ".env")
+            .expect("read follows the link")
+            .expect("file exists");
+        assert_eq!(content, "TOKEN=1\n");
+        let path = resolve_worktree_write_path(worktree_str, ".env").expect("resolve write path");
+        assert_eq!(
+            path,
+            main.path.join(".env").canonicalize().expect("canonical main env"),
         );
     }
 

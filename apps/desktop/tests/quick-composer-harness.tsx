@@ -61,6 +61,7 @@ Object.assign(window, {
 											(_, i) => `src/components/component-${i}.tsx`,
 										),
 									],
+						ignoredPaths: [],
 					};
 				case "list_repositories":
 					return { repositories: params.has("empty") ? [] : repositories };

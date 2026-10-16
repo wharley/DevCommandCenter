@@ -4752,6 +4752,7 @@
     "mentionInChat": "Mention in chat",
     "copyPath": "Copy path",
     "pathCopied": "Path copied",
+    "ignoredFile": "Ignored by .gitignore",
     "copyFailed": "Could not copy the path"
   },
   "fileTabs": {
