@@ -22,6 +22,7 @@ import {
 	selectedCleanupBytes,
 } from "./completed-cleanup";
 import type { WorkspaceSummary } from "./types";
+import { DccDataSection } from "./dcc-data-section";
 import { formatDiskBytes, workspaceDiskUsageIds } from "./workspace-disk-usage";
 import { workspaceRailDisplayTitle } from "./workspace-rail-shared";
 
@@ -178,6 +179,8 @@ export function CompletedCleanupDialog({
 						))}
 					</ul>
 				)}
+
+				<DccDataSection open={open} disabled={deleting} />
 
 				<DialogFooter className="min-w-0 items-center sm:justify-between">
 					<span className="text-xs tabular-nums text-muted-foreground">

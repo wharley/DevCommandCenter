@@ -571,6 +571,15 @@
     "calculatingWorkspaceDiskUsage": "Calculating disk usage…",
     "workspaceDiskSpaceFreed": "Space that will be freed: approximately {{size}}.",
     "cleanup": {
+      "dccData": {
+        "label": "DCC data",
+        "summary": "Database {{database}} ({{reclaimable}} reclaimable) · browser cache {{cache}} · app {{webview}}",
+        "compact": "Compact",
+        "compacting": "Compacting…",
+        "compacted": "Freed {{size}}.",
+        "compactedOnRestart": "Freed {{size}}; {{pending}} more leave the disk when DCC reopens.",
+        "failed": "DCC's data could not be compacted."
+      },
       "action": "Free up space",
       "title": "Free up space",
       "description": "Deleting removes each task's worktree, conversations and Undo history. The local branch stays in the repository. Only tasks with everything committed and pushed come checked.",

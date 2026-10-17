@@ -15,7 +15,7 @@ mod delta_compaction;
 pub use delta_compaction::{DeltaCompactionStep, DELTA_COMPACTION_SETTLE_MINUTES};
 use delta_compaction::DELTA_COMPACTION_TABLE_SQL;
 mod space;
-pub use space::{vacuum_into_incremental_mode, VacuumOutcome};
+pub use space::{database_space, vacuum_into_incremental_mode, DatabaseSpace, VacuumOutcome};
 
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};

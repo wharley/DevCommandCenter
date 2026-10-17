@@ -17,7 +17,8 @@ const PAUSE_BETWEEN_STEPS: Duration = Duration::from_millis(100);
 /// Free pages (4 KB) given back to the disk per write, after each pass.
 const PAGES_PER_RECLAIM: u32 = 2048;
 
-fn run_pass(db_path: &PathBuf) -> Result<(usize, usize), String> {
+/// One full pass; also what "Compactar" in the cleanup dialog runs.
+pub(crate) fn run_pass(db_path: &PathBuf) -> Result<(usize, usize), String> {
     let repo = SqliteSessionRepo::open(db_path).map_err(|error| error.to_string())?;
     let (mut merged, mut deleted) = (0, 0);
     for session_id in repo

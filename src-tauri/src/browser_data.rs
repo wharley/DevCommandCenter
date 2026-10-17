@@ -35,7 +35,7 @@ fn store_dir(app: &AppHandle<Wry>) -> Option<PathBuf> {
     )
 }
 
-fn dir_bytes(path: &Path) -> u64 {
+pub(crate) fn dir_bytes(path: &Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(path) else {
         return 0;
     };

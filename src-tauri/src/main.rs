@@ -31,6 +31,7 @@ mod skills_commands;
 mod workspace_commands;
 mod delta_compaction_worker;
 mod browser_data;
+mod storage_commands;
 #[cfg(target_os = "macos")]
 mod webview_storage;
 
@@ -7034,6 +7035,8 @@ pub fn run() {
             menu_bar::menu_bar_quit,
             browser_data::browser_storage_usage,
             browser_data::browser_clear_data,
+            storage_commands::dcc_storage_usage,
+            storage_commands::dcc_storage_compact,
             keep_awake_commands::keep_awake_status,
             keep_awake_commands::keep_awake_set_mode,
             usage_limit_commands::usage_limit_settings,

@@ -19,6 +19,31 @@ fn page_stats(conn: &Connection) -> rusqlite::Result<(i64, i64, i64)> {
     Ok((page_size, page_count, free_pages))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DatabaseSpace {
+    pub file_bytes: i64,
+    pub free_bytes: i64,
+    /// Free pages go back to the disk while DCC runs (incremental mode).
+    pub incremental: bool,
+    /// Not incremental yet, but the next startup converts it.
+    pub vacuums_at_startup: bool,
+}
+
+fn worth_a_full_vacuum(page_size: i64, page_count: i64, free_pages: i64) -> bool {
+    free_pages * page_size >= VACUUM_MIN_FREE_BYTES && free_pages * 4 >= page_count
+}
+
+pub fn database_space(conn: &Connection) -> rusqlite::Result<DatabaseSpace> {
+    let mode: i64 = conn.query_row("PRAGMA auto_vacuum", [], |row| row.get(0))?;
+    let (page_size, page_count, free_pages) = page_stats(conn)?;
+    Ok(DatabaseSpace {
+        file_bytes: page_count * page_size,
+        free_bytes: free_pages * page_size,
+        incremental: mode == 2,
+        vacuums_at_startup: mode == 0 && worth_a_full_vacuum(page_size, page_count, free_pages),
+    })
+}
+
 /// Rewrites a database created before incremental auto-vacuum, once, when at
 /// least a quarter of it (and 64 MB) is free. It holds the write lock for a
 /// few seconds, so callers run it before anything starts writing (app
@@ -30,7 +55,7 @@ pub fn vacuum_into_incremental_mode(conn: &Connection) -> rusqlite::Result<Optio
         return Ok(None);
     }
     let (page_size, page_count, free_pages) = page_stats(conn)?;
-    if free_pages * page_size < VACUUM_MIN_FREE_BYTES || free_pages * 4 < page_count {
+    if !worth_a_full_vacuum(page_size, page_count, free_pages) {
         return Ok(None);
     }
     conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL; VACUUM;")?;
@@ -107,6 +132,10 @@ mod tests {
             .unwrap();
         assert!(file_len(&path) > 80 * 1024 * 1024);
 
+        let space = database_space(&conn).unwrap();
+        assert!(space.vacuums_at_startup && !space.incremental, "{space:?}");
+        assert!(space.free_bytes > 64 * 1024 * 1024);
+
         let outcome = vacuum_into_incremental_mode(&conn).unwrap().unwrap();
         assert!(outcome.after_bytes < 1024 * 1024, "{outcome:?}");
         assert!(file_len(&path) < 1024 * 1024);
@@ -115,6 +144,8 @@ mod tests {
             .unwrap();
         assert_eq!(mode, 2);
         assert_eq!(vacuum_into_incremental_mode(&conn).unwrap(), None);
+        let space = database_space(&conn).unwrap();
+        assert!(space.incremental && !space.vacuums_at_startup, "{space:?}");
     }
 
     #[test]

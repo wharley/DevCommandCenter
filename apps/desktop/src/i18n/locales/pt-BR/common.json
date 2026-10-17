@@ -571,6 +571,15 @@
     "calculatingWorkspaceDiskUsage": "Calculando espaço ocupado…",
     "workspaceDiskSpaceFreed": "Espaço que será liberado: aproximadamente {{size}}.",
     "cleanup": {
+      "dccData": {
+        "label": "Dados do DCC",
+        "summary": "Banco {{database}} ({{reclaimable}} recuperáveis) · cache do navegador {{cache}} · app {{webview}}",
+        "compact": "Compactar",
+        "compacting": "Compactando…",
+        "compacted": "Liberados {{size}}.",
+        "compactedOnRestart": "Liberados {{size}}; mais {{pending}} saem do disco quando o DCC reabrir.",
+        "failed": "Não foi possível compactar os dados do DCC."
+      },
       "action": "Liberar espaço",
       "title": "Liberar espaço",
       "description": "Excluir apaga o worktree, as conversas e o histórico de Desfazer de cada tarefa. A branch local continua no repositório. Já vêm marcadas só as que têm tudo commitado e publicado.",
