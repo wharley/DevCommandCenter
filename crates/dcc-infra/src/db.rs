@@ -8947,7 +8947,20 @@ impl SessionEventRepo for SqliteSessionRepo {
                 ],
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        Self::reindex_session_sync(&transaction, &event.session_id)?;
+        // Reindexing rereads every event of the session, so doing it per
+        // streamed chunk made each turn quadratic. Deltas reach the index with
+        // the next non-delta event, at the latest when the turn ends.
+        let streamed_chunk = matches!(
+            event.kind,
+            SessionEventKind::TurnDelta { .. }
+                | SessionEventKind::TurnAssistantMessageDelta { .. }
+                | SessionEventKind::TurnReasoningDelta { .. }
+                | SessionEventKind::TurnToolCallDelta { .. }
+                | SessionEventKind::DelegationDelta { .. }
+        );
+        if !streamed_chunk {
+            Self::reindex_session_sync(&transaction, &event.session_id)?;
+        }
         transaction
             .commit()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -14514,6 +14527,58 @@ mod tests {
             &TurnId("nonterminal-turn".to_owned()),
         ))
         .is_err());
+    }
+
+    #[test]
+    fn streamed_chunks_reach_the_search_index_when_the_turn_ends() {
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
+        event_session(&repo, "search-delta-session");
+        futures::executor::block_on(repo.save_thread(&Thread {
+            id: ThreadId("search-delta-thread".to_owned()),
+            project_id: ProjectId("project-events".to_owned()),
+            session_id: Some(SessionId("search-delta-session".to_owned())),
+            title: "Streaming".to_owned(),
+            archived_at: None,
+        }))
+        .expect("save thread");
+        let turn_id = TurnId("turn-1".to_owned());
+        let append = |event_id: &str, sequence: u64, kind: SessionEventKind| {
+            futures::executor::block_on(repo.append_event(&event_record(
+                event_id,
+                "search-delta-session",
+                sequence,
+                kind,
+            )))
+            .expect("append event");
+        };
+        let matches = |query: &str| repo.search_sessions(query, 10).expect("search").len();
+
+        append(
+            "started",
+            1,
+            SessionEventKind::TurnStarted {
+                turn_id: turn_id.clone(),
+                prompt: "Explain the parser".to_owned(),
+                plan_mode: None,
+                model: None,
+                evidence: None,
+                retry_of_turn_id: None,
+                approval_policy: None,
+            },
+        );
+        append(
+            "chunk",
+            2,
+            SessionEventKind::TurnDelta {
+                turn_id: turn_id.clone(),
+                content: "zebrafish tokenizer".to_owned(),
+            },
+        );
+        assert_eq!(matches("parser"), 1);
+        assert_eq!(matches("zebrafish"), 0, "a chunk alone does not reindex");
+
+        append("completed", 3, SessionEventKind::TurnCompleted { turn_id });
+        assert_eq!(matches("zebrafish"), 1);
     }
 
     #[test]
