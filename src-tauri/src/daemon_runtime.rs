@@ -260,6 +260,8 @@ fn open_connection(db_path: &Path) -> Result<Connection, String> {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+    // Before journal_mode: a new file only takes auto_vacuum while empty.
+    dcc_infra::db::limit_storage_growth(&conn).map_err(|e| e.to_string())?;
     conn.execute_batch(
         "
         PRAGMA journal_mode = WAL;
@@ -269,7 +271,6 @@ fn open_connection(db_path: &Path) -> Result<Connection, String> {
         ",
     )
     .map_err(|e| e.to_string())?;
-    dcc_infra::db::limit_wal_growth(&conn).map_err(|e| e.to_string())?;
     conn.execute_batch(APP_SCHEMA_SQL)
         .map_err(|e| e.to_string())?;
     Ok(conn)

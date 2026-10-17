@@ -7293,6 +7293,8 @@ pub fn run() {
             appshot_commands::setup(app.handle(), app_data_dir.clone())?;
             let db_path = app_data_dir.join("database.sqlite");
             let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+            // Before journal_mode: a new file only takes auto_vacuum while empty.
+            dcc_infra::db::limit_storage_growth(&conn).map_err(|e| e.to_string())?;
             conn.execute_batch(
                 "
                 PRAGMA journal_mode = WAL;
@@ -7302,7 +7304,6 @@ pub fn run() {
                 ",
             )
             .map_err(|e| e.to_string())?;
-            dcc_infra::db::limit_wal_growth(&conn).map_err(|e| e.to_string())?;
             run_legacy_schema_migrations(&conn)
                 .map_err(|e| format!("failed to migrate legacy schema: {e}"))?;
             conn.execute_batch(APP_SCHEMA_SQL)
@@ -7311,6 +7312,17 @@ pub fn run() {
                 .map_err(|e| format!("failed to apply MCP schema: {e}"))?;
             sync_existing_repo_configs(&conn)
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
+            // Once per database: nothing writes yet, so the rewrite cannot
+            // make an agent wait. Later frees go back in slices (worker).
+            match dcc_infra::db::vacuum_into_incremental_mode(&conn) {
+                Ok(Some(outcome)) => eprintln!(
+                    "[DCC] database compacted: {} MB -> {} MB",
+                    outcome.before_bytes / (1024 * 1024),
+                    outcome.after_bytes / (1024 * 1024)
+                ),
+                Ok(None) => {}
+                Err(error) => eprintln!("[DCC] database compaction skipped: {error}"),
+            }
             eprintln!("[DCC] Database ready at {:?}", db_path);
             delta_compaction_worker::spawn(db_path.clone());
             let session_command_state =

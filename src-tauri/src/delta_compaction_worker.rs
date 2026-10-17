@@ -1,7 +1,7 @@
 //! Background pass that merges the streamed chunks of settled turns (see
-//! `dcc_infra::db::delta_compaction`). It runs on its own connection, in small
-//! write transactions with pauses between them, so agents appending events
-//! never wait on it for long.
+//! `dcc_infra::db::delta_compaction`) and then gives free pages back to the
+//! disk. It runs on its own connection, in small write transactions with
+//! pauses between them, so agents appending events never wait on it for long.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -14,6 +14,8 @@ const PASS_INTERVAL: Duration = Duration::from_secs(30 * 60);
 /// Rows deleted per write transaction, and the pause after each one.
 const ROWS_PER_STEP: usize = 1000;
 const PAUSE_BETWEEN_STEPS: Duration = Duration::from_millis(100);
+/// Free pages (4 KB) given back to the disk per write, after each pass.
+const PAGES_PER_RECLAIM: u32 = 2048;
 
 fn run_pass(db_path: &PathBuf) -> Result<(usize, usize), String> {
     let repo = SqliteSessionRepo::open(db_path).map_err(|error| error.to_string())?;
@@ -35,6 +37,19 @@ fn run_pass(db_path: &PathBuf) -> Result<(usize, usize), String> {
                 break;
             }
         }
+    }
+    // Freed pages, from this pass or from deleted tasks, go back to the disk;
+    // stop as soon as a slice makes no progress.
+    let mut free_pages = i64::MAX;
+    loop {
+        let remaining = repo
+            .reclaim_free_pages_step(PAGES_PER_RECLAIM)
+            .map_err(|error| error.to_string())?;
+        if remaining == 0 || remaining >= free_pages {
+            break;
+        }
+        free_pages = remaining;
+        std::thread::sleep(PAUSE_BETWEEN_STEPS);
     }
     Ok((merged, deleted))
 }

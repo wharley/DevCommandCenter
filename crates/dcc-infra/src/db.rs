@@ -14,6 +14,8 @@ use crate::ai_memory::AiMemoryHit;
 mod delta_compaction;
 pub use delta_compaction::{DeltaCompactionStep, DELTA_COMPACTION_SETTLE_MINUTES};
 use delta_compaction::DELTA_COMPACTION_TABLE_SQL;
+mod space;
+pub use space::{vacuum_into_incremental_mode, VacuumOutcome};
 
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
@@ -353,19 +355,25 @@ const SESSION_SEARCH_INDEX_MARKER: (&str, i64) = ("session_search_index", 1);
 
 const TERMINAL_EVENT_KEYS_MARKER: (&str, i64) = ("terminal_event_keys", 1);
 
-/// WAL mode only checkpoints back into the database; without a size limit the
-/// `-wal` file stays at its largest burst forever. 32 MiB follows T3 Code.
-/// `checkpoint_fullfsync` makes checkpoints durable on macOS, where a plain
-/// fsync does not flush the drive cache.
-pub const WAL_GROWTH_PRAGMAS: &str = "
+/// - `auto_vacuum = INCREMENTAL` lets deleted pages go back to the disk in
+///   small slices ([`SqliteSessionRepo::reclaim_free_pages_step`]). SQLite
+///   only applies it to an empty file or at the next VACUUM, so it must run
+///   before `journal_mode`, and an existing database converts once through
+///   [`vacuum_into_incremental_mode`].
+/// - WAL mode only checkpoints back into the database; without a size limit
+///   the `-wal` file stays at its largest burst forever. 32 MiB follows T3.
+/// - `checkpoint_fullfsync` makes checkpoints durable on macOS, where a plain
+///   fsync does not flush the drive cache.
+pub const STORAGE_GROWTH_PRAGMAS: &str = "
+PRAGMA auto_vacuum = INCREMENTAL;
 PRAGMA journal_size_limit = 33554432;
 PRAGMA checkpoint_fullfsync = ON;
 ";
 
-/// Applies [`WAL_GROWTH_PRAGMAS`]; they are per connection, so every writer
-/// that can run a checkpoint needs them.
-pub fn limit_wal_growth(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(WAL_GROWTH_PRAGMAS)
+/// Applies [`STORAGE_GROWTH_PRAGMAS`]; they are per connection, so every
+/// connection that writes needs them, before anything else touches the file.
+pub fn limit_storage_growth(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(STORAGE_GROWTH_PRAGMAS)
 }
 
 /// Durable browser location metadata is deliberately kept separate from the
@@ -975,7 +983,7 @@ impl SqliteWorkspaceRepo {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path.as_ref())
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        limit_wal_growth(&conn)
+        limit_storage_growth(&conn)
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let repo = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -2041,7 +2049,7 @@ impl SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        limit_wal_growth(&conn)
+        limit_storage_growth(&conn)
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let repo = Self {
             conn: Arc::new(Mutex::new(conn)),

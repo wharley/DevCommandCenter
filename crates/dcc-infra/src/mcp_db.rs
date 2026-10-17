@@ -108,7 +108,7 @@ impl fmt::Debug for SqliteMcpRepo {
 impl SqliteMcpRepo {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path.as_ref()).map_err(repository_error)?;
-        crate::db::limit_wal_growth(&conn).map_err(repository_error)?;
+        crate::db::limit_storage_growth(&conn).map_err(repository_error)?;
         let repo = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
