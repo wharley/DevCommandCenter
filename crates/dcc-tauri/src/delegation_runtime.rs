@@ -1568,7 +1568,7 @@ pub fn task_result_turn(
     }
     lines.extend([
         String::new(),
-        "The human can open the task to read the rest or keep talking to it. Tell them where the plan stands and, if a next step is due, propose it. Follow-ups to an open task go through dcc_task_message, from a turn the human started.".to_string(),
+        "The human can open the task to read the rest or keep talking to it. Tell them in a few lines where things stand, then stop: this message cannot propose or start tasks. If the task found problems, list them; reviewing, fixing and re-checking its work is yours to do in this conversation once the human replies.".to_string(),
     ]);
     lines.join("\n")
 }
@@ -1820,6 +1820,11 @@ pub async fn propose_task(
     let person_turn = open_turn
         .as_ref()
         .is_some_and(|(_, prompt)| !prompt.starts_with(DCC_TURN_PREFIX));
+    // A [DCC] status turn proposing the next task is how review → fix →
+    // review chains form with nobody asking; only the human moves the plan.
+    if open_turn.is_some() && !person_turn {
+        return Err("a turn started by a [DCC] status cannot propose tasks; tell the human where things stand and stop. Fixing or re-checking a task's work is yours to do in this conversation once they reply".to_string());
+    }
     if input.start_now && !person_turn {
         return Err("start=now is only for a turn the human started; propose the task instead so they can start it".to_string());
     }
@@ -3112,15 +3117,29 @@ mod tests {
             let error = propose_task(state, now("Fase 2")).await.expect_err("no open turn");
             assert!(error.contains("start=now"), "{error}");
 
-            append(state, "parent", started("p-2", "[DCC] Task \"Fase 1\" ended a turn")).await;
-            let error = propose_task(state, now("Fase 2")).await.expect_err("DCC turn");
-            assert!(error.contains("start=now"), "{error}");
-
-            // Proposing from that same turn is fine: the person still decides.
+            append(state, "parent", started("p-2", "plan the mobile app")).await;
             let error = propose_task(state, proposal_input("Fase 2"))
                 .await
                 .expect_err("stops at the unknown provider");
             assert!(!error.contains("start=now"), "{error}");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_dcc_status_turn_cannot_propose_the_next_task() {
+            // Review → fix → review chains came from status turns proposing
+            // the next step with nobody asking.
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            append(
+                state,
+                "parent",
+                started("p-2", "[DCC] Task \"Revisar correção\" ended a turn"),
+            )
+            .await;
+            let error = propose_task(state, proposal_input("Corrigir os P1"))
+                .await
+                .expect_err("status turn");
+            assert!(error.contains("[DCC] status cannot propose"), "{error}");
         }
 
         #[tokio::test(flavor = "current_thread")]

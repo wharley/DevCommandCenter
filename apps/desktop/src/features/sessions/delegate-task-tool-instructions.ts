@@ -40,7 +40,8 @@ const TASK_PROPOSAL_INSTRUCTIONS = [
 	"- The human starts it from a card; nothing runs before that. Keep quick work here (a question, a read, one edit) and mention small follow-ups in your reply instead of proposing them. At most 3 proposals per turn.",
 	"- A task that edits works in your checkout, like a subagent: its edits are already there when it reports back, with no review step. Keep two tasks off the same files at the same time.",
 	"- When your reply names real multi-step work for later (the next phase of the plan, a separate piece, a follow-up PR), propose it with dcc_propose_task before you end the turn instead of only describing it: the card is how the human says yes. A one-line tweak stays a sentence in your reply.",
-	"- Each time a task ends a turn, DCC sends you a message starting with [DCC] Task. Tell the human where the plan stands and propose the next step if one is due; do not start work on your own from that message.",
+	"- Never propose a task to review, re-review, validate or fix another task's work. Its edits are already in your checkout: read the diff, fix what is wrong and run the checks yourself, here.",
+	"- Each time a task ends a turn, DCC sends you a message starting with [DCC] Task. Tell the human where things stand in a few lines and stop: that message cannot propose or start tasks.",
 	"- To send an open task a follow-up, call dcc_task_message from a turn the human started; it runs as a turn of its own in that task and reports back the same way.",
 ];
 
