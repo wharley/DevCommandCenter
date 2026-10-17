@@ -170,6 +170,54 @@ fn is_edit_capable(delegation: &Delegation) -> bool {
     matches!(delegation.mode, DelegationMode::Implement) || delegation.budget.allow_file_edits
 }
 
+/// The parent's child that is editing its checkout right now. Children that
+/// share the checkout take turns: two writing the same files at once is how
+/// edits get lost. An open task only counts while a turn of it runs.
+async fn child_editing_the_checkout(
+    state: &SessionCommandState,
+    parent_session_id: &SessionId,
+    except: Option<&DelegationId>,
+) -> Result<Option<Delegation>, String> {
+    let children = DelegationRepo::list_delegations(state, None, Some(parent_session_id))
+        .await
+        .map_err(|error| error.to_string())?;
+    for child in children {
+        if except == Some(&child.id)
+            || !is_edit_capable(&child)
+            || !child.budget.shared_checkout
+            || !matches!(
+                child.status,
+                DelegationStatus::Queued | DelegationStatus::Running
+            )
+        {
+            continue;
+        }
+        if child.kind == DelegationKind::Task {
+            let Some(child_session_id) = child.child_session_id.as_ref() else {
+                continue;
+            };
+            let events = SessionEventRepo::list_events_by_session(state, child_session_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            if SessionProjection::fold(&events)
+                .and_then(|projection| projection.active_turn_id)
+                .is_none()
+            {
+                continue;
+            }
+        }
+        return Ok(Some(child));
+    }
+    Ok(None)
+}
+
+fn busy_checkout_error(child: &Delegation) -> String {
+    format!(
+        "\"{}\" is still editing this checkout; only one child edits at a time. Wait for it to end its turn, then try again",
+        task_title(child)
+    )
+}
+
 fn clip(value: &str, max_chars: usize) -> String {
     let trimmed = value.trim();
     if trimmed.chars().count() <= max_chars {
@@ -1006,6 +1054,13 @@ pub async fn run_delegation(
         approval_policy: None,
         shared_checkout: allow_file_edits && input.shared_checkout,
     };
+    if budget.shared_checkout {
+        if let Some(busy) =
+            child_editing_the_checkout(state, &parent.id, input.proposal_id.as_ref()).await?
+        {
+            return Err(busy_checkout_error(&busy));
+        }
+    }
     let target_provider_id = resolve_target_provider(
         state,
         input.target_provider_id.as_deref(),
@@ -1742,6 +1797,13 @@ pub async fn message_task(
     let task = delegation_for_parent(state, parent_session_id, task_id).await?;
     if task.kind != DelegationKind::Task || task.status != DelegationStatus::Running {
         return Err("only an open task takes messages; propose a new task instead".to_string());
+    }
+    if is_edit_capable(&task) && task.budget.shared_checkout {
+        if let Some(busy) =
+            child_editing_the_checkout(state, parent_session_id, Some(&task.id)).await?
+        {
+            return Err(busy_checkout_error(&busy));
+        }
     }
     let parent_events = SessionEventRepo::list_events_by_session(state, parent_session_id)
         .await
@@ -3447,6 +3509,44 @@ mod tests {
 
             let closed = complete_task(state, &task.id).await.expect("close");
             assert_eq!(closed.status, DelegationStatus::Completed);
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn only_one_child_edits_the_parents_checkout_at_a_time() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let mut task = open_task(state).await;
+            task.mode = DelegationMode::Implement;
+            task.budget.allow_file_edits = true;
+            task.budget.shared_checkout = true;
+            DelegationRepo::save_delegation(state, &task)
+                .await
+                .expect("save");
+            let parent = SessionId("parent".to_string());
+
+            // An open task that is not working holds nothing.
+            assert!(child_editing_the_checkout(state, &parent, None)
+                .await
+                .expect("check")
+                .is_none());
+
+            append(
+                state,
+                "child",
+                started("c-1", "Task from Dev Command Center."),
+            )
+            .await;
+            let busy = child_editing_the_checkout(state, &parent, None)
+                .await
+                .expect("check")
+                .expect("the task is editing");
+            assert_eq!(busy.id, task.id);
+            assert!(busy_checkout_error(&busy).contains("only one child edits at a time"));
+            // The task itself is not in its own way.
+            assert!(child_editing_the_checkout(state, &parent, Some(&task.id))
+                .await
+                .expect("check")
+                .is_none());
         }
 
         #[tokio::test(flavor = "current_thread")]

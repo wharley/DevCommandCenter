@@ -36,11 +36,11 @@ function buildNativeSubagentInstructions(provider: Provider) {
 /** `dcc_propose_task`: a phase of the plan as its own conversation, on any provider. */
 const TASK_PROPOSAL_INSTRUCTIONS = [
 	"Task proposals (Dev Command Center):",
-	"- When a phase of the plan, or independent multi-step work, deserves its own conversation with a clean context, call dcc_propose_task when it is in your tool list: a short title in the human's language and a self-contained brief. It runs on your own provider unless you name another.",
-	"- The human starts it from a card; nothing runs before that. Keep quick work here (a question, a read, one edit) and mention small follow-ups in your reply instead of proposing them. At most 3 proposals per turn.",
-	"- A task that edits works in your checkout, like a subagent: its edits are already there when it reports back, with no review step. Keep two tasks off the same files at the same time.",
-	"- When your reply names real multi-step work for later (the next phase of the plan, a separate piece, a follow-up PR), propose it with dcc_propose_task before you end the turn instead of only describing it: the card is how the human says yes. A one-line tweak stays a sentence in your reply.",
+	"- What the human asks for in this conversation is yours to do here: investigate, implement, review, fix and test it yourself. Never split their request into tasks.",
+	"- Call dcc_propose_task, when it is in your tool list, only when the human asks to split work off, run it in parallel or open another task, or for an independent piece of work outside their request that you noticed. It takes a short title in the human's language and a self-contained brief, and runs on your own provider unless you name another.",
+	"- The human starts it from a card; nothing runs before that. At most 3 proposals per turn. A small follow-up or a one-line tweak stays a sentence in your reply.",
 	"- Never propose a task to review, re-review, validate or fix another task's work. Its edits are already in your checkout: read the diff, fix what is wrong and run the checks yourself, here.",
+	"- A task that edits works in your checkout, like a subagent: its edits are already there when it reports back, with no review step. Only one task edits at a time: DCC refuses to start another while one is working.",
 	"- Each time a task ends a turn, DCC sends you a message starting with [DCC] Task. Tell the human where things stand in a few lines and stop: that message cannot propose or start tasks.",
 	"- To send an open task a follow-up, call dcc_task_message from a turn the human started; it runs as a turn of its own in that task and reports back the same way.",
 ];
@@ -75,7 +75,7 @@ export function buildDelegateTaskToolInstructions(
 		...lines,
 		"",
 		"Cross-provider delegation (Dev Command Center):",
-		"- To hand a bounded, self-contained task to a different provider, call the DCC tool dcc_delegate_task when it is in your tool list.",
+		"- When the human asks for another provider or model to do a bounded, self-contained piece, call the DCC tool dcc_delegate_task when it is in your tool list. Do not delegate their request on your own.",
 		"- It returns a taskId at once; DCC delivers the result later as a message starting with [DCC] (mid-turn if you are still working). Keep working on independent parts or end your turn — do not poll. Use wait=true or dcc_task_wait only when you cannot continue without the result.",
 		"- review and explain are read-only; implement edits this checkout directly, so its edits are already here when the result arrives.",
 		"- Pass a short title (a few words, in the human's language) naming the task; the human sees it as the child conversation's title.",

@@ -41,11 +41,13 @@ describe("delegate task tool instructions", () => {
 				FALLBACK_PROVIDER_CATALOG.providers,
 				providerId,
 			);
-			expect(instructions).toContain("call dcc_propose_task");
+			expect(instructions).toContain("Call dcc_propose_task");
 			expect(instructions).toContain("runs on your own provider");
 			expect(instructions).toContain("At most 3 proposals per turn");
-			expect(instructions).toContain("propose it with dcc_propose_task before you end the turn");
-			expect(instructions).toContain("A one-line tweak stays a sentence");
+			expect(instructions).toContain("Never split their request into tasks");
+			expect(instructions).toContain("only when the human asks to split work off");
+			expect(instructions).toContain("a one-line tweak stays a sentence");
+			expect(instructions).toContain("Only one task edits at a time");
 			expect(instructions).toContain("its edits are already there when it reports back");
 		}
 		const cursor = FALLBACK_PROVIDER_CATALOG.providers.find((item) => item.id === "cursor");
