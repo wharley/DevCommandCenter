@@ -337,6 +337,21 @@ CREATE VIRTUAL TABLE IF NOT EXISTS dcc_session_search USING fts5(
 );
 "#;
 
+/// Data migrations that scan every event run once per version instead of on
+/// every repo open; the marker records the version already applied.
+const SCHEMA_MARKER_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_schema_markers (
+	name TEXT PRIMARY KEY NOT NULL,
+	version INTEGER NOT NULL
+);
+"#;
+
+/// Bump whenever `build_search_text` changes what a session row holds; the
+/// next open then rebuilds the FTS table once.
+const SESSION_SEARCH_INDEX_MARKER: (&str, i64) = ("session_search_index", 1);
+
+const TERMINAL_EVENT_KEYS_MARKER: (&str, i64) = ("terminal_event_keys", 1);
+
 /// Durable browser location metadata is deliberately kept separate from the
 /// session projection. It contains only a caller-sanitized URL and expires
 /// opportunistically; no page data, browser state, or capability is stored.
@@ -2629,7 +2644,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{PROVIDER_NATIVE_REWIND_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{PROVIDER_NATIVE_REWIND_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}\n{SCHEMA_MARKER_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
@@ -2833,7 +2848,12 @@ impl SqliteSessionRepo {
             "terminal_kind",
             "TEXT NULL",
         )?;
-        Self::backfill_terminal_event_keys(&migration)?;
+        // Both insert paths write the keys, so only rows from before the
+        // columns existed need the full scan.
+        if !Self::schema_marker_applied(&migration, TERMINAL_EVENT_KEYS_MARKER)? {
+            Self::backfill_terminal_event_keys(&migration)?;
+            Self::record_schema_marker(&migration, TERMINAL_EVENT_KEYS_MARKER)?;
+        }
         migration
             .execute_batch(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_dcc_session_events_terminal_turn\n\
@@ -2847,8 +2867,9 @@ impl SqliteSessionRepo {
         // Compatibility cleanup for bundles removed before their sessions were
         // deleted explicitly. Keep orphaned single-workspace history unchanged;
         // only multi-root sessions can be identified safely here.
-        conn.execute(
-            r#"
+        let removed_orphans = conn
+            .execute(
+                r#"
             DELETE FROM dcc_sessions
              WHERE TRIM(additional_workspace_ids_json) NOT IN ('', '[]', 'null')
                AND NOT EXISTS (
@@ -2857,10 +2878,54 @@ impl SqliteSessionRepo {
                     WHERE w.id = dcc_sessions.workspace_id
                )
             "#,
-            [],
+                [],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        if removed_orphans > 0 {
+            conn.execute(
+                "DELETE FROM dcc_session_search WHERE session_id NOT IN (SELECT id FROM dcc_sessions)",
+                [],
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        // Repos are opened per command (the sidebar polls every minute), so a
+        // full rebuild here rewrote the whole FTS table from every event on
+        // each open. Writes keep rows current; rebuild only when the indexed
+        // text format changes.
+        if !Self::schema_marker_applied(&conn, SESSION_SEARCH_INDEX_MARKER)? {
+            let transaction = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            Self::rebuild_search_index_sync(&transaction)?;
+            Self::record_schema_marker(&transaction, SESSION_SEARCH_INDEX_MARKER)?;
+            transaction
+                .commit()
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn schema_marker_applied(conn: &Connection, (name, version): (&str, i64)) -> Result<bool> {
+        let applied = conn
+            .query_row(
+                "SELECT version FROM dcc_schema_markers WHERE name = ?1",
+                params![name],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(applied == Some(version))
+    }
+
+    fn record_schema_marker(conn: &Connection, (name, version): (&str, i64)) -> Result<()> {
+        conn.execute(
+            r#"
+            INSERT INTO dcc_schema_markers (name, version) VALUES (?1, ?2)
+            ON CONFLICT(name) DO UPDATE SET version = excluded.version
+            "#,
+            params![name, version],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        Self::rebuild_search_index_sync(&conn)?;
         Ok(())
     }
 
@@ -3267,6 +3332,9 @@ impl SqliteSessionRepo {
                 )
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
             recovered.push((SessionId(session_id), turn_id));
+        }
+        for (session_id, _) in &recovered {
+            Self::reindex_session_sync(&transaction, session_id)?;
         }
         transaction
             .commit()
@@ -11706,6 +11774,71 @@ mod tests {
                 .expect("read single session")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn reopening_the_session_repo_keeps_the_search_index_until_its_version_changes() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("search.sqlite");
+        let insert_sentinel = |repo: &SqliteSessionRepo| {
+            repo.conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO dcc_session_search (session_id, workspace_id, project_id, thread_title, search_text) VALUES ('sentinel', 'w', 'p', 't', 'text')",
+                    [],
+                )
+                .unwrap();
+        };
+        let sentinel_rows = |repo: &SqliteSessionRepo| -> i64 {
+            repo.conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM dcc_session_search WHERE session_id = 'sentinel'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+
+        let first = SqliteSessionRepo::open(&path).expect("open first repo");
+        insert_sentinel(&first);
+        drop(first);
+        let reopened = SqliteSessionRepo::open(&path).expect("reopen repo");
+        assert_eq!(
+            sentinel_rows(&reopened),
+            1,
+            "open must not rebuild the index"
+        );
+
+        reopened
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE dcc_schema_markers SET version = 0 WHERE name = ?1",
+                params![SESSION_SEARCH_INDEX_MARKER.0],
+            )
+            .unwrap();
+        drop(reopened);
+        let upgraded = SqliteSessionRepo::open(&path).expect("open after version bump");
+        assert_eq!(
+            sentinel_rows(&upgraded),
+            0,
+            "a new index version rebuilds once"
+        );
+        let version: i64 = upgraded
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT version FROM dcc_schema_markers WHERE name = ?1",
+                params![SESSION_SEARCH_INDEX_MARKER.0],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, SESSION_SEARCH_INDEX_MARKER.1);
     }
 
     #[test]
