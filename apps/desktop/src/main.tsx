@@ -15,6 +15,7 @@ import {
 	createDccQueryClient,
 	dccQueryPersistOptions,
 } from "./lib/query-client";
+import { removeLegacyBrowserStorage } from "./lib/frontend-state-cleanup";
 import "./i18n/config";
 import "./styles/app.css";
 
@@ -35,6 +36,7 @@ const QuickComposer = lazy(() =>
 );
 
 const removeErrorListeners = installFrontendErrorListeners();
+removeLegacyBrowserStorage();
 if (import.meta.hot) import.meta.hot.dispose(removeErrorListeners);
 const queryClient = createDccQueryClient();
 

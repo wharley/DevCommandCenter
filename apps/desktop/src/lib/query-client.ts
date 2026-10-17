@@ -1,14 +1,10 @@
-import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import {
 	defaultShouldDehydrateQuery,
 	focusManager,
 	QueryClient,
 	type Query,
 } from "@tanstack/react-query";
-import {
-	removeOldestQuery,
-	type PersistedClient,
-} from "@tanstack/react-query-persist-client";
+import type { PersistedClient, Persister } from "@tanstack/react-query-persist-client";
 import type { CoreEvent, WorkspaceSessionSummary } from "@dcc/contracts";
 import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { REMOTE_CORE_EVENT_NAME } from "./session-api";
@@ -539,14 +535,102 @@ export function createDccQueryClient() {
 	return queryClient;
 }
 
-export const dccQueryPersister = createAsyncStoragePersister({
-	key: DCC_QUERY_CACHE_STORAGE_KEY,
-	storage: browserStorage
-		? createDccQueryCacheStorage(browserStorage)
-		: undefined,
-	serialize: serializeDccQueryCache,
-	retry: removeOldestQuery,
+/**
+ * The snapshot only has to survive a restart, and restored queries refetch
+ * anyway. Writing ~260 KB on every cache event (the library default is once a
+ * second) kept WebKit's localStorage WAL from ever shrinking.
+ */
+export const DCC_QUERY_CACHE_WRITE_DELAY_MS = 15_000;
+/** Unchanged data is still rewritten this often so `maxAge` keeps a live snapshot. */
+export const DCC_QUERY_CACHE_REFRESH_MS = 60 * 60_000;
+
+/** What a restart would see; refetch counters and timestamps are left out. */
+function persistedDataFingerprint(client: PersistedClient): string {
+	return JSON.stringify(
+		client.clientState.queries.map((query) => [
+			query.queryHash,
+			query.state.status,
+			query.state.data,
+		]),
+	);
+}
+
+export function createDccQueryPersister(input: {
+	storage: Storage | undefined;
+	delayMs?: number;
+	now?: () => number;
+}): Persister & { flush: () => void } {
+	const { storage } = input;
+	const delayMs = input.delayMs ?? DCC_QUERY_CACHE_WRITE_DELAY_MS;
+	const now = input.now ?? Date.now;
+	let pending: PersistedClient | null = null;
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	let lastFingerprint: string | null = null;
+	let lastWrittenAt = 0;
+
+	const flush = () => {
+		if (timer) {
+			clearTimeout(timer);
+			timer = null;
+		}
+		const client = pending;
+		pending = null;
+		if (!client || !storage) return;
+		const compacted = compactDccPersistedClient(client);
+		const fingerprint = persistedDataFingerprint(compacted);
+		if (
+			fingerprint === lastFingerprint &&
+			now() - lastWrittenAt < DCC_QUERY_CACHE_REFRESH_MS
+		) {
+			return;
+		}
+		try {
+			storage.setItem(DCC_QUERY_CACHE_STORAGE_KEY, JSON.stringify(compacted));
+			lastFingerprint = fingerprint;
+			lastWrittenAt = now();
+		} catch {
+			/* createDccQueryCacheStorage already logged it; the next change retries */
+		}
+	};
+
+	return {
+		flush,
+		persistClient: (client) => {
+			pending = client;
+			timer ??= setTimeout(flush, delayMs);
+		},
+		restoreClient: () => {
+			const raw = storage?.getItem(DCC_QUERY_CACHE_STORAGE_KEY);
+			if (!raw) return undefined;
+			const client = JSON.parse(raw) as PersistedClient;
+			lastFingerprint = persistedDataFingerprint(client);
+			lastWrittenAt = client.timestamp;
+			return client;
+		},
+		removeClient: () => {
+			pending = null;
+			if (timer) {
+				clearTimeout(timer);
+				timer = null;
+			}
+			lastFingerprint = null;
+			storage?.removeItem(DCC_QUERY_CACHE_STORAGE_KEY);
+		},
+	};
+}
+
+export const dccQueryPersister = createDccQueryPersister({
+	storage: browserStorage ? createDccQueryCacheStorage(browserStorage) : undefined,
 });
+
+if (typeof window !== "undefined") {
+	// Closing, reloading or hiding the window must not lose the delayed write.
+	window.addEventListener("pagehide", dccQueryPersister.flush);
+	window.addEventListener("beforeunload", dccQueryPersister.flush);
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") dccQueryPersister.flush();
+	});
+}
 
 export const dccQueryPersistOptions = {
 	persister: dccQueryPersister,

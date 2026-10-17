@@ -29,6 +29,8 @@ mod menu_bar;
 mod session_commands;
 mod skills_commands;
 mod workspace_commands;
+#[cfg(target_os = "macos")]
+mod webview_storage;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike};
 use dcc_tauri::commands::workspace_commands::reconcile_delegation_worktree_operations;
@@ -6866,6 +6868,17 @@ pub fn run() {
     #[cfg(not(windows))]
     bootstrap_shell_env();
 
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "macos")]
+    if let Some(home) = home_dir_path() {
+        webview_storage::compact_local_storage_wal(
+            &home
+                .join("Library")
+                .join("WebKit")
+                .join(&context.config().identifier),
+        );
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -7442,7 +7455,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             #[cfg(target_os = "macos")]

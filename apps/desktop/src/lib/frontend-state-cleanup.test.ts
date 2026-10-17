@@ -3,7 +3,23 @@ import { describe, expect, it } from "vitest";
 import {
 	cleanupCompletedWorkspaceFrontendState,
 	cleanupDeletedWorkspaceFrontendState,
+	removeDeletedWorkspaceStorage,
+	removeLegacyStorage,
 } from "./frontend-state-cleanup";
+
+function memoryStorage(entries: Record<string, string>): Storage {
+	const values = new Map(Object.entries(entries));
+	return {
+		get length() {
+			return values.size;
+		},
+		clear: () => values.clear(),
+		getItem: (key) => values.get(key) ?? null,
+		key: (index) => [...values.keys()][index] ?? null,
+		removeItem: (key) => void values.delete(key),
+		setItem: (key, value) => void values.set(key, value),
+	};
+}
 
 describe("frontend state cleanup", () => {
 	it("is exact, idempotent, and keeps durable history on completion", () => {
@@ -57,5 +73,48 @@ describe("frontend state cleanup", () => {
 		expect(
 			client.getQueryData(["workspaceFileContent", "C:\\repo\\ab", "two.ts"]),
 		).toBe("two");
+	});
+
+	it("removes only the deleted task's composer keys and session picks", () => {
+		const storage = memoryStorage({
+			"dcc.workspace.composer.draft.w1": "draft",
+			"dcc.workspace.composer.draft.w1.conversation.new": "new",
+			"dcc.workspace.composer.draft.w1.conversation.session.s1.editor.v1": "{}",
+			"dcc.workspace.composer.effort.w1": "high",
+			"dcc.workspace.composer.approval.w1.codex": "auto",
+			"dcc.workspace.composer.draft.w10": "sibling",
+			"dcc.workspace.composer.effort.w2": "low",
+			"dcc.theme": "dark",
+			"dcc.sessionComposerSelections": JSON.stringify({
+				s1: { providerId: "codex", modelId: "gpt" },
+				s2: { providerId: "claude", modelId: "opus" },
+			}),
+		});
+
+		removeDeletedWorkspaceStorage(storage, { workspaceIds: ["w1"], sessionIds: ["s1"] });
+
+		const remaining = Array.from({ length: storage.length }, (_, index) => storage.key(index));
+		expect(remaining.sort()).toEqual([
+			"dcc.sessionComposerSelections",
+			"dcc.theme",
+			"dcc.workspace.composer.draft.w10",
+			"dcc.workspace.composer.effort.w2",
+		]);
+		expect(JSON.parse(storage.getItem("dcc.sessionComposerSelections") ?? "{}")).toEqual({
+			s2: { providerId: "claude", modelId: "opus" },
+		});
+	});
+
+	it("drops keys written by removed features", () => {
+		const storage = memoryStorage({
+			"dcc:attention:records": "[]",
+			"dcc-review-trail-dcc-1::primary": "[]",
+			"dcc-terminal-tabs-v1": "{}",
+		});
+
+		removeLegacyStorage(storage);
+
+		expect(storage.length).toBe(1);
+		expect(storage.getItem("dcc-terminal-tabs-v1")).toBe("{}");
 	});
 });

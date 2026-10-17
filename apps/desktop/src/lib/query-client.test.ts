@@ -8,8 +8,10 @@ import {
 	applyWorkspaceForgeMetadataUpdated,
 	configureDccQueryGcDefaults,
 	createDccQueryCacheStorage,
+	createDccQueryPersister,
 	DCC_QUERY_CACHE_BUSTER,
 	DCC_QUERY_CACHE_MAX_CHARS,
+	DCC_QUERY_CACHE_REFRESH_MS,
 	DCC_QUERY_CACHE_STORAGE_KEY,
 	DCC_QUERY_GC_TIME_MS,
 	prepareDccQueryCacheStorage,
@@ -361,5 +363,69 @@ describe("DCC query cache persistence", () => {
 
 		expect(storage.getItem(DCC_QUERY_CACHE_STORAGE_KEY)).toBe("new-cache");
 		expect(storage.getItem("dcc-composer-draft")).toBe("keep-me");
+	});
+	it("writes the restart snapshot once per delay, keeping the latest state", () => {
+		vi.useFakeTimers();
+		try {
+			const storage = new MemoryStorage();
+			const setItem = vi.spyOn(storage, "setItem");
+			const persister = createDccQueryPersister({ storage, delayMs: 15_000 });
+			const queryClient = new QueryClient();
+
+			for (let index = 0; index < 50; index += 1) {
+				queryClient.setQueryData(["workspaces"], [{ id: index }]);
+				void persister.persistClient(persistedClient(queryClient));
+			}
+			expect(setItem).not.toHaveBeenCalled();
+
+			vi.advanceTimersByTime(15_000);
+			expect(setItem).toHaveBeenCalledTimes(1);
+			const written = JSON.parse(storage.getItem(DCC_QUERY_CACHE_STORAGE_KEY) ?? "{}");
+			expect(written.clientState.queries[0].state.data).toEqual([{ id: 49 }]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("skips rewriting a snapshot whose data did not change", () => {
+		let clock = 1_000;
+		const storage = new MemoryStorage();
+		const setItem = vi.spyOn(storage, "setItem");
+		const persister = createDccQueryPersister({ storage, now: () => clock });
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(["workspaces"], [{ id: 1 }]);
+
+		void persister.persistClient(persistedClient(queryClient));
+		persister.flush();
+		// A refetch that returns the same data only bumps counters and timestamps.
+		queryClient.setQueryData(["workspaces"], [{ id: 1 }]);
+		void persister.persistClient(persistedClient(queryClient));
+		persister.flush();
+		expect(setItem).toHaveBeenCalledTimes(1);
+
+		clock += DCC_QUERY_CACHE_REFRESH_MS;
+		void persister.persistClient(persistedClient(queryClient));
+		persister.flush();
+		expect(setItem).toHaveBeenCalledTimes(2);
+
+		queryClient.setQueryData(["workspaces"], [{ id: 2 }]);
+		void persister.persistClient(persistedClient(queryClient));
+		persister.flush();
+		expect(setItem).toHaveBeenCalledTimes(3);
+	});
+
+	it("restores the snapshot it wrote and forgets it on remove", async () => {
+		const storage = new MemoryStorage();
+		const persister = createDccQueryPersister({ storage });
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(["shell"], { ready: true });
+
+		void persister.persistClient(persistedClient(queryClient));
+		persister.flush();
+		const restored = await persister.restoreClient();
+		expect(restored?.clientState.queries[0].state.data).toEqual({ ready: true });
+
+		await persister.removeClient();
+		expect(storage.getItem(DCC_QUERY_CACHE_STORAGE_KEY)).toBeNull();
 	});
 });

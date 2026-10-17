@@ -95,11 +95,69 @@ export function saveApprovalPolicy(
 	window.localStorage.setItem(key, policy);
 }
 
+/**
+ * Typing saved the draft (and its editor JSON) on every keystroke. Writes now
+ * wait for a short pause; reads, clears and immediate saves settle a pending
+ * write first, so a sent prompt can never come back from a late timer.
+ */
+export const DRAFT_WRITE_DELAY_MS = 300;
+
+type PendingDraft = {
+	timer: ReturnType<typeof setTimeout>;
+	value: string;
+	state?: () => SerializedEditorState;
+};
+
+const pendingDrafts = new Map<string, PendingDraft>();
+
+export function scheduleDraftSave(
+	key: string,
+	value: string,
+	state?: () => SerializedEditorState,
+) {
+	if (typeof window === "undefined") return;
+	const previous = pendingDrafts.get(key);
+	if (previous) clearTimeout(previous.timer);
+	pendingDrafts.set(key, {
+		timer: setTimeout(() => flushPendingDraft(key), DRAFT_WRITE_DELAY_MS),
+		value,
+		state,
+	});
+}
+
+export function flushPendingDraft(key: string) {
+	const pending = pendingDrafts.get(key);
+	if (!pending) return;
+	pendingDrafts.delete(key);
+	clearTimeout(pending.timer);
+	saveDraft(key, pending.value, pending.state?.());
+}
+
+export function flushPendingDrafts() {
+	for (const key of [...pendingDrafts.keys()]) flushPendingDraft(key);
+}
+
+function cancelPendingDraft(key: string) {
+	const pending = pendingDrafts.get(key);
+	if (!pending) return;
+	pendingDrafts.delete(key);
+	clearTimeout(pending.timer);
+}
+
+if (typeof window !== "undefined") {
+	window.addEventListener("pagehide", flushPendingDrafts);
+	window.addEventListener("beforeunload", flushPendingDrafts);
+	document.addEventListener("visibilitychange", () => {
+		if (document.visibilityState === "hidden") flushPendingDrafts();
+	});
+}
+
 export function loadDraft(key: string) {
 	if (typeof window === "undefined") {
 		return "";
 	}
 
+	flushPendingDraft(key);
 	return window.localStorage.getItem(key) ?? "";
 }
 
@@ -107,6 +165,7 @@ const structuredDraftKey = (key: string) => `${key}.editor.v1`;
 
 export function loadStructuredDraft(key: string): SerializedEditorState | null {
 	if (typeof window === "undefined") return null;
+	flushPendingDraft(key);
 	try {
 		const stored = JSON.parse(
 			window.localStorage.getItem(structuredDraftKey(key)) ?? "null",
@@ -128,6 +187,7 @@ export function saveDraft(
 		return;
 	}
 
+	cancelPendingDraft(key);
 	if (value.trim().length === 0) {
 		clearDraft(key);
 		return;
@@ -152,6 +212,7 @@ export function clearDraft(key: string) {
 		return;
 	}
 
+	cancelPendingDraft(key);
 	window.localStorage.removeItem(key);
 	window.localStorage.removeItem(structuredDraftKey(key));
 }

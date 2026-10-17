@@ -5,9 +5,11 @@ import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
 	clearDraft,
+	flushPendingDraft,
 	loadDraft,
 	loadStructuredDraft,
 	saveDraft,
+	scheduleDraftSave,
 } from "../../draftStorage";
 import { setEditorText } from "../../editorOps";
 import { $extractComposerPrompt } from "../extract-composer-prompt";
@@ -63,6 +65,9 @@ export function DraftPersistencePlugin({
 		setEditorText(editor, stored);
 	}, [draftKey, editor, fallbackDraftKeys]);
 
+	// Leaving a conversation keeps what was typed in its last pause window.
+	useEffect(() => () => flushPendingDraft(draftKey), [draftKey]);
+
 	const handleChange = (editorState: EditorState) => {
 		const { value, hasContext } = editorState.read(() => ({
 			value: $extractComposerPrompt(),
@@ -73,7 +78,11 @@ export function DraftPersistencePlugin({
 			return;
 		}
 
-		saveDraft(draftKey, value, hasContext ? editorState.toJSON() : undefined);
+		scheduleDraftSave(
+			draftKey,
+			value,
+			hasContext ? () => editorState.toJSON() : undefined,
+		);
 	};
 
 	return <OnChangePlugin onChange={handleChange} ignoreSelectionChange />;
