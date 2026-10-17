@@ -98,6 +98,7 @@ fn open_connection(db_path: &Path) -> Result<Connection, String> {
         ",
     )
     .map_err(|e| e.to_string())?;
+    dcc_infra::db::limit_wal_growth(&conn).map_err(|e| e.to_string())?;
     Ok(conn)
 }
 

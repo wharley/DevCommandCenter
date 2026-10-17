@@ -226,9 +226,6 @@ CREATE TABLE IF NOT EXISTS dcc_session_events (
 	FOREIGN KEY (session_id) REFERENCES dcc_sessions(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_dcc_session_events_session_sequence
-	ON dcc_session_events(session_id, sequence);
-
 -- Best-effort external indexes must survive a closed app or a temporary
 -- outage. The DCC session remains the source of truth; this table only records
 -- which durable sessions still need an ai-memory export.
@@ -351,6 +348,21 @@ CREATE TABLE IF NOT EXISTS dcc_schema_markers (
 const SESSION_SEARCH_INDEX_MARKER: (&str, i64) = ("session_search_index", 1);
 
 const TERMINAL_EVENT_KEYS_MARKER: (&str, i64) = ("terminal_event_keys", 1);
+
+/// WAL mode only checkpoints back into the database; without a size limit the
+/// `-wal` file stays at its largest burst forever. 32 MiB follows T3 Code.
+/// `checkpoint_fullfsync` makes checkpoints durable on macOS, where a plain
+/// fsync does not flush the drive cache.
+pub const WAL_GROWTH_PRAGMAS: &str = "
+PRAGMA journal_size_limit = 33554432;
+PRAGMA checkpoint_fullfsync = ON;
+";
+
+/// Applies [`WAL_GROWTH_PRAGMAS`]; they are per connection, so every writer
+/// that can run a checkpoint needs them.
+pub fn limit_wal_growth(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(WAL_GROWTH_PRAGMAS)
+}
 
 /// Durable browser location metadata is deliberately kept separate from the
 /// session projection. It contains only a caller-sanitized URL and expires
@@ -958,6 +970,8 @@ pub struct ForgeBoundRepositoryRecord {
 impl SqliteWorkspaceRepo {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path.as_ref())
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        limit_wal_growth(&conn)
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let repo = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -2023,6 +2037,8 @@ impl SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        limit_wal_growth(&conn)
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let repo = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -2647,6 +2663,7 @@ impl SqliteSessionRepo {
             "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{PROVIDER_NATIVE_REWIND_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}\n{SCHEMA_MARKER_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Self::drop_redundant_event_sequence_index(&conn)?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "offer_prompt", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "effort", "TEXT NULL")?;
@@ -2902,6 +2919,36 @@ impl SqliteSessionRepo {
                 .commit()
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         }
+        Ok(())
+    }
+
+    /// `UNIQUE(session_id, sequence)` already indexes these columns, so the
+    /// explicit copy only doubled ~40 MB of index pages. Databases created
+    /// before that constraint keep (or get) the explicit index.
+    fn drop_redundant_event_sequence_index(conn: &Connection) -> Result<()> {
+        let covered = conn
+            .query_row(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM pragma_index_list('dcc_session_events') AS list
+                     WHERE list."unique" = 1
+                       AND (SELECT group_concat(name, ',')
+                              FROM (SELECT name FROM pragma_index_info(list.name) ORDER BY seqno))
+                           = 'session_id,sequence'
+                )
+                "#,
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute_batch(if covered {
+            "DROP INDEX IF EXISTS idx_dcc_session_events_session_sequence"
+        } else {
+            "CREATE INDEX IF NOT EXISTS idx_dcc_session_events_session_sequence
+                ON dcc_session_events(session_id, sequence)"
+        })
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(())
     }
 
@@ -11787,6 +11834,48 @@ mod tests {
                 .expect("read single session")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn session_repo_bounds_the_wal_and_drops_the_duplicate_sequence_index() {
+        let directory = tempfile::tempdir().expect("temporary database directory");
+        let path = directory.path().join("storage.sqlite");
+        {
+            let legacy = Connection::open(&path).unwrap();
+            legacy
+                .execute_batch(SESSION_TABLE_SQL)
+                .and_then(|_| {
+                    legacy.execute_batch(
+                        "CREATE INDEX idx_dcc_session_events_session_sequence
+                            ON dcc_session_events(session_id, sequence)",
+                    )
+                })
+                .unwrap();
+        }
+
+        let repo = SqliteSessionRepo::open(&path).expect("open repo");
+        let conn = repo.conn.lock().unwrap();
+        let journal_size_limit: i64 = conn
+            .query_row("PRAGMA journal_size_limit", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal_size_limit, 32 * 1024 * 1024);
+        let duplicate: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'idx_dcc_session_events_session_sequence'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(duplicate, 0);
+        let plan: String = conn
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT event_id FROM dcc_session_events WHERE session_id = 's' ORDER BY sequence",
+                [],
+                |row| row.get(3),
+            )
+            .unwrap();
+        assert!(plan.contains("USING INDEX"), "{plan}");
+        assert!(!plan.contains("TEMP B-TREE"), "{plan}");
     }
 
     #[test]

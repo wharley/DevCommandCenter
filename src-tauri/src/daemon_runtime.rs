@@ -269,6 +269,7 @@ fn open_connection(db_path: &Path) -> Result<Connection, String> {
         ",
     )
     .map_err(|e| e.to_string())?;
+    dcc_infra::db::limit_wal_growth(&conn).map_err(|e| e.to_string())?;
     conn.execute_batch(APP_SCHEMA_SQL)
         .map_err(|e| e.to_string())?;
     Ok(conn)
@@ -2625,7 +2626,24 @@ fn handle_rpc(service: &DaemonService, request: RpcRequest) -> RpcResponse {
     }
 }
 
+/// Each RPC row is a one-shot mailbox: the caller stops polling long before a
+/// day, after which nothing reads it again.
+const FINISHED_RPC_RETENTION: &str = "-1 day";
+const RPC_PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
 impl DaemonService {
+    fn prune_finished_requests(&self) -> Result<usize, String> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM daemon_rpc_requests
+                  WHERE status IN ('done', 'error')
+                    AND updated_at < datetime('now', ?1)",
+                params![FINISHED_RPC_RETENTION],
+            )
+            .map_err(|e| e.to_string())
+        })
+    }
+
     fn process_pending_requests(&self) -> Result<(), String> {
         let pending = self.with_conn(|conn| {
             let mut stmt = conn
@@ -2888,7 +2906,14 @@ fn execute_trigger(
 }
 
 fn request_loop(service: Arc<DaemonService>, runtime_file: PathBuf) {
+    let mut last_prune: Option<std::time::Instant> = None;
     while service.running.load(Ordering::Relaxed) {
+        if last_prune.is_none_or(|at| at.elapsed() >= RPC_PRUNE_INTERVAL) {
+            if let Err(error) = service.prune_finished_requests() {
+                eprintln!("[DCC][dccd] rpc retention error: {error}");
+            }
+            last_prune = Some(std::time::Instant::now());
+        }
         if let Err(error) = service.process_pending_requests() {
             eprintln!("[DCC][dccd] request error: {error}");
         }
@@ -3036,6 +3061,42 @@ mod tests {
             .with_conn(|conn| read_daemon_process_state(conn, "p1", "web"))
             .unwrap()
             .unwrap()
+    }
+
+    #[test]
+    fn finished_rpc_mailboxes_are_pruned_after_a_day() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = DaemonService::new(dir.path().join("database.sqlite")).unwrap();
+        service
+            .with_conn(|conn| {
+                conn.execute_batch(
+                    "INSERT INTO daemon_rpc_requests (id, method, status) VALUES
+                       ('old-done', 'm', 'done'), ('old-error', 'm', 'error'),
+                       ('old-pending', 'm', 'pending'), ('fresh-done', 'm', 'done');
+                     UPDATE daemon_rpc_requests SET status = status;
+                     DROP TRIGGER update_daemon_rpc_requests_timestamp;
+                     UPDATE daemon_rpc_requests SET updated_at = datetime('now', '-2 days')
+                      WHERE id LIKE 'old-%';",
+                )
+                .map_err(|e| e.to_string())
+            })
+            .unwrap();
+
+        assert_eq!(service.prune_finished_requests().unwrap(), 2);
+        let left = service
+            .with_conn(|conn| {
+                let mut statement = conn
+                    .prepare("SELECT id FROM daemon_rpc_requests ORDER BY id")
+                    .map_err(|e| e.to_string())?;
+                let ids = statement
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string());
+                ids
+            })
+            .unwrap();
+        assert_eq!(left, ["fresh-done", "old-pending"]);
     }
 
     #[test]

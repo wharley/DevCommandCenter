@@ -7301,6 +7301,7 @@ pub fn run() {
                 ",
             )
             .map_err(|e| e.to_string())?;
+            dcc_infra::db::limit_wal_growth(&conn).map_err(|e| e.to_string())?;
             run_legacy_schema_migrations(&conn)
                 .map_err(|e| format!("failed to migrate legacy schema: {e}"))?;
             conn.execute_batch(APP_SCHEMA_SQL)
