@@ -2453,6 +2453,16 @@
           "waitingForLimit": "waiting for the limit until {{time}}"
         }
       },
+      "browserData": {
+        "title": "Browser data",
+        "body": "The built-in browser caches pages so they open faster. Above 500 MB DCC clears the cache by itself; logins stay.",
+        "usage": "Cache: {{cache}} · Total: {{total}}",
+        "clearCache": "Clear cache",
+        "clearEverything": "Clear everything",
+        "clearEverythingHint": "\"Clear everything\" also deletes cookies and site data: you are signed out of every site in the browser.",
+        "confirmEverything": "Sign out of every site and delete the browser's data?",
+        "cleared": "Done: the cache now takes {{cache}}."
+      },
       "usageLimit": {
         "title": "Continue on its own when the limit runs out",
         "body": "When the plan's usage limit runs out mid-task, DCC waits for the limit to come back and sends \"Continue de onde parou.\" on its own, with the task's same access. Then the queue moves on as usual. At most 3 resumes per task every 12 hours; paid reset credits are never used.",

@@ -30,6 +30,7 @@ mod session_commands;
 mod skills_commands;
 mod workspace_commands;
 mod delta_compaction_worker;
+mod browser_data;
 #[cfg(target_os = "macos")]
 mod webview_storage;
 
@@ -7031,6 +7032,8 @@ pub fn run() {
             menu_bar::menu_bar_compose,
             menu_bar::menu_bar_open_main,
             menu_bar::menu_bar_quit,
+            browser_data::browser_storage_usage,
+            browser_data::browser_clear_data,
             keep_awake_commands::keep_awake_status,
             keep_awake_commands::keep_awake_set_mode,
             usage_limit_commands::usage_limit_settings,
@@ -7325,6 +7328,7 @@ pub fn run() {
             }
             eprintln!("[DCC] Database ready at {:?}", db_path);
             delta_compaction_worker::spawn(db_path.clone());
+            browser_data::spawn_cache_limit(app.handle().clone());
             let session_command_state =
                 SessionCommandState::new(app.handle().clone(), db_path.clone());
             let computer_use_state = ComputerUseState::default();

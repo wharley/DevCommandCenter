@@ -78,3 +78,26 @@ void dcc_browser_set_session_cookies(void *rawWebView, uint64_t request, const D
         }];
     });
 }
+
+typedef void (*DCCBrowserDataCallback)(uint64_t, const char *);
+
+/// Removes website data from the Browser's named store without needing one of
+/// its views open. `kinds`: 1 = caches only (logins stay), 2 = everything,
+/// cookies and site storage included. Must run on the main thread.
+void dcc_browser_remove_data(const uint8_t *identifier, uint64_t request, int kinds, DCCBrowserDataCallback callback) {
+    if (![NSThread isMainThread] || !identifier) { callback(request, "Browser data store is unavailable"); return; }
+    if (@available(macOS 14.0, *)) {
+        NSUUID *uuid = [[NSUUID alloc] initWithUUIDBytes:identifier];
+        WKWebsiteDataStore *store = [WKWebsiteDataStore dataStoreForIdentifier:uuid];
+        NSSet<NSString *> *types = kinds == 2
+            ? [WKWebsiteDataStore allWebsiteDataTypes]
+            : [NSSet setWithObjects:WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache,
+                  WKWebsiteDataTypeFetchCache, WKWebsiteDataTypeOfflineWebApplicationCache, nil];
+        [store removeDataOfTypes:types modifiedSince:[NSDate distantPast] completionHandler:^{
+            callback(request, NULL);
+        }];
+    } else {
+        // Older systems give the Browser a nonpersistent store: nothing on disk.
+        callback(request, NULL);
+    }
+}

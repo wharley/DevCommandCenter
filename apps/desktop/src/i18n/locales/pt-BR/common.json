@@ -2453,6 +2453,16 @@
           "waitingForLimit": "aguardando limite até {{time}}"
         }
       },
+      "browserData": {
+        "title": "Dados do navegador",
+        "body": "O navegador embutido guarda páginas em cache para abrir mais rápido. Acima de 500 MB o DCC limpa o cache sozinho; logins continuam.",
+        "usage": "Cache: {{cache}} · Total: {{total}}",
+        "clearCache": "Limpar cache",
+        "clearEverything": "Limpar tudo",
+        "clearEverythingHint": "\"Limpar tudo\" também apaga cookies e dados de sites: você sai de todos os sites no navegador.",
+        "confirmEverything": "Sair de todos os sites e apagar os dados do navegador?",
+        "cleared": "Pronto: o cache agora ocupa {{cache}}."
+      },
       "usageLimit": {
         "title": "Continuar sozinho se o limite acabar",
         "body": "Quando o limite de uso do plano acabar no meio de uma tarefa, o DCC espera o limite voltar e manda \"Continue de onde parou.\" sozinho, com o mesmo acesso da tarefa. Depois a fila segue normalmente. No máximo 3 retomadas por tarefa a cada 12 horas; créditos pagos de reset nunca são usados.",
