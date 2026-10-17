@@ -10,12 +10,14 @@ export type EventsDelta = {
 	/** Highest sequence the session has, even when `events` is empty. */
 	lastSeq: number;
 	hasMore: boolean;
+	/** The cursor fell inside merged history; only a full reload is correct. */
+	reset?: boolean;
 };
 
 export type DeltaPlan =
 	| { kind: "apply"; events: RawSessionEvent[]; cursor: number; more: boolean }
 	/** The delta cannot be applied on top of what is held: refetch everything. */
-	| { kind: "reset"; reason: "history-shrank" | "rewind" };
+	| { kind: "reset"; reason: "history-shrank" | "history-compacted" | "rewind" };
 
 /** A rewind rewrites which turns are visible; the thread folds from scratch. */
 export function isRewind(event: RawSessionEvent): boolean {
@@ -27,6 +29,7 @@ export function maxSequence(events: RawSessionEvent[], floor = 0): number {
 }
 
 export function planDelta(cursor: number, delta: EventsDelta): DeltaPlan {
+	if (delta.reset) return { kind: "reset", reason: "history-compacted" };
 	// The session's history is behind what we hold (deleted and recreated).
 	if (delta.lastSeq < cursor) return { kind: "reset", reason: "history-shrank" };
 	const events = delta.events

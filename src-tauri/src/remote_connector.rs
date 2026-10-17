@@ -1633,6 +1633,19 @@ async fn handle_subscription(
                     return;
                 }
             };
+            if page["reset"].as_bool() == Some(true) {
+                // The cursor sits inside merged history: the phone reloads.
+                let frame = Frame::Evt(StreamEvent {
+                    id,
+                    event: "resync".into(),
+                    data: json!({ "reason": "history-compacted" }),
+                    seq: None,
+                });
+                if tx.send(frame).await.is_err() {
+                    return;
+                }
+                break;
+            }
             for event in page["events"].as_array().cloned().unwrap_or_default() {
                 let seq = event["sequence"].as_u64();
                 if let Some(seq) = seq {

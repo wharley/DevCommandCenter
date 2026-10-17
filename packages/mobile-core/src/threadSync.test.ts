@@ -44,6 +44,12 @@ describe("thread delta sync", () => {
 		});
 	});
 
+	it("resets when the cursor fell inside merged history", () => {
+		expect(
+			planDelta(7, { events: [], lastSeq: 0, hasMore: false, reset: true }),
+		).toEqual({ kind: "reset", reason: "history-compacted" });
+	});
+
 	it("resets when the delta carries a rewind", () => {
 		expect(
 			planDelta(2, {

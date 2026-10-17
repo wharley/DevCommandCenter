@@ -29,6 +29,7 @@ mod menu_bar;
 mod session_commands;
 mod skills_commands;
 mod workspace_commands;
+mod delta_compaction_worker;
 #[cfg(target_os = "macos")]
 mod webview_storage;
 
@@ -7311,6 +7312,7 @@ pub fn run() {
             sync_existing_repo_configs(&conn)
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
             eprintln!("[DCC] Database ready at {:?}", db_path);
+            delta_compaction_worker::spawn(db_path.clone());
             let session_command_state =
                 SessionCommandState::new(app.handle().clone(), db_path.clone());
             let computer_use_state = ComputerUseState::default();

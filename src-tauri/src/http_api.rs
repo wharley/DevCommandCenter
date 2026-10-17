@@ -2333,6 +2333,7 @@ struct SessionEventsQuery {
 /// With `after`: `{events, lastSeq, hasMore}`, where `lastSeq` is the
 /// session's highest sequence even when the delta is empty, so the client can
 /// tell "up to date" from "history went backwards" (`lastSeq < cursor`).
+/// `reset: true` means the cursor can no longer be continued: reload.
 async fn list_session_events_handler(
     State(config): State<Arc<RwLock<HttpConfig>>>,
     Path(session_id): Path<String>,
@@ -2346,6 +2347,15 @@ async fn list_session_events_handler(
                 .map_err(|error| error.to_string())?;
             return serde_json::to_value(items).map_err(|error| error.to_string());
         };
+        // Settled turns get their streamed chunks merged; a cursor inside a
+        // merged run never saw the rest of it. `lastSeq: 0` is below any such
+        // cursor, so clients that predate `reset` reload too.
+        if repo
+            .cursor_inside_compacted_run_sync(&session_id, after)
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(json!({ "events": [], "lastSeq": 0, "hasMore": false, "reset": true }));
+        }
         let limit = query
             .limit
             .unwrap_or(SESSION_EVENTS_DEFAULT_LIMIT)
@@ -3056,6 +3066,40 @@ mod tests {
         )
         .await;
         assert_eq!(ahead["lastSeq"], 5);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_cursor_inside_merged_history_asks_the_client_to_reload() {
+        let fixture = embedded_fixture().await;
+        append_resumed_events(&fixture, 5).await;
+        let db_path = std::fs::canonicalize(fixture._root.path())
+            .unwrap()
+            .join("state.sqlite");
+        // As the delta compaction leaves it: row 2 absorbed rows 3 and 4.
+        rusqlite::Connection::open(db_path)
+            .unwrap()
+            .execute_batch(
+                "UPDATE dcc_session_events SET compacted_through = 4 WHERE sequence = 2;
+                 DELETE FROM dcc_session_events WHERE sequence IN (3, 4);",
+            )
+            .unwrap();
+
+        let (status, inside) = get_json(
+            &fixture.app,
+            "/api/v1/sessions/http-respond/events?after=3",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{inside}");
+        assert_eq!(inside["reset"], true);
+        assert_eq!(inside["lastSeq"], 0, "older phones reset on lastSeq < cursor");
+
+        let (_, past) = get_json(
+            &fixture.app,
+            "/api/v1/sessions/http-respond/events?after=4",
+        )
+        .await;
+        assert_eq!(past["reset"], Value::Null);
+        assert_eq!(past["lastSeq"], 5);
     }
 
     #[tokio::test(flavor = "current_thread")]
