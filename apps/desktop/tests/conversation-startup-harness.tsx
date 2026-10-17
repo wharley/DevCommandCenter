@@ -19,7 +19,7 @@ const accepted = { sessionTurnStarted: { session_id: sessionId, turn_id: "turn-1
 const providers = [
 	{ id: "codex", label: "Codex", models: [{ id: "gpt-6-astra", label: "GPT-6 Astra" }], capabilities: {} },
 ] as unknown as ProviderCatalog["providers"];
-const stages = ["idle", "routing", "creating", "catalog", "hydrating", "sending", "accepted", "activity"];
+const stages = ["idle", "routing", "creating", "catalog", "hydrating", "sending", "accepted", "tools", "activity"];
 
 function Fixture() {
 	const { i18n } = useTranslation("common");
@@ -28,15 +28,18 @@ function Fixture() {
 	const creating = stage === "creating" || routing;
 	const unanchored = creating || stage === "catalog";
 	const selectedSessionId = creating || stage === "idle" ? null : sessionId;
-	const running = ["accepted", "activity"].includes(stage);
-	const pending = visibleSessionPendingPrompt({
-		prompt: !["idle", "activity"].includes(stage) ? prompt : null,
+	const running = ["accepted", "tools", "activity"].includes(stage);
+	const sent = visibleSessionPendingPrompt({
+		prompt: !["idle", "tools", "activity"].includes(stage) ? prompt : null,
 		pendingSessionId: unanchored ? null : selectedSessionId,
 		startingWorkspaceId: unanchored ? "ws" : null,
 		workspaceId: "ws",
 		sessionId: selectedSessionId,
 	});
+	// As WorkspacePanel does: a running turn keeps its prompt until history catches up.
+	const pending = sent ?? (running ? prompt : null);
 	const events = creating ? [] : running ? [started, accepted] : [started];
+	if (stage === "tools" || stage === "activity") events.push({ sessionTurnToolCallStarted: { session_id: sessionId, turn_id: "turn-1", tool_call_id: "tool-1", action: "Run command", command: "rg -n authorized src" } } as CoreEvent);
 	if (stage === "activity") events.push({ sessionTurnDelta: { session_id: sessionId, turn_id: "turn-1", content: "Vou conferir a autenticação e a restauração das sessões." } });
 	const messages = projectWorkspaceMessages([], events, creating ? null : sessionId, pending);
 	return (

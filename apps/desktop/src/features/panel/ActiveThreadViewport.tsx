@@ -540,8 +540,16 @@ export function ActiveThreadViewport({
 	const startupFallbackSinceRef = useRef<number | null>(null);
 	if (!startupVisible) startupFallbackSinceRef.current = null;
 	else startupFallbackSinceRef.current ??= Date.now();
+	// A turn this window did not send (reopened, other device) counts from its
+	// own start, not from when the row mounted.
+	const latestTurnStartedAt =
+		latestUserTurnId && latestUserCreatedAt ? Date.parse(latestUserCreatedAt) : Number.NaN;
 	const startupSince =
-		latestTurnClock ?? pendingPromptClock ?? startupFallbackSinceRef.current ?? Date.now();
+		latestTurnClock ??
+		pendingPromptClock ??
+		(Number.isFinite(latestTurnStartedAt) ? latestTurnStartedAt : null) ??
+		startupFallbackSinceRef.current ??
+		Date.now();
 	// The reply that takes over from the startup row is not new: its header
 	// and status line were already on screen, so it must not fade in again.
 	const wasStartupVisibleRef = useRef(false);

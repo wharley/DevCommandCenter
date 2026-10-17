@@ -43,9 +43,22 @@ describe("appendStartupPrompt", () => {
 	});
 
 	it("adds a repeated prompt once the earlier one was answered", () => {
-		const messages = [{ ...message("u", "user", "t"), content: "Again" }, message("a", "assistant", "t")];
+		const messages = [
+			{ ...message("u", "user", "t"), content: "Again" },
+			{ ...message("a", "assistant", "t"), turnSettled: true },
+		];
 		expect(appendStartupPrompt(messages, "Again")).toHaveLength(3);
 		expect(appendStartupPrompt(messages, null)).toBe(messages);
+	});
+
+	it("does not repeat the running turn's prompt below the agent's work", () => {
+		const messages = [
+			{ ...message("u", "user", "t"), content: "Investigate" },
+			{ ...message("a", "assistant", "t"), streaming: true },
+		];
+		const shown = appendStartupPrompt(messages, "Investigate");
+		expect(shown).toBe(messages);
+		expect(shouldShowConversationStarting(shown, "Investigate", "running")).toBe(false);
 	});
 });
 

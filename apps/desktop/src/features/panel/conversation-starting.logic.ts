@@ -69,9 +69,12 @@ export function appendStartupPrompt(
 	if (!trimmed) return messages;
 	const latestUserIndex = messages.findLastIndex((message) => message.role === "user");
 	const latestUser = messages[latestUserIndex];
+	// While a turn runs its own prompt comes back here (the panel keeps it
+	// visible until history catches up); a reply still in progress answers
+	// nothing yet, or the prompt would be repeated below the agent's work.
 	const answered = messages
 		.slice(latestUserIndex + 1)
-		.some((message) => message.role === "assistant" || Boolean(message.delegation));
+		.some((message) => message.role === "assistant" && message.turnSettled === true);
 	if (latestUser && !answered && latestUser.content.trim() === trimmed) return messages;
 	return [
 		...messages,

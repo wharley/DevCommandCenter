@@ -48,6 +48,12 @@ try {
 	await button("Idioma").click();
 	await startupRow.getByText("Waiting for the first response", { exact: true }).waitFor();
 	await button("Idioma").click();
+	// The agent's first tool call takes over from the row, before any text.
+	await button("tools").click();
+	await page.getByText("rg -n authorized src").first().waitFor();
+	assert.equal(await startupRow.count(), 0, "the agent's work replaces the startup row");
+	assert.equal(await page.locator('[data-message-role="user"]').count(), 1, "the running turn's prompt is not repeated");
+	assert.equal(await page.getByText(prompt, { exact: true }).count(), 1);
 	await button("activity").click();
 	await page.getByText("Vou conferir a autenticação e a restauração das sessões.", { exact: true }).waitFor();
 	assert.equal(await startupRow.count(), 0);
