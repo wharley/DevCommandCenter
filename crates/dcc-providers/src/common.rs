@@ -2196,6 +2196,16 @@ pub(crate) fn append_tool_instructions(prompt: String, tool_instructions: Option
     )
 }
 
+/// A provider's own `/goal` command (`/goal`, `/goal <objective>`,
+/// `/goal clear`…). It must reach the provider as written: directives before
+/// it hide the command, instructions after it join the objective.
+pub(crate) fn is_goal_command(prompt: &str) -> bool {
+    prompt
+        .trim_start()
+        .strip_prefix("/goal")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+}
+
 /// Credentials a parent process may carry that would outrank an account's own
 /// Claude login.
 const CLAUDE_INHERITED_CREDENTIAL_VARS: [&str; 3] = [

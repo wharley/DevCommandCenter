@@ -72,11 +72,11 @@ export function formatGoalTokens(tokens: number): string {
 }
 
 /**
- * The turn that continues a stopped goal. Codex resumes its goal natively;
- * Claude has no resume, any message continues it.
+ * The turn that continues a stopped goal. Codex and Grok resume their goal
+ * natively; Claude has no resume, any message continues it.
  */
 export function goalResumePrompt(providerId: string | null | undefined): string {
-	return providerId === "codex" ? "/goal resume" : "Continue de onde parou.";
+	return providerId === "codex" || providerId === "grok" ? "/goal resume" : "Continue de onde parou.";
 }
 
 /**

@@ -20,6 +20,7 @@ pub mod gemini;
 #[allow(dead_code)]
 mod gemini_mcp;
 pub mod grok_acp;
+mod grok_goal;
 // The exact-version ACP projection remains inert until the installed Grok
 // runtime proves structured MCP ownership in permission and tool-call events.
 #[allow(dead_code)]

@@ -24,6 +24,7 @@ use uuid::Uuid;
 use dcc_core::{
     application::compose_wire_prompt_for_provider,
     domain::{
+        goal::GoalSignal,
         provider::{Capabilities, HealthStatus, ProviderEvent, ProviderId, SessionHandle},
         session::SessionId,
     },
@@ -33,11 +34,17 @@ use dcc_core::{
 
 use crate::common::{
     acp_tool_call_detail, append_tool_instructions, apply_cli_spawn_environment, augmented_path,
+    is_goal_command,
 };
+use crate::grok_goal::{grok_goal_update, GrokGoalTracker};
 
 const PROVIDER_ID: &str = "grok";
 const PROVIDER_LABEL: &str = "Grok Build";
 const PROVIDER_DESCRIPTION: &str = "Grok Build provider through the Agent Client Protocol.";
+const PROMPT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// A goal runs inside the prompt that set (or resumed) it, for as long as
+/// the work takes.
+const GOAL_PROMPT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Deserialize)]
 struct Incoming {
@@ -66,6 +73,7 @@ struct SessionRuntime {
     reasoning_active: Mutex<bool>,
     /// `promptCapabilities.image` from `initialize`.
     image_prompts: std::sync::atomic::AtomicBool,
+    goal: std::sync::Mutex<GrokGoalTracker>,
 }
 
 impl SessionRuntime {
@@ -88,7 +96,27 @@ impl SessionRuntime {
             .map_err(|error| CoreError::Provider(format!("grok {method} error: {error}")))
     }
 
-    async fn start_prompt(&self, prompt: String) -> Result<()> {
+    fn emit_goal_signals(&self, signals: Vec<GoalSignal>) {
+        for signal in signals {
+            let _ = self.events_tx.send(ProviderEvent::Goal {
+                signal,
+                at: now_iso(),
+            });
+        }
+    }
+
+    fn goal_tracker(&self) -> std::sync::MutexGuard<'_, GrokGoalTracker> {
+        self.goal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    async fn start_prompt(self: &Arc<Self>, prompt: String) -> Result<()> {
+        let prompt_timeout = if is_goal_command(&prompt) {
+            GOAL_PROMPT_TIMEOUT
+        } else {
+            PROMPT_TIMEOUT
+        };
         let session_id = self
             .grok_session_id
             .lock()
@@ -111,10 +139,19 @@ impl SessionRuntime {
         }))
         .await?;
 
+        let runtime = Arc::clone(self);
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
+            let outcome = timeout(prompt_timeout, rx).await;
             let at = now_iso();
-            match timeout(Duration::from_secs(30 * 60), rx).await {
+            let flushed = runtime.goal_tracker().flush(std::time::Instant::now());
+            runtime.emit_goal_signals(flushed);
+            if !matches!(outcome, Ok(Ok(Ok(_)))) && runtime.goal_tracker().is_active() {
+                // Grok pauses a goal whose turn fails; DCC shows it the same
+                // way even if that notification never came.
+                runtime.emit_goal_signals(vec![GoalSignal::Paused { reason: None }]);
+            }
+            match outcome {
                 Ok(Ok(Ok(result))) => {
                     if let Some(usage) = crate::common::acp_prompt_usage(&result) {
                         let _ = events_tx.send(ProviderEvent::TurnUsage {
@@ -134,6 +171,14 @@ impl SessionRuntime {
                     });
                 }
                 Err(_) => {
+                    // Stop Grok too, or it keeps working with no DCC turn.
+                    let _ = runtime
+                        .write_message(json!({
+                            "jsonrpc": "2.0",
+                            "method": "session/cancel",
+                            "params": { "sessionId": session_id },
+                        }))
+                        .await;
                     let _ = events_tx.send(ProviderEvent::Failed {
                         message: "grok session/prompt timed out".to_string(),
                         at,
@@ -244,6 +289,7 @@ impl GrokAcpAdapter {
             events_tx,
             reasoning_active: Mutex::new(false),
             image_prompts: std::sync::atomic::AtomicBool::new(false),
+            goal: std::sync::Mutex::new(GrokGoalTracker::default()),
         });
         let session_key = cfg.session_id.0.clone();
         self.state
@@ -363,13 +409,25 @@ impl GrokAcpAdapter {
                 if let (Some(method), Some(params)) =
                     (message.method.as_deref(), message.params.as_ref())
                 {
-                    for event in
-                        acp_notification_events(method, params, &runtime.reasoning_active).await
+                    let main_session = runtime.grok_session_id.lock().await.clone();
+                    for event in session_notification_events(
+                        method,
+                        params,
+                        main_session.as_deref(),
+                        &runtime.reasoning_active,
+                        &runtime.goal,
+                    )
+                    .await
                     {
                         let _ = runtime.events_tx.send(event);
                     }
                 }
             }
+
+            // Grok's goal lives in its process: a new one starts a new
+            // session that never heard of it.
+            let ended = runtime.goal_tracker().end();
+            runtime.emit_goal_signals(ended);
 
             let stderr_output = stderr_task.await.unwrap_or_default();
             let at = now_iso();
@@ -471,6 +529,48 @@ fn select_auth_method(initialized: &Value) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// What DCC shows of one notification from Grok.
+///
+/// Subagents (a goal's planner, workers and verifiers) report under their
+/// own session; only `main_session`, the one DCC opened, is the
+/// conversation. A notification without a session, or one before
+/// `session/new` answered, counts as the conversation. Grok reports its goal
+/// in an extension notification, not in `session/update`.
+async fn session_notification_events(
+    method: &str,
+    params: &Value,
+    main_session: Option<&str>,
+    reasoning_active: &Mutex<bool>,
+    goal: &std::sync::Mutex<GrokGoalTracker>,
+) -> Vec<ProviderEvent> {
+    if let (Some(session), Some(main)) = (
+        params.get("sessionId").and_then(Value::as_str),
+        main_session,
+    ) {
+        if session != main {
+            return Vec::new();
+        }
+    }
+    if method == "_x.ai/session_notification" {
+        let Some(update) = params.get("update").and_then(grok_goal_update) else {
+            return Vec::new();
+        };
+        let signals = goal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .observe(update, std::time::Instant::now());
+        let at = now_iso();
+        return signals
+            .into_iter()
+            .map(|signal| ProviderEvent::Goal {
+                signal,
+                at: at.clone(),
+            })
+            .collect();
+    }
+    acp_notification_events(method, params, reasoning_active).await
 }
 
 async fn acp_notification_events(
@@ -666,6 +766,8 @@ impl Provider for GrokAcpAdapter {
             })?;
         let prompt = match input {
             Input::Text(text) => text,
+            // `/goal …` must reach Grok as written.
+            Input::Turn(turn) if is_goal_command(&turn.prompt) => turn.prompt.trim().to_string(),
             Input::Turn(turn) => compose_grok_prompt(&turn),
             Input::UserInputResponse(_) => {
                 return Err(CoreError::Provider(
@@ -767,6 +869,9 @@ impl Provider for GrokAcpAdapter {
 pub fn stable_grok_capabilities() -> Capabilities {
     let mut capabilities = crate::common::stable_cli_capabilities();
     capabilities.supports_runtime_home = true;
+    // `/goal` with ACP goal notifications; Grok's service only accepts
+    // CLIs that have it (1.0.13+).
+    capabilities.supports_native_goal = true;
     capabilities
 }
 
@@ -849,6 +954,207 @@ mod tests {
         assert!(
             matches!(tool.as_slice(), [ProviderEvent::ToolCallStarted { id, command: Some(command), .. }] if id == "call_1" && command == "pwd")
         );
+    }
+
+    /// Replays a recorded Grok stdout (fixture) through the reader's own
+    /// handling, as the session `main` would see it.
+    async fn replay(fixture: &str, main: &str) -> Vec<ProviderEvent> {
+        let reasoning_active = Mutex::new(false);
+        let goal = std::sync::Mutex::new(GrokGoalTracker::default());
+        let mut events = Vec::new();
+        for line in fixture.lines().filter(|line| !line.trim().is_empty()) {
+            let message: Incoming = serde_json::from_str(line).expect("fixture line");
+            if let (Some(method), Some(params)) = (message.method.as_deref(), message.params) {
+                events.extend(
+                    session_notification_events(
+                        method,
+                        &params,
+                        Some(main),
+                        &reasoning_active,
+                        &goal,
+                    )
+                    .await,
+                );
+            }
+        }
+        events
+    }
+
+    fn goal_signals(events: &[ProviderEvent]) -> Vec<GoalSignal> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                ProviderEvent::Goal { signal, .. } => Some(signal.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn final_goal(signals: &[GoalSignal]) -> Option<dcc_core::domain::goal::SessionGoal> {
+        signals.iter().fold(
+            None,
+            |goal, signal| match dcc_core::domain::goal::apply_goal_signal(
+                goal.as_ref(),
+                signal,
+                "t",
+            ) {
+                Some(next) => next,
+                None => goal,
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn a_goal_set_in_grok_runs_inside_the_prompt_until_complete() {
+        use dcc_core::domain::goal::GoalStatus;
+        let fixture = include_str!("../fixtures/goal/grok_goal_complete.jsonl");
+        let main = "01a15056-89a6-7eb1-b6d0-619320657986";
+        let events = replay(fixture, main).await;
+
+        let signals = goal_signals(&events);
+        // Grok sent 30 `goal_updated`; only the status changes go out.
+        assert_eq!(signals.len(), 2, "{signals:?}");
+        assert!(matches!(
+            &signals[0],
+            GoalSignal::Snapshot { goal: Some(goal) }
+                if goal.status == GoalStatus::Active
+                    && goal.objective == "Create a file hello.txt containing exactly the word hi, then stop."
+        ));
+        let done = final_goal(&signals).expect("goal");
+        assert_eq!(done.status, GoalStatus::Complete);
+        assert!(done.tokens_used.is_some_and(|tokens| tokens > 0));
+
+        // The subagents' own messages and tools stay out of the conversation.
+        let main_tools = fixture
+            .lines()
+            .filter(|line| line.contains(main) && line.contains(r#""sessionUpdate": "tool_call""#))
+            .count();
+        let started = events
+            .iter()
+            .filter(|event| matches!(event, ProviderEvent::ToolCallStarted { .. }))
+            .count();
+        assert_eq!(started, main_tools);
+        let text: String = events
+            .iter()
+            .filter_map(|event| match event {
+                ProviderEvent::TextDelta { content }
+                | ProviderEvent::AssistantMessageDelta { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(text.contains("hello.txt"));
+        assert!(!text.contains("Goal Plan Writer"));
+    }
+
+    #[tokio::test]
+    async fn stop_pauses_the_goal_resume_continues_and_clear_drops_it() {
+        use dcc_core::domain::goal::GoalStatus;
+        let fixture = include_str!("../fixtures/goal/grok_goal_pause_resume_clear.jsonl");
+        let events = replay(fixture, "01a15059-3ebe-7031-85a4-eb8303e1fbf6").await;
+        let signals = goal_signals(&events);
+        let statuses: Vec<Option<GoalStatus>> = signals
+            .iter()
+            .map(|signal| match signal {
+                GoalSignal::Snapshot { goal } => goal.as_ref().map(|goal| goal.status),
+                GoalSignal::Cleared => None,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![
+                Some(GoalStatus::Active),
+                Some(GoalStatus::Paused),
+                Some(GoalStatus::Active),
+                Some(GoalStatus::Paused),
+                None,
+            ]
+        );
+        assert_eq!(final_goal(&signals), None);
+    }
+
+    /// The whole path against the installed Grok: `/goal` sent as a DCC turn
+    /// is one turn that ends with the goal complete. Spends Grok credits.
+    #[tokio::test]
+    #[ignore = "runs the installed grok CLI against xAI"]
+    async fn live_grok_goal_is_one_turn_until_complete() {
+        use dcc_core::domain::goal::GoalStatus;
+        use futures::StreamExt;
+        let dir = std::env::temp_dir().join(format!("dcc-grok-goal-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let adapter = GrokAcpAdapter::new(stable_grok_capabilities());
+        let handle = adapter
+            .prepare_session(SessionConfig {
+                workspace_id: dcc_core::domain::workspace::WorkspaceId("live".to_string()),
+                session_id: SessionId("grok-goal-live".to_string()),
+                model: None,
+                working_directory: Some(dir.to_string_lossy().into_owned()),
+                additional_working_directories: vec![],
+                provider_runtime: None,
+                mcp_servers: vec![],
+                native_resume_id: None,
+                native_rewind_checkpoint: None,
+            })
+            .await
+            .expect("grok session");
+        let mut events = adapter.stream_events(&handle);
+        adapter
+            .send_input(
+                &handle,
+                Input::Turn(ProviderTurnInput {
+                    prompt: "/goal Create a file hello.txt containing exactly the word hi."
+                        .to_string(),
+                    tool_instructions: Some("DCC tools".to_string()),
+                    plan_mode: Some(false),
+                    effort: Some("medium".to_string()),
+                    fast_mode: None,
+                    approval_policy: None,
+                    resume_fallback_context: None,
+                }),
+            )
+            .await
+            .expect("send");
+        let mut seen = Vec::new();
+        while let Some(Ok(event)) =
+            timeout(Duration::from_secs(15 * 60), events.next()).await.expect("events")
+        {
+            let done = matches!(
+                event,
+                ProviderEvent::Completed { .. } | ProviderEvent::Failed { .. }
+            );
+            seen.push(event);
+            if done {
+                break;
+            }
+        }
+        let _ = adapter.cancel(&handle).await;
+        let signals = goal_signals(&seen);
+        eprintln!("goal signals: {signals:?}");
+        assert!(
+            matches!(seen.last(), Some(ProviderEvent::Completed { .. })),
+            "{:?}",
+            seen.last()
+        );
+        assert_eq!(
+            final_goal(&signals).map(|goal| goal.status),
+            Some(GoalStatus::Complete)
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("hello.txt"))
+                .expect("hello.txt")
+                .trim(),
+            "hi"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_goal_command_skips_the_directives_and_gets_the_long_timeout() {
+        assert!(is_goal_command("/goal tests pass"));
+        assert!(is_goal_command("/goal resume"));
+        assert!(!is_goal_command("Continue the task"));
+        assert!(GOAL_PROMPT_TIMEOUT > PROMPT_TIMEOUT);
+        assert!(stable_grok_capabilities().supports_native_goal);
     }
 
     #[test]

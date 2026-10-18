@@ -66,8 +66,9 @@ describe("formatGoalTokens", () => {
 });
 
 describe("goalResumePrompt", () => {
-	it("resumes Codex natively and continues Claude with a message", () => {
+	it("resumes Codex and Grok natively and continues Claude with a message", () => {
 		expect(goalResumePrompt("codex")).toBe("/goal resume");
+		expect(goalResumePrompt("grok")).toBe("/goal resume");
 		expect(goalResumePrompt("claude_code")).toBe("Continue de onde parou.");
 	});
 });
@@ -76,6 +77,7 @@ describe("goalClearPrompt", () => {
 	it("uses the provider command, or asks Cursor's agent to end the goal", () => {
 		expect(goalClearPrompt("claude_code")).toBe("/goal clear");
 		expect(goalClearPrompt("codex")).toBe("/goal clear");
+		expect(goalClearPrompt("grok")).toBe("/goal clear");
 		expect(goalClearPrompt("cursor")).toMatch(/^Encerre o objetivo/);
 	});
 });

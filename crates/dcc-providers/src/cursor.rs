@@ -25,7 +25,9 @@ use dcc_core::{
     CoreError, Result,
 };
 
-use crate::common::{append_tool_instructions, experimental_cli_capabilities, replacement_diff};
+use crate::common::{
+    append_tool_instructions, experimental_cli_capabilities, is_goal_command, replacement_diff,
+};
 use crate::cursor_acp::CursorBridgeProvider;
 
 const PROVIDER_LABEL: &str = "Cursor";
@@ -83,13 +85,6 @@ pub fn adapter() -> CursorBridgeProvider {
         capabilities.clone(),
         CursorProvider::new("cursor", "cursor-agent", capabilities),
     )
-}
-
-fn is_goal_command(prompt: &str) -> bool {
-    prompt
-        .trim_start()
-        .strip_prefix("/goal")
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
 }
 
 fn cursor_capabilities() -> Capabilities {
@@ -1468,13 +1463,16 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(matches!(
-            &signals[..],
-            [
-                GoalSignal::Snapshot { goal: Some(goal) },
-                GoalSignal::Status { status: GoalStatus::Complete },
-            ] if goal.status == GoalStatus::Active && goal.objective.starts_with("The file count.txt")
-        ), "{signals:?}");
+        assert!(
+            matches!(
+                &signals[..],
+                [
+                    GoalSignal::Snapshot { goal: Some(goal) },
+                    GoalSignal::Status { status: GoalStatus::Complete },
+                ] if goal.status == GoalStatus::Active && goal.objective.starts_with("The file count.txt")
+            ),
+            "{signals:?}"
+        );
         assert_eq!(
             events
                 .iter()
