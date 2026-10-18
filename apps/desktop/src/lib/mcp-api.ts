@@ -2,6 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { MCP_METHODS } from "@dcc/contracts";
 import type {
 	ActivateMcpDefinitionInput,
+	CancelMcpConnectOutput,
+	DisconnectMcpConnectorInput,
+	DisconnectMcpConnectorOutput,
+	McpConnectLoginInput,
+	StartMcpConnectInput,
+	StartMcpConnectOutput,
+	TestMcpIntegrationInput,
+	TestMcpIntegrationOutput,
+	WaitMcpConnectOutput,
 	ActivateMcpIntegrationOutput,
 	CreateMcpIntegrationInput,
 	CreateMcpIntegrationOutput,
@@ -74,6 +83,41 @@ export function disconnectMcpOauth(input: DisconnectMcpOauthInput) {
 export function setMcpToolPolicy(input: SetMcpToolPolicyInput) {
 	requireTauriRuntime();
 	return invoke<SetMcpToolPolicyOutput>(MCP_METHODS.setMcpToolPolicy, {
+		input,
+	});
+}
+
+/** Starts DCC's own sign-in for a remote connector. */
+export function startMcpConnect(input: StartMcpConnectInput) {
+	requireTauriRuntime();
+	return invoke<StartMcpConnectOutput>(MCP_METHODS.startMcpConnect, { input });
+}
+
+/** Resolves when the browser returns, the sign-in is cancelled, or it times out. */
+export function waitMcpConnect(input: McpConnectLoginInput) {
+	requireTauriRuntime();
+	return invoke<WaitMcpConnectOutput>(MCP_METHODS.waitMcpConnect, { input });
+}
+
+export function cancelMcpConnect(input: McpConnectLoginInput) {
+	requireTauriRuntime();
+	return invoke<CancelMcpConnectOutput>(MCP_METHODS.cancelMcpConnect, {
+		input,
+	});
+}
+
+/** Revokes DCC's sign-in with the vendor and forgets it. */
+export function disconnectMcpConnector(input: DisconnectMcpConnectorInput) {
+	requireTauriRuntime();
+	return invoke<DisconnectMcpConnectorOutput>(
+		MCP_METHODS.disconnectMcpConnector,
+		{ input },
+	);
+}
+
+export function testMcpIntegration(input: TestMcpIntegrationInput) {
+	requireTauriRuntime();
+	return invoke<TestMcpIntegrationOutput>(MCP_METHODS.testMcpIntegration, {
 		input,
 	});
 }

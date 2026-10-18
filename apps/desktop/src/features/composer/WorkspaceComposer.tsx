@@ -60,6 +60,7 @@ import type {
 import type { RuntimeSessionSnapshot } from "@/features/sessions/workbench-types";
 import { canAbortRun } from "@/features/sessions/session-chrome-state";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { ConnectorReconnectStrip } from "./connector-reconnect-strip";
 import { ComposerContextReview } from "./ComposerContextReview";
 import { ExecutionContextRail } from "./ExecutionContextRail";
 import { getProviderUnhealthyReason } from "@/features/providers/provider-selection.logic";
@@ -839,6 +840,7 @@ export function WorkspaceComposer({
 					disabled={inputDisabled || isSubmitting}
 				/>
 			) : null}
+			<ConnectorReconnectStrip />
 			<UsageLimitStrip
 				sessionId={sessionId}
 				workspaceId={sessionSnapshot?.workspaceId ?? null}

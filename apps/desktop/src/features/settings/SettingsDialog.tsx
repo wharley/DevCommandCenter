@@ -94,7 +94,7 @@ import { WorkspaceProjectAutomationDialog } from "@/features/automation/workspac
 import { WORKSPACE_GIT_STATUS_QUERY_KEY } from "@/features/inspector/use-workspace-git-status";
 import { WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "@/features/inspector/use-workspace-git-branch-diff";
 import { disconnectCodeRabbitCli } from "@/lib/coderabbit-cli";
-import { McpIntegrationsPanel } from "@/features/settings/mcp-integrations-panel";
+import { ConnectorsPanel } from "@/features/settings/connectors/ConnectorsPanel";
 import { ComputerUsePanel } from "@/features/settings/computer-use-panel";
 import { QuickComposerShortcut } from "@/features/quick-composer/QuickComposerShortcut";
 import { AppshotsShortcut } from "@/features/settings/appshots-shortcut";
@@ -1945,7 +1945,7 @@ export function SettingsDialog({
 							) : null}
 
 							{activeSection === "integrations" ? (
-								<McpIntegrationsPanel
+								<ConnectorsPanel
 									projectId={projectId}
 									sessionId={sessionId}
 									sessionProviderId={sessionProviderId}

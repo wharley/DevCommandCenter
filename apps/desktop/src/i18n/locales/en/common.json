@@ -2203,6 +2203,10 @@
       "max": "Max",
       "ultrathink": "Ultrathink"
     },
+    "connectorReconnect": {
+      "one": "{{name}} needs to be reconnected.",
+      "many": "{{name}} and {{count}} more need to be reconnected."
+    },
     "planFollowUp": {
       "kicker": "Plan draft",
       "needsInput": "Plan needs input",
@@ -2354,7 +2358,7 @@
         "model": "agents models usage limits account runtime codex claude cursor grok gemini",
         "decisionProvider": "decision provider Jev TypeSafe classifier memory filter routing validator",
         "aiMemory": "memory ai-memory history continuity sidecar",
-        "integrations": "mcp servers tools credentials",
+        "integrations": "mcp connectors servers tools credentials clickup linear notion github sentry",
         "computerUse": "computer use apps screen recording accessibility permissions",
         "account": "github gitlab login authentication coderabbit accounts",
         "connections": "phone tablet remote pairing devices",
@@ -2392,8 +2396,8 @@
         "description": "Project memory and continuity across tasks."
       },
       "integrations": {
-        "label": "Integrations",
-        "description": "External MCP servers, scopes, and credentials."
+        "label": "Connectors",
+        "description": "Sign in to ClickUp, Linear, Notion, and other services your agents can use."
       },
       "computerUse": {
         "label": "Computer Use",
@@ -2630,6 +2634,109 @@
       "enabledToast": "{{provider}} is enabled for new work.",
       "disabledToast": "{{provider}} is disabled for new work.",
       "disabledBlockReason": "{{provider}} is disabled. Enable it in Settings → Providers before sending or starting new work."
+    },
+    "connectors": {
+      "searchPlaceholder": "Search connectors",
+      "addCustom": "Add custom",
+      "connectedTitle": "Connected",
+      "categories": {
+        "popular": "Popular",
+        "developer": "Developer tools",
+        "productivity": "Productivity"
+      },
+      "noMatch": "No connectors match “{{query}}”. Use Add custom to connect any MCP server by URL.",
+      "footer": "Agents use the services you connect here from the next message on.",
+      "footerUnsupported": "{{providers}} don't support connectors yet.",
+      "loadError": "Connectors could not be loaded.",
+      "retry": "Try again",
+      "desktopOnly": "Connectors work in the desktop app.",
+      "status": {
+        "connected": "Connected",
+        "connectedTools_one": "Connected · {{count}} tool",
+        "connectedTools_other": "Connected · {{count}} tools",
+        "needsAuth": "Sign-in expired. Reconnect to keep using it.",
+        "failed": "Didn't answer the last check.",
+        "off": "Off",
+        "unchecked": "Not checked yet"
+      },
+      "actions": {
+        "connect": "Connect",
+        "reconnect": "Reconnect",
+        "manage": "Manage",
+        "test": "Test connection",
+        "testing": "Testing…",
+        "disconnect": "Disconnect",
+        "remove": "Remove",
+        "more": "{{name}} actions"
+      },
+      "catalog": {
+        "clickup": "Read, create, and update tasks, lists, and docs.",
+        "linear": "Find, create, and update issues, projects, and comments.",
+        "notion": "Search, read, and edit pages and databases.",
+        "github": "Repositories, issues, pull requests, and Actions.",
+        "sentry": "Investigate errors, issues, and releases.",
+        "slack": "Search, read, and post in your workspace.",
+        "zedy": "Your store's products, collections, and checkout links."
+      },
+      "connect": {
+        "title": "Connect {{name}}",
+        "controlTitle": "You're in control",
+        "controlBody": "Agents get only the access {{name}} grants DCC, and you can disconnect it anytime in Settings.",
+        "riskTitle": "Connectors may introduce risk",
+        "riskBody": "{{name}} is run by its own provider, not DCC. Its tools can read and change data in your account, and content it returns could try to steer your agent. Review tool calls before you approve them.",
+        "dataTitle": "Data shared with this connector",
+        "dataBody": "The request and task context go to {{name}}, and its answers go to the AI provider. {{name}}'s terms and privacy policy apply. Your sign-in stays on this computer and is never shared with AI providers.",
+        "learnMore": "Learn more",
+        "continue": "Continue to {{name}}",
+        "waiting": "Waiting for {{name}}…",
+        "waitingHint": "Finish signing in in your browser. This window updates on its own.",
+        "cancel": "Cancel",
+        "tokenLabel": "Access token",
+        "tokenHint": "{{name}} doesn't register apps automatically. Create a personal access token with access only to what the agent needs.",
+        "createToken": "Create a token on {{name}}",
+        "connectWithToken": "Connect with token"
+      },
+      "toast": {
+        "connected": "{{name}} connected. New messages can use it.",
+        "connectedTools_one": "{{name}} connected · {{count}} tool. New messages can use it.",
+        "connectedTools_other": "{{name}} connected · {{count}} tools. New messages can use it.",
+        "disconnected": "{{name}} disconnected.",
+        "removed": "{{name}} removed.",
+        "testConnected_one": "{{name}} answered · {{count}} tool.",
+        "testConnected_other": "{{name}} answered · {{count}} tools.",
+        "testNeedsAuth": "{{name}} needs to be reconnected.",
+        "testFailed": "{{name}} didn't answer: {{message}}"
+      },
+      "failure": {
+        "notMcpServer": "No MCP server answered at this URL.",
+        "clientRequired": "{{name}} only signs in apps registered with it. Connect with a token or your own app.",
+        "clientRejected": "{{name}} refused DCC: {{message}}",
+        "declined": "The sign-in was declined: {{message}}",
+        "cancelled": "Sign-in cancelled.",
+        "timedOut": "The sign-in to {{name}} timed out. Try again.",
+        "transient": "{{message}}",
+        "other": "{{message}}"
+      },
+      "custom": {
+        "title": "Add a custom connector",
+        "hint": "Any remote MCP server. DCC signs in with OAuth when the server asks for it.",
+        "urlLabel": "MCP server URL",
+        "nameLabel": "Name",
+        "invalidUrl": "Use a full https URL without a username or password.",
+        "continue": "Continue"
+      },
+      "manage": {
+        "lastChecked": "Last check: {{date}}",
+        "toolsTitle": "Tools",
+        "toolsHint": "By default the agent asks for your approval before using a tool. Adjust per tool if you like.",
+        "noTools": "Test the connection to see the tools.",
+        "disconnectConfirm": "Disconnect {{name}}? Agents lose its tools, and DCC deletes its sign-in from this computer.",
+        "removeConfirm": "Remove {{name}}? Agents lose its tools, and DCC forgets this connector."
+      },
+      "advanced": {
+        "title": "Advanced",
+        "hint": "Local commands (stdio), headers, scopes, and each session's state."
+      }
     },
     "integrations": {
       "title": "External MCP integrations",
@@ -3572,19 +3679,19 @@
         "keywords": "conflict conflicts merge rebase base update worktree hunk resolve"
       },
       "mcp": {
-        "label": "MCP integrations",
-        "summary": "Give agents external tools, with scope and credentials.",
-        "whatIs": "An MCP integration connects a tool server to the provider: Figma, payments, internal tools. You set the [Scope], store protected credentials and enable it after reviewing what the server exposes.",
-        "whenToUse": "When the agent needs to query or act on a system outside the repository.",
+        "label": "Connectors",
+        "summary": "Give agents access to ClickUp, Linear, Notion, and other services.",
+        "whatIs": "A connector links an outside service to your agents. DCC signs in once, keeps the access on this computer, and serves the tools to the provider in every task without exposing the token.",
+        "whenToUse": "When the agent needs to query or act on a system outside the repository, such as tasks, issues, or errors.",
         "steps": [
-          "Open Settings and the [Integrations] section.",
-          "Click [Add integration], fill in [Display name] and [Server URL].",
-          "Pick the [Scope]: [This session], [This project] or [Global].",
-          "Store tokens under [Protected credentials] or use [Connect with OAuth].",
-          "Click [Review and enable integration]. It applies to the providers' next sessions."
+          "Open Settings and the [Connectors] section.",
+          "Click the connector you want, read the notice, and continue to sign in through the browser.",
+          "Back in DCC, the connector shows under [Connected] and works from the next message on.",
+          "For a server outside the catalog, use [Add custom] and paste the [MCP server URL].",
+          "If the sign-in expires, click [Reconnect]. Under [Manage] you can test the connection and adjust each tool."
         ],
-        "tip": "Credentials are stored securely and never shown again. Whoever sees the integration does not see the secret.",
-        "keywords": "mcp integration integrations server tools oauth credential scope figma"
+        "tip": "The sign-in is stored securely and never sent to AI providers. Local commands and headers live under [Advanced].",
+        "keywords": "mcp connector connectors integration integrations server tools oauth sign-in clickup linear notion github sentry"
       },
       "codeRabbit": {
         "label": "Review with CodeRabbit",

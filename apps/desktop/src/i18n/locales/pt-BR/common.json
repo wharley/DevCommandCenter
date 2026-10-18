@@ -2203,6 +2203,10 @@
       "max": "Máximo",
       "ultrathink": "Ultrathink"
     },
+    "connectorReconnect": {
+      "one": "{{name}} precisa reconectar.",
+      "many": "{{name}} e mais {{count}} precisam reconectar."
+    },
     "planFollowUp": {
       "kicker": "Rascunho do plano",
       "needsInput": "Plano precisa de resposta",
@@ -2354,7 +2358,7 @@
         "model": "agentes modelos uso limite conta runtime codex claude cursor grok gemini",
         "decisionProvider": "decision provider Jev TypeSafe classificador filtro de memória roteamento validador",
         "aiMemory": "memória ai-memory histórico continuidade sidecar",
-        "integrations": "mcp servidores ferramentas credenciais",
+        "integrations": "mcp conectores servidores ferramentas credenciais clickup linear notion github sentry",
         "computerUse": "computer use aplicativos gravação de tela acessibilidade permissões",
         "account": "github gitlab login autenticação coderabbit contas",
         "connections": "celular tablet remoto pareamento dispositivos",
@@ -2392,8 +2396,8 @@
         "description": "Memória do projeto e continuidade entre tarefas."
       },
       "integrations": {
-        "label": "Integrações",
-        "description": "Servidores MCP externos, escopos e credenciais."
+        "label": "Conectores",
+        "description": "Entre no ClickUp, Linear, Notion e outros serviços que seus agentes podem usar."
       },
       "computerUse": {
         "label": "Computer Use",
@@ -2630,6 +2634,109 @@
       "enabledToast": "{{provider}} está ativado para novos trabalhos.",
       "disabledToast": "{{provider}} está desativado para novos trabalhos.",
       "disabledBlockReason": "{{provider}} está desativado. Ative-o em Configurações → Provedores antes de enviar ou iniciar trabalho novo."
+    },
+    "connectors": {
+      "searchPlaceholder": "Buscar conectores",
+      "addCustom": "Adicionar personalizado",
+      "connectedTitle": "Conectados",
+      "categories": {
+        "popular": "Populares",
+        "developer": "Desenvolvimento",
+        "productivity": "Produtividade"
+      },
+      "noMatch": "Nenhum conector com “{{query}}”. Use Adicionar personalizado para conectar qualquer servidor MCP pela URL.",
+      "footer": "Os agentes usam os serviços conectados aqui a partir da próxima mensagem.",
+      "footerUnsupported": "{{providers}} ainda não usam conectores.",
+      "loadError": "Não foi possível carregar os conectores.",
+      "retry": "Tentar de novo",
+      "desktopOnly": "Os conectores funcionam no app desktop.",
+      "status": {
+        "connected": "Conectado",
+        "connectedTools_one": "Conectado · {{count}} ferramenta",
+        "connectedTools_other": "Conectado · {{count}} ferramentas",
+        "needsAuth": "Login expirado. Reconecte para continuar usando.",
+        "failed": "Não respondeu no último teste.",
+        "off": "Desligado",
+        "unchecked": "Ainda não testado"
+      },
+      "actions": {
+        "connect": "Conectar",
+        "reconnect": "Reconectar",
+        "manage": "Gerenciar",
+        "test": "Testar conexão",
+        "testing": "Testando…",
+        "disconnect": "Desconectar",
+        "remove": "Remover",
+        "more": "Ações de {{name}}"
+      },
+      "catalog": {
+        "clickup": "Leia, crie e atualize tarefas, listas e documentos.",
+        "linear": "Encontre, crie e atualize issues, projetos e comentários.",
+        "notion": "Busque, leia e edite páginas e bancos de dados.",
+        "github": "Repositórios, issues, pull requests e Actions.",
+        "sentry": "Investigue erros, issues e releases.",
+        "slack": "Busque, leia e poste no seu workspace.",
+        "zedy": "Produtos, coleções e links de checkout da sua loja."
+      },
+      "connect": {
+        "title": "Conectar {{name}}",
+        "controlTitle": "Você no controle",
+        "controlBody": "Os agentes têm só o acesso que o {{name}} conceder ao DCC, e você pode desconectar quando quiser em Configurações.",
+        "riskTitle": "Conectores podem trazer risco",
+        "riskBody": "O {{name}} é operado pelo próprio fornecedor, não pelo DCC. As ferramentas dele leem e mudam dados da sua conta, e o conteúdo que ele devolve pode tentar desviar o agente. Revise as chamadas antes de aprovar.",
+        "dataTitle": "O que é compartilhado",
+        "dataBody": "O pedido e o contexto da tarefa vão para o {{name}}, e as respostas dele vão para o provider de IA. Valem os termos e a política de privacidade do {{name}}. O login fica neste computador e nunca é enviado aos providers de IA.",
+        "learnMore": "Saiba mais",
+        "continue": "Continuar no {{name}}",
+        "waiting": "Aguardando o {{name}}…",
+        "waitingHint": "Termine o login no navegador. Esta janela atualiza sozinha.",
+        "cancel": "Cancelar",
+        "tokenLabel": "Token de acesso",
+        "tokenHint": "O {{name}} não cadastra apps automaticamente. Crie um token de acesso pessoal com acesso só ao que o agente precisa.",
+        "createToken": "Criar token no {{name}}",
+        "connectWithToken": "Conectar com token"
+      },
+      "toast": {
+        "connected": "{{name}} conectado. Já vale a partir da próxima mensagem.",
+        "connectedTools_one": "{{name}} conectado · {{count}} ferramenta. Já vale a partir da próxima mensagem.",
+        "connectedTools_other": "{{name}} conectado · {{count}} ferramentas. Já vale a partir da próxima mensagem.",
+        "disconnected": "{{name}} desconectado.",
+        "removed": "{{name}} removido.",
+        "testConnected_one": "{{name}} respondeu · {{count}} ferramenta.",
+        "testConnected_other": "{{name}} respondeu · {{count}} ferramentas.",
+        "testNeedsAuth": "{{name}} precisa ser reconectado.",
+        "testFailed": "{{name}} não respondeu: {{message}}"
+      },
+      "failure": {
+        "notMcpServer": "Nenhum servidor MCP respondeu nesta URL.",
+        "clientRequired": "O {{name}} só aceita apps cadastrados nele. Conecte com um token ou com seu próprio app.",
+        "clientRejected": "O {{name}} recusou o DCC: {{message}}",
+        "declined": "O login foi recusado: {{message}}",
+        "cancelled": "Login cancelado.",
+        "timedOut": "O login no {{name}} expirou. Tente de novo.",
+        "transient": "{{message}}",
+        "other": "{{message}}"
+      },
+      "custom": {
+        "title": "Adicionar conector personalizado",
+        "hint": "Qualquer servidor MCP remoto. O DCC entra com OAuth quando o servidor pedir.",
+        "urlLabel": "URL do servidor MCP",
+        "nameLabel": "Nome",
+        "invalidUrl": "Use uma URL https completa, sem usuário ou senha.",
+        "continue": "Continuar"
+      },
+      "manage": {
+        "lastChecked": "Último teste: {{date}}",
+        "toolsTitle": "Ferramentas",
+        "toolsHint": "Por padrão o agente pede sua aprovação antes de usar uma ferramenta. Ajuste por ferramenta se quiser.",
+        "noTools": "Teste a conexão para ver as ferramentas.",
+        "disconnectConfirm": "Desconectar {{name}}? Os agentes perdem as ferramentas dele e o DCC apaga o login deste computador.",
+        "removeConfirm": "Remover {{name}}? Os agentes perdem as ferramentas dele e o DCC esquece este conector."
+      },
+      "advanced": {
+        "title": "Avançado",
+        "hint": "Comandos locais (stdio), cabeçalhos, escopos e o estado de cada sessão."
+      }
     },
     "integrations": {
       "title": "Integrações MCP externas",
@@ -3572,19 +3679,19 @@
         "keywords": "conflito conflitos merge rebase base atualizar worktree bloco hunk resolver"
       },
       "mcp": {
-        "label": "Integrações MCP",
-        "summary": "Dê ferramentas externas aos agentes, com escopo e credenciais.",
-        "whatIs": "Uma integração MCP conecta um servidor de ferramentas ao provider: Figma, pagamentos, ferramentas internas. Você define o [Escopo], guarda credenciais protegidas e ativa depois de revisar o que o servidor expõe.",
-        "whenToUse": "Quando o agente precisa consultar ou agir em um sistema fora do repositório.",
+        "label": "Conectores",
+        "summary": "Dê aos agentes acesso ao ClickUp, Linear, Notion e outros serviços.",
+        "whatIs": "Um conector liga um serviço externo aos agentes. O DCC faz o login uma vez, guarda o acesso neste computador e entrega as ferramentas ao provider em cada tarefa, sem expor o token.",
+        "whenToUse": "Quando o agente precisa consultar ou agir em um sistema fora do repositório, como tarefas, issues ou erros.",
         "steps": [
-          "Abra Configurações e a seção [Integrações].",
-          "Clique em [Adicionar integração], preencha [Nome de exibição] e [URL do servidor].",
-          "Escolha o [Escopo]: [Esta sessão], [Este projeto] ou [Global].",
-          "Guarde tokens em [Credenciais protegidas] ou use [Conectar com OAuth].",
-          "Clique em [Revisar e ativar integração]. Ela vale para as próximas sessões dos providers."
+          "Abra Configurações e a seção [Conectores].",
+          "Clique no conector que quer usar, leia o aviso e clique em continuar para entrar pelo navegador.",
+          "Volte ao DCC: o conector aparece em [Conectados] e já vale a partir da próxima mensagem.",
+          "Para um servidor fora do catálogo, use [Adicionar personalizado] e cole a [URL do servidor MCP].",
+          "Se o login expirar, clique em [Reconectar]. Em [Gerenciar] você testa a conexão e ajusta cada ferramenta."
         ],
-        "tip": "Credenciais são armazenadas com segurança e nunca voltam para a tela. Quem vê a integração não vê o segredo.",
-        "keywords": "mcp integração integrações servidor ferramentas oauth credencial escopo figma"
+        "tip": "O login fica guardado com segurança e nunca é enviado aos providers de IA. Comandos locais e cabeçalhos ficam em [Avançado].",
+        "keywords": "mcp conector conectores integração integrações servidor ferramentas oauth login clickup linear notion github sentry"
       },
       "codeRabbit": {
         "label": "Review com CodeRabbit",

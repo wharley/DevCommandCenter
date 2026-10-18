@@ -81,11 +81,16 @@ pub async fn start_mcp_connect(
 
 #[tauri::command]
 pub async fn wait_mcp_connect(
+    window: tauri::WebviewWindow,
     coordinator: State<'_, McpConnectCoordinator>,
     gateway: State<'_, ConnectorGateway>,
     input: McpConnectLoginInput,
 ) -> Result<WaitMcpConnectOutput, String> {
-    mcp_command_impl::wait_mcp_connect(coordinator, gateway, input).await
+    let output = mcp_command_impl::wait_mcp_connect(coordinator, gateway, input).await;
+    // The sign-in finished in the browser; bring DCC back in front.
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    output
 }
 
 #[tauri::command]
