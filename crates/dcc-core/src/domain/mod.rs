@@ -4,6 +4,7 @@ pub mod decision;
 pub mod delegation;
 pub mod delegation_apply;
 pub mod delegation_worktree;
+pub mod goal;
 pub mod guarded_undo;
 pub mod idea;
 pub mod mcp;

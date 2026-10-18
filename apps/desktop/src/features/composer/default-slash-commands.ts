@@ -8,7 +8,10 @@ export type SlashCommandEntry = {
 	/** When `"client-action"`, parent handles insert (e.g. decorator swap). */
 	source?: "builtin" | "client-action";
 	/** Listed only when the selected provider declares this capability. */
-	requiresCapability?: keyof Pick<Capabilities, "supportsCompactionCommand">;
+	requiresCapability?: keyof Pick<
+		Capabilities,
+		"supportsCompactionCommand" | "supportsNativeGoal"
+	>;
 };
 
 export const DEFAULT_SLASH_COMMANDS: readonly SlashCommandEntry[] = [
@@ -27,6 +30,13 @@ export const DEFAULT_SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 		description: "Compact the provider context and re-anchor",
 		source: "client-action",
 		requiresCapability: "supportsCompactionCommand",
+	},
+	{
+		// The provider's own command: inserted for the person to finish
+		// (`/goal <condition>`) and sent as written.
+		name: "goal",
+		description: "Set a goal the agent keeps working toward until it is done",
+		requiresCapability: "supportsNativeGoal",
 	},
 ];
 

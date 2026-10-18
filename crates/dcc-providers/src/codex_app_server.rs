@@ -43,6 +43,7 @@ use dcc_core::{
             ProviderResetCredit, ProviderResetCredits, ProviderResetOutcome, ProviderUsageWindow,
             SessionHandle, ToolCallDetail,
         },
+        goal::{GoalSignal, GoalStatus, ProviderGoalSnapshot},
         session::{AssistantMessagePhase, SessionId},
         usage::ModelTokenUsage,
     },
@@ -262,6 +263,23 @@ const CODEX_TURN_ADDITIONAL_CONTEXT_MIN_VERSION: (u64, u64, u64) = (0, 135, 0);
 const CODEX_ADDITIONAL_CONTEXT_MAX_ENTRY_BYTES: usize = 4_000;
 
 fn codex_supports_turn_additional_context(cli_version: &str) -> bool {
+    codex_version_at_least(cli_version, CODEX_TURN_ADDITIONAL_CONTEXT_MIN_VERSION)
+}
+
+/// The turn that continues a paused goal (`/goal resume`).
+const CODEX_GOAL_RESUME_PROMPT: &str = "Continue working toward the goal.";
+
+/// First Codex CLI with persisted goals (`thread/goal/*`) on by default.
+const CODEX_GOALS_MIN_VERSION: (u64, u64, u64) = (0, 128, 0);
+/// Codex starts the next goal turn right after the previous one completes;
+/// a completion is held this long in case it continues.
+const CODEX_GOAL_CONTINUATION_GRACE: Duration = Duration::from_secs(5);
+
+fn codex_supports_goals(cli_version: &str) -> bool {
+    codex_version_at_least(cli_version, CODEX_GOALS_MIN_VERSION)
+}
+
+fn codex_version_at_least(cli_version: &str, min: (u64, u64, u64)) -> bool {
     let version = cli_version.split('+').next().unwrap_or_default();
     let (core, prerelease) = match version.split_once('-') {
         Some((core, prerelease)) => (core, Some(prerelease)),
@@ -274,8 +292,82 @@ fn codex_supports_turn_additional_context(cli_version: &str) -> bool {
         return false;
     };
     let version = (major, minor, patch);
-    version > CODEX_TURN_ADDITIONAL_CONTEXT_MIN_VERSION
-        || (version == CODEX_TURN_ADDITIONAL_CONTEXT_MIN_VERSION && prerelease.is_none())
+    version > min || (version == min && prerelease.is_none())
+}
+
+/// `/goal …` typed in the composer. Codex takes goals over its RPC, not as
+/// prompt text, so the adapter turns the command into `thread/goal/*` calls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CodexGoalCommand {
+    Show,
+    Clear,
+    Pause,
+    Resume,
+    Set(String),
+}
+
+fn parse_codex_goal_command(prompt: &str) -> Option<CodexGoalCommand> {
+    let rest = prompt.trim().strip_prefix("/goal")?;
+    if !(rest.is_empty() || rest.starts_with(char::is_whitespace)) {
+        return None;
+    }
+    let argument = rest.trim();
+    Some(match argument.to_ascii_lowercase().as_str() {
+        "" | "edit" | "status" => CodexGoalCommand::Show,
+        "clear" => CodexGoalCommand::Clear,
+        "pause" => CodexGoalCommand::Pause,
+        "resume" => CodexGoalCommand::Resume,
+        _ => CodexGoalCommand::Set(argument.to_string()),
+    })
+}
+
+/// A Codex `ThreadGoal` as the goal DCC follows.
+fn codex_goal_snapshot(goal: &Value) -> Option<ProviderGoalSnapshot> {
+    let objective = goal.get("objective").and_then(Value::as_str)?.trim();
+    if objective.is_empty() {
+        return None;
+    }
+    let status = match goal.get("status").and_then(Value::as_str)? {
+        "active" => GoalStatus::Active,
+        "paused" => GoalStatus::Paused,
+        "blocked" => GoalStatus::Blocked,
+        "usageLimited" => GoalStatus::UsageLimited,
+        "budgetLimited" => GoalStatus::BudgetLimited,
+        "complete" => GoalStatus::Complete,
+        _ => return None,
+    };
+    Some(ProviderGoalSnapshot {
+        objective: objective.to_string(),
+        status,
+        tokens_used: goal.get("tokensUsed").and_then(Value::as_u64),
+        token_budget: goal.get("tokenBudget").and_then(Value::as_u64),
+        time_used_seconds: goal.get("timeUsedSeconds").and_then(Value::as_u64),
+    })
+}
+
+/// The answer to `/goal`, `/goal clear` and `/goal pause`, which change the
+/// goal without a model turn. Fixed text, never generated.
+fn codex_goal_control_message(command: &CodexGoalCommand, goal: Option<&ProviderGoalSnapshot>) -> String {
+    match (command, goal) {
+        (CodexGoalCommand::Clear, _) => "Objetivo removido.".to_string(),
+        (CodexGoalCommand::Pause, Some(_)) => "Objetivo pausado.".to_string(),
+        (_, None) => "Nenhum objetivo definido. Use `/goal <condição>`.".to_string(),
+        (_, Some(goal)) => format!("Objetivo: {}", goal.objective),
+    }
+}
+
+/// Where the root thread's goal stands, so its continuation turns stay one
+/// DCC turn: Codex runs turn after turn by itself while the goal is active.
+#[derive(Debug, Default)]
+struct CodexGoalTracker {
+    /// The root thread's goal is active.
+    active: bool,
+    /// A completed root turn whose `Completed` waits for the next goal turn.
+    held_turn: Option<String>,
+    /// Bumped whenever a hold starts or ends, so a stale timer does nothing.
+    hold_generation: u64,
+    /// The person is stopping the task: nothing is held.
+    stopping: bool,
 }
 
 /// Splits context at line boundaries into entries Codex will not truncate.
@@ -450,6 +542,12 @@ impl CodexRuntimeMetadata {
         self.mcp_projection.as_ref().is_some_and(|projection| {
             codex_supports_turn_additional_context(&projection.cli_version)
         })
+    }
+
+    fn goals_supported(&self) -> bool {
+        self.mcp_projection
+            .as_ref()
+            .is_some_and(|projection| codex_supports_goals(&projection.cli_version))
     }
 
     fn require_version(&self) -> Result<()> {
@@ -2193,6 +2291,7 @@ struct SessionRuntime {
     events_tx: broadcast::Sender<ProviderEvent>,
     last_retry_at: Mutex<Option<Instant>>,
     usage_limits: Mutex<CodexUsageLimitTracker>,
+    goal: Mutex<CodexGoalTracker>,
     /// The thread continues one a previous runtime persisted.
     native_resumed: std::sync::atomic::AtomicBool,
     /// Thread id DCC has not been told about yet. Reported on the first
@@ -2201,6 +2300,150 @@ struct SessionRuntime {
 }
 
 impl SessionRuntime {
+    fn emit_goal(&self, goal: Option<ProviderGoalSnapshot>) {
+        let _ = self.events_tx.send(ProviderEvent::Goal {
+            signal: GoalSignal::Snapshot { goal },
+            at: now_iso(),
+        });
+    }
+
+    async fn read_goal(&self, thread_id: &str) -> Option<ProviderGoalSnapshot> {
+        self.send_request("thread/goal/get", json!({ "threadId": thread_id }))
+            .await
+            .ok()?
+            .get("goal")
+            .and_then(codex_goal_snapshot)
+    }
+
+    async fn pause_goal(&self, thread_id: &str) {
+        let _ = self
+            .send_request(
+                "thread/goal/set",
+                json!({ "threadId": thread_id, "status": "paused" }),
+            )
+            .await;
+    }
+
+    /// `thread/goal/updated` or `thread/goal/cleared` of the root thread.
+    async fn observe_goal(&self, goal: Option<ProviderGoalSnapshot>) {
+        let active = goal
+            .as_ref()
+            .is_some_and(|goal| goal.status == GoalStatus::Active);
+        self.emit_goal(goal);
+        let mut tracker = self.goal.lock().await;
+        tracker.active = active;
+        if !active {
+            self.release_goal_hold(&mut tracker);
+        }
+    }
+
+    /// The held turn did not continue: the DCC turn ends now.
+    fn release_goal_hold(&self, tracker: &mut CodexGoalTracker) {
+        if tracker.held_turn.take().is_some() {
+            tracker.hold_generation += 1;
+            let _ = self.events_tx.send(ProviderEvent::Completed { at: now_iso() });
+        }
+    }
+
+    /// A root turn completed while the goal is active: Codex is about to
+    /// start the next goal turn, so its `Completed` waits for it a moment.
+    async fn hold_goal_completion(self: &Arc<Self>, turn_id: &str) -> bool {
+        let mut tracker = self.goal.lock().await;
+        if !tracker.active || tracker.stopping {
+            return false;
+        }
+        tracker.held_turn = Some(turn_id.to_string());
+        tracker.hold_generation += 1;
+        let generation = tracker.hold_generation;
+        let runtime = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(CODEX_GOAL_CONTINUATION_GRACE).await;
+            let mut tracker = runtime.goal.lock().await;
+            if tracker.hold_generation == generation {
+                runtime.release_goal_hold(&mut tracker);
+            }
+        });
+        true
+    }
+
+    /// A root turn started. The next turn of a held goal run continues the
+    /// same DCC turn; one with no DCC turn to carry it is stopped, so a goal
+    /// never runs where the person cannot see it.
+    async fn observe_root_turn_started(self: &Arc<Self>, thread_id: &str, turn_id: &str) {
+        let mut tracker = self.goal.lock().await;
+        let mut active_turn = self.active_turn_id.lock().await;
+        if active_turn.as_deref() == Some(turn_id) {
+            return;
+        }
+        if tracker.held_turn.take().is_some() {
+            tracker.hold_generation += 1;
+            *active_turn = Some(turn_id.to_string());
+            return;
+        }
+        if active_turn.is_none() && (tracker.active || tracker.stopping) {
+            let runtime = self.clone();
+            let (thread_id, turn_id) = (thread_id.to_string(), turn_id.to_string());
+            // The responses arrive on the reader that called this.
+            tokio::spawn(async move {
+                runtime.pause_goal(&thread_id).await;
+                let _ = runtime
+                    .send_request(
+                        "turn/interrupt",
+                        json!({ "threadId": thread_id, "turnId": turn_id }),
+                    )
+                    .await;
+            });
+        }
+    }
+
+    /// The turn guidance goes to. Between two turns of a goal run there is
+    /// none for a moment: wait for the next one rather than lose the words.
+    async fn turn_for_steer(&self) -> Option<String> {
+        let deadline = Instant::now() + CODEX_GOAL_CONTINUATION_GRACE + Duration::from_secs(1);
+        loop {
+            if let Some(turn_id) = self.active_turn_id.lock().await.clone() {
+                return Some(turn_id);
+            }
+            if self.goal.lock().await.held_turn.is_none() || Instant::now() >= deadline {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// `/goal`, `/goal clear`, `/goal pause`: the goal changes without a
+    /// model turn, and the DCC turn ends with the fixed answer.
+    async fn run_goal_control(&self, thread_id: &str, command: &CodexGoalCommand) -> Result<()> {
+        match command {
+            CodexGoalCommand::Clear => {
+                self.send_request("thread/goal/clear", json!({ "threadId": thread_id }))
+                    .await?;
+            }
+            CodexGoalCommand::Pause => {
+                if self.read_goal(thread_id).await.is_some() {
+                    self.pause_goal(thread_id).await;
+                }
+            }
+            _ => {}
+        }
+        let goal = self.read_goal(thread_id).await;
+        self.goal.lock().await.active = goal
+            .as_ref()
+            .is_some_and(|goal| goal.status == GoalStatus::Active);
+        let message = codex_goal_control_message(command, goal.as_ref());
+        self.emit_goal(goal);
+        let at = now_iso();
+        let _ = self.events_tx.send(ProviderEvent::AssistantMessageCompleted {
+            id: format!("codex:goal:{}", Uuid::new_v4()),
+            phase: AssistantMessagePhase::Unknown,
+            content: Some(message),
+            model: None,
+            at: at.clone(),
+        });
+        let _ = self.events_tx.send(ProviderEvent::Completed { at });
+        Ok(())
+    }
+
     async fn restore_additional_context(&self, thread_id: &str) {
         let context = self.last_additional_context.lock().await.clone();
         let Some(params) = context
@@ -3059,6 +3302,7 @@ impl CodexAppServerAdapter {
             events_tx: events_tx.clone(),
             last_retry_at: Mutex::new(None),
             usage_limits: Mutex::new(CodexUsageLimitTracker::default()),
+            goal: Mutex::new(CodexGoalTracker::default()),
             native_resumed: std::sync::atomic::AtomicBool::new(false),
             unreported_native_thread: Mutex::new(None),
         });
@@ -3283,6 +3527,8 @@ impl CodexAppServerAdapter {
                                     .lock()
                                     .await
                                     .insert(thread_id.to_string(), turn_id.to_string());
+                            } else {
+                                runtime.observe_root_turn_started(thread_id, turn_id).await;
                             }
                         }
                     }
@@ -3306,6 +3552,31 @@ impl CodexAppServerAdapter {
                     }
                     if (method == "turn/completed" || method == "error") && belongs_to_root {
                         *runtime.active_turn_id.lock().await = None;
+                    }
+                    if matches!(method.as_str(), "thread/goal/updated" | "thread/goal/cleared") {
+                        if belongs_to_root {
+                            let goal = if method == "thread/goal/updated" {
+                                params.get("goal").and_then(codex_goal_snapshot)
+                            } else {
+                                None
+                            };
+                            runtime.observe_goal(goal).await;
+                        }
+                        continue;
+                    }
+                    // Codex keeps starting goal turns after a failed one, one
+                    // per second, forever: a failure pauses the goal.
+                    if method == "turn/completed"
+                        && belongs_to_root
+                        && params.pointer("/turn/status").and_then(Value::as_str) == Some("failed")
+                        && runtime.goal.lock().await.active
+                    {
+                        if let Some(thread_id) = current_thread_id.clone() {
+                            let pause_runtime = runtime.clone();
+                            tokio::spawn(async move {
+                                pause_runtime.pause_goal(&thread_id).await;
+                            });
+                        }
                     }
                     if method == "item/completed"
                         && belongs_to_root
@@ -3483,6 +3754,18 @@ impl CodexAppServerAdapter {
                             }
                         }
                     } else {
+                        let completed_turn = (method == "turn/completed" && belongs_to_root)
+                            .then(|| params.pointer("/turn/id").and_then(Value::as_str))
+                            .flatten()
+                            .filter(|_| {
+                                params.pointer("/turn/status").and_then(Value::as_str)
+                                    == Some("completed")
+                            });
+                        if let Some(turn_id) = completed_turn {
+                            if runtime.hold_goal_completion(turn_id).await {
+                                continue;
+                            }
+                        }
                         let current_turn_id = runtime.active_turn_id.lock().await.clone();
                         if let Some(event) = project_codex_notification_event(
                             method,
@@ -3745,6 +4028,7 @@ impl Provider for CodexAppServerAdapter {
         let supported = self.runtime_metadata().multi_agent_v2_supported;
         capabilities.supports_native_subagent_steering = supported;
         capabilities.supports_native_subagent_interrupt = supported;
+        capabilities.supports_native_goal = self.runtime_metadata().goals_supported();
         capabilities
     }
 
@@ -3805,6 +4089,51 @@ impl Provider for CodexAppServerAdapter {
             .await
             .clone()
             .ok_or_else(|| CoreError::Provider("codex session has no thread ID".to_string()))?;
+
+        let goal_command = match &input {
+            Input::Turn(turn) if self.runtime_metadata().goals_supported() => {
+                parse_codex_goal_command(&turn.prompt)
+            }
+            _ => None,
+        };
+        let mut input = input;
+        let mut activate_goal = false;
+        match goal_command {
+            Some(
+                command @ (CodexGoalCommand::Show
+                | CodexGoalCommand::Clear
+                | CodexGoalCommand::Pause),
+            ) => return runtime.run_goal_control(&thread_id, &command).await,
+            Some(CodexGoalCommand::Set(objective)) => {
+                // Set paused first: an active goal makes Codex start a turn
+                // by itself, without the approvals and model of this one.
+                let _ = runtime
+                    .send_request("thread/goal/clear", json!({ "threadId": thread_id }))
+                    .await;
+                runtime
+                    .send_request(
+                        "thread/goal/set",
+                        json!({ "threadId": thread_id, "objective": objective, "status": "paused" }),
+                    )
+                    .await?;
+                if let Input::Turn(turn) = &mut input {
+                    turn.prompt = objective;
+                }
+                activate_goal = true;
+            }
+            Some(CodexGoalCommand::Resume) => {
+                if runtime.read_goal(&thread_id).await.is_none() {
+                    return runtime
+                        .run_goal_control(&thread_id, &CodexGoalCommand::Show)
+                        .await;
+                }
+                if let Input::Turn(turn) = &mut input {
+                    turn.prompt = CODEX_GOAL_RESUME_PROMPT.to_string();
+                }
+                activate_goal = true;
+            }
+            None => {}
+        }
 
         let has_dcc_mcp_servers = runtime.has_dcc_mcp_servers().await;
         let (payload, effort, summary, approval_policy, sandbox_policy) = match input {
@@ -3880,6 +4209,16 @@ impl Provider for CodexAppServerAdapter {
                 checkpoint: turn_id.to_string(),
             });
         }
+        if activate_goal {
+            // The turn already runs with this turn's settings; Codex
+            // continues from it while the goal stays active.
+            let _ = runtime
+                .send_request(
+                    "thread/goal/set",
+                    json!({ "threadId": thread_id, "status": "active" }),
+                )
+                .await;
+        }
 
         Ok(())
     }
@@ -3900,10 +4239,9 @@ impl Provider for CodexAppServerAdapter {
             .await
             .clone()
             .ok_or_else(|| CoreError::Provider("codex session has no thread ID".to_string()))?;
-        let expected_turn_id =
-            runtime.active_turn_id.lock().await.clone().ok_or_else(|| {
-                CoreError::Provider("codex session has no active turn".to_string())
-            })?;
+        let expected_turn_id = runtime.turn_for_steer().await.ok_or_else(|| {
+            CoreError::Provider("codex session has no active turn".to_string())
+        })?;
 
         runtime
             .send_request(
@@ -4111,16 +4449,30 @@ impl Provider for CodexAppServerAdapter {
         runtime.cancel_pending_mcp_approvals().await;
         runtime.cancel_pending_native_approvals().await;
         let thread_id = runtime.thread_id.lock().await.clone();
+        // Stop pauses the goal first, or Codex would start the next turn.
+        let goal_active = {
+            let mut tracker = runtime.goal.lock().await;
+            tracker.held_turn = None;
+            tracker.hold_generation += 1;
+            tracker.stopping = tracker.active;
+            tracker.active
+        };
+        if let (true, Some(thread_id)) = (goal_active, thread_id.as_deref()) {
+            runtime.pause_goal(thread_id).await;
+        }
         let turn_id = runtime.active_turn_id.lock().await.clone();
-        if let (Some(thread_id), Some(turn_id)) = (thread_id, turn_id) {
-            runtime
+        let interrupted = match (thread_id, turn_id) {
+            (Some(thread_id), Some(turn_id)) => runtime
                 .send_request(
                     "turn/interrupt",
                     json!({ "threadId": thread_id, "turnId": turn_id }),
                 )
-                .await?;
-        }
-        Ok(())
+                .await
+                .map(|_| ()),
+            _ => Ok(()),
+        };
+        runtime.goal.lock().await.stopping = false;
+        interrupted
     }
 
     async fn resume(&self, previous: &SessionId) -> Result<SessionHandle> {
@@ -5905,3 +6257,7 @@ unified_exec                         stable             true
 #[cfg(all(test, unix))]
 #[path = "codex_runtime_update_tests.rs"]
 mod runtime_update_tests;
+
+#[cfg(all(test, unix))]
+#[path = "codex_goal_tests.rs"]
+mod goal_tests;

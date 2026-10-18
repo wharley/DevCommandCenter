@@ -85,6 +85,7 @@ import {
 	submitComposerDraftOptimistically,
 } from "./WorkspaceComposer.logic";
 import { DEFAULT_SLASH_COMMANDS, availableSlashCommands } from "./default-slash-commands";
+import { GoalStrip } from "./goal-strip";
 import { $createFileBadgeNode, FileBadgeNode } from "./editor/file-badge-node";
 import { $createImageBadgeNode, ImageBadgeNode } from "./editor/image-badge-node";
 import { PastedSnippetBadgeNode } from "./editor/pasted-snippet-badge-node";
@@ -482,6 +483,28 @@ export function WorkspaceComposer({
 		],
 	);
 
+	// Goal actions (`/goal clear`, continue) are plain turns: no plan mode and
+	// no evidence, which belong to what the person writes.
+	const sendGoalPrompt = useCallback(
+		(rawPrompt: string) =>
+			onSubmitPrompt({
+				rawPrompt,
+				envelope: {
+					planMode: false,
+					effort: resolveEffectiveEffort({
+						selectedEffort: effort,
+						supportedEfforts: availableEffortLevels,
+						ultrathinkSelected: false,
+						rawPrompt,
+					}),
+					fastMode: isFastMode,
+					approvalPolicy,
+					evidence: null,
+				},
+			}),
+		[approvalPolicy, availableEffortLevels, effort, isFastMode, onSubmitPrompt],
+	);
+
 	const handleSubmitDraft = useCallback(
 		async (behavior: "send" | "queue" | "steer" = "send") => {
 			if (isSubmittingRef.current) {
@@ -821,6 +844,13 @@ export function WorkspaceComposer({
 				workspaceId={sessionSnapshot?.workspaceId ?? null}
 				queuedCount={queuedTurns.length}
 				disabled={inputDisabled || hasActiveTurn}
+			/>
+			<GoalStrip
+				sessionId={sessionId}
+				workspaceId={sessionSnapshot?.workspaceId ?? null}
+				working={hasActiveTurn}
+				disabled={inputDisabled || isSubmitting}
+				onSendPrompt={sendGoalPrompt}
 			/>
 			{queuedTurns.length > 0 ? (
 				<div className="mb-2 rounded-xl border border-border/45 bg-background/30 px-2.5 py-2">

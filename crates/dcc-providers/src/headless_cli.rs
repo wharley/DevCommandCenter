@@ -1390,6 +1390,7 @@ mod tests {
                 fast_mode_support: dcc_core::domain::provider::TurnControlSupport::PromptFallback,
                 supports_dynamic_models: false,
                 supports_compaction_command: false,
+                supports_native_goal: false,
             },
             true,
             HeadlessCliKind::Gemini,

@@ -1919,6 +1919,7 @@
       "error": "Não foi possível anexar o arquivo selecionado"
     },
     "slashCommands": {
+      "goal": "Definir um objetivo que o agente persegue até ficar pronto",
       "compact": "Compactar o contexto do provider e reancorar a spec da missão",
       "spec": "Criar ou atualizar a mission spec desta tarefa",
       "clear": "Limpar o rascunho atual do composer"
@@ -5295,6 +5296,27 @@
       "completed": "Concluída",
       "aborted": "Interrompida"
     }
+  },
+  "goal": {
+    "titleWorking": "Trabalhando no objetivo",
+    "titleActive": "Objetivo ativo",
+    "titlePaused": "Objetivo pausado",
+    "titleBlocked": "Objetivo travado",
+    "titleUsageLimited": "Objetivo parado pelo limite de uso",
+    "titleBudgetLimited": "Objetivo atingiu o orçamento de tokens",
+    "titleComplete": "Objetivo concluído",
+    "checks_one": "{{count}} verificação",
+    "checks_other": "{{count}} verificações",
+    "tokens": "{{used}} tokens",
+    "tokensOfBudget": "{{used}} de {{budget}} tokens",
+    "minutes": "{{count}} min",
+    "lastCheck": "Ainda não: {{reason}}",
+    "idleHint": "O agente segue no objetivo quando você mandar a próxima mensagem.",
+    "clear": "Limpar",
+    "clearHint": "Pede ao agente para abandonar o objetivo",
+    "resume": "Continuar",
+    "dismiss": "Fechar",
+    "actionFailed": "Não foi possível atualizar o objetivo: {{message}}"
   },
   "usageLimit": {
     "backAt": "volta às {{time}}",

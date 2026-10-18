@@ -745,6 +745,7 @@ fn capabilities() -> Capabilities {
         fast_mode_support: TurnControlSupport::PromptFallback,
         supports_dynamic_models: true,
         supports_compaction_command: false,
+        supports_native_goal: false,
     }
 }
 

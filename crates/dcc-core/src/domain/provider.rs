@@ -293,6 +293,10 @@ pub struct Capabilities {
     /// DCC may treat it as a compaction signal (post-compact re-anchor).
     #[serde(default)]
     pub supports_compaction_command: bool,
+    /// The runtime keeps working toward a goal set with `/goal` until it is
+    /// met, and reports it so DCC can follow it. See `domain::goal`.
+    #[serde(default)]
+    pub supports_native_goal: bool,
 }
 
 /// How a turn control (plan mode, fast mode) actually reaches the runtime.
@@ -664,6 +668,12 @@ pub enum ProviderEvent {
     /// provider reported late. `resets_at` is `None` when unknown.
     UsageLimitReached {
         resets_at: Option<String>,
+        at: String,
+    },
+    /// What the provider said about its own goal (`/goal`). See
+    /// `domain::goal`.
+    Goal {
+        signal: super::goal::GoalSignal,
         at: String,
     },
     Completed {

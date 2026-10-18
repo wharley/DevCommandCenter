@@ -13,6 +13,7 @@ use tokio::{
 use dcc_core::{
     application::{compose_fallback_prompt_for_provider, PromptInjectionOptions},
     domain::{
+        goal::{GoalSignal, GoalStatus, ProviderGoalSnapshot},
         provider::{
             Capabilities, HealthStatus, McpSupportLevel, ProviderDescriptor, ProviderEvent,
             ProviderId, ProviderModelDescriptor, SessionHandle, ToolCallDetail,
@@ -84,6 +85,13 @@ pub fn adapter() -> CursorBridgeProvider {
     )
 }
 
+fn is_goal_command(prompt: &str) -> bool {
+    prompt
+        .trim_start()
+        .strip_prefix("/goal")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+}
+
 fn cursor_capabilities() -> Capabilities {
     let mut capabilities = experimental_cli_capabilities();
     capabilities.mcp_support = McpSupportLevel::NativeConfig;
@@ -92,6 +100,9 @@ fn cursor_capabilities() -> Capabilities {
     capabilities.supports_dynamic_models = true;
     // Cursor receives DCC's MCP tools, so it can propose and delegate tasks.
     capabilities.can_request_delegation = true;
+    // Undocumented and behind a Cursor rollout flag; works on the
+    // stream-json route only (the ACP runtime has no goals yet).
+    capabilities.supports_native_goal = true;
     capabilities
 }
 
@@ -465,7 +476,10 @@ fn parse_cursor_stream_value(value: &Value, state: &mut CursorStreamState) -> Ve
 
     match kind {
         "assistant" => parse_cursor_assistant_message(value, state, at),
-        "tool_call" => parse_cursor_tool_call(value, at).into_iter().collect(),
+        "tool_call" => parse_cursor_tool_call(value, at.clone())
+            .into_iter()
+            .chain(parse_cursor_goal(value, at))
+            .collect(),
         "result" => parse_cursor_result(value, state, at),
         "system" => {
             if value.get("subtype").and_then(Value::as_str) == Some("init") {
@@ -526,6 +540,49 @@ fn parse_cursor_assistant_message(
     }
     events.push(ProviderEvent::AssistantMessageDelta { id, content: delta });
     events
+}
+
+/// Cursor's `/goal` runs as tools of its own: `createGoalToolCall` with the
+/// objective, `updateGoalToolCall` with the new status. Only completed calls
+/// count. The continuation turns stay inside the same `--print` run, so the
+/// goal never outlives the DCC turn.
+fn parse_cursor_goal(value: &Value, at: String) -> Option<ProviderEvent> {
+    if value.get("subtype").and_then(Value::as_str) != Some("completed") {
+        return None;
+    }
+    let tool_call = value.get("tool_call")?;
+    let signal = if let Some(create) = tool_call.get("createGoalToolCall") {
+        create.pointer("/result/success")?;
+        let objective = create.pointer("/args/objective")?.as_str()?.trim();
+        (!objective.is_empty()).then(|| GoalSignal::Snapshot {
+            goal: Some(ProviderGoalSnapshot {
+                objective: objective.to_string(),
+                status: GoalStatus::Active,
+                tokens_used: None,
+                token_budget: None,
+                time_used_seconds: None,
+            }),
+        })?
+    } else {
+        let update = tool_call.get("updateGoalToolCall")?;
+        let status = update
+            .pointer("/result/success/status")
+            .or_else(|| update.pointer("/args/status"))?
+            .as_str()?;
+        GoalSignal::Status {
+            status: match status
+                .trim_start_matches("GOAL_STATUS_")
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "active" => GoalStatus::Active,
+                "paused" => GoalStatus::Paused,
+                "complete" => GoalStatus::Complete,
+                _ => return None,
+            },
+        }
+    };
+    Some(ProviderEvent::Goal { signal, at })
 }
 
 fn parse_cursor_tool_call(value: &Value, at: String) -> Option<ProviderEvent> {
@@ -1273,6 +1330,11 @@ impl Provider for CursorProvider {
 
         let (prompt, plan_mode) = match input {
             Input::Text(prompt) => (prompt, None),
+            // `/goal …` must reach Cursor as written: directives before it
+            // hide the command, instructions after it join the objective.
+            Input::Turn(turn) if is_goal_command(&turn.prompt) => {
+                (turn.prompt.trim().to_string(), None)
+            }
             Input::Turn(turn) => (
                 append_tool_instructions(
                     compose_fallback_prompt_for_provider(
@@ -1392,6 +1454,44 @@ impl Provider for CursorProvider {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cursor_goal_run_reports_the_goal_and_ends_once() {
+        let mut state = CursorStreamState::default();
+        let events = include_str!("../fixtures/goal/cursor_goal_complete.jsonl")
+            .lines()
+            .flat_map(|line| parse_cursor_stream_line(line, &mut state))
+            .collect::<Vec<_>>();
+        let signals = events
+            .iter()
+            .filter_map(|event| match event {
+                ProviderEvent::Goal { signal, .. } => Some(signal.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            &signals[..],
+            [
+                GoalSignal::Snapshot { goal: Some(goal) },
+                GoalSignal::Status { status: GoalStatus::Complete },
+            ] if goal.status == GoalStatus::Active && goal.objective.starts_with("The file count.txt")
+        ), "{signals:?}");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ProviderEvent::Completed { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn only_a_leading_goal_command_skips_the_directives() {
+        assert!(is_goal_command("/goal tests pass"));
+        assert!(is_goal_command("  /goal"));
+        assert!(!is_goal_command("/goals"));
+        assert!(!is_goal_command("please /goal x"));
+    }
+
     use super::*;
 
     #[test]

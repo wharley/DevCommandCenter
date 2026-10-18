@@ -4723,6 +4723,73 @@ impl SessionCommandState {
         .await
     }
 
+    /// Follows the provider's own goal (`/goal`): the signal moves the
+    /// session's goal and the change is recorded. See `domain::goal`.
+    pub async fn record_goal_signal(
+        &self,
+        session_id: &SessionId,
+        turn_id: Option<&TurnId>,
+        signal: &dcc_core::domain::goal::GoalSignal,
+        at: &str,
+    ) -> Result<()> {
+        let events = self.session_repo.list_events_by_session_sync(session_id)?;
+        let current = dcc_core::domain::goal::session_goal(&events);
+        let Some(goal) =
+            dcc_core::domain::goal::apply_goal_signal(current.as_ref(), signal, at)
+        else {
+            return Ok(());
+        };
+        self.append_goal_updated(session_id, turn_id, goal).await
+    }
+
+    /// "Fechar" on a finished goal: the provider has nothing left to clear
+    /// (Claude already dropped it), so only the session forgets it. A goal
+    /// still in play is cleared through the provider instead (`/goal clear`).
+    pub async fn dismiss_finished_goal(&self, session_id: &SessionId) -> Result<()> {
+        let events = self.session_repo.list_events_by_session_sync(session_id)?;
+        match dcc_core::domain::goal::session_goal(&events) {
+            Some(goal) if goal.status == dcc_core::domain::goal::GoalStatus::Complete => {
+                self.append_goal_updated(session_id, None, None).await
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// A turn that ended normally can complete a goal its provider never
+    /// reports as achieved (Claude clears it once the condition holds).
+    async fn complete_goal_with_turn(&self, session_id: &SessionId, turn_id: &TurnId) -> Result<()> {
+        let events = self.session_repo.list_events_by_session_sync(session_id)?;
+        let at = Utc::now().to_rfc3339();
+        match dcc_core::domain::goal::goal_completed_by_turn(&events, turn_id, &at) {
+            Some(goal) => {
+                self.append_goal_updated(session_id, Some(turn_id), Some(goal))
+                    .await
+            }
+            None => Ok(()),
+        }
+    }
+
+    async fn append_goal_updated(
+        &self,
+        session_id: &SessionId,
+        turn_id: Option<&TurnId>,
+        goal: Option<dcc_core::domain::goal::SessionGoal>,
+    ) -> Result<()> {
+        self.append_and_publish_session_event(
+            session_id,
+            SessionEventKind::GoalUpdated {
+                turn_id: turn_id.cloned(),
+                goal: goal.clone(),
+            },
+            dcc_core::ports::events::CoreEvent::SessionGoalUpdated {
+                session_id: session_id.0.clone(),
+                turn_id: turn_id.map(|turn_id| turn_id.0.clone()),
+                goal,
+            },
+        )
+        .await
+    }
+
     /// Finalizes a just-recorded TurnStarted when binding the new turn failed.
     /// This deliberately never inspects, cancels, or clears the binding for a
     /// still-running older turn in the same session.
@@ -7119,6 +7186,13 @@ impl SessionCommandState {
                             }
                         }
                         if completed {
+                            if let Some(turn_id) = completed_turn_id.as_ref() {
+                                if let Err(error) =
+                                    state.complete_goal_with_turn(&session_id, turn_id).await
+                                {
+                                    eprintln!("[DCC] goal completion failed: {error}");
+                                }
+                            }
                             if let Some(review_turn_id) = completed_turn_id {
                                 let review_state = state.clone();
                                 let review_session_id = session_id.clone();
@@ -7176,6 +7250,15 @@ impl SessionCommandState {
                                     }
                                 }
                             }
+                        }
+                    }
+                    Ok(ProviderEvent::Goal { signal, at }) => {
+                        let turn_id = binding.current_turn_id.lock().await.clone().map(TurnId);
+                        if let Err(error) = state
+                            .record_goal_signal(&session_id, turn_id.as_ref(), &signal, &at)
+                            .await
+                        {
+                            eprintln!("[DCC] goal update failed: {error}");
                         }
                     }
                     Ok(ProviderEvent::Failed { message, .. }) => {

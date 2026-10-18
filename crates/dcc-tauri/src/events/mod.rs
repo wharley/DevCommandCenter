@@ -35,6 +35,7 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionUsageLimitAutoResumeChanged { .. } => {
             format!("{SESSION_EVENT_PREFIX}/usage-limit/auto-resume")
         }
+        CoreEvent::SessionGoalUpdated { .. } => format!("{SESSION_EVENT_PREFIX}/goal/updated"),
         CoreEvent::SessionConversationRewound { .. } => {
             format!("{SESSION_EVENT_PREFIX}/conversation/rewound")
         }

@@ -19,6 +19,7 @@ mod desktop_agent_requests;
 mod feedback_commands;
 mod keep_awake_commands;
 mod usage_limit_commands;
+mod goal_commands;
 mod forge_commands;
 mod git_support;
 mod mcp_commands;
@@ -7045,6 +7046,7 @@ pub fn run() {
             usage_limit_commands::session_set_usage_limit_auto_resume,
             usage_limit_commands::session_resume_after_usage_limit,
             usage_limit_commands::session_resume_after_usage_limit_on_account,
+            goal_commands::session_dismiss_goal,
             desktop_agent_requests::agent_request_attention,
             quick_composer::quick_composer_status,
             quick_composer::quick_composer_set_shortcut,

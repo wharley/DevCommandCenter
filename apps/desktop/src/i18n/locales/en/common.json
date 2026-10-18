@@ -1919,6 +1919,7 @@
       "error": "Unable to attach the selected file"
     },
     "slashCommands": {
+      "goal": "Set a goal the agent keeps working toward until it is done",
       "compact": "Compact the provider context and re-anchor the mission spec",
       "spec": "Draft or update this task's mission spec",
       "clear": "Clear the current composer draft"
@@ -5295,6 +5296,27 @@
       "completed": "Completed",
       "aborted": "Interrupted"
     }
+  },
+  "goal": {
+    "titleWorking": "Working on the goal",
+    "titleActive": "Goal active",
+    "titlePaused": "Goal paused",
+    "titleBlocked": "Goal blocked",
+    "titleUsageLimited": "Goal stopped by the usage limit",
+    "titleBudgetLimited": "Goal reached its token budget",
+    "titleComplete": "Goal complete",
+    "checks_one": "{{count}} check",
+    "checks_other": "{{count}} checks",
+    "tokens": "{{used}} tokens",
+    "tokensOfBudget": "{{used}} of {{budget}} tokens",
+    "minutes": "{{count}} min",
+    "lastCheck": "Not yet: {{reason}}",
+    "idleHint": "The agent keeps pursuing the goal when you send the next message.",
+    "clear": "Clear",
+    "clearHint": "Asks the agent to drop the goal",
+    "resume": "Continue",
+    "dismiss": "Close",
+    "actionFailed": "Could not update the goal: {{message}}"
   },
   "usageLimit": {
     "backAt": "back at {{time}}",

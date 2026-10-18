@@ -67,6 +67,11 @@ pub enum CoreEvent {
         session_id: String,
         enabled: bool,
     },
+    SessionGoalUpdated {
+        session_id: String,
+        turn_id: Option<String>,
+        goal: Option<crate::domain::goal::SessionGoal>,
+    },
     SessionConversationRewound {
         session_id: String,
         anchor_turn_id: String,
@@ -318,6 +323,7 @@ impl CoreEvent {
             | Self::SessionUsageLimitReached { session_id, .. }
             | Self::SessionUsageLimitResumed { session_id, .. }
             | Self::SessionUsageLimitAutoResumeChanged { session_id, .. }
+            | Self::SessionGoalUpdated { session_id, .. }
             | Self::SessionConversationRewound { session_id, .. }
             | Self::SessionMcpRuntimeStatusChanged { session_id, .. }
             | Self::SessionTurnStarted { session_id, .. }
@@ -1021,6 +1027,16 @@ impl CoreEvent {
                     ..
                 },
             ) => enabled == actual_enabled,
+            (
+                SessionEventKind::GoalUpdated { turn_id, goal },
+                Self::SessionGoalUpdated {
+                    turn_id: actual_turn_id,
+                    goal: actual_goal,
+                    ..
+                },
+            ) => {
+                turn_id.as_ref().map(|id| &id.0) == actual_turn_id.as_ref() && goal == actual_goal
+            }
             (
                 SessionEventKind::ConversationRewound {
                     anchor_turn_id,

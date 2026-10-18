@@ -1858,6 +1858,7 @@ struct EventSummary {
     last_turn_awaiting_user: Option<String>,
     last_turn_awaiting_since: Option<String>,
     usage_limit: Option<dcc_core::domain::usage_limit::SessionUsageLimit>,
+    goal: Option<dcc_core::domain::goal::SessionGoal>,
 }
 
 impl EventSummary {
@@ -1913,6 +1914,7 @@ impl EventSummary {
             last_turn_awaiting_user: dcc_core::domain::session::last_turn_awaiting_user(events),
             last_turn_awaiting_since: dcc_core::domain::session::last_turn_awaiting_since(events),
             usage_limit: dcc_core::domain::usage_limit::session_usage_limit(events),
+            goal: dcc_core::domain::goal::session_goal(events),
         }
     }
 }
@@ -5742,6 +5744,7 @@ impl SqliteSessionRepo {
                 | SessionEventKind::UsageLimitReached { .. }
                 | SessionEventKind::UsageLimitResumed { .. }
                 | SessionEventKind::UsageLimitAutoResumeChanged { .. }
+                | SessionEventKind::GoalUpdated { .. }
                 | SessionEventKind::ConversationRewound { .. }
                 | SessionEventKind::SessionResumed => {}
             }
@@ -6103,6 +6106,7 @@ impl SqliteSessionRepo {
             last_turn_awaiting_user: derived.last_turn_awaiting_user,
             last_turn_awaiting_since: derived.last_turn_awaiting_since,
             usage_limit: derived.usage_limit,
+            goal: derived.goal,
         })
     }
 

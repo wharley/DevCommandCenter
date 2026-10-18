@@ -21,6 +21,7 @@ use uuid::Uuid;
 use dcc_core::{
     application::compose_wire_prompt_for_provider,
     domain::{
+        goal::GoalSignal,
         provider::{
             Capabilities, HealthStatus, McpSupportLevel, NativeSubagentStatus, ProviderEvent,
             ProviderId, SessionHandle, ToolCallDetail,
@@ -880,6 +881,90 @@ fn parse_claude_stream_value(
     }
 }
 
+const CLAUDE_SYNTHETIC_MODEL: &str = "<synthetic>";
+const CLAUDE_GOAL_CHECK_PREFIX: &str = "Stop hook feedback:\n";
+
+/// Claude Code's `/goal` notices, written into the transcript as synthetic
+/// assistant messages (`Goal set: …`, `Goal active: … (2 turns)`,
+/// `Goal cleared: …`, `No goal set…`, `Goal paused …`).
+fn claude_goal_notice(text: &str) -> Option<GoalSignal> {
+    let text = text.trim();
+    if let Some(objective) = text.strip_prefix("Goal set: ") {
+        return Some(GoalSignal::Set {
+            objective: objective.trim().to_string(),
+        });
+    }
+    if let Some(rest) = text.strip_prefix("Goal active: ") {
+        let (objective, checks) = claude_goal_active(rest)?;
+        return Some(GoalSignal::Active {
+            objective: objective.to_string(),
+            checks,
+        });
+    }
+    if text.starts_with("Goal cleared") || text.starts_with("No goal set") {
+        return Some(GoalSignal::Cleared);
+    }
+    if text.starts_with("Goal paused") {
+        return Some(GoalSignal::Paused {
+            reason: Some(text.to_string()),
+        });
+    }
+    None
+}
+
+/// `<objective> (not yet evaluated)` or `<objective> (<n> turn[s])`, maybe
+/// followed by more text; the first parenthesis that fits ends the objective.
+fn claude_goal_active(rest: &str) -> Option<(&str, u32)> {
+    let mut from = 0;
+    while let Some(offset) = rest[from..].find(" (") {
+        let open = from + offset;
+        let tail = &rest[open + 2..];
+        if tail.starts_with("not yet evaluated)") {
+            return Some((&rest[..open], 0));
+        }
+        let digits = tail.chars().take_while(char::is_ascii_digit).count();
+        if digits > 0 {
+            let after = &tail[digits..];
+            if after.starts_with(" turn)") || after.starts_with(" turns)") {
+                return Some((&rest[..open], tail[..digits].parse().ok()?));
+            }
+        }
+        from = open + 2;
+    }
+    None
+}
+
+/// A goal check Claude Code fed back to the model: a synthetic top-level
+/// user message `Stop hook feedback:\n[<objective>]: <why it is not met>`.
+fn claude_goal_check(value: &Value) -> Option<GoalSignal> {
+    if value.get("isSynthetic").and_then(Value::as_bool) != Some(true)
+        || nonempty_json_string(value.get("parent_tool_use_id")).is_some()
+    {
+        return None;
+    }
+    let content = value.pointer("/message/content")?;
+    let text = match content {
+        Value::String(text) => text.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => return None,
+    };
+    let rest = text.strip_prefix(CLAUDE_GOAL_CHECK_PREFIX)?;
+    let (objective, feedback) = rest
+        .strip_prefix('[')
+        .and_then(|inner| inner.split_once("]: "))
+        .map(|(objective, feedback)| (Some(objective.trim().to_string()), feedback))
+        .unwrap_or((None, rest));
+    Some(GoalSignal::Check {
+        objective,
+        feedback: feedback.trim().to_string(),
+    })
+}
+
 fn parse_claude_terminal_value(
     value: &Value,
     state: &mut ProviderStreamState,
@@ -917,6 +1002,24 @@ fn parse_claude_terminal_value(
                 .filter_map(|block| block.get("text").and_then(Value::as_str))
                 .collect::<Vec<_>>()
                 .join("");
+            // Claude Code's own notices are not a model answering: they must
+            // not become the turn's model, and the goal ones are state.
+            let message_model =
+                message_model.filter(|model| model != CLAUDE_SYNTHETIC_MODEL);
+            if message.get("model").and_then(Value::as_str) == Some(CLAUDE_SYNTHETIC_MODEL) {
+                if let Some(signal) = claude_goal_notice(&text) {
+                    let goal = ProviderEvent::Goal {
+                        signal: signal.clone(),
+                        at: at.clone(),
+                    };
+                    // "No goal set" answers a bare `/goal`: the person asked,
+                    // so it stays visible.
+                    if !text.trim_start().starts_with("No goal set") {
+                        return Some(goal);
+                    }
+                    state.claude_pending_events.push(goal);
+                }
+            }
 
             // The Agent SDK can expose the stream envelope UUID for partial
             // text while the authoritative `assistant` snapshot carries the
@@ -954,6 +1057,9 @@ fn parse_claude_terminal_value(
             }
         }
         "user" => {
+            if let Some(signal) = claude_goal_check(value) {
+                return Some(ProviderEvent::Goal { signal, at });
+            }
             let content = value.pointer("/message/content")?.as_array()?;
             for block in content.iter().filter_map(Value::as_object) {
                 if block.get("type").and_then(Value::as_str) != Some("tool_result") {
@@ -2650,6 +2756,7 @@ pub fn stable_cli_capabilities() -> Capabilities {
         fast_mode_support: TurnControlSupport::PromptFallback,
         supports_dynamic_models: false,
         supports_compaction_command: false,
+        supports_native_goal: false,
     }
 }
 
@@ -2682,6 +2789,7 @@ pub fn experimental_cli_capabilities() -> Capabilities {
         fast_mode_support: TurnControlSupport::PromptFallback,
         supports_dynamic_models: false,
         supports_compaction_command: false,
+        supports_native_goal: false,
     }
 }
 
@@ -2721,6 +2829,103 @@ mod tests {
         let detail = codex_item_detail(item.as_object().unwrap()).expect("todo list detail");
         let input: Value = serde_json::from_str(detail.input.as_deref().unwrap()).unwrap();
         assert_eq!(input["items"][1]["text"], "Two");
+    }
+
+    #[test]
+    fn claude_goal_run_reports_set_and_each_check_without_a_synthetic_model() {
+        let events = replay_claude(include_str!("../fixtures/goal/claude_goal_three_checks.jsonl"));
+        let signals = events
+            .iter()
+            .filter_map(|event| match event {
+                ProviderEvent::Goal { signal, .. } => Some(signal.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(signals.len(), 3, "{signals:?}");
+        assert!(matches!(
+            &signals[0],
+            GoalSignal::Set { objective } if objective.starts_with("the file count.txt contains the number 3.")
+        ));
+        for check in &signals[1..] {
+            assert!(matches!(
+                check,
+                GoalSignal::Check { objective: Some(objective), feedback }
+                    if objective.starts_with("the file count.txt contains the number 3.")
+                        && !feedback.is_empty()
+                        && !feedback.starts_with('[')
+            ));
+        }
+        assert!(events.iter().all(|event| !matches!(
+            event,
+            ProviderEvent::AssistantMessageCompleted { model: Some(model), .. } if model == "<synthetic>"
+        )));
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                ProviderEvent::AssistantMessageCompleted { content: Some(text), .. } if text.starts_with("Goal set: ")
+            )),
+            "the goal notice is state, not an answer"
+        );
+        assert!(matches!(events.last(), Some(ProviderEvent::Completed { .. })));
+    }
+
+    #[test]
+    fn claude_goal_notices_cover_status_clear_and_pause() {
+        assert_eq!(
+            claude_goal_notice("Goal active: tests pass (3 turns)"),
+            Some(GoalSignal::Active {
+                objective: "tests pass".to_string(),
+                checks: 3
+            })
+        );
+        assert_eq!(
+            claude_goal_notice("Goal active: f(x) is (1) ok (not yet evaluated) · 2m"),
+            Some(GoalSignal::Active {
+                objective: "f(x) is (1) ok".to_string(),
+                checks: 0
+            })
+        );
+        assert_eq!(
+            claude_goal_notice("Goal active: a (1 turn)"),
+            Some(GoalSignal::Active {
+                objective: "a".to_string(),
+                checks: 1
+            })
+        );
+        assert_eq!(claude_goal_notice("Goal cleared: tests pass"), Some(GoalSignal::Cleared));
+        assert_eq!(
+            claude_goal_notice("No goal set. Usage: `/goal <condition>`"),
+            Some(GoalSignal::Cleared)
+        );
+        assert!(matches!(
+            claude_goal_notice("Goal paused · a hook ended the turn · send a message to continue"),
+            Some(GoalSignal::Paused { reason: Some(_) })
+        ));
+        assert_eq!(claude_goal_notice("You've hit your session limit"), None);
+    }
+
+    #[test]
+    fn claude_no_goal_answer_stays_visible() {
+        let line = r#"{"type":"assistant","message":{"id":"m1","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"No goal set. Usage: `/goal <condition>`"}]},"parent_tool_use_id":null}"#;
+        let events = replay_claude(line);
+        assert!(matches!(
+            &events[..],
+            [
+                ProviderEvent::AssistantMessageCompleted { model: None, content: Some(_), .. },
+                ProviderEvent::Goal { signal: GoalSignal::Cleared, .. }
+            ]
+        ), "{events:?}");
+    }
+
+    #[test]
+    fn claude_stop_hook_feedback_of_the_persons_own_hook_has_no_objective() {
+        let line = r#"{"type":"user","isSynthetic":true,"parent_tool_use_id":null,"message":{"role":"user","content":"Stop hook feedback:\nlint failed"}}"#;
+        assert!(matches!(
+            &replay_claude(line)[..],
+            [ProviderEvent::Goal { signal: GoalSignal::Check { objective: None, feedback }, .. }] if feedback == "lint failed"
+        ));
+        let not_synthetic = r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"text","text":"Stop hook feedback:\n[g]: x"}]}}"#;
+        assert!(replay_claude(not_synthetic).is_empty());
     }
 
     #[test]

@@ -41,6 +41,7 @@ fn claude_code_capabilities() -> Capabilities {
     capabilities.plan_mode_support = TurnControlSupport::Native;
     capabilities.fast_mode_support = TurnControlSupport::Native;
     capabilities.supports_compaction_command = true;
+    capabilities.supports_native_goal = true;
     capabilities
 }
 

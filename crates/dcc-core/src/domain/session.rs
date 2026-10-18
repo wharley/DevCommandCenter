@@ -531,6 +531,13 @@ pub enum SessionEventKind {
     UsageLimitAutoResumeChanged {
         enabled: bool,
     },
+    /// The provider's own goal (`/goal`) changed; `None` when it was cleared.
+    /// The latest one is the current goal. See `domain::goal`.
+    GoalUpdated {
+        #[serde(rename = "turnId", default)]
+        turn_id: Option<TurnId>,
+        goal: Option<super::goal::SessionGoal>,
+    },
     /// "Edit from here": the conversation went back to just before
     /// `anchor_turn_id`. The anchor and every later turn leave the
     /// conversation. Their events stay durable for audit, but every
@@ -588,6 +595,7 @@ impl SessionEventKind {
             | Self::TurnCompleted { turn_id }
             | Self::TurnAborted { turn_id, .. }
             | Self::UsageLimitReached { turn_id, .. } => Some(turn_id),
+            Self::GoalUpdated { turn_id, .. } => turn_id.as_ref(),
             Self::SessionStarted { .. }
             | Self::TurnQueued { .. }
             | Self::QueuedTurnRemoved { .. }
@@ -834,7 +842,8 @@ impl SessionProjection {
             SessionEventKind::ObjectivePaused { .. }
             | SessionEventKind::UsageLimitReached { .. }
             | SessionEventKind::UsageLimitResumed { .. }
-            | SessionEventKind::UsageLimitAutoResumeChanged { .. } => {}
+            | SessionEventKind::UsageLimitAutoResumeChanged { .. }
+            | SessionEventKind::GoalUpdated { .. } => {}
             SessionEventKind::ConversationRewound { .. } => {
                 self.active_turn_id = None;
             }
@@ -895,6 +904,9 @@ pub struct WorkspaceSessionSummary {
     /// The usage limit that stopped the latest turn, while it stands.
     #[serde(default)]
     pub usage_limit: Option<super::usage_limit::SessionUsageLimit>,
+    /// The provider's own goal (`/goal`), while the session has one.
+    #[serde(default)]
+    pub goal: Option<super::goal::SessionGoal>,
 }
 
 /// What the latest turn is waiting on the user for, if anything. Requests are

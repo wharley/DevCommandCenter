@@ -481,6 +481,14 @@ function recordToCoreEvent(record: SessionEventRecord): CoreEvent | null {
 					account_label: record.kind.accountLabel ?? null,
 				},
 			};
+		case "goal_updated":
+			return {
+				sessionGoalUpdated: {
+					session_id: record.sessionId,
+					turn_id: record.kind.turnId ?? null,
+					goal: record.kind.goal ?? null,
+				},
+			};
 		case "conversation_rewound":
 			return {
 				sessionConversationRewound: {
@@ -520,6 +528,9 @@ function getEventSessionId(event: CoreEvent): string | null {
 	}
 	if ("sessionUsageLimitResumed" in event && event.sessionUsageLimitResumed) {
 		return event.sessionUsageLimitResumed.session_id;
+	}
+	if ("sessionGoalUpdated" in event && event.sessionGoalUpdated) {
+		return event.sessionGoalUpdated.session_id;
 	}
 	if (
 		"sessionMcpRuntimeStatusChanged" in event &&
@@ -656,6 +667,7 @@ function eventLabel(event: CoreEvent): string {
 	if ("sessionConversationRewound" in event) return "session.conversation.rewound";
 	if ("sessionUsageLimitReached" in event) return "session.usage-limit.reached";
 	if ("sessionUsageLimitResumed" in event) return "session.usage-limit.resumed";
+	if ("sessionGoalUpdated" in event) return "session.goal.updated";
 	if ("sessionMcpRuntimeStatusChanged" in event) return "session.mcp.runtime-status";
 	if ("sessionTurnStarted" in event) return "session.turn.started";
 	if ("sessionTurnSteered" in event) return "session.turn.steered";

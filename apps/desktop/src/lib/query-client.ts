@@ -311,6 +311,8 @@ export function coreEventRefreshPlan(event: CoreEvent): DccCoreEventRefreshPlan 
 		("sessionUsageLimitResumed" in event && event.sessionUsageLimitResumed) ||
 		("sessionUsageLimitAutoResumeChanged" in event &&
 			event.sessionUsageLimitAutoResumeChanged) ||
+		// The provider's own goal moved: the strip above the composer reads it.
+		("sessionGoalUpdated" in event && event.sessionGoalUpdated) ||
 		null;
 	if (awaitingUser) {
 		return {
