@@ -5,6 +5,7 @@
  *
  *   yarn app:local                 build, snapshot, install, relaunch
  *   yarn app:local --skip-build    install the last build again
+ *   yarn app:local --version 0.2.0 build as 0.2.0-local.g<commit> instead
  *   yarn app:rollback              put back the app the last install replaced
  *   yarn app:rollback --with-db    ...and the database as it was at that moment
  *
@@ -83,14 +84,25 @@ function bundleVersion(appPath) {
   return capture('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', join(appPath, 'Contents', 'Info.plist')]);
 }
 
-function localVersion() {
+/**
+ * `base` (from --version) names the release this build previews, e.g. 0.2.0
+ * gives 0.2.0-local.g<commit>: still older than the real 0.2.0, so the
+ * updater moves to it once it ships.
+ */
+function localVersion(base) {
+  const commit = capture('git', ['rev-parse', '--short', 'HEAD']) || 'unknown';
+  const dirty = capture('git', ['status', '--porcelain', '--untracked-files=no']) ? '.dirty' : '';
+  if (base) {
+    if (!/^\d+\.\d+\.\d+$/.test(base)) {
+      fail(`--version must look like 0.2.0, got ${base}`);
+    }
+    return `${base}-local.g${commit}${dirty}`;
+  }
   const { version } = JSON.parse(readFileSync(tauriConfigPath, 'utf8'));
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!match) {
     fail(`unexpected version in tauri.conf.json: ${version}`);
   }
-  const commit = capture('git', ['rev-parse', '--short', 'HEAD']) || 'unknown';
-  const dirty = capture('git', ['status', '--porcelain', '--untracked-files=no']) ? '.dirty' : '';
   // "g" keeps the identifier alphanumeric: an all-digit hash with a leading
   // zero is not valid semver.
   return `${match[1]}.${match[2]}.${Number(match[3]) + 1}-local.g${commit}${dirty}`;
@@ -231,12 +243,12 @@ function moveApp(source, target) {
   }
 }
 
-function install({ skipBuild }) {
+function install({ skipBuild, baseVersion }) {
   if (process.platform !== 'darwin') {
     fail('app:local installs into /Applications and only runs on macOS.');
   }
 
-  const version = localVersion();
+  const version = localVersion(baseVersion);
   if (!skipBuild) {
     build(version);
   }
@@ -308,9 +320,13 @@ function rollback({ withDb }) {
 
 const [command, ...flags] = process.argv.slice(2);
 if (command === 'install') {
-  install({ skipBuild: flags.includes('--skip-build') });
+  const versionFlag = flags.indexOf('--version');
+  install({
+    skipBuild: flags.includes('--skip-build'),
+    baseVersion: versionFlag >= 0 ? flags[versionFlag + 1] : undefined,
+  });
 } else if (command === 'rollback') {
   rollback({ withDb: flags.includes('--with-db') });
 } else {
-  fail('usage: node scripts/app-local.mjs install [--skip-build] | rollback [--with-db]');
+  fail('usage: node scripts/app-local.mjs install [--skip-build] [--version X.Y.Z] | rollback [--with-db]');
 }
