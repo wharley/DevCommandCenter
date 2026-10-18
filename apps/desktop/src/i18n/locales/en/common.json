@@ -3333,7 +3333,7 @@
         "steps": [
           "Type the request. Be specific about the outcome and about what must not change.",
           "Type @ and start a file name to attach it as context.",
-          "Type / to see local commands, such as [/spec] and [/clear].",
+          "Type / to see the commands. [/spec] and [/clear] are DCC's; /goal and /compact go to the agent and turn green when the task's agent accepts them.",
           "Use [Attach file or image] to send a screenshot or a log.",
           "Send. While the agent works, the Inspector shows what it is doing."
         ],
@@ -3652,6 +3652,21 @@
         ],
         "prompt": "Intent: eliminate the 500 error on avatar upload. Done when: a 5 MB upload works, an integration test covers the case and the log no longer shows the exception.",
         "keywords": "objective intent done when evidence turns failures pause investigate bug"
+      },
+      "goal": {
+        "label": "Goal until done (/goal)",
+        "summary": "The agent keeps working on its own until a condition holds.",
+        "whatIs": "With /goal, the task's own agent (Claude, Codex, Grok and, experimentally, Cursor) repeats turns by itself and checks the condition each round, until it holds, you stop it or the limit runs out. DCC does not run that loop: it follows what the agent reports. The strip above the composer shows [Working on the goal], how many checks there were, the tokens spent and why the latest check said not yet, and at the end [Goal complete]. Not to be confused with the [Task objective], which only reminds the agent of the intent each turn.",
+        "whenToUse": "To leave a long task running, overnight too, when you can state in a checkable way what done means, for example \"all tests pass\".",
+        "steps": [
+          "In the composer, type /goal followed by the done condition. The command turns green when the task's agent accepts it; without color it goes as plain text.",
+          "Send. Every turn the agent takes on its own shows as one turn of the task.",
+          "To stop, use the composer's stop button. On Codex the goal becomes [Goal paused] and comes back with [Continue]; [Clear] drops the goal.",
+          "When it finishes, the strip shows [Goal complete]; use [Close] to dismiss it."
+        ],
+        "prompt": "/goal npm test passes with no failures and lint shows no errors. Fix one problem at a time and run the tests after each change.",
+        "tip": "To keep going overnight, turn on [Keep the Mac awake] and [Continue on its own when the limit runs out]. Write a condition the agent can check by itself: if it can never hold, the agent may keep going until you stop it.",
+        "keywords": "goal /goal objective condition done finish loop repeat on its own overnight check checks codex claude grok cursor"
       },
       "multiProject": {
         "label": "Multi-project task",

@@ -3333,7 +3333,7 @@
         "steps": [
           "Digite o pedido. Seja específico sobre o resultado e sobre o que não deve mudar.",
           "Escreva @ e comece o nome de um arquivo para anexá-lo como contexto.",
-          "Escreva / para ver os comandos locais, como [/spec] e [/clear].",
+          "Escreva / para ver os comandos. [/spec] e [/clear] são do DCC; /goal e /compact vão para o agente e ficam verdes quando o agente da tarefa aceita.",
           "Use [Anexar arquivo ou imagem] para mandar um print ou um log.",
           "Envie. Enquanto o agente trabalha, o Inspector mostra o que ele está fazendo."
         ],
@@ -3652,6 +3652,21 @@
         ],
         "prompt": "Intenção: eliminar o erro 500 no upload de avatar. Pronto quando: upload de 5 MB funciona, teste de integração cobre o caso e o log não mostra mais a exceção.",
         "keywords": "objetivo intenção pronto quando evidência evidências turnos falhas pausar investigar bug"
+      },
+      "goal": {
+        "label": "Objetivo até concluir (/goal)",
+        "summary": "O agente segue trabalhando sozinho até uma condição ser cumprida.",
+        "whatIs": "Com /goal, o próprio agente da tarefa (Claude, Codex, Grok e, em teste, Cursor) repete os turnos sozinho e confere a condição a cada volta, até ela ser cumprida, você parar ou o limite acabar. O DCC não roda esse laço: ele acompanha o que o agente informa. A faixa acima do composer mostra [Trabalhando no objetivo], quantas verificações já houve, os tokens gastos e o motivo da última verificação, e no fim [Objetivo concluído]. Não confunda com o [Objetivo da tarefa], que só lembra o agente da intenção a cada turno.",
+        "whenToUse": "Para deixar uma tarefa longa rodando, inclusive à noite, quando dá para dizer de um jeito verificável o que é pronto, por exemplo \"todos os testes passam\".",
+        "steps": [
+          "No composer, escreva /goal seguido da condição de pronto. O comando fica verde quando o agente da tarefa aceita; sem cor, ele vai como texto comum.",
+          "Envie. Todos os turnos que o agente fizer sozinho aparecem como um turno só da tarefa.",
+          "Para parar, use o botão de parar do composer. No Codex o objetivo fica [Objetivo pausado] e volta com [Continuar]; [Limpar] abandona o objetivo.",
+          "Quando terminar, a faixa mostra [Objetivo concluído]; use [Fechar] para tirá-la."
+        ],
+        "prompt": "/goal npm test passa sem falhas e o lint não mostra erros. Corrija um problema por vez e rode os testes depois de cada mudança.",
+        "tip": "Para seguir durante a noite, ligue [Manter o Mac acordado] e [Continuar sozinho se o limite acabar]. Escreva uma condição que o agente consiga conferir sozinho: se ela nunca puder ser cumprida, ele pode continuar até você parar.",
+        "keywords": "objetivo goal /goal meta condição pronto concluir loop repetir sozinho noite verificação verificações codex claude grok cursor"
       },
       "multiProject": {
         "label": "Tarefa multi-projeto",
