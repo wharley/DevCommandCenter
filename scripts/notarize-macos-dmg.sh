@@ -58,7 +58,19 @@ if [[ "${submission_status}" != "Accepted" ]]; then
 fi
 
 echo "Stapling the notarization ticket to the DMG..."
-xcrun stapler staple "${dmg_path}"
+# Stapling fetches the ticket from Apple's CDN, which can drop the connection
+# or not have the fresh ticket yet (v0.1.99 Intel: "network connection was
+# lost", error 68). The ticket is already issued, so retrying is safe.
+staple_attempt=1
+until xcrun stapler staple "${dmg_path}"; do
+  if [[ "${staple_attempt}" -ge 5 ]]; then
+    echo "Stapling failed after ${staple_attempt} attempts." >&2
+    exit 1
+  fi
+  echo "Stapling attempt ${staple_attempt} failed; retrying in 30s..."
+  staple_attempt=$((staple_attempt + 1))
+  sleep 30
+done
 xcrun stapler validate "${dmg_path}"
 
 echo "Assessing the DMG with Gatekeeper..."
