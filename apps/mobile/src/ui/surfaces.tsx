@@ -8,7 +8,8 @@ import Feather from "@expo/vector-icons/Feather";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import { Children, isValidElement, useId, type ReactNode } from "react";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
-import { Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import Svg, { Defs, LinearGradient, Mask, Pattern, RadialGradient, Rect, Stop } from "react-native-svg";
 import { alpha, font, makeStyles, radius, useTheme, type Palette } from "../theme";
 import { haptic } from "./haptics";
@@ -297,25 +298,35 @@ export function SheetHeader({ title, detail, onClose }: { title: string; detail?
  * The body of a sheet: the header rides inside the scroll view, pinned.
  * The native form sheet lays out its scroll view itself and expects it as
  * the screen's only child (react-native-screens warns past two subviews):
- * render this as the screen's root, with nothing beside it.
+ * render this as the screen's root, with nothing beside it. A focused input
+ * scrolls above the keyboard, `bottomOffset` above it.
  */
 export function SheetScroll({
 	header,
 	children,
 	contentStyle,
 	style,
+	bottomOffset = 24,
 }: {
 	header: ReactNode;
 	children: ReactNode;
 	contentStyle?: StyleProp<ViewStyle>;
 	style?: StyleProp<ViewStyle>;
+	/** Room to keep between a focused input and the keyboard (e.g. a footer riding on it). */
+	bottomOffset?: number;
 }) {
 	const styles = useStyles();
 	return (
-		<ScrollView style={style} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
+		<KeyboardAwareScrollView
+			style={style}
+			stickyHeaderIndices={[0]}
+			keyboardShouldPersistTaps="handled"
+			contentContainerStyle={{ paddingBottom: 40 }}
+			bottomOffset={bottomOffset}
+		>
 			<View style={styles.sheetPinned}>{header}</View>
 			<View style={contentStyle}>{children}</View>
-		</ScrollView>
+		</KeyboardAwareScrollView>
 	);
 }
 

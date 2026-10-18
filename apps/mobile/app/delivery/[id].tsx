@@ -36,6 +36,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 /** Pushes and PRs run hooks, checks and the forge on the computer. */
@@ -195,6 +196,8 @@ export default function DeliveryScreen() {
 		<View style={styles.root}>
 			<SheetScroll
 				contentStyle={[styles.content, { paddingBottom: footerHeight }]}
+				// Inputs in the list stop above the footer, which rides on the keyboard.
+				bottomOffset={footerHeight - insets.bottom + 12}
 				header={
 					<SheetHeader
 						title="Mudanças"
@@ -392,7 +395,13 @@ export default function DeliveryScreen() {
 				</View>
 			</SheetScroll>
 
-			<View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
+			{/* Rides on the keyboard, so the commit message stays in sight while editing;
+			    with the keyboard up it already covers the home indicator. */}
+			<KeyboardStickyView
+				offset={{ opened: insets.bottom }}
+				style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}
+				onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
+			>
 				{request ? (
 					<View style={styles.actions}>
 						<Button label="Cancelar" variant="ghost" style={{ flex: 1 }} disabled={busy !== null} onPress={() => setRequest(null)} />
@@ -441,7 +450,7 @@ export default function DeliveryScreen() {
 						</View>
 					</>
 				)}
-			</View>
+			</KeyboardStickyView>
 		</View>
 	);
 }
