@@ -169,6 +169,55 @@ async fn reconnecting_on_the_fixed_port_reuses_the_registered_client() {
 }
 
 #[tokio::test]
+async fn a_dcc_sign_in_replaces_the_old_provider_grant() {
+    use dcc_core::{
+        domain::mcp::{mcp_oauth_resource_fingerprint, McpOauthGrant, McpSecretReferenceId},
+        ports::SecretValue,
+    };
+    let harness = harness(OAuthFixtureConfig::default()).await;
+    let legacy_ref = McpSecretReferenceId("oauth-grant:claude_code:fixture".into());
+    harness
+        .stores
+        .credentials
+        .store_secret(&legacy_ref, SecretValue::new(b"legacy".to_vec()).unwrap())
+        .await
+        .unwrap();
+    harness
+        .stores
+        .repo
+        .save_mcp_oauth_grant(&McpOauthGrant {
+            definition_id: harness.definition.id.clone(),
+            provider_id: ProviderId("claude_code".into()),
+            resource_fingerprint: mcp_oauth_resource_fingerprint(&harness.definition).unwrap(),
+            secret_ref: legacy_ref.clone(),
+            created_at: "2026-10-18T00:00:00Z".into(),
+            updated_at: "2026-10-18T00:00:00Z".into(),
+        })
+        .await
+        .unwrap();
+
+    connect(&harness).await.expect("connected");
+
+    let owners = harness
+        .stores
+        .repo
+        .list_mcp_oauth_grants(Some(&harness.definition.id))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|grant| grant.provider_id.0)
+        .collect::<Vec<_>>();
+    assert_eq!(owners, vec![DCC_OAUTH_GRANT_OWNER.to_string()]);
+    assert!(harness
+        .stores
+        .credentials
+        .resolve_secret(&legacy_ref)
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
 async fn concurrent_refreshes_share_one_exchange() {
     let harness = harness(OAuthFixtureConfig::default()).await;
     connect(&harness).await.expect("connected");

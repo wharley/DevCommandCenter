@@ -2728,7 +2728,10 @@
       "manage": {
         "lastChecked": "Last check: {{date}}",
         "toolsTitle": "Tools",
-        "toolsHint": "By default the agent asks for your approval before using a tool. Adjust per tool if you like.",
+        "toolsHint": "By default each tool follows the task's mode: it asks in Supervised and runs right away in Full access. Allow or Deny always applies.",
+      "policyDefault": "Default",
+      "projectsTitle": "Projects",
+      "projectsHint": "Switch the connector off in projects where it shouldn't appear. Applies from the next message.",
         "noTools": "Test the connection to see the tools.",
         "disconnectConfirm": "Disconnect {{name}}? Agents lose its tools, and DCC deletes its sign-in from this computer.",
         "removeConfirm": "Remove {{name}}? Agents lose its tools, and DCC forgets this connector."

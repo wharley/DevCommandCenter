@@ -7204,6 +7204,7 @@ pub fn run() {
             mcp_commands::cancel_mcp_connect,
             mcp_commands::disconnect_mcp_connector,
             mcp_commands::test_mcp_integration,
+            mcp_commands::set_mcp_project_enabled,
             provider_commands::list_providers,
             provider_commands::get_provider_availability,
             provider_commands::check_provider_executable,

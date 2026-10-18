@@ -272,7 +272,8 @@ use dcc_tauri::commands::{
         SetMcpToolPolicyInput, SetMcpToolPolicyOutput, StartMcpConnectInput,
         StartMcpConnectOutput, McpConnectLoginInput, WaitMcpConnectOutput, McpConnectFailure,
         CancelMcpConnectOutput, DisconnectMcpConnectorInput, DisconnectMcpConnectorOutput,
-        TestMcpIntegrationInput, TestMcpIntegrationOutput,
+        TestMcpIntegrationInput, TestMcpIntegrationOutput, SetMcpProjectEnabledInput,
+        SetMcpProjectEnabledOutput,
     },
     provider_commands::{
         AntigravityStatusInput, AntigravityStatusOutput, ConnectAntigravityInput,
@@ -663,6 +664,7 @@ struct McpMethods {
     cancel_mcp_connect: String,
     disconnect_mcp_connector: String,
     test_mcp_integration: String,
+    set_mcp_project_enabled: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1033,6 +1035,8 @@ fn main() {
         .typ::<DisconnectMcpConnectorOutput>()
         .typ::<TestMcpIntegrationInput>()
         .typ::<TestMcpIntegrationOutput>()
+        .typ::<SetMcpProjectEnabledInput>()
+        .typ::<SetMcpProjectEnabledOutput>()
         .typ::<dcc_core::domain::mcp::McpConnectionCheck>()
         .typ::<dcc_core::domain::mcp::McpConnectionState>()
         .typ::<StartThreadInput>()
@@ -1377,6 +1381,7 @@ fn main() {
             cancel_mcp_connect: "cancel_mcp_connect".to_string(),
             disconnect_mcp_connector: "disconnect_mcp_connector".to_string(),
             test_mcp_integration: "test_mcp_integration".to_string(),
+            set_mcp_project_enabled: "set_mcp_project_enabled".to_string(),
         },
     );
 

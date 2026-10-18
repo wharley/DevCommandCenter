@@ -25,6 +25,7 @@ use crate::{
     mcp_connect::{ConnectStart, ConnectStores, McpConnectCoordinator, DCC_OAUTH_GRANT_OWNER},
     state::WorkspaceCommandState,
 };
+use dcc_core::domain::project::ProjectId;
 use dcc_core::{
     application::probe_mcp_definition,
     domain::mcp::{McpConnectionCheck, McpConnectionState, McpErrorCategory},
@@ -44,6 +45,9 @@ pub struct McpIntegrationRecord {
     pub oauth_provider_ids: Vec<ProviderId>,
     /// Last connection check DCC ran itself; `None` until one ran.
     pub connection_check: Option<McpConnectionCheck>,
+    /// Projects where this integration is switched off.
+    #[serde(default)]
+    pub excluded_project_ids: Vec<ProjectId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -212,6 +216,20 @@ pub enum McpConnectFailure {
 #[serde(rename_all = "camelCase")]
 pub struct CancelMcpConnectOutput {
     pub cancelled: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMcpProjectEnabledInput {
+    pub definition_id: McpDefinitionId,
+    pub project_id: ProjectId,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMcpProjectEnabledOutput {
+    pub excluded_project_ids: Vec<ProjectId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -408,6 +426,34 @@ pub async fn disconnect_mcp_connector(
     Ok(DisconnectMcpConnectorOutput { disconnected })
 }
 
+/// Switches an integration off (or back on) in one project. New sessions in
+/// that project leave it out; other projects keep it.
+#[tauri::command]
+pub async fn set_mcp_project_enabled(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetMcpProjectEnabledInput,
+) -> Result<SetMcpProjectEnabledOutput, String> {
+    let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    repo.get_mcp_definition(&input.definition_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "MCP integration not found".to_string())?;
+    repo.set_mcp_project_exclusion(&input.definition_id, &input.project_id, !input.enabled)
+        .await
+        .map_err(|error| error.to_string())?;
+    let excluded_project_ids = repo
+        .list_mcp_project_exclusions()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|(definition_id, _)| definition_id == &input.definition_id)
+        .map(|(_, project_id)| project_id)
+        .collect();
+    Ok(SetMcpProjectEnabledOutput {
+        excluded_project_ids,
+    })
+}
+
 #[tauri::command]
 pub async fn test_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
@@ -542,10 +588,20 @@ where
         .into_iter()
         .map(|check| (check.definition_id.clone(), check))
         .collect::<HashMap<_, _>>();
+    let mut exclusions_by_definition = HashMap::<McpDefinitionId, Vec<ProjectId>>::new();
+    for (definition_id, project_id) in repo.list_mcp_project_exclusions().await? {
+        exclusions_by_definition
+            .entry(definition_id)
+            .or_default()
+            .push(project_id);
+    }
     let integrations = definitions
         .into_iter()
         .map(|definition| {
             let connection_check = checks_by_definition.remove(&definition.id);
+            let excluded_project_ids = exclusions_by_definition
+                .remove(&definition.id)
+                .unwrap_or_default();
             let bindings = bindings_by_definition
                 .remove(&definition.id)
                 .unwrap_or_default();
@@ -557,6 +613,7 @@ where
                 .unwrap_or_default();
             McpIntegrationRecord {
                 connection_check,
+                excluded_project_ids,
                 ..integration_record(definition, bindings, policies, grants)
             }
         })
@@ -824,6 +881,7 @@ fn integration_record(
             .map(|grant| grant.provider_id)
             .collect(),
         connection_check: None,
+        excluded_project_ids: Vec::new(),
     }
 }
 

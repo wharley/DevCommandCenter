@@ -2073,6 +2073,31 @@ fn codex_mcp_elicitation_result(behavior: &str) -> Option<Value> {
     }))
 }
 
+/// Matches the sandbox `codex_turn_execution_policy` picks: no policy means
+/// full access, and plan mode never runs with it.
+fn codex_turn_has_full_access(
+    approval_policy: Option<ProviderApprovalPolicy>,
+    plan_mode: Option<bool>,
+) -> bool {
+    plan_mode != Some(true)
+        && matches!(
+            approval_policy,
+            Some(ProviderApprovalPolicy::FullAccess) | None
+        )
+}
+
+/// A tool without an explicit DCC policy follows the task's mode: it runs in
+/// a full-access turn and asks otherwise. Explicit Allow/Deny always win.
+fn effective_codex_mcp_decision(
+    decision: McpToolPolicyDecision,
+    turn_full_access: bool,
+) -> McpToolPolicyDecision {
+    match decision {
+        McpToolPolicyDecision::Ask if turn_full_access => McpToolPolicyDecision::Allow,
+        other => other,
+    }
+}
+
 fn codex_mcp_tool_policy(
     policies: &CodexMcpToolPolicyMap,
     definition_id: &dcc_core::domain::mcp::McpDefinitionId,
@@ -2285,6 +2310,9 @@ struct SessionRuntime {
     mcp_status_snapshot: StdRwLock<Option<Vec<McpRuntimeStatus>>>,
     pending: PendingMap,
     pending_mcp_approvals: Mutex<HashMap<String, PendingCodexMcpApproval>>,
+    /// The running turn has full access, so MCP tools without an explicit
+    /// DCC policy run without asking, like every other tool in that turn.
+    turn_full_access: std::sync::atomic::AtomicBool,
     pending_native_approvals: Mutex<HashMap<String, PendingCodexNativeApproval>>,
     pending_subagent_models: Mutex<HashMap<String, String>>,
     next_id: AtomicU64,
@@ -2875,10 +2903,13 @@ async fn handle_codex_mcp_elicitation_request(
     );
 
     if let Some((request_id, pending, request, definition_id)) = claimed {
-        let decision = codex_mcp_tool_policy(
-            &*runtime.mcp_tool_policies.lock().await,
-            &definition_id,
-            &request.tool_name,
+        let decision = effective_codex_mcp_decision(
+            codex_mcp_tool_policy(
+                &*runtime.mcp_tool_policies.lock().await,
+                &definition_id,
+                &request.tool_name,
+            ),
+            runtime.turn_full_access.load(Ordering::SeqCst),
         );
         if matches!(
             decision,
@@ -3296,6 +3327,7 @@ impl CodexAppServerAdapter {
             mcp_status_snapshot: StdRwLock::new(None),
             pending: Arc::new(Mutex::new(HashMap::new())),
             pending_mcp_approvals: Mutex::new(HashMap::new()),
+            turn_full_access: std::sync::atomic::AtomicBool::new(false),
             pending_native_approvals: Mutex::new(HashMap::new()),
             pending_subagent_models: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
@@ -4136,6 +4168,12 @@ impl Provider for CodexAppServerAdapter {
         }
 
         let has_dcc_mcp_servers = runtime.has_dcc_mcp_servers().await;
+        let full_access = match &input {
+            Input::Text(_) => true,
+            Input::Turn(turn) => codex_turn_has_full_access(turn.approval_policy, turn.plan_mode),
+            _ => false,
+        };
+        runtime.turn_full_access.store(full_access, Ordering::SeqCst);
         let (payload, effort, summary, approval_policy, sandbox_policy) = match input {
             Input::Text(text) => (
                 CodexTurnPayload {
@@ -6261,3 +6299,34 @@ mod runtime_update_tests;
 #[cfg(all(test, unix))]
 #[path = "codex_goal_tests.rs"]
 mod goal_tests;
+
+#[cfg(test)]
+mod mcp_task_mode_tests {
+    use super::*;
+
+    #[test]
+    fn tools_without_a_policy_follow_the_task_mode() {
+        assert_eq!(
+            effective_codex_mcp_decision(McpToolPolicyDecision::Ask, true),
+            McpToolPolicyDecision::Allow
+        );
+        assert_eq!(
+            effective_codex_mcp_decision(McpToolPolicyDecision::Ask, false),
+            McpToolPolicyDecision::Ask
+        );
+        assert_eq!(
+            effective_codex_mcp_decision(McpToolPolicyDecision::Deny, true),
+            McpToolPolicyDecision::Deny
+        );
+    }
+
+    #[test]
+    fn only_full_access_outside_plan_mode_skips_the_prompt() {
+        assert!(codex_turn_has_full_access(Some(ProviderApprovalPolicy::FullAccess), None));
+        assert!(codex_turn_has_full_access(None, Some(false)));
+        assert!(!codex_turn_has_full_access(Some(ProviderApprovalPolicy::FullAccess), Some(true)));
+        assert!(!codex_turn_has_full_access(Some(ProviderApprovalPolicy::Ask), None));
+        assert!(!codex_turn_has_full_access(Some(ProviderApprovalPolicy::Auto), None));
+        assert!(!codex_turn_has_full_access(Some(ProviderApprovalPolicy::ReadOnly), None));
+    }
+}

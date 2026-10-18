@@ -62,6 +62,13 @@ pub async fn resolve_session_mcp_servers(
             .map_err(|_| invalid_registry("tool policy"))?;
     }
 
+    let excluded_here = repo
+        .list_mcp_project_exclusions()
+        .await?
+        .into_iter()
+        .filter(|(_, project_id)| project_id == &input.project_id)
+        .map(|(definition_id, _)| definition_id.0)
+        .collect::<HashSet<_>>();
     let selected_ids = bindings
         .iter()
         .filter(|binding| {
@@ -73,6 +80,7 @@ pub async fn resolve_session_mcp_servers(
                     .any(|provider_id| provider_id == &input.provider_id)
         })
         .map(|binding| binding.definition_id.0.clone())
+        .filter(|definition_id| !excluded_here.contains(definition_id))
         .collect::<HashSet<_>>();
 
     let mut definitions_by_id = HashMap::with_capacity(definitions.len());
@@ -263,10 +271,15 @@ mod tests {
         bindings: Arc<Mutex<Vec<McpBinding>>>,
         policies: Arc<Mutex<Vec<crate::domain::mcp::McpToolPolicy>>>,
         oauth_grants: Arc<Mutex<Vec<McpOauthGrant>>>,
+        project_exclusions: Arc<Mutex<Vec<(McpDefinitionId, ProjectId)>>>,
     }
 
     #[async_trait]
     impl McpRepo for FakeMcpRepo {
+        async fn list_mcp_project_exclusions(&self) -> Result<Vec<(McpDefinitionId, ProjectId)>> {
+            Ok(self.project_exclusions.lock().unwrap().clone())
+        }
+
         async fn save_mcp_definition(&self, definition: &McpDefinition) -> Result<()> {
             self.definitions.lock().unwrap().push(definition.clone());
             Ok(())
@@ -489,6 +502,41 @@ mod tests {
             created_at: "2026-07-28T00:00:00Z".to_string(),
             updated_at: "2026-07-28T00:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn a_connector_switched_off_in_a_project_stays_out_of_it() {
+        let repo = FakeMcpRepo::default();
+        let credentials = FakeCredentialStore::default();
+        let definition = trusted_definition(
+            "clickup",
+            McpTransport::Http {
+                url: "https://mcp.clickup.com/mcp".to_string(),
+            },
+            Vec::new(),
+        );
+        repo.definitions.lock().unwrap().push(definition.clone());
+        repo.bindings.lock().unwrap().push(binding(
+            "global",
+            "clickup",
+            McpBindingScope::Global,
+            Vec::new(),
+        ));
+        let resolve = |project: &str| {
+            let mut input = input();
+            input.project_id = ProjectId(project.to_string());
+            futures::executor::block_on(resolve_session_mcp_servers(&repo, &credentials, &input))
+                .expect("resolve")
+                .len()
+        };
+        assert_eq!(resolve("project-a"), 1);
+
+        repo.project_exclusions
+            .lock()
+            .unwrap()
+            .push((definition.id.clone(), ProjectId("project-a".to_string())));
+        assert_eq!(resolve("project-a"), 0);
+        assert_eq!(resolve("project-b"), 1, "other projects keep it");
     }
 
     fn input() -> ResolveSessionMcpInput {

@@ -7,7 +7,8 @@ use dcc_tauri::{
         DisconnectMcpOauthInput, DisconnectMcpOauthOutput, ListMcpIntegrationsOutput,
         McpConnectLoginInput, RemoveMcpIntegrationInput, RemoveMcpIntegrationOutput,
         SetMcpToolPolicyInput, SetMcpToolPolicyOutput, StartMcpConnectInput, StartMcpConnectOutput,
-        TestMcpIntegrationInput, TestMcpIntegrationOutput, WaitMcpConnectOutput,
+        SetMcpProjectEnabledInput, SetMcpProjectEnabledOutput, TestMcpIntegrationInput,
+        TestMcpIntegrationOutput, WaitMcpConnectOutput,
     },
     connector_gateway::ConnectorGateway,
     mcp_connect::McpConnectCoordinator,
@@ -91,6 +92,14 @@ pub async fn wait_mcp_connect(
     let _ = window.unminimize();
     let _ = window.set_focus();
     output
+}
+
+#[tauri::command]
+pub async fn set_mcp_project_enabled(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetMcpProjectEnabledInput,
+) -> Result<SetMcpProjectEnabledOutput, String> {
+    mcp_command_impl::set_mcp_project_enabled(state, input).await
 }
 
 #[tauri::command]

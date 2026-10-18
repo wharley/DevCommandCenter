@@ -381,6 +381,7 @@ impl McpConnectCoordinator {
                     .map_err(storage_error)?
                     .ok_or(McpOauthError::Cancelled)?;
                 save_credential(&stores, &definition, &credential).await?;
+                forget_provider_grants(&stores, &definition.id).await;
                 Ok(definition)
             }
             .await;
@@ -416,6 +417,25 @@ impl McpConnectCoordinator {
     #[cfg(test)]
     fn listener_port(&self) -> Option<u16> {
         self.lock().listener.as_ref().map(|listener| listener.port)
+    }
+}
+
+/// Once DCC holds the sign-in, grants a provider adapter kept for the same
+/// connector (the old in-turn mcp-remote path) are deleted, so only one
+/// sign-in exists per connector. Best effort.
+async fn forget_provider_grants(stores: &ConnectStores, definition_id: &McpDefinitionId) {
+    let Ok(grants) = stores.repo.list_mcp_oauth_grants(Some(definition_id)).await else {
+        return;
+    };
+    for grant in grants
+        .into_iter()
+        .filter(|grant| grant.provider_id.0 != DCC_OAUTH_GRANT_OWNER)
+    {
+        let _ = stores.credentials.delete_secret(&grant.secret_ref).await;
+        let _ = stores
+            .repo
+            .delete_mcp_oauth_grant(definition_id, &grant.provider_id)
+            .await;
     }
 }
 

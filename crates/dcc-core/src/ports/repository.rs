@@ -163,6 +163,25 @@ pub trait McpRepo: Send + Sync {
         let _ = definition_id;
         Ok(())
     }
+
+    /// Projects where a definition stays off even though a binding selects it.
+    async fn list_mcp_project_exclusions(
+        &self,
+    ) -> Result<Vec<(McpDefinitionId, crate::domain::project::ProjectId)>> {
+        Ok(Vec::new())
+    }
+
+    async fn set_mcp_project_exclusion(
+        &self,
+        definition_id: &McpDefinitionId,
+        project_id: &crate::domain::project::ProjectId,
+        excluded: bool,
+    ) -> Result<()> {
+        let _ = (definition_id, project_id, excluded);
+        Err(crate::CoreError::Repository(
+            "MCP project exclusions are unavailable".to_string(),
+        ))
+    }
 }
 
 #[async_trait]

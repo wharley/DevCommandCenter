@@ -6,6 +6,8 @@ import type {
 	DisconnectMcpConnectorInput,
 	DisconnectMcpConnectorOutput,
 	McpConnectLoginInput,
+	SetMcpProjectEnabledInput,
+	SetMcpProjectEnabledOutput,
 	StartMcpConnectInput,
 	StartMcpConnectOutput,
 	TestMcpIntegrationInput,
@@ -118,6 +120,14 @@ export function disconnectMcpConnector(input: DisconnectMcpConnectorInput) {
 export function testMcpIntegration(input: TestMcpIntegrationInput) {
 	requireTauriRuntime();
 	return invoke<TestMcpIntegrationOutput>(MCP_METHODS.testMcpIntegration, {
+		input,
+	});
+}
+
+/** Switches an integration off (or back on) in one project. */
+export function setMcpProjectEnabled(input: SetMcpProjectEnabledInput) {
+	requireTauriRuntime();
+	return invoke<SetMcpProjectEnabledOutput>(MCP_METHODS.setMcpProjectEnabled, {
 		input,
 	});
 }

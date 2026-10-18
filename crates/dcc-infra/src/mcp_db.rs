@@ -14,7 +14,7 @@ use dcc_core::{
         McpDefinition, McpDefinitionId, McpDefinitionOwnership, McpOauthGrant, McpOauthResourceFingerprint, McpSecretReferenceId,
         McpToolPolicy, McpToolPolicyDecision, McpTransport, McpTrust,
     },
-    domain::provider::ProviderId,
+    domain::{project::ProjectId, provider::ProviderId},
     ports::McpRepo,
     CoreError, Result,
 };
@@ -90,6 +90,13 @@ CREATE TABLE IF NOT EXISTS dcc_mcp_oauth_grants (
 
 CREATE INDEX IF NOT EXISTS idx_dcc_mcp_oauth_grants_definition
 ON dcc_mcp_oauth_grants(definition_id, provider_id);
+
+CREATE TABLE IF NOT EXISTS dcc_mcp_project_exclusions (
+    definition_id TEXT NOT NULL,
+    project_id TEXT NOT NULL CHECK (length(project_id) > 0),
+    PRIMARY KEY (definition_id, project_id),
+    FOREIGN KEY (definition_id) REFERENCES dcc_mcp_definitions(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS dcc_mcp_connection_checks (
     definition_id TEXT PRIMARY KEY NOT NULL,
@@ -677,6 +684,49 @@ impl McpRepo for SqliteMcpRepo {
                 check.checked_at,
             ],
         )
+        .map_err(repository_error)?;
+        Ok(())
+    }
+
+    async fn list_mcp_project_exclusions(&self) -> Result<Vec<(McpDefinitionId, ProjectId)>> {
+        let conn = self.lock_connection()?;
+        let mut statement = conn
+            .prepare(
+                "SELECT definition_id, project_id FROM dcc_mcp_project_exclusions \
+                 ORDER BY definition_id ASC, project_id ASC",
+            )
+            .map_err(repository_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((McpDefinitionId(row.get(0)?), ProjectId(row.get(1)?)))
+            })
+            .map_err(repository_error)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(repository_error)
+    }
+
+    async fn set_mcp_project_exclusion(
+        &self,
+        definition_id: &McpDefinitionId,
+        project_id: &ProjectId,
+        excluded: bool,
+    ) -> Result<()> {
+        if project_id.0.trim().is_empty() {
+            return Err(CoreError::InvalidInput("project id is required".to_string()));
+        }
+        let conn = self.lock_connection()?;
+        if excluded {
+            conn.execute(
+                "INSERT OR IGNORE INTO dcc_mcp_project_exclusions (definition_id, project_id) \
+                 VALUES (?1, ?2)",
+                params![definition_id.0, project_id.0],
+            )
+        } else {
+            conn.execute(
+                "DELETE FROM dcc_mcp_project_exclusions WHERE definition_id = ?1 AND project_id = ?2",
+                params![definition_id.0, project_id.0],
+            )
+        }
         .map_err(repository_error)?;
         Ok(())
     }

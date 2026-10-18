@@ -47,10 +47,10 @@ test("applies explicit DCC MCP allow and deny policies before provider permissio
 	}
 });
 
-test("asks through DCC for MCP tools without an explicit policy", async () => {
+test("leaves MCP tools without an explicit policy to the task's permission mode", async () => {
 	const events = [];
 	const state = stateWith("ask");
-	const pending = hookFor(state, events)(
+	const result = await hookFor(state, events)(
 		{
 			hook_event_name: "PreToolUse",
 			tool_name: "mcp__dcc-fixture__mutate",
@@ -59,15 +59,9 @@ test("asks through DCC for MCP tools without an explicit policy", async () => {
 		"tool-ask",
 		{ signal: new AbortController().signal },
 	);
-
-	await Promise.resolve();
-	state.pendingPermissions.get("tool-ask")?.resolve("allow");
-	const result = await pending;
-	assert.equal(result.hookSpecificOutput.permissionDecision, "allow");
-	assert.deepEqual(
-		events.map((event) => event.type),
-		["dcc_permission_request", "dcc_permission_resolved"],
-	);
+	assert.deepEqual(result, { continue: true });
+	assert.deepEqual(events, []);
+	assert.equal(state.pendingPermissions.size, 0);
 });
 
 test("does not intercept provider-native tools", async () => {

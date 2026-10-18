@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -12,7 +13,9 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { setMcpToolPolicy } from "@/lib/mcp-api";
+import { Switch } from "@/components/ui/switch";
+import { setMcpProjectEnabled, setMcpToolPolicy } from "@/lib/mcp-api";
+import { listRepositories } from "@/lib/workspace-api";
 import {
 	getMcpToolPolicyDecision,
 	listMcpToolAnnotationHints,
@@ -41,6 +44,24 @@ export function ManageConnectorDialog({
 }: ManageConnectorDialogProps) {
 	const { t } = useTranslation();
 	const [policyBusy, setPolicyBusy] = useState<string | null>(null);
+	const repositories = useQuery({
+		queryKey: ["connectorProjects"],
+		queryFn: listRepositories,
+		staleTime: 60_000,
+		enabled: view !== null,
+	});
+	// One row per project; a project may hold several repositories.
+	const projects = useMemo(() => {
+		const byId = new Map<string, string>();
+		for (const repository of repositories.data?.repositories ?? []) {
+			if (!byId.has(repository.projectId)) {
+				byId.set(repository.projectId, repository.displayName ?? repository.name);
+			}
+		}
+		return [...byId.entries()]
+			.map(([id, name]) => ({ id, name }))
+			.sort((left, right) => left.name.localeCompare(right.name));
+	}, [repositories.data]);
 
 	if (!view) {
 		return (
@@ -54,6 +75,28 @@ export function ManageConnectorDialog({
 	const check = integration.connectionCheck ?? null;
 	const tools = check?.tools ?? [];
 	const testing = busy === `test:${id}`;
+
+	// "ask" is the stored default, which now follows the task's mode.
+	const policyLabel = (value: McpToolPolicyDecision) =>
+		value === "ask"
+			? t("settings.connectors.manage.policyDefault")
+			: t(`settings.integrations.toolPolicy.${value}`);
+
+	const excluded = new Set(integration.excludedProjectIds ?? []);
+	const appliesGlobally = integration.bindings.some(
+		(binding) => binding.enabled && binding.scope.type === "global",
+	);
+	const toggleProject = async (projectId: string, enabled: boolean) => {
+		setPolicyBusy(`project:${projectId}`);
+		try {
+			await setMcpProjectEnabled({ definitionId: id, projectId, enabled });
+			onChanged();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		} finally {
+			setPolicyBusy(null);
+		}
+	};
 
 	const changePolicy = async (toolName: string, decision: McpToolPolicyDecision) => {
 		setPolicyBusy(`${toolName}:${decision}`);
@@ -116,6 +159,32 @@ export function ManageConnectorDialog({
 				</div>
 
 				<div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+					{appliesGlobally && projects.length > 0 ? (
+						<div className="mb-5">
+							<p className="text-[12px] font-medium text-foreground">
+								{t("settings.connectors.manage.projectsTitle")}
+							</p>
+							<p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+								{t("settings.connectors.manage.projectsHint")}
+							</p>
+							<div className="mt-2 space-y-1">
+								{projects.map((project) => (
+									<label
+										key={project.id}
+										className="flex items-center justify-between gap-3 rounded-lg px-3 py-1.5 hover:bg-muted/40"
+									>
+										<span className="truncate text-[12px] text-foreground">{project.name}</span>
+										<Switch
+											size="sm"
+											checked={!excluded.has(project.id)}
+											disabled={policyBusy !== null}
+											onCheckedChange={(checked) => void toggleProject(project.id, checked)}
+										/>
+									</label>
+								))}
+							</div>
+						</div>
+					) : null}
 					<p className="text-[12px] font-medium text-foreground">
 						{t("settings.connectors.manage.toolsTitle")}
 					</p>
@@ -171,14 +240,12 @@ export function ManageConnectorDialog({
 												key={value}
 												value={value}
 												className="h-6 min-w-12 rounded-md border border-border/50 px-1.5"
-												aria-label={t(`settings.integrations.toolPolicy.${value}`)}
+												aria-label={policyLabel(value)}
 											>
 												{policyBusy === `${tool.name}:${value}` ? (
 													<Loader2 className="size-3 animate-spin" />
 												) : (
-													<span className="text-[10px]">
-														{t(`settings.integrations.toolPolicy.${value}`)}
-													</span>
+													<span className="text-[10px]">{policyLabel(value)}</span>
 												)}
 											</ToggleGroupItem>
 										))}

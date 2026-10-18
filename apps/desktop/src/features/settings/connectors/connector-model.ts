@@ -60,10 +60,16 @@ export function deriveConnectorView(
 	const check = integration.connectionCheck ?? null;
 	const enabled =
 		integration.definition.enabled && !mcpIntegrationNeedsTrust(integration);
+	// Signed in only through a provider's own in-turn login (the old
+	// mcp-remote path): reconnecting moves it to DCC's sign-in.
+	const legacySignIn =
+		url !== null &&
+		!isSignedIn(integration) &&
+		integration.oauthProviderIds.length > 0;
 	let status: ConnectorStatus;
 	if (!enabled) {
 		status = "off";
-	} else if (check?.state === "needsAuth") {
+	} else if (legacySignIn || check?.state === "needsAuth") {
 		status = "needsAuth";
 	} else if (check?.state === "failed") {
 		status = "failed";

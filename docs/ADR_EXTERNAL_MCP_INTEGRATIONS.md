@@ -162,8 +162,12 @@ explicit choice.
 
 ### Permissions
 
-Server annotations are not authorization. Unknown tools default to **Ask**.
-Allow and deny decisions are scoped to a server and tool. An adapter is not a
+Server annotations are not authorization. A tool without an explicit
+decision follows the task's permission mode, like the provider's own tools: it
+asks in supervised modes and runs in a full-access turn (October 2026; before
+that, every such tool asked even under full access). Plan and read-only turns
+never auto-run it. Allow and deny decisions are scoped to a server and tool and
+always win over the task's mode. An adapter is not a
 verified bridge unless DCC can preserve or intercept the approval boundary,
 especially for destructive, financial, identity, deployment, and deletion
 operations.

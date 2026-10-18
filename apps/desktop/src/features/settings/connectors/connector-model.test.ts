@@ -105,6 +105,13 @@ describe("connector view", () => {
 		expect(deriveConnectorView(record()).status).toBe("unchecked");
 	});
 
+	it("asks to reconnect connectors signed in only by a provider", () => {
+		const legacy = { ...record(), oauthProviderIds: ["claude_code"] } as McpIntegrationRecord;
+		expect(deriveConnectorView(legacy).status).toBe("needsAuth");
+		const moved = { ...record(), oauthProviderIds: ["claude_code", "dcc"] } as McpIntegrationRecord;
+		expect(deriveConnectorView(moved).status).toBe("connected");
+	});
+
 	it("reports disabled or untrusted connectors as off", () => {
 		expect(deriveConnectorView(record({ enabled: false, signedIn: true })).status).toBe("off");
 		expect(deriveConnectorView(record({ trusted: false })).status).toBe("off");

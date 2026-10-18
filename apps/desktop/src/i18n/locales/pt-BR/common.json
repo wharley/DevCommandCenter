@@ -2728,7 +2728,10 @@
       "manage": {
         "lastChecked": "Último teste: {{date}}",
         "toolsTitle": "Ferramentas",
-        "toolsHint": "Por padrão o agente pede sua aprovação antes de usar uma ferramenta. Ajuste por ferramenta se quiser.",
+        "toolsHint": "Por padrão cada ferramenta segue o modo da tarefa: pede aprovação em Supervisionado e roda direto em Acesso total. Permitir ou Negar vale sempre.",
+      "policyDefault": "Padrão",
+      "projectsTitle": "Projetos",
+      "projectsHint": "Desligue o conector nos projetos onde ele não deve aparecer. Vale a partir da próxima mensagem.",
         "noTools": "Teste a conexão para ver as ferramentas.",
         "disconnectConfirm": "Desconectar {{name}}? Os agentes perdem as ferramentas dele e o DCC apaga o login deste computador.",
         "removeConfirm": "Remover {{name}}? Os agentes perdem as ferramentas dele e o DCC esquece este conector."

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 
 import { resolveDccMcpToolPolicy } from "./mcp-config.mjs";
-import { handlePermissionRequest } from "./permission-bridge.mjs";
 
 function hookDecision(decision, reason) {
 	return {
@@ -40,7 +39,7 @@ export function createDccMcpPermissionHooks(state, emit) {
 		PreToolUse: [
 			{
 				hooks: [
-					async (input, toolUseID, options) => {
+					async (input, toolUseID) => {
 						const policy = resolveDccMcpToolPolicy(
 							state.mcpProjection,
 							input?.tool_name,
@@ -58,22 +57,10 @@ export function createDccMcpPermissionHooks(state, emit) {
 							return hookDecision("deny", "Denied by DCC MCP tool policy.");
 						}
 
-						const result = await handlePermissionRequest(
-							policy.toolName,
-							input?.tool_input,
-							{
-								toolUseID,
-								signal: options.signal,
-								title: "DCC MCP tool approval",
-								description:
-									"This integration tool is configured to ask before every use.",
-							},
-							state,
-							emit,
-						);
-						return result.behavior === "allow"
-							? hookDecision("allow", "Approved by the user in DCC.")
-							: hookDecision("deny", "Denied by the user in DCC.");
+						// No explicit policy: the tool follows the task's permission
+						// mode like any other tool. Full access runs it; supervised
+						// modes reach canUseTool and ask through DCC.
+						return { continue: true };
 					},
 				],
 			},
