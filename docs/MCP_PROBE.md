@@ -11,11 +11,17 @@ remote endpoint. Therefore a definition must be structurally valid and its
 current fingerprint must already have an explicit matching trust decision.
 Merely clicking “test connection” never bypasses trust.
 
-An explicitly trusted definition may be probed while disabled. This allows a
-future UI to test a connection without permanently enabling provider
-attachment.
+An explicitly trusted definition may be probed while disabled, so Settings can
+test a connection without enabling provider attachment
+(`test_mcp_integration`). The last result is kept per definition in
+`dcc_mcp_connection_checks` and shown without an open session.
 
-For command definitions, the current implementation additionally requires:
+A connector DCC signed in to is not probed here: its check runs through the
+connector gateway, which supplies and refreshes the vendor token.
+
+Command definitions run in one of two lookup modes.
+
+**Strict** (conformance runs and the default):
 
 - an absolute, existing executable path;
 - a canonical path on Unix, preventing symlink or `PATH` reinterpretation;
@@ -24,10 +30,16 @@ For command definitions, the current implementation additionally requires:
 - a cleared inherited environment, populated only by declared secret
   environment bindings.
 
-Bare commands such as `npx` are intentionally rejected until the definition
-preparation flow can resolve the executable, display that path, and include it
-in the trusted definition. This is fail-closed behavior, not a compatibility
-claim.
+**User PATH** (the Settings check), matching how provider runtimes start the
+same server:
+
+- a bare command such as `npx` is looked up on the user's `PATH` (the app
+  imports the login shell's `PATH` at startup); a path must be absolute;
+- symlinks are followed to the real executable;
+- the working directory defaults to the home directory;
+- the environment is cleared except `PATH`, `HOME`, and declared secret
+  environment bindings;
+- direct argument-array execution, without a shell.
 
 ## Protocol flow
 

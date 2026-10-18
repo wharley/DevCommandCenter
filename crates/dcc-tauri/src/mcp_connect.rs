@@ -61,7 +61,7 @@ struct PendingSignIn {
     authorization: PendingAuthorization,
     stores: ConnectStores,
     started: Instant,
-    done: oneshot::Sender<McpOauthResult<()>>,
+    done: oneshot::Sender<McpOauthResult<McpDefinition>>,
 }
 
 struct RunningListener {
@@ -74,7 +74,7 @@ struct RunningListener {
 struct Inner {
     /// Keyed by OAuth `state`.
     pending: HashMap<String, PendingSignIn>,
-    waiters: HashMap<String, oneshot::Receiver<McpOauthResult<()>>>,
+    waiters: HashMap<String, oneshot::Receiver<McpOauthResult<McpDefinition>>>,
     listener: Option<RunningListener>,
 }
 
@@ -174,7 +174,8 @@ impl McpConnectCoordinator {
 
     /// Waits until the browser comes back, the sign-in is cancelled, or it
     /// times out.
-    pub async fn wait(&self, login_id: &str) -> McpOauthResult<()> {
+    /// Returns the connected definition once its grant is stored.
+    pub async fn wait(&self, login_id: &str) -> McpOauthResult<McpDefinition> {
         let Some(receiver) = self.lock().waiters.remove(login_id) else {
             return Err(McpOauthError::Cancelled);
         };
@@ -249,6 +250,7 @@ impl McpConnectCoordinator {
             .delete_mcp_oauth_grant(definition_id, &owner)
             .await
             .map_err(storage_error)?;
+        let _ = stores.repo.delete_mcp_connection_check(definition_id).await;
         Ok(true)
     }
 
@@ -378,7 +380,8 @@ impl McpConnectCoordinator {
                     .await
                     .map_err(storage_error)?
                     .ok_or(McpOauthError::Cancelled)?;
-                save_credential(&stores, &definition, &credential).await
+                save_credential(&stores, &definition, &credential).await?;
+                Ok(definition)
             }
             .await;
             let _ = done.send(result);

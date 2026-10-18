@@ -21,7 +21,7 @@ use super::{
         initialize_request, initialized_notification, list_tools_request,
         parse_initialize_response, parse_tools_response, read_response, write_message,
     },
-    SecureMcpProbe,
+    CommandLookup, SecureMcpProbe,
 };
 
 pub(super) async fn probe_stdio<C>(
@@ -40,8 +40,16 @@ where
         unreachable!("stdio probe called for another transport");
     };
 
-    let executable = canonical_executable(executable)?;
-    let cwd = canonical_working_directory(cwd.as_deref())?;
+    let (executable, cwd) = match &probe.command_lookup {
+        CommandLookup::Strict => (
+            canonical_executable(executable)?,
+            canonical_working_directory(cwd.as_deref())?,
+        ),
+        CommandLookup::UserPath { path, home } => (
+            user_executable(executable, path)?,
+            user_working_directory(cwd.as_deref(), home)?,
+        ),
+    };
     let mut command = Command::new(&executable);
     command
         .args(args)
@@ -54,6 +62,9 @@ where
     #[cfg(unix)]
     command.process_group(0);
 
+    if let CommandLookup::UserPath { path, home } = &probe.command_lookup {
+        command.env("PATH", path).env("HOME", home);
+    }
     apply_secret_environment(probe, definition, &mut command).await?;
 
     let mut child = command.spawn().map_err(|error| match error.kind() {
@@ -161,6 +172,65 @@ fn canonical_executable(executable: &str) -> McpProbeResult<PathBuf> {
         ));
     }
     Ok(resolved)
+}
+
+/// Finds `executable` like a shell would: a path is used as given (symlinks
+/// followed), a bare name is searched on `path`.
+fn user_executable(executable: &str, path: &std::ffi::OsStr) -> McpProbeResult<PathBuf> {
+    let not_found = || {
+        probe_error(
+            McpErrorCategory::ExecutableNotFound,
+            "MCP command was not found on your PATH",
+        )
+    };
+    let candidate = if executable.contains(std::path::MAIN_SEPARATOR) {
+        let configured = Path::new(executable);
+        if !configured.is_absolute() {
+            return Err(probe_error(
+                McpErrorCategory::InvalidDefinition,
+                "MCP command path must be absolute",
+            ));
+        }
+        configured.to_path_buf()
+    } else {
+        std::env::split_paths(path)
+            .map(|directory| directory.join(executable))
+            .find(|candidate| is_executable_file(candidate))
+            .ok_or_else(not_found)?
+    };
+    let resolved = std::fs::canonicalize(&candidate).map_err(|_| not_found())?;
+    if !is_executable_file(&resolved) {
+        return Err(not_found());
+    }
+    Ok(resolved)
+}
+
+fn is_executable_file(candidate: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(candidate) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        metadata.is_file()
+    }
+}
+
+fn user_working_directory(cwd: Option<&str>, home: &Path) -> McpProbeResult<PathBuf> {
+    let directory = cwd.map(Path::new).unwrap_or(home);
+    std::fs::canonicalize(directory)
+        .ok()
+        .filter(|resolved| resolved.is_dir())
+        .ok_or_else(|| {
+            probe_error(
+                McpErrorCategory::InvalidDefinition,
+                "MCP working directory does not exist",
+            )
+        })
 }
 
 fn canonical_working_directory(cwd: Option<&str>) -> McpProbeResult<PathBuf> {
@@ -293,6 +363,39 @@ mod tests {
                 .expect_err("missing executable");
             assert_eq!(missing.category, McpErrorCategory::ExecutableNotFound);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_path_lookup_finds_bare_commands_and_follows_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("temp");
+        let bin = temp.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let real = temp.path().join("real-server");
+        std::fs::write(&real, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&real, bin.join("mcp-server")).unwrap();
+        std::fs::write(bin.join("not-executable"), "").unwrap();
+        let path = std::env::join_paths([temp.path().join("missing"), bin.clone()]).unwrap();
+
+        let found = user_executable("mcp-server", &path).expect("found on PATH");
+        assert_eq!(found, std::fs::canonicalize(&real).unwrap());
+        assert_eq!(
+            user_executable("not-executable", &path)
+                .unwrap_err()
+                .category,
+            McpErrorCategory::ExecutableNotFound
+        );
+        assert_eq!(
+            user_executable("relative/server", &path)
+                .unwrap_err()
+                .category,
+            McpErrorCategory::InvalidDefinition
+        );
+        let home = user_working_directory(None, temp.path()).expect("home default");
+        assert_eq!(home, std::fs::canonicalize(temp.path()).unwrap());
     }
 
     #[tokio::test]

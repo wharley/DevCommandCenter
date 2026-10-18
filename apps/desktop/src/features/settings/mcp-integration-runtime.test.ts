@@ -48,6 +48,7 @@ function integration(
 		toolPolicies: [],
 		credentialCount: 0,
 		oauthProviderIds: [],
+		connectionCheck: null,
 	};
 }
 

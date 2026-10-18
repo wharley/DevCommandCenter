@@ -99,7 +99,7 @@ async fn connect(harness: &Harness) -> Result<(), McpOauthError> {
         panic!("fixture requires a sign-in");
     };
     approve_in_browser(&authorization_url).await;
-    harness.coordinator.wait(&login_id).await
+    harness.coordinator.wait(&login_id).await.map(|_| ())
 }
 
 #[tokio::test]
@@ -297,7 +297,7 @@ async fn a_cancelled_sign_in_stores_nothing() {
     };
     assert!(harness.coordinator.cancel(&login_id));
     assert_eq!(
-        harness.coordinator.wait(&login_id).await,
+        harness.coordinator.wait(&login_id).await.map(|_| ()),
         Err(McpOauthError::Cancelled)
     );
 }
@@ -305,6 +305,7 @@ async fn a_cancelled_sign_in_stores_nothing() {
 mod gateway {
     use std::sync::Mutex;
 
+    use dcc_core::domain::mcp::McpConnectionState;
     use dcc_tauri::connector_gateway::{ConnectorCall, ConnectorGateway, ConnectorResponse};
     use serde_json::json;
 
@@ -351,7 +352,8 @@ mod gateway {
         let ConnectorResponse::Json { body, .. } = response else {
             panic!("expected a reply");
         };
-        assert_eq!(body["result"]["serverInfo"]["name"], "dcc-oauth-fixture");
+        assert_eq!(body["id"], 1);
+        assert_eq!(body["result"]["tools"][0]["name"], "get_task");
         assert!(needs_auth.lock().unwrap().is_empty());
     }
 
@@ -412,5 +414,60 @@ mod gateway {
             )
             .await;
         assert_eq!(response, ConnectorResponse::Accepted { session_id: None });
+    }
+
+    #[tokio::test]
+    async fn connection_check_lists_tools_and_is_remembered() {
+        let harness = harness(OAuthFixtureConfig::default()).await;
+        connect(&harness).await.expect("connected");
+        let (gateway, _) = gateway(&harness);
+        let check = gateway.check(&harness.definition).await;
+        assert_eq!(
+            check.state,
+            McpConnectionState::Connected,
+            "{:?}",
+            check.message
+        );
+        let names = check
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["get_task", "create_task"]);
+        assert_eq!(check.tools[0].annotations.read_only_hint, Some(true));
+        let stored = harness
+            .stores
+            .repo
+            .list_mcp_connection_checks()
+            .await
+            .unwrap();
+        assert_eq!(stored, vec![check]);
+    }
+
+    #[tokio::test]
+    async fn a_revoked_sign_in_is_remembered_as_needs_auth_with_its_tools() {
+        let harness = harness(OAuthFixtureConfig::default()).await;
+        connect(&harness).await.expect("connected");
+        let (gateway, needs_auth) = gateway(&harness);
+        gateway.check(&harness.definition).await;
+        harness.fixture.revoke_all_tokens();
+
+        let check = gateway.check(&harness.definition).await;
+        assert_eq!(check.state, McpConnectionState::NeedsAuth);
+        assert_eq!(check.tools.len(), 2, "last known tools stay visible");
+        assert_eq!(
+            *needs_auth.lock().unwrap(),
+            vec![harness.definition.id.clone()]
+        );
+
+        // A tool call through the gateway records the same state.
+        let _ = gateway.handle(&harness.definition.id, tools_list()).await;
+        let stored = harness
+            .stores
+            .repo
+            .list_mcp_connection_checks()
+            .await
+            .unwrap();
+        assert_eq!(stored[0].state, McpConnectionState::NeedsAuth);
     }
 }

@@ -35,10 +35,41 @@ impl Default for McpProbeLimits {
     }
 }
 
+/// How a stdio command is located and started.
+#[derive(Clone, Debug, Default)]
+pub enum CommandLookup {
+    /// Absolute, canonical executable and working directory; empty
+    /// environment. Used by conformance runs.
+    #[default]
+    Strict,
+    /// Behaves like provider runtimes: a bare command (`npx`) is found on the
+    /// user's PATH, symlinks are followed, the working directory defaults to
+    /// `home`, and the child receives `PATH` and `HOME`.
+    UserPath {
+        path: std::ffi::OsString,
+        home: std::path::PathBuf,
+    },
+}
+
+impl CommandLookup {
+    /// The app imports the login shell's PATH at startup, so the process PATH
+    /// is the user's.
+    pub fn from_environment() -> Self {
+        match (std::env::var_os("PATH"), std::env::var_os("HOME")) {
+            (Some(path), Some(home)) => Self::UserPath {
+                path,
+                home: home.into(),
+            },
+            _ => Self::Strict,
+        }
+    }
+}
+
 pub struct SecureMcpProbe<C: ?Sized> {
     credentials: Arc<C>,
     http_client: reqwest::Client,
     limits: McpProbeLimits,
+    command_lookup: CommandLookup,
 }
 
 impl<C> SecureMcpProbe<C>
@@ -67,7 +98,15 @@ where
             credentials,
             http_client,
             limits,
+            command_lookup: CommandLookup::Strict,
         })
+    }
+}
+
+impl<C: ?Sized> SecureMcpProbe<C> {
+    pub fn with_command_lookup(mut self, command_lookup: CommandLookup) -> Self {
+        self.command_lookup = command_lookup;
+        self
     }
 }
 

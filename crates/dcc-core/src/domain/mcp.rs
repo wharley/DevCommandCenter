@@ -620,6 +620,47 @@ impl McpProbeReport {
     }
 }
 
+/// Outcome of the last connection check DCC ran itself, independent of any
+/// provider session. It is what Settings shows for a connector.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum McpConnectionState {
+    Connected,
+    /// The sign-in expired or was revoked; the user must reconnect.
+    NeedsAuth,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConnectionCheck {
+    pub definition_id: McpDefinitionId,
+    pub state: McpConnectionState,
+    #[serde(default)]
+    pub tools: Vec<McpToolSummary>,
+    /// Short, user-safe reason when the check did not connect.
+    pub message: Option<String>,
+    pub checked_at: String,
+}
+
+impl McpConnectionCheck {
+    pub fn validate(&self) -> Result<(), McpValidationError> {
+        validate_non_empty("definitionId", &self.definition_id.0)?;
+        validate_non_empty("checkedAt", &self.checked_at)?;
+        if self.tools.len() > MAX_MCP_TOOL_COUNT {
+            return Err(McpValidationError::TooManyTools);
+        }
+        if self
+            .message
+            .as_ref()
+            .is_some_and(|message| message.chars().count() > MAX_RUNTIME_ERROR_CHARS)
+        {
+            return Err(McpValidationError::RuntimeErrorTooLong);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct McpRuntimeStatus {

@@ -10,8 +10,8 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use dcc_core::{
     domain::mcp::{
-        McpBinding, McpBindingId, McpBindingScope, McpDefinition, McpDefinitionId,
-        McpDefinitionOwnership, McpOauthGrant, McpOauthResourceFingerprint, McpSecretReferenceId,
+        McpBinding, McpBindingId, McpBindingScope, McpConnectionCheck, McpConnectionState,
+        McpDefinition, McpDefinitionId, McpDefinitionOwnership, McpOauthGrant, McpOauthResourceFingerprint, McpSecretReferenceId,
         McpToolPolicy, McpToolPolicyDecision, McpTransport, McpTrust,
     },
     domain::provider::ProviderId,
@@ -90,6 +90,15 @@ CREATE TABLE IF NOT EXISTS dcc_mcp_oauth_grants (
 
 CREATE INDEX IF NOT EXISTS idx_dcc_mcp_oauth_grants_definition
 ON dcc_mcp_oauth_grants(definition_id, provider_id);
+
+CREATE TABLE IF NOT EXISTS dcc_mcp_connection_checks (
+    definition_id TEXT PRIMARY KEY NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('connected', 'needs_auth', 'failed')),
+    tools_json TEXT NOT NULL DEFAULT '[]',
+    message TEXT,
+    checked_at TEXT NOT NULL,
+    FOREIGN KEY (definition_id) REFERENCES dcc_mcp_definitions(id) ON DELETE CASCADE
+);
 "#;
 
 #[derive(Clone)]
@@ -636,6 +645,82 @@ impl McpRepo for SqliteMcpRepo {
         )
         .map_err(repository_error)?;
         Ok(())
+    }
+
+    async fn save_mcp_connection_check(&self, check: &McpConnectionCheck) -> Result<()> {
+        check
+            .validate()
+            .map_err(|error| CoreError::InvalidInput(error.to_string()))?;
+        let state = match check.state {
+            McpConnectionState::Connected => "connected",
+            McpConnectionState::NeedsAuth => "needs_auth",
+            McpConnectionState::Failed => "failed",
+        };
+        let conn = self.lock_connection()?;
+        conn.execute(
+            r#"
+            INSERT INTO dcc_mcp_connection_checks (
+                definition_id, state, tools_json, message, checked_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(definition_id) DO UPDATE SET
+                state = excluded.state,
+                tools_json = excluded.tools_json,
+                message = excluded.message,
+                checked_at = excluded.checked_at
+            "#,
+            params![
+                check.definition_id.0,
+                state,
+                serialize_json(&check.tools)?,
+                check.message,
+                check.checked_at,
+            ],
+        )
+        .map_err(repository_error)?;
+        Ok(())
+    }
+
+    async fn delete_mcp_connection_check(&self, definition_id: &McpDefinitionId) -> Result<()> {
+        let conn = self.lock_connection()?;
+        conn.execute(
+            "DELETE FROM dcc_mcp_connection_checks WHERE definition_id = ?1",
+            params![definition_id.0],
+        )
+        .map_err(repository_error)?;
+        Ok(())
+    }
+
+    async fn list_mcp_connection_checks(&self) -> Result<Vec<McpConnectionCheck>> {
+        let conn = self.lock_connection()?;
+        let mut statement = conn
+            .prepare(
+                r#"
+                SELECT definition_id, state, tools_json, message, checked_at
+                  FROM dcc_mcp_connection_checks
+                 ORDER BY definition_id ASC
+                "#,
+            )
+            .map_err(repository_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                let state = match row.get::<_, String>(1)?.as_str() {
+                    "connected" => McpConnectionState::Connected,
+                    "needs_auth" => McpConnectionState::NeedsAuth,
+                    "failed" => McpConnectionState::Failed,
+                    _ => return Err(invalid_column(1, "unknown MCP connection state")),
+                };
+                Ok(McpConnectionCheck {
+                    definition_id: McpDefinitionId(row.get(0)?),
+                    state,
+                    tools: deserialize_column(row, 2)?,
+                    message: row.get(3)?,
+                    checked_at: row.get(4)?,
+                })
+            })
+            .map_err(repository_error)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(repository_error)
     }
 }
 

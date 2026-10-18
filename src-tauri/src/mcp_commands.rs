@@ -7,8 +7,9 @@ use dcc_tauri::{
         DisconnectMcpOauthInput, DisconnectMcpOauthOutput, ListMcpIntegrationsOutput,
         McpConnectLoginInput, RemoveMcpIntegrationInput, RemoveMcpIntegrationOutput,
         SetMcpToolPolicyInput, SetMcpToolPolicyOutput, StartMcpConnectInput, StartMcpConnectOutput,
-        WaitMcpConnectOutput,
+        TestMcpIntegrationInput, TestMcpIntegrationOutput, WaitMcpConnectOutput,
     },
+    connector_gateway::ConnectorGateway,
     mcp_connect::McpConnectCoordinator,
     state::WorkspaceCommandState,
 };
@@ -81,9 +82,19 @@ pub async fn start_mcp_connect(
 #[tauri::command]
 pub async fn wait_mcp_connect(
     coordinator: State<'_, McpConnectCoordinator>,
+    gateway: State<'_, ConnectorGateway>,
     input: McpConnectLoginInput,
 ) -> Result<WaitMcpConnectOutput, String> {
-    mcp_command_impl::wait_mcp_connect(coordinator, input).await
+    mcp_command_impl::wait_mcp_connect(coordinator, gateway, input).await
+}
+
+#[tauri::command]
+pub async fn test_mcp_integration(
+    state: State<'_, WorkspaceCommandState>,
+    gateway: State<'_, ConnectorGateway>,
+    input: TestMcpIntegrationInput,
+) -> Result<TestMcpIntegrationOutput, String> {
+    mcp_command_impl::test_mcp_integration(state, gateway, input).await
 }
 
 #[tauri::command]

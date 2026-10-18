@@ -144,6 +144,25 @@ pub trait McpRepo: Send + Sync {
         let _ = (definition_id, provider_id);
         Ok(())
     }
+    /// Replaces the last connection check for a definition.
+    async fn save_mcp_connection_check(
+        &self,
+        check: &crate::domain::mcp::McpConnectionCheck,
+    ) -> Result<()> {
+        let _ = check;
+        Ok(())
+    }
+
+    async fn list_mcp_connection_checks(
+        &self,
+    ) -> Result<Vec<crate::domain::mcp::McpConnectionCheck>> {
+        Ok(Vec::new())
+    }
+
+    async fn delete_mcp_connection_check(&self, definition_id: &McpDefinitionId) -> Result<()> {
+        let _ = definition_id;
+        Ok(())
+    }
 }
 
 #[async_trait]

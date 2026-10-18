@@ -21,9 +21,16 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    mcp_connect::{ConnectStart, ConnectStores, McpConnectCoordinator},
+    connector_gateway::ConnectorGateway,
+    mcp_connect::{ConnectStart, ConnectStores, McpConnectCoordinator, DCC_OAUTH_GRANT_OWNER},
     state::WorkspaceCommandState,
 };
+use dcc_core::{
+    application::probe_mcp_definition,
+    domain::mcp::{McpConnectionCheck, McpConnectionState, McpErrorCategory},
+};
+use dcc_infra::mcp_probe::{CommandLookup, McpProbeLimits, SecureMcpProbe};
+use std::time::Duration;
 use dcc_infra::mcp_oauth::{McpOauthError, UserProvidedClient};
 use std::sync::Arc;
 
@@ -35,6 +42,8 @@ pub struct McpIntegrationRecord {
     pub tool_policies: Vec<McpToolPolicy>,
     pub credential_count: usize,
     pub oauth_provider_ids: Vec<ProviderId>,
+    /// Last connection check DCC ran itself; `None` until one ran.
+    pub connection_check: Option<McpConnectionCheck>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -175,7 +184,10 @@ pub struct McpConnectLoginInput {
     rename_all_fields = "camelCase"
 )]
 pub enum WaitMcpConnectOutput {
-    Connected,
+    /// Signed in. `check` lists the tools when the follow-up check ran.
+    Connected {
+        check: Option<McpConnectionCheck>,
+    },
     Failed {
         reason: McpConnectFailure,
         message: String,
@@ -200,6 +212,18 @@ pub enum McpConnectFailure {
 #[serde(rename_all = "camelCase")]
 pub struct CancelMcpConnectOutput {
     pub cancelled: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestMcpIntegrationInput {
+    pub definition_id: McpDefinitionId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TestMcpIntegrationOutput {
+    pub check: McpConnectionCheck,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -345,10 +369,14 @@ pub async fn start_mcp_connect(
 #[tauri::command]
 pub async fn wait_mcp_connect(
     coordinator: State<'_, McpConnectCoordinator>,
+    gateway: State<'_, ConnectorGateway>,
     input: McpConnectLoginInput,
 ) -> Result<WaitMcpConnectOutput, String> {
     Ok(match coordinator.wait(&input.login_id).await {
-        Ok(()) => WaitMcpConnectOutput::Connected,
+        // The follow-up check gives Settings the tool count right away.
+        Ok(definition) => WaitMcpConnectOutput::Connected {
+            check: Some(gateway.check(&definition).await),
+        },
         Err(error) => WaitMcpConnectOutput::Failed {
             reason: connect_failure(&error),
             message: error.to_string(),
@@ -378,6 +406,81 @@ pub async fn disconnect_mcp_connector(
         .await
         .map_err(|error| error.to_string())?;
     Ok(DisconnectMcpConnectorOutput { disconnected })
+}
+
+#[tauri::command]
+pub async fn test_mcp_integration(
+    state: State<'_, WorkspaceCommandState>,
+    gateway: State<'_, ConnectorGateway>,
+    input: TestMcpIntegrationInput,
+) -> Result<TestMcpIntegrationOutput, String> {
+    let stores = connect_stores(&state)?;
+    let definition = stores
+        .repo
+        .get_mcp_definition(&input.definition_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "MCP integration not found".to_string())?;
+    let check = run_connection_check(&gateway, &stores, &definition).await;
+    Ok(TestMcpIntegrationOutput { check })
+}
+
+/// Signed-in connectors are checked through the gateway (vendor token and
+/// refresh); everything else through the standalone probe, which finds bare
+/// commands on the user's PATH like provider runtimes do.
+pub async fn run_connection_check(
+    gateway: &ConnectorGateway,
+    stores: &ConnectStores,
+    definition: &McpDefinition,
+) -> McpConnectionCheck {
+    let signed_in = stores
+        .repo
+        .get_mcp_oauth_grant(
+            &definition.id,
+            &ProviderId(DCC_OAUTH_GRANT_OWNER.to_string()),
+        )
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    if signed_in && matches!(definition.transport, McpTransport::Http { .. }) {
+        return gateway.check(definition).await;
+    }
+    let limits = McpProbeLimits {
+        // A first `npx -y` run downloads the package.
+        initialize_timeout: Duration::from_secs(30),
+        list_tools_timeout: Duration::from_secs(15),
+        ..McpProbeLimits::default()
+    };
+    let probed = match SecureMcpProbe::with_limits(Arc::clone(&stores.credentials), limits) {
+        Ok(probe) => {
+            let probe = probe.with_command_lookup(CommandLookup::from_environment());
+            probe_mcp_definition(&probe, definition).await
+        }
+        Err(error) => Err(error),
+    };
+    let check = match probed {
+        Ok(report) => McpConnectionCheck {
+            definition_id: definition.id.clone(),
+            state: McpConnectionState::Connected,
+            tools: report.tools,
+            message: None,
+            checked_at: Utc::now().to_rfc3339(),
+        },
+        Err(error) => McpConnectionCheck {
+            definition_id: definition.id.clone(),
+            state: if error.category == McpErrorCategory::Authentication {
+                McpConnectionState::NeedsAuth
+            } else {
+                McpConnectionState::Failed
+            },
+            tools: Vec::new(),
+            message: Some(error.message),
+            checked_at: Utc::now().to_rfc3339(),
+        },
+    };
+    let _ = stores.repo.save_mcp_connection_check(&check).await;
+    check
 }
 
 fn connect_stores(state: &WorkspaceCommandState) -> Result<ConnectStores, String> {
@@ -433,9 +536,16 @@ where
             .push(grant);
     }
 
+    let mut checks_by_definition = repo
+        .list_mcp_connection_checks()
+        .await?
+        .into_iter()
+        .map(|check| (check.definition_id.clone(), check))
+        .collect::<HashMap<_, _>>();
     let integrations = definitions
         .into_iter()
         .map(|definition| {
+            let connection_check = checks_by_definition.remove(&definition.id);
             let bindings = bindings_by_definition
                 .remove(&definition.id)
                 .unwrap_or_default();
@@ -445,7 +555,10 @@ where
             let grants = grants_by_definition
                 .remove(&definition.id)
                 .unwrap_or_default();
-            integration_record(definition, bindings, policies, grants)
+            McpIntegrationRecord {
+                connection_check,
+                ..integration_record(definition, bindings, policies, grants)
+            }
         })
         .collect();
     Ok(ListMcpIntegrationsOutput { integrations })
@@ -710,6 +823,7 @@ fn integration_record(
             .into_iter()
             .map(|grant| grant.provider_id)
             .collect(),
+        connection_check: None,
     }
 }
 

@@ -10,6 +10,7 @@ use std::{
 };
 
 use axum::{
+    body::Bytes,
     extract::{Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -93,7 +94,10 @@ impl OAuthFixture {
             ledger: Arc::default(),
         };
         let router = Router::new()
-            .route("/mcp", post(mcp))
+            .route(
+                "/mcp",
+                post(mcp).delete(|| async { StatusCode::NO_CONTENT }),
+            )
             .route(
                 "/.well-known/oauth-protected-resource/mcp",
                 get(protected_resource),
@@ -165,22 +169,37 @@ impl FixtureState {
     }
 }
 
-async fn mcp(State(state): State<FixtureState>, headers: HeaderMap) -> Response {
+async fn mcp(State(state): State<FixtureState>, headers: HeaderMap, body: Bytes) -> Response {
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "));
     if token.is_some_and(|token| state.ledger().access_tokens.contains(token)) {
-        return Json(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {
+        let request: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        let id = request.get("id").cloned().unwrap_or(json!(1));
+        let result = match request.get("method").and_then(Value::as_str) {
+            Some("tools/list") => json!({
+                "tools": [
+                    { "name": "get_task", "inputSchema": {"type": "object"},
+                      "annotations": { "readOnlyHint": true } },
+                    { "name": "create_task", "inputSchema": {"type": "object"},
+                      "annotations": { "destructiveHint": false } }
+                ]
+            }),
+            Some(method) if method.starts_with("notifications/") => {
+                return StatusCode::ACCEPTED.into_response()
+            }
+            _ => json!({
                 "protocolVersion": crate::LATEST_PROTOCOL_VERSION,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "dcc-oauth-fixture", "version": "0" }
-            }
-        }))
-        .into_response();
+            }),
+        };
+        return (
+            [("mcp-session-id", "fixture-session")],
+            Json(json!({ "jsonrpc": "2.0", "id": id, "result": result })),
+        )
+            .into_response();
     }
     let challenge = if state.config.challenge_has_resource_metadata {
         format!(

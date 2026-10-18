@@ -4,7 +4,7 @@
 /* Constants */
 export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","cancelRunningDelegation":"cancel_running_delegation","completeDelegation":"complete_delegation","completeTask":"complete_task","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation","startTaskProposal":"start_task_proposal"} as const;
 
-export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","cancelMcpConnect":"cancel_mcp_connect","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpConnector":"disconnect_mcp_connector","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy","startMcpConnect":"start_mcp_connect","waitMcpConnect":"wait_mcp_connect"} as const;
+export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","cancelMcpConnect":"cancel_mcp_connect","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpConnector":"disconnect_mcp_connector","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy","startMcpConnect":"start_mcp_connect","testMcpIntegration":"test_mcp_integration","waitMcpConnect":"wait_mcp_connect"} as const;
 
 export const PROVIDER_METHODS = {"cancelProviderAccountSignIn":"cancel_provider_account_sign_in","checkProviderExecutable":"check_provider_executable","connectAntigravity":"connect_antigravity","createProviderAccount":"create_provider_account","getAntigravityStatus":"get_antigravity_status","getProviderAvailability":"get_provider_availability","installAntigravity":"install_antigravity","listProviderAccounts":"list_provider_accounts","listProviders":"list_providers","providerAccountReset":"provider_account_reset","providerAccountStatus":"provider_account_status","providerAccountUsage":"provider_account_usage","removeProviderAccount":"remove_provider_account","renameProviderAccount":"rename_provider_account","setProviderAvailability":"set_provider_availability","signInProviderAccount":"sign_in_provider_account"} as const;
 
@@ -1418,6 +1418,23 @@ export type McpConnectLoginInput = {
 	loginId: string,
 };
 
+export type McpConnectionCheck = {
+	definitionId: McpDefinitionId,
+	state: McpConnectionState,
+	tools?: McpToolSummary[],
+	// Short, user-safe reason when the check did not connect.
+	message: string | null,
+	checkedAt: string,
+};
+
+/**
+ *  Outcome of the last connection check DCC ran itself, independent of any
+ *  provider session. It is what Settings shows for a connector.
+ */
+export type McpConnectionState = "connected" |
+// The sign-in expired or was revoked; the user must reconnect.
+"needsAuth" | "failed";
+
 export type McpCredentialInput = {
 	target: McpSecretTarget,
 	/**
@@ -1463,6 +1480,8 @@ export type McpIntegrationRecord = {
 	toolPolicies: McpToolPolicy[],
 	credentialCount: number,
 	oauthProviderIds: ProviderId[],
+	// Last connection check DCC ran itself; `None` until one ran.
+	connectionCheck: McpConnectionCheck | null,
 };
 
 /**
@@ -2880,6 +2899,14 @@ export type SwitchLocalBranchInput = {
 	newBranch: string | null,
 };
 
+export type TestMcpIntegrationInput = {
+	definitionId: McpDefinitionId,
+};
+
+export type TestMcpIntegrationOutput = {
+	check: McpConnectionCheck,
+};
+
 export type Thread = {
 	id: ThreadId,
 	project_id: ProjectId,
@@ -3046,7 +3073,9 @@ export type UsageTotals = {
 	costUsd?: number | null,
 };
 
-export type WaitMcpConnectOutput = { kind: "connected" } | { kind: "failed"; reason: McpConnectFailure; message: string };
+export type WaitMcpConnectOutput =
+// Signed in. `check` lists the tools when the follow-up check ran.
+{ kind: "connected"; check: McpConnectionCheck | null } | { kind: "failed"; reason: McpConnectFailure; message: string };
 
 export type WaitMcpOauthInput = {
 	sessionId: string,

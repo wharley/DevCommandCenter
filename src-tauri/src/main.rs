@@ -7203,6 +7203,7 @@ pub fn run() {
             mcp_commands::wait_mcp_connect,
             mcp_commands::cancel_mcp_connect,
             mcp_commands::disconnect_mcp_connector,
+            mcp_commands::test_mcp_integration,
             provider_commands::list_providers,
             provider_commands::get_provider_availability,
             provider_commands::check_provider_executable,
@@ -7380,7 +7381,7 @@ pub fn run() {
                 browser_agent_requests.clone(),
                 session_command_state.clone(),
                 computer_use_state.clone(),
-                connector_gateway,
+                connector_gateway.clone(),
             )) {
                 Ok(bridge) => match session_command_state
                     .install_ephemeral_mcp_projection(bridge.clone())
@@ -7417,6 +7418,9 @@ pub fn run() {
             app.manage(CodeRabbitReviewJobsState::default());
             if let Some(coordinator) = mcp_connect_coordinator {
                 app.manage(coordinator);
+            }
+            if let Some(gateway) = connector_gateway {
+                app.manage(gateway);
             }
             let desktop_agent_requests = desktop_agent_requests::DesktopAgentRequests::new(
                 app.handle().clone(),
