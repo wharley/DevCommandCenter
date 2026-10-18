@@ -85,7 +85,13 @@ import {
 	setPlanModeState,
 	submitComposerDraftOptimistically,
 } from "./WorkspaceComposer.logic";
-import { DEFAULT_SLASH_COMMANDS, availableSlashCommands } from "./default-slash-commands";
+import {
+	DEFAULT_SLASH_COMMANDS,
+	availableSlashCommands,
+	typedCommandNames,
+} from "./default-slash-commands";
+import { SlashCommandNode } from "./editor/slash-command-node";
+import { SlashCommandHighlightPlugin } from "./editor/plugins/SlashCommandHighlightPlugin";
 import { GoalStrip } from "./goal-strip";
 import { $createFileBadgeNode, FileBadgeNode } from "./editor/file-badge-node";
 import { $createImageBadgeNode, ImageBadgeNode } from "./editor/image-badge-node";
@@ -659,6 +665,7 @@ export function WorkspaceComposer({
 				FileBadgeNode,
 				ImageBadgeNode,
 				PastedSnippetBadgeNode,
+				SlashCommandNode,
 				...COMPOSER_LINK_NODES,
 				...COMPOSER_LIST_NODES,
 			],
@@ -797,6 +804,7 @@ export function WorkspaceComposer({
 			),
 		[selectedProvider, t],
 	);
+	const typedCommands = useMemo(() => typedCommandNames(slashCommands), [slashCommands]);
 	// `/compact` is a DCC-owned action: it clears the draft and sends the
 	// runtime's compaction command as its own turn, so the post-compact
 	// re-anchor can follow. It is only listed for runtimes that understand it.
@@ -971,6 +979,7 @@ export function WorkspaceComposer({
 						compact: runCompactCommand,
 					}}
 				/>
+				<SlashCommandHighlightPlugin commands={typedCommands} />
 				<FileMentionPlugin
 					workspaceRootPath={fileMentionRootPath ?? workspacePath}
 					floating={compactExecutionPicker}

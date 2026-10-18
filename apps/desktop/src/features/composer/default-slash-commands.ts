@@ -7,6 +7,12 @@ export type SlashCommandEntry = {
 	description: string;
 	/** When `"client-action"`, parent handles insert (e.g. decorator swap). */
 	source?: "builtin" | "client-action";
+	/**
+	 * The provider runs it when it is sent as typed text too, so the composer
+	 * highlights it. DCC menu actions (`/spec`, `/clear`) only work from the
+	 * menu and are not marked.
+	 */
+	runsWhenTyped?: boolean;
 	/** Listed only when the selected provider declares this capability. */
 	requiresCapability?: keyof Pick<
 		Capabilities,
@@ -30,6 +36,7 @@ export const DEFAULT_SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 		description: "Compact the provider context and re-anchor",
 		source: "client-action",
 		requiresCapability: "supportsCompactionCommand",
+		runsWhenTyped: true,
 	},
 	{
 		// The provider's own command: inserted for the person to finish
@@ -37,6 +44,7 @@ export const DEFAULT_SLASH_COMMANDS: readonly SlashCommandEntry[] = [
 		name: "goal",
 		description: "Set a goal the agent keeps working toward until it is done",
 		requiresCapability: "supportsNativeGoal",
+		runsWhenTyped: true,
 	},
 ];
 
@@ -53,4 +61,9 @@ export function availableSlashCommands(
 		(command) =>
 			!command.requiresCapability || capabilities?.[command.requiresCapability] === true,
 	);
+}
+
+/** Names of the offered commands that run when typed, for the highlight. */
+export function typedCommandNames(commands: readonly SlashCommandEntry[]): string[] {
+	return commands.filter((command) => command.runsWhenTyped).map((command) => command.name);
 }

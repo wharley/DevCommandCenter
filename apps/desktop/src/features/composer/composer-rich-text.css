@@ -150,3 +150,17 @@
 	text-align: end;
 	line-height: 1.4;
 }
+
+/* A leading slash command the provider runs when sent (`/goal`, `/compact`).
+   Green reads "recognized"; amber is reserved for "needs you" and blue for links. */
+.composer-slash-command {
+	--composer-command-color: #047857;
+	color: var(--composer-command-color);
+	background: color-mix(in srgb, var(--composer-command-color) 10%, transparent);
+	border-radius: 4px;
+	padding: 1px 3px;
+	font-weight: 500;
+}
+.dark .composer-slash-command {
+	--composer-command-color: #6ee7b7;
+}
