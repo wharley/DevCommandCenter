@@ -1132,15 +1132,32 @@ fn resolve_authorized_workspace_mutation_for_id(
 }
 
 pub trait EphemeralMcpProjection: Send + Sync {
-    fn project_for_session(&self, session: &Session)
-        -> Result<Option<EphemeralMcpProjectionLease>>;
+    /// Issues one session lease. `connectors` are signed-in connectors the
+    /// session may reach through DCC's gateway with the same lease.
+    fn project_for_session(
+        &self,
+        session: &Session,
+        connectors: &[ConnectorProjection],
+    ) -> Result<Option<EphemeralMcpProjectionLease>>;
     fn revoke_session(&self, session_id: &SessionId, lease_id: &str);
 }
 
 #[derive(Clone, Debug)]
 pub struct EphemeralMcpProjectionLease {
-    pub server: ProviderMcpServerConfig,
+    /// DCC's own server first, then one entry per granted connector.
+    pub servers: Vec<ProviderMcpServerConfig>,
     pub lease_id: String,
+}
+
+/// A connector DCC signed in to, served to the provider through the gateway
+/// instead of directly.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConnectorProjection {
+    pub definition_id: McpDefinitionId,
+    /// Readable `dcc-<slug>` name; the `dcc-` namespace keeps it clear of the
+    /// user's own provider configuration.
+    pub server_name: String,
+    pub tool_policies: Vec<dcc_core::ports::ProviderMcpToolPolicy>,
 }
 
 #[derive(Clone)]
@@ -1660,6 +1677,7 @@ impl SessionCommandState {
         &self,
         provider_projection_version: Option<&str>,
         session: &Session,
+        connectors: &[ConnectorProjection],
     ) -> Result<Option<EphemeralMcpProjectionLease>> {
         if provider_projection_version.is_none() {
             return Ok(None);
@@ -1674,7 +1692,7 @@ impl SessionCommandState {
         let Some(projection) = projection else {
             return Ok(None);
         };
-        let lease = match projection.project_for_session(session) {
+        let lease = match projection.project_for_session(session, connectors) {
             Ok(lease) => lease,
             Err(_) => {
                 eprintln!("[DCC] ephemeral MCP projection unavailable; continuing without it");
@@ -4827,25 +4845,42 @@ impl SessionCommandState {
             self.provider_runtime_config(&session.provider_id, session.provider_runtime.as_ref())?;
         provider.refresh_runtime_metadata().await?;
         let mcp_projection_version = provider.dcc_mcp_projection_version();
-        let mut mcp_servers = self
+        let mcp_servers = self
             .resolve_provider_mcp_servers(session, mcp_projection_version.as_deref())
             .await?;
-        let projected_definition_ids = mcp_servers
+        let (mut mcp_servers, connectors) = self.split_gateway_connectors(mcp_servers).await;
+        let mut projected_definition_ids = mcp_servers
             .iter()
             .map(|server| server.definition_id.clone())
             .collect::<Vec<_>>();
         let mut ephemeral_lease_id = None;
-        let ephemeral_projection =
-            match self.project_ephemeral_mcp_server(mcp_projection_version.as_deref(), session) {
-                Ok(projection) => projection,
-                Err(error) => {
-                    return Err(error);
-                }
-            };
+        let ephemeral_projection = match self.project_ephemeral_mcp_server(
+            mcp_projection_version.as_deref(),
+            session,
+            &connectors,
+        ) {
+            Ok(projection) => projection,
+            Err(error) => {
+                return Err(error);
+            }
+        };
+        if ephemeral_projection.is_none() && !connectors.is_empty() {
+            eprintln!(
+                "[DCC] connector gateway unavailable; {} signed-in connector(s) skipped",
+                connectors.len()
+            );
+        }
         if let Some(projection) = ephemeral_projection {
             let lease_id = projection.lease_id.clone();
-            match append_ephemeral_mcp_server(&mut mcp_servers, projection.server) {
-                Ok(()) => ephemeral_lease_id = Some(lease_id),
+            match append_ephemeral_mcp_servers(&mut mcp_servers, projection.servers) {
+                Ok(()) => {
+                    ephemeral_lease_id = Some(lease_id);
+                    projected_definition_ids.extend(
+                        connectors
+                            .iter()
+                            .map(|connector| connector.definition_id.clone()),
+                    );
+                }
                 Err(_) => {
                     self.revoke_ephemeral_mcp_projection(&session.id, Some(&lease_id));
                     eprintln!(
@@ -5556,6 +5591,64 @@ impl SessionCommandState {
         Ok(registered_provider(&binding.provider_id)?
             .capabilities
             .mcp_oauth_support)
+    }
+
+    /// Moves connectors DCC signed in to out of the direct projection: they
+    /// reach the provider through the gateway, which holds the vendor token.
+    /// On any registry error the servers stay as they were.
+    async fn split_gateway_connectors(
+        &self,
+        servers: Vec<ProviderMcpServerConfig>,
+    ) -> (Vec<ProviderMcpServerConfig>, Vec<ConnectorProjection>) {
+        if servers.is_empty() {
+            return (servers, Vec::new());
+        }
+        let Ok(repo) = SqliteMcpRepo::open(&self.db_path) else {
+            return (servers, Vec::new());
+        };
+        let Ok(grants) = repo.list_mcp_oauth_grants(None).await else {
+            return (servers, Vec::new());
+        };
+        let signed_in = grants
+            .into_iter()
+            .filter(|grant| grant.provider_id.0 == crate::mcp_connect::DCC_OAUTH_GRANT_OWNER)
+            .map(|grant| grant.definition_id)
+            .collect::<HashSet<_>>();
+        if signed_in.is_empty() {
+            return (servers, Vec::new());
+        }
+        let mut direct = Vec::with_capacity(servers.len());
+        let mut connectors = Vec::new();
+        let mut taken = servers
+            .iter()
+            .map(|server| server.server_name.clone())
+            .collect::<HashSet<_>>();
+        taken.insert("dcc-browser-webview".to_string());
+        for server in servers {
+            let is_http = matches!(
+                server.transport,
+                dcc_core::ports::ProviderMcpTransport::Http { .. }
+            );
+            if !is_http || !signed_in.contains(&server.definition_id) {
+                direct.push(server);
+                continue;
+            }
+            let display_name = repo
+                .get_mcp_definition(&server.definition_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|definition| definition.display_name)
+                .unwrap_or_default();
+            let server_name = connector_server_name(&display_name, &taken);
+            taken.insert(server_name.clone());
+            connectors.push(ConnectorProjection {
+                definition_id: server.definition_id,
+                server_name,
+                tool_policies: server.tool_policies,
+            });
+        }
+        (direct, connectors)
     }
 
     async fn resolve_provider_mcp_servers(
@@ -7906,20 +7999,57 @@ fn lexical_absolute_path(path: &std::path::Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn append_ephemeral_mcp_server(
+/// Appends the lease's servers all or nothing.
+fn append_ephemeral_mcp_servers(
     servers: &mut Vec<ProviderMcpServerConfig>,
-    projection: ProviderMcpServerConfig,
+    projected: Vec<ProviderMcpServerConfig>,
 ) -> Result<()> {
-    let definition_id = projection.definition_id.clone();
-    if servers.iter().any(|server| {
-        server.server_name == projection.server_name || server.definition_id == definition_id
-    }) {
-        return Err(dcc_core::CoreError::Provider(
-            "ephemeral MCP projection collides with a persistent definition".to_string(),
-        ));
+    let mut names = servers
+        .iter()
+        .map(|server| server.server_name.clone())
+        .collect::<HashSet<_>>();
+    let mut definition_ids = servers
+        .iter()
+        .map(|server| server.definition_id.clone())
+        .collect::<HashSet<_>>();
+    for server in &projected {
+        if !names.insert(server.server_name.clone())
+            || !definition_ids.insert(server.definition_id.clone())
+        {
+            return Err(dcc_core::CoreError::Provider(
+                "ephemeral MCP projection collides with a persistent definition".to_string(),
+            ));
+        }
     }
-    servers.push(projection);
+    servers.extend(projected);
     Ok(())
+}
+
+/// `dcc-<slug>` from a display name: lowercase ASCII letters, digits and
+/// dashes, bounded so `mcp__<name>__<tool>` stays short.
+pub fn connector_server_name(display_name: &str, taken: &HashSet<String>) -> String {
+    let mut slug = String::new();
+    for character in display_name.chars() {
+        let character = character.to_ascii_lowercase();
+        if character.is_ascii_alphanumeric() {
+            slug.push(character);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let mut slug = slug.trim_end_matches('-').chars().take(32).collect::<String>();
+    slug = slug.trim_end_matches('-').to_string();
+    if slug.is_empty() || slug == "browser-webview" {
+        slug = "connector".to_string();
+    }
+    let base = format!("dcc-{slug}");
+    if !taken.contains(&base) {
+        return base;
+    }
+    (2..)
+        .map(|suffix| format!("{base}-{suffix}"))
+        .find(|candidate| !taken.contains(candidate))
+        .expect("an unused suffix exists")
 }
 
 #[async_trait]
@@ -11973,6 +12103,7 @@ mod tests {
         fn project_for_session(
             &self,
             _session: &Session,
+            _connectors: &[ConnectorProjection],
         ) -> Result<Option<EphemeralMcpProjectionLease>> {
             self.projects.fetch_add(1, Ordering::SeqCst);
             if self.fail.load(Ordering::SeqCst) {
@@ -11989,7 +12120,10 @@ mod tests {
                 .map(|config| {
                     config
                         .clone()
-                        .map(|server| EphemeralMcpProjectionLease { server, lease_id })
+                        .map(|server| EphemeralMcpProjectionLease {
+                            servers: vec![server],
+                            lease_id,
+                        })
                 })
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
         }
@@ -12037,13 +12171,13 @@ mod tests {
 
         let session = sample_session("ephemeral-projection");
         let projected = state
-            .project_ephemeral_mcp_server(Some("audited-runtime"), &session)
+            .project_ephemeral_mcp_server(Some("audited-runtime"), &session, &[])
             .expect("projection should resolve")
             .expect("audited provider should receive projection");
-        assert_eq!(projected.server.definition_id.0, "dcc-browser");
+        assert_eq!(projected.servers[0].definition_id.0, "dcc-browser");
         assert_eq!(projected.lease_id, "lease-1");
         assert!(state
-            .project_ephemeral_mcp_server(None, &session)
+            .project_ephemeral_mcp_server(None, &session, &[])
             .expect("unsupported provider should not call projector")
             .is_none());
         assert_eq!(projector.projects.load(Ordering::SeqCst), 1);
@@ -12055,7 +12189,7 @@ mod tests {
         );
 
         let winner = state
-            .project_ephemeral_mcp_server(Some("audited-runtime"), &session)
+            .project_ephemeral_mcp_server(Some("audited-runtime"), &session, &[])
             .expect("second projection should resolve")
             .expect("second audited projection should exist");
         assert_eq!(winner.lease_id, "lease-2");
@@ -12108,7 +12242,7 @@ mod tests {
 
         let session = sample_session("ephemeral-projection-failure");
         assert!(state
-            .project_ephemeral_mcp_server(Some("audited-runtime"), &session)
+            .project_ephemeral_mcp_server(Some("audited-runtime"), &session, &[])
             .expect("projection failure should degrade")
             .is_none());
         assert_eq!(projector.projects.load(Ordering::SeqCst), 1);
@@ -12124,9 +12258,9 @@ mod tests {
                 persistent_definition,
                 persistent_name,
             )];
-            let error = append_ephemeral_mcp_server(
+            let error = append_ephemeral_mcp_servers(
                 &mut servers,
-                fake_ephemeral_server("dcc-browser", "dcc-browser-webview"),
+                vec![fake_ephemeral_server("dcc-browser", "dcc-browser-webview")],
             )
             .expect_err("persistent identity collision must fail closed");
             assert!(error.to_string().contains("collides"));
@@ -12134,12 +12268,42 @@ mod tests {
         }
 
         let mut servers = vec![fake_ephemeral_server("persistent", "persistent-server")];
-        append_ephemeral_mcp_server(
+        append_ephemeral_mcp_servers(
             &mut servers,
-            fake_ephemeral_server("dcc-browser", "dcc-browser-webview"),
+            vec![fake_ephemeral_server("dcc-browser", "dcc-browser-webview")],
         )
         .expect("distinct persistent and ephemeral identities should append");
         assert_eq!(servers.len(), 2);
+
+        // A lease is appended all or nothing: one colliding connector keeps
+        // the browser server out too.
+        let mut servers = vec![fake_ephemeral_server("persistent", "dcc-clickup")];
+        append_ephemeral_mcp_servers(
+            &mut servers,
+            vec![
+                fake_ephemeral_server("dcc-browser", "dcc-browser-webview"),
+                fake_ephemeral_server("clickup", "dcc-clickup"),
+            ],
+        )
+        .expect_err("connector name collision must fail closed");
+        assert_eq!(servers.len(), 1);
+    }
+
+    #[test]
+    fn connector_server_names_are_readable_and_unique() {
+        let mut taken = HashSet::from(["dcc-browser-webview".to_string()]);
+        assert_eq!(connector_server_name("ClickUp", &taken), "dcc-clickup");
+        assert_eq!(
+            connector_server_name("Jira & Confluence (Atlassian)", &taken),
+            "dcc-jira-confluence-atlassian"
+        );
+        assert_eq!(connector_server_name("Ação!", &taken), "dcc-a-o");
+        assert_eq!(connector_server_name("   ", &taken), "dcc-connector");
+        assert_eq!(connector_server_name("Browser Webview", &taken), "dcc-connector");
+        taken.insert("dcc-clickup".to_string());
+        assert_eq!(connector_server_name("ClickUp", &taken), "dcc-clickup-2");
+        let long = connector_server_name(&"a".repeat(200), &taken);
+        assert!(long.len() <= 64, "{long}");
     }
 
     #[test]

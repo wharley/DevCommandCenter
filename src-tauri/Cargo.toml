@@ -86,6 +86,7 @@ guarded-undo-capture-v2 = ["dcc-tauri/guarded-undo-capture-v2"]
 
 [dev-dependencies]
 tempfile = "3"
+dcc-infra = { path = "../crates/dcc-infra", features = ["test-support"] }
 dcc-providers = { path = "../crates/dcc-providers" }
 futures-util = "0.3"
 tokio = { version = "1", features = ["test-util"] }

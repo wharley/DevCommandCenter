@@ -4,14 +4,14 @@
 //! one short-lived bearer token per attached session, and every request is
 //! bound back to the in-memory Browser scope and consent grant.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::{to_bytes, Body};
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
@@ -51,10 +51,17 @@ use crate::computer_use_commands::{
     ComputerElements, ComputerInputMethod, ComputerTargetSnapshot, ComputerUseState,
     PointerButton, MAX_SCROLL_DELTA,
 };
-use dcc_tauri::state::{EphemeralMcpProjection, EphemeralMcpProjectionLease, SessionCommandState};
+use dcc_tauri::connector_gateway::{ConnectorCall, ConnectorGateway, ConnectorResponse};
+use dcc_tauri::state::{
+    ConnectorProjection, EphemeralMcpProjection, EphemeralMcpProjectionLease, SessionCommandState,
+};
 
 const MAX_REGISTRY_ENTRIES: usize = 128;
 const MAX_BODY_BYTES: usize = 64 * 1024;
+/// Connector calls carry tool arguments for third-party services, which can
+/// be larger than DCC's own tool calls.
+const MAX_CONNECTOR_BODY_BYTES: usize = 1024 * 1024;
+const CONNECTOR_CONCURRENCY: usize = 16;
 const MAX_MCP_TEXT_CONTENT_CHARS: usize = 32_000;
 /// Element lists are the agent's main view of a desktop window; they get
 /// their own budget, matching the native observation bound.
@@ -163,6 +170,9 @@ struct TokenBinding {
 #[derive(Default)]
 struct TokenRegistry {
     by_lease: HashMap<String, TokenBinding>,
+    /// Connector definition ids each lease may reach through the gateway,
+    /// fixed when the lease is issued.
+    connector_grants: HashMap<String, HashSet<String>>,
     /// One active evidence handle per lease, bounded by the lease registry.
     /// The capture itself remains owned by BrowserState and is one-shot there.
     evidence_capture_leases: HashMap<String, String>,
@@ -223,9 +233,18 @@ impl TokenRegistry {
             .filter_map(|(capture_id, owner)| (owner == lease_id).then(|| capture_id.clone()))
             .collect::<Vec<_>>();
         self.by_lease.remove(lease_id);
+        self.connector_grants.remove(lease_id);
         self.evidence_capture_leases
             .retain(|_, owner| owner != lease_id);
         capture_ids
+    }
+
+    fn lease_may_use_connector(&self, binding: &TokenBinding, definition_id: &str) -> bool {
+        self.binding_is_current(binding)
+            && self
+                .connector_grants
+                .get(&binding.lease_id)
+                .is_some_and(|granted| granted.contains(definition_id))
     }
 
     fn take_all_evidence_captures(&mut self) -> Vec<(TokenBinding, String)> {
@@ -252,6 +271,7 @@ pub struct BrowserMcpBridge {
     computer: ComputerUseState,
     registry: Mutex<TokenRegistry>,
     endpoint: String,
+    connectors: Option<ConnectorGateway>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
     shutting_down: AtomicBool,
 }
@@ -263,6 +283,7 @@ impl BrowserMcpBridge {
         browser_requests: BrowserAgentRequestBroker,
         sessions: SessionCommandState,
         computer: ComputerUseState,
+        connectors: Option<ConnectorGateway>,
     ) -> Result<Arc<Self>, String> {
         let listener =
             tokio::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
@@ -283,6 +304,7 @@ impl BrowserMcpBridge {
             computer,
             registry: Mutex::new(TokenRegistry::default()),
             endpoint,
+            connectors,
             shutdown: Mutex::new(Some(shutdown_tx)),
             shutting_down: AtomicBool::new(false),
         });
@@ -307,6 +329,7 @@ impl BrowserMcpBridge {
         let cleanup = if let Ok(mut registry) = self.registry.lock() {
             let cleanup = registry.take_all_evidence_captures();
             registry.by_lease.clear();
+            registry.connector_grants.clear();
             cleanup
         } else {
             Vec::new()
@@ -469,6 +492,7 @@ impl BrowserMcpBridge {
     fn issue_projection(
         &self,
         session: &Session,
+        connectors: &[ConnectorProjection],
     ) -> CoreResult<Option<EphemeralMcpProjectionLease>> {
         let mut token = [0_u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut token);
@@ -484,21 +508,42 @@ impl BrowserMcpBridge {
             provider_id: session.provider_id.clone(),
             phase: LeasePhase::Issued,
         };
-        let secret =
-            SecretValue::new(format!("Bearer {plaintext}").into_bytes()).map_err(|_| {
-                CoreError::Repository("failed to create Browser MCP credential".to_string())
-            })?;
+        let bearer = || {
+            SecretValue::new(format!("Bearer {plaintext}").into_bytes())
+                .map(|secret| vec![ProviderMcpSecret::new("Authorization", secret)])
+                .map_err(|_| {
+                    CoreError::Repository("failed to create Browser MCP credential".to_string())
+                })
+        };
         let policies = browser_mcp_tool_policies();
-        let server = ProviderMcpServerConfig {
+        let mut servers = vec![ProviderMcpServerConfig {
             definition_id: McpDefinitionId(DCC_BROWSER_DEFINITION_ID.to_string()),
             server_name: DCC_BROWSER_SERVER_NAME.to_string(),
             transport: ProviderMcpTransport::Http {
                 url: self.endpoint.clone(),
-                headers: vec![ProviderMcpSecret::new("Authorization", secret)],
+                headers: bearer()?,
             },
             oauth_state: None,
             tool_policies: policies,
-        };
+        }];
+        // Connectors share the lease's bearer; the gateway checks the grant
+        // per request, so revoking the lease cuts every connector at once.
+        let mut connector_grants = HashSet::new();
+        if self.connectors.is_some() {
+            for connector in connectors {
+                connector_grants.insert(connector.definition_id.0.clone());
+                servers.push(ProviderMcpServerConfig {
+                    definition_id: connector.definition_id.clone(),
+                    server_name: connector.server_name.clone(),
+                    transport: ProviderMcpTransport::Http {
+                        url: format!("{}/connectors/{}", self.endpoint, connector.definition_id.0),
+                        headers: bearer()?,
+                    },
+                    oauth_state: None,
+                    tool_policies: connector.tool_policies.clone(),
+                });
+            }
+        }
         let mut registry = self
             .registry
             .lock()
@@ -511,10 +556,15 @@ impl BrowserMcpBridge {
         // All fallible credential/config construction is above this point, so
         // a failed projection cannot leave an authenticated orphaned lease.
         registry.by_lease.insert(lease_id.clone(), binding);
+        if !connector_grants.is_empty() {
+            registry
+                .connector_grants
+                .insert(lease_id.clone(), connector_grants);
+        }
         drop(registry);
         self.computer.record_projection(&session.id.0, &lease_id);
         self.emit_computer_preview_cleared(&session.id.0);
-        Ok(Some(EphemeralMcpProjectionLease { server, lease_id }))
+        Ok(Some(EphemeralMcpProjectionLease { servers, lease_id }))
     }
 }
 
@@ -561,19 +611,31 @@ fn is_computer_observation_tool(name: &str) -> bool {
 /// route, body limit, and concurrency gate. Tests call this router in-process;
 /// no port, WebView, provider runtime, or external network is involved.
 fn browser_mcp_router(bridge: Arc<BrowserMcpBridge>) -> Router {
+    // Connector traffic has its own body limit and concurrency gate so a
+    // slow third-party server cannot starve DCC's own tools.
+    let connectors = Router::new()
+        .route(
+            "/mcp/connectors/:definition_id",
+            post(connector_post).delete(connector_delete),
+        )
+        .with_state(Arc::clone(&bridge))
+        .layer(DefaultBodyLimit::max(MAX_CONNECTOR_BODY_BYTES))
+        .layer(ConcurrencyLimitLayer::new(CONNECTOR_CONCURRENCY));
     Router::new()
         .route("/mcp", post(mcp_post))
         .with_state(bridge)
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(ConcurrencyLimitLayer::new(8))
+        .merge(connectors)
 }
 
 impl EphemeralMcpProjection for BrowserMcpBridge {
     fn project_for_session(
         &self,
         session: &Session,
+        connectors: &[ConnectorProjection],
     ) -> CoreResult<Option<EphemeralMcpProjectionLease>> {
-        self.issue_projection(session)
+        self.issue_projection(session, connectors)
     }
 
     fn revoke_session(&self, session_id: &SessionId, lease_id: &str) {
@@ -605,6 +667,110 @@ impl EphemeralMcpProjection for BrowserMcpBridge {
             }
         }
     }
+}
+
+/// Authenticates the lease and its grant for one connector. A connector the
+/// lease was not granted answers 404, like an unknown route.
+fn connector_binding(
+    bridge: &BrowserMcpBridge,
+    headers: &HeaderMap,
+    definition_id: &str,
+) -> Result<(TokenBinding, ConnectorGateway), Response> {
+    if !loopback_origin(headers) {
+        return Err(StatusCode::FORBIDDEN.into_response());
+    }
+    let Some(binding) = bridge.authenticate(headers) else {
+        return Err(StatusCode::UNAUTHORIZED.into_response());
+    };
+    if bridge.is_shutting_down() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE.into_response());
+    }
+    let (Some(gateway), true) = (
+        bridge.connectors.clone(),
+        bridge
+            .registry
+            .lock()
+            .is_ok_and(|registry| registry.lease_may_use_connector(&binding, definition_id)),
+    ) else {
+        return Err(StatusCode::NOT_FOUND.into_response());
+    };
+    Ok((binding, gateway))
+}
+
+async fn connector_post(
+    State(bridge): State<Arc<BrowserMcpBridge>>,
+    Path(definition_id): Path<String>,
+    request: Request<Body>,
+) -> Response {
+    let headers = request.headers().clone();
+    let (_, gateway) = match connector_binding(&bridge, &headers, &definition_id) {
+        Ok(found) => found,
+        Err(response) => return response,
+    };
+    if !accepts_mcp(&headers) {
+        return StatusCode::NOT_ACCEPTABLE.into_response();
+    }
+    if !json_content_type(&headers) {
+        return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
+    }
+    let body = match to_bytes(request.into_body(), MAX_CONNECTOR_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(_) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+    };
+    let Ok(body) = serde_json::from_slice::<Value>(&body) else {
+        return rpc_error(Value::Null, -32700, None);
+    };
+    let header_text = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+    };
+    let response = gateway
+        .handle(
+            &McpDefinitionId(definition_id),
+            ConnectorCall {
+                session_id: header_text("mcp-session-id"),
+                protocol_version: header_text("mcp-protocol-version"),
+                body,
+            },
+        )
+        .await;
+    let with_session = |mut response: Response, session_id: Option<String>| {
+        if let Some(value) = session_id.and_then(|id| HeaderValue::from_str(&id).ok()) {
+            response.headers_mut().insert("mcp-session-id", value);
+        }
+        response
+    };
+    match response {
+        ConnectorResponse::Json { session_id, body } => {
+            with_session(Json(body).into_response(), session_id)
+        }
+        ConnectorResponse::Accepted { session_id } => {
+            with_session(StatusCode::ACCEPTED.into_response(), session_id)
+        }
+        ConnectorResponse::SessionExpired => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn connector_delete(
+    State(bridge): State<Arc<BrowserMcpBridge>>,
+    Path(definition_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let (_, gateway) = match connector_binding(&bridge, &headers, &definition_id) {
+        Ok(found) => found,
+        Err(response) => return response,
+    };
+    if let Some(session_id) = headers
+        .get("mcp-session-id")
+        .and_then(|value| value.to_str().ok())
+    {
+        gateway
+            .close(&McpDefinitionId(definition_id), session_id)
+            .await;
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn mcp_post(State(bridge): State<Arc<BrowserMcpBridge>>, request: Request<Body>) -> Response {
@@ -2850,6 +3016,13 @@ mod tests {
     const TEST_LEASE_ID: &str = "browser-mcp-in-process-test-lease";
 
     fn test_bridge(phase: LeasePhase) -> (Arc<BrowserMcpBridge>, TokenBinding, TempDir) {
+        test_bridge_with_connectors(phase, None)
+    }
+
+    fn test_bridge_with_connectors(
+        phase: LeasePhase,
+        connectors: Option<ConnectorGateway>,
+    ) -> (Arc<BrowserMcpBridge>, TokenBinding, TempDir) {
         let temp = tempfile::tempdir().expect("temporary session state");
         let root = std::fs::canonicalize(temp.path()).expect("physical temporary session state");
         let sessions =
@@ -2870,6 +3043,7 @@ mod tests {
             computer: ComputerUseState::supported_test_state(),
             registry: Mutex::new(TokenRegistry::default()),
             endpoint: "http://127.0.0.1:0/mcp".to_string(),
+            connectors,
             shutdown: Mutex::new(None),
             shutting_down: AtomicBool::new(false),
         });
@@ -2895,6 +3069,7 @@ mod tests {
             BrowserAgentRequestBroker::default(),
             sessions,
             ComputerUseState::supported_test_state(),
+            None,
         )
         .await
         .expect("start local Browser MCP bridge");
@@ -2912,7 +3087,7 @@ mod tests {
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         };
         let projection = bridge
-            .issue_projection(&session)
+            .issue_projection(&session, &[])
             .expect("issue local projection")
             .expect("Codex receives the projection");
         let adapter = dcc_providers::codex::adapter();
@@ -2923,7 +3098,7 @@ mod tests {
             working_directory: Some(root.display().to_string()),
             additional_working_directories: Vec::new(),
             provider_runtime: None,
-            mcp_servers: vec![projection.server],
+            mcp_servers: projection.servers,
             native_resume_id: None,
             native_rewind_checkpoint: None,
         };
@@ -2997,6 +3172,141 @@ mod tests {
             );
         }
         assert_eq!(dcc.tools.len(), DCC_MCP_TOOL_COUNT);
+    }
+
+
+    fn empty_connector_gateway(temp: &TempDir) -> ConnectorGateway {
+        let repo = dcc_infra::mcp_db::SqliteMcpRepo::open(temp.path().join("connectors.sqlite"))
+            .expect("connector registry");
+        ConnectorGateway::new(
+            dcc_tauri::mcp_connect::McpConnectCoordinator::with_callback_port(0)
+                .expect("coordinator"),
+            dcc_tauri::mcp_connect::ConnectStores {
+                repo: Arc::new(repo),
+                credentials: Arc::new(
+                    dcc_infra::credential_store::InMemoryCredentialStore::default(),
+                ),
+            },
+            Arc::new(|_: &McpDefinitionId| {}),
+        )
+        .expect("gateway")
+    }
+
+    fn connector_request(method: &str, definition_id: &str, bearer: Option<&str>) -> Request<Body> {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(format!("/mcp/connectors/{definition_id}"))
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(bearer) = bearer {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {bearer}"));
+        }
+        request
+            .body(Body::from(
+                json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}).to_string(),
+            ))
+            .expect("connector request")
+    }
+
+    #[tokio::test]
+    async fn connector_routes_require_the_lease_and_its_grant() {
+        let gateway_dir = tempfile::tempdir().expect("gateway state");
+        let (bridge, binding, _temp) = test_bridge_with_connectors(
+            LeasePhase::Ready(MCP_PROTOCOL_VERSION),
+            Some(empty_connector_gateway(&gateway_dir)),
+        );
+        let app = browser_mcp_router(Arc::clone(&bridge));
+
+        let unauthenticated = router_call(&app, connector_request("POST", "mcp-granted", None)).await;
+        assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+        let not_granted =
+            router_call(&app, connector_request("POST", "mcp-granted", Some(TEST_BEARER))).await;
+        assert_eq!(not_granted.status(), StatusCode::NOT_FOUND);
+
+        bridge
+            .registry
+            .lock()
+            .expect("registry")
+            .connector_grants
+            .insert(
+                binding.lease_id.clone(),
+                HashSet::from(["mcp-granted".to_string()]),
+            );
+        // The definition is gone from the registry, so the gateway answers a
+        // JSON-RPC error instead of an HTTP failure the provider would act on.
+        let granted =
+            router_call(&app, connector_request("POST", "mcp-granted", Some(TEST_BEARER))).await;
+        assert_eq!(granted.status(), StatusCode::OK);
+        let body = response_json(granted).await;
+        assert_eq!(body["id"], 1);
+        assert!(body["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("disconnected")));
+        let other =
+            router_call(&app, connector_request("POST", "mcp-other", Some(TEST_BEARER))).await;
+        assert_eq!(other.status(), StatusCode::NOT_FOUND);
+        let get = router_call(&app, connector_request("GET", "mcp-granted", Some(TEST_BEARER))).await;
+        assert_eq!(get.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+        bridge.revoke_session(&SessionId(binding.session_id.clone()), &binding.lease_id);
+        let revoked =
+            router_call(&app, connector_request("POST", "mcp-granted", Some(TEST_BEARER))).await;
+        assert_eq!(revoked.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn projection_serves_granted_connectors_with_the_lease_bearer() {
+        let gateway_dir = tempfile::tempdir().expect("gateway state");
+        let (bridge, _, _temp) = test_bridge_with_connectors(
+            LeasePhase::Issued,
+            Some(empty_connector_gateway(&gateway_dir)),
+        );
+        let session = Session {
+            id: SessionId("connector-session".to_string()),
+            project_id: ProjectId("project".to_string()),
+            workspace_id: WorkspaceId("workspace".to_string()),
+            additional_workspace_ids: Vec::new(),
+            provider_id: "claude_code".to_string(),
+            model: None,
+            provider_runtime: None,
+            working_directory_override: None,
+            state: SessionState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let lease = bridge
+            .issue_projection(
+                &session,
+                &[ConnectorProjection {
+                    definition_id: McpDefinitionId("mcp-clickup".to_string()),
+                    server_name: "dcc-clickup".to_string(),
+                    tool_policies: Vec::new(),
+                }],
+            )
+            .expect("projection")
+            .expect("lease");
+        assert_eq!(lease.servers.len(), 2);
+        let connector = &lease.servers[1];
+        assert_eq!(connector.server_name, "dcc-clickup");
+        let ProviderMcpTransport::Http { url, headers } = &connector.transport else {
+            panic!("connectors are served over HTTP");
+        };
+        assert_eq!(url, "http://127.0.0.1:0/mcp/connectors/mcp-clickup");
+        let ProviderMcpTransport::Http { headers: browser_headers, .. } = &lease.servers[0].transport
+        else {
+            panic!("browser server is HTTP");
+        };
+        assert_eq!(
+            headers[0].expose_secret(),
+            browser_headers[0].expose_secret()
+        );
+        assert!(bridge
+            .registry
+            .lock()
+            .expect("registry")
+            .connector_grants
+            .get(&lease.lease_id)
+            .is_some_and(|granted| granted.contains("mcp-clickup")));
     }
 
     fn mcp_request(body: impl Into<Body>) -> Request<Body> {

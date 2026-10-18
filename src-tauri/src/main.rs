@@ -7344,12 +7344,41 @@ pub fn run() {
             // ever installed and existing sessions are not reconfigured.
             let browser_state = BrowserState::default();
             let browser_agent_requests = BrowserAgentRequestBroker::default();
+            // One sign-in coordinator serves the Settings commands and the
+            // connector gateway, so a refresh is never run twice in parallel.
+            let mcp_connect_coordinator = match dcc_tauri::mcp_connect::McpConnectCoordinator::new() {
+                Ok(coordinator) => Some(coordinator),
+                Err(error) => {
+                    eprintln!("[DCC][mcp-connect] unavailable: {error}");
+                    None
+                }
+            };
+            let connector_gateway = mcp_connect_coordinator.as_ref().and_then(|coordinator| {
+                let db_path = WorkspaceCommandState::from_session(&session_command_state).db_path;
+                let repo = SqliteMcpRepo::open(&db_path).ok()?;
+                let app_handle = app.handle().clone();
+                dcc_tauri::connector_gateway::ConnectorGateway::new(
+                    coordinator.clone(),
+                    dcc_tauri::mcp_connect::ConnectStores {
+                        repo: Arc::new(repo),
+                        credentials: Arc::new(
+                            dcc_infra::credential_store::SystemCredentialStore::default(),
+                        ),
+                    },
+                    Arc::new(move |definition_id: &dcc_core::domain::mcp::McpDefinitionId| {
+                        let _ = app_handle.emit("mcp-connector-needs-auth", definition_id.0.clone());
+                    }),
+                )
+                .map_err(|error| eprintln!("[DCC][mcp-connect] gateway unavailable: {error}"))
+                .ok()
+            });
             let browser_mcp_bridge = match tauri::async_runtime::block_on(BrowserMcpBridge::start(
                 Some(app.handle().clone()),
                 browser_state.clone(),
                 browser_agent_requests.clone(),
                 session_command_state.clone(),
                 computer_use_state.clone(),
+                connector_gateway,
             )) {
                 Ok(bridge) => match session_command_state
                     .install_ephemeral_mcp_projection(bridge.clone())
@@ -7384,11 +7413,8 @@ pub fn run() {
             app.manage(workspace_command_state);
             app.manage(ai_memory_sidecar);
             app.manage(CodeRabbitReviewJobsState::default());
-            match dcc_tauri::mcp_connect::McpConnectCoordinator::new() {
-                Ok(coordinator) => {
-                    app.manage(coordinator);
-                }
-                Err(error) => eprintln!("[DCC][mcp-connect] unavailable: {error}"),
+            if let Some(coordinator) = mcp_connect_coordinator {
+                app.manage(coordinator);
             }
             let desktop_agent_requests = desktop_agent_requests::DesktopAgentRequests::new(
                 app.handle().clone(),

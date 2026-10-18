@@ -133,6 +133,19 @@ impl OAuthFixture {
         self.ledger().last_resource.clone()
     }
 
+    /// Invalidates every access token, as if they all expired server-side.
+    /// Refresh tokens keep working.
+    pub fn expire_access_tokens(&self) {
+        self.ledger().access_tokens.clear();
+    }
+
+    /// Invalidates refresh tokens too, as if the user revoked the app.
+    pub fn revoke_all_tokens(&self) {
+        let mut ledger = self.ledger();
+        ledger.access_tokens.clear();
+        ledger.refresh_tokens.clear();
+    }
+
     pub fn accepts_access_token(&self, token: &str) -> bool {
         self.ledger().access_tokens.contains(token)
     }

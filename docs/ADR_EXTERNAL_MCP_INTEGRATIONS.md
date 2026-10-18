@@ -53,6 +53,38 @@ store behind provider, definition, and resource-bound metadata. This is not a
 general shared DCC gateway and does not change other providers' direct
 attachment paths.
 
+### October 2026 amendment: DCC-owned sign-in and connector gateway
+
+Provider-owned OAuth broke down for remote connectors: the Claude path signed
+in only inside a turn, the Codex path only after a failed attach, and grants
+kept inside a provider's config directory do not follow the user across
+multiple provider accounts. DCC therefore signs in to remote HTTP connectors
+itself and serves them to providers through a narrow gateway.
+
+- **Sign-in.** DCC runs the MCP authorization flow outside any turn: an
+  unauthenticated probe, RFC 9728 and RFC 8414/OpenID discovery (with the
+  well-known fallbacks), client identification (the user's own app, a Client
+  ID Metadata Document, or dynamic registration), PKCE S256 with `state` and
+  `resource`, and an RFC 9207 `iss` check before redeeming the code. The
+  callback listens on `127.0.0.1` only while a sign-in is pending.
+- **Storage.** The grant is a versioned credential-store envelope under the
+  `dcc` owner in the existing grant table. Refreshes are serialized per
+  connector, because some vendors issue single-use refresh tokens.
+- **Gateway.** A signed-in connector is not injected into the provider with
+  its vendor token. The provider receives a `dcc-<slug>` HTTP server on DCC's
+  existing loopback listener (`/mcp/connectors/<definition>`), authenticated
+  with the same per-session lease bearer as DCC's own server. The gateway
+  checks that the lease was granted the connector, swaps in a fresh vendor
+  token, forwards each JSON-RPC exchange, and returns plain JSON. It refreshes
+  and retries once on 401, and never answers 401 itself: a provider would
+  start OAuth against DCC. A lost sign-in becomes a JSON-RPC error the model
+  can relay plus a `mcp-connector-needs-auth` event for the UI.
+- **Scope of the exception.** Only HTTP definitions with a DCC-owned grant use
+  the gateway. Stdio servers, header-secret servers, and grants still owned by
+  an adapter keep their direct paths. Server-initiated messages in streamed
+  answers are dropped; resources, prompts, sampling, and elicitation remain
+  out of scope.
+
 ### Tools-first boundary
 
 The first compatibility contract covers MCP initialization, tool discovery,

@@ -301,3 +301,116 @@ async fn a_cancelled_sign_in_stores_nothing() {
         Err(McpOauthError::Cancelled)
     );
 }
+
+mod gateway {
+    use std::sync::Mutex;
+
+    use dcc_tauri::connector_gateway::{ConnectorCall, ConnectorGateway, ConnectorResponse};
+    use serde_json::json;
+
+    use super::*;
+
+    fn gateway(harness: &Harness) -> (ConnectorGateway, Arc<Mutex<Vec<McpDefinitionId>>>) {
+        let needs_auth = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&needs_auth);
+        let gateway = ConnectorGateway::new(
+            harness.coordinator.clone(),
+            harness.stores.clone(),
+            Arc::new(move |definition_id: &McpDefinitionId| {
+                recorded.lock().unwrap().push(definition_id.clone());
+            }),
+        )
+        .expect("gateway");
+        (gateway, needs_auth)
+    }
+
+    fn tools_list() -> ConnectorCall {
+        ConnectorCall {
+            session_id: None,
+            protocol_version: Some("2025-11-25".into()),
+            body: json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        }
+    }
+
+    fn error_message(response: &ConnectorResponse) -> String {
+        let ConnectorResponse::Json { body, .. } = response else {
+            panic!("expected a JSON-RPC body, got {response:?}");
+        };
+        body["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn forwards_with_the_vendor_token() {
+        let harness = harness(OAuthFixtureConfig::default()).await;
+        connect(&harness).await.expect("connected");
+        let (gateway, needs_auth) = gateway(&harness);
+        let response = gateway.handle(&harness.definition.id, tools_list()).await;
+        let ConnectorResponse::Json { body, .. } = response else {
+            panic!("expected a reply");
+        };
+        assert_eq!(body["result"]["serverInfo"]["name"], "dcc-oauth-fixture");
+        assert!(needs_auth.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn refreshes_once_when_the_server_rejects_the_token() {
+        let harness = harness(OAuthFixtureConfig::default()).await;
+        connect(&harness).await.expect("connected");
+        harness.fixture.expire_access_tokens();
+        let (gateway, needs_auth) = gateway(&harness);
+        let response = gateway.handle(&harness.definition.id, tools_list()).await;
+        assert!(
+            matches!(response, ConnectorResponse::Json { ref body, .. } if body.get("result").is_some())
+        );
+        assert_eq!(harness.fixture.refreshes(), 1);
+        assert!(needs_auth.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_revoked_sign_in_asks_for_reconnection_instead_of_401() {
+        let harness = harness(OAuthFixtureConfig::default()).await;
+        connect(&harness).await.expect("connected");
+        harness.fixture.revoke_all_tokens();
+        let (gateway, needs_auth) = gateway(&harness);
+        let response = gateway.handle(&harness.definition.id, tools_list()).await;
+        assert!(error_message(&response).contains("needs to be reconnected"));
+        assert_eq!(
+            *needs_auth.lock().unwrap(),
+            vec![harness.definition.id.clone()]
+        );
+    }
+
+    #[tokio::test]
+    async fn disconnecting_cuts_running_sessions_off() {
+        let harness = harness(OAuthFixtureConfig::default()).await;
+        connect(&harness).await.expect("connected");
+        harness
+            .coordinator
+            .disconnect(&harness.stores, &harness.definition.id)
+            .await
+            .unwrap();
+        let (gateway, _) = gateway(&harness);
+        let response = gateway.handle(&harness.definition.id, tools_list()).await;
+        assert!(error_message(&response).contains("needs to be reconnected"));
+    }
+
+    #[tokio::test]
+    async fn notifications_are_accepted_even_when_signed_out() {
+        let harness = harness(OAuthFixtureConfig::default()).await;
+        let (gateway, _) = gateway(&harness);
+        let response = gateway
+            .handle(
+                &harness.definition.id,
+                ConnectorCall {
+                    session_id: None,
+                    protocol_version: None,
+                    body: json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+                },
+            )
+            .await;
+        assert_eq!(response, ConnectorResponse::Accepted { session_id: None });
+    }
+}
