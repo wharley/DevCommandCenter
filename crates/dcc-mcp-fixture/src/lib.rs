@@ -1,4 +1,5 @@
 pub mod http;
+pub mod oauth;
 pub mod stdio;
 
 use std::{

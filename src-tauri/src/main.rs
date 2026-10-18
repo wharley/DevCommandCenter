@@ -7197,6 +7197,10 @@ pub fn run() {
             mcp_commands::remove_mcp_integration,
             mcp_commands::disconnect_mcp_oauth,
             mcp_commands::set_mcp_tool_policy,
+            mcp_commands::start_mcp_connect,
+            mcp_commands::wait_mcp_connect,
+            mcp_commands::cancel_mcp_connect,
+            mcp_commands::disconnect_mcp_connector,
             provider_commands::list_providers,
             provider_commands::get_provider_availability,
             provider_commands::check_provider_executable,
@@ -7380,6 +7384,12 @@ pub fn run() {
             app.manage(workspace_command_state);
             app.manage(ai_memory_sidecar);
             app.manage(CodeRabbitReviewJobsState::default());
+            match dcc_tauri::mcp_connect::McpConnectCoordinator::new() {
+                Ok(coordinator) => {
+                    app.manage(coordinator);
+                }
+                Err(error) => eprintln!("[DCC][mcp-connect] unavailable: {error}"),
+            }
             let desktop_agent_requests = desktop_agent_requests::DesktopAgentRequests::new(
                 app.handle().clone(),
                 browser_agent_requests.clone(),

@@ -20,7 +20,12 @@ use tauri::State;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::state::WorkspaceCommandState;
+use crate::{
+    mcp_connect::{ConnectStart, ConnectStores, McpConnectCoordinator},
+    state::WorkspaceCommandState,
+};
+use dcc_infra::mcp_oauth::{McpOauthError, UserProvidedClient};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -125,6 +130,90 @@ pub struct SetMcpToolPolicyOutput {
     pub integration: McpIntegrationRecord,
 }
 
+#[derive(Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StartMcpConnectInput {
+    pub definition_id: McpDefinitionId,
+    /// The user's own OAuth app, for servers that register no clients
+    /// (e.g. Slack). Write-only, like credential secrets.
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum StartMcpConnectOutput {
+    /// The server works without a sign-in.
+    NoAuthRequired,
+    /// Open `authorizationUrl` in the browser, then call `wait_mcp_connect`.
+    Authorize {
+        login_id: String,
+        authorization_url: String,
+    },
+    Failed {
+        reason: McpConnectFailure,
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConnectLoginInput {
+    pub login_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum WaitMcpConnectOutput {
+    Connected,
+    Failed {
+        reason: McpConnectFailure,
+        message: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum McpConnectFailure {
+    NotMcpServer,
+    /// The server needs the user's own OAuth app (client id/secret).
+    ClientRequired,
+    ClientRejected,
+    Declined,
+    Cancelled,
+    TimedOut,
+    Transient,
+    Other,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelMcpConnectOutput {
+    pub cancelled: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectMcpConnectorInput {
+    pub definition_id: McpDefinitionId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectMcpConnectorOutput {
+    pub disconnected: bool,
+}
+
 #[derive(Debug, Error)]
 enum McpCommandError {
     #[error("{0}")]
@@ -209,6 +298,111 @@ pub async fn set_mcp_tool_policy(
     set_tool_policy(&repo, input)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn start_mcp_connect(
+    state: State<'_, WorkspaceCommandState>,
+    coordinator: State<'_, McpConnectCoordinator>,
+    input: StartMcpConnectInput,
+) -> Result<StartMcpConnectOutput, String> {
+    let stores = connect_stores(&state)?;
+    let definition = stores
+        .repo
+        .get_mcp_definition(&input.definition_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "MCP integration not found".to_string())?;
+    let user_client = input
+        .client_id
+        .map(|client_id| client_id.trim().to_string())
+        .filter(|client_id| !client_id.is_empty())
+        .map(|client_id| UserProvidedClient {
+            client_id,
+            client_secret: input
+                .client_secret
+                .map(|secret| secret.trim().to_string())
+                .filter(|secret| !secret.is_empty()),
+        });
+    Ok(
+        match coordinator.start(stores, &definition, user_client).await {
+            Ok(ConnectStart::NoAuthRequired) => StartMcpConnectOutput::NoAuthRequired,
+            Ok(ConnectStart::Authorize {
+                login_id,
+                authorization_url,
+            }) => StartMcpConnectOutput::Authorize {
+                login_id,
+                authorization_url,
+            },
+            Err(error) => StartMcpConnectOutput::Failed {
+                reason: connect_failure(&error),
+                message: error.to_string(),
+            },
+        },
+    )
+}
+
+#[tauri::command]
+pub async fn wait_mcp_connect(
+    coordinator: State<'_, McpConnectCoordinator>,
+    input: McpConnectLoginInput,
+) -> Result<WaitMcpConnectOutput, String> {
+    Ok(match coordinator.wait(&input.login_id).await {
+        Ok(()) => WaitMcpConnectOutput::Connected,
+        Err(error) => WaitMcpConnectOutput::Failed {
+            reason: connect_failure(&error),
+            message: error.to_string(),
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn cancel_mcp_connect(
+    coordinator: State<'_, McpConnectCoordinator>,
+    input: McpConnectLoginInput,
+) -> Result<CancelMcpConnectOutput, String> {
+    Ok(CancelMcpConnectOutput {
+        cancelled: coordinator.cancel(&input.login_id),
+    })
+}
+
+#[tauri::command]
+pub async fn disconnect_mcp_connector(
+    state: State<'_, WorkspaceCommandState>,
+    coordinator: State<'_, McpConnectCoordinator>,
+    input: DisconnectMcpConnectorInput,
+) -> Result<DisconnectMcpConnectorOutput, String> {
+    let stores = connect_stores(&state)?;
+    let disconnected = coordinator
+        .disconnect(&stores, &input.definition_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(DisconnectMcpConnectorOutput { disconnected })
+}
+
+fn connect_stores(state: &WorkspaceCommandState) -> Result<ConnectStores, String> {
+    let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    Ok(ConnectStores {
+        repo: Arc::new(repo),
+        credentials: Arc::new(SystemCredentialStore::default()),
+    })
+}
+
+fn connect_failure(error: &McpOauthError) -> McpConnectFailure {
+    match error {
+        McpOauthError::NotMcpServer => McpConnectFailure::NotMcpServer,
+        McpOauthError::ClientRegistrationRequired => McpConnectFailure::ClientRequired,
+        McpOauthError::ClientRegistrationRejected(_) => McpConnectFailure::ClientRejected,
+        McpOauthError::AuthorizationDenied(_) => McpConnectFailure::Declined,
+        McpOauthError::Cancelled => McpConnectFailure::Cancelled,
+        McpOauthError::Timeout => McpConnectFailure::TimedOut,
+        McpOauthError::Transient(_) => McpConnectFailure::Transient,
+        McpOauthError::Discovery(_)
+        | McpOauthError::StateMismatch
+        | McpOauthError::IssuerMismatch
+        | McpOauthError::TokenExchange(_)
+        | McpOauthError::ReauthorizationRequired => McpConnectFailure::Other,
+    }
 }
 
 async fn list_integrations<R>(repo: &R) -> McpCommandResult<ListMcpIntegrationsOutput>

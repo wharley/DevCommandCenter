@@ -8,6 +8,7 @@ pub mod delivery_failure;
 pub mod events;
 pub mod git;
 pub mod guarded_undo_runtime;
+pub mod mcp_connect;
 pub mod process_runtime_registry;
 pub mod provider_delta_coalescer;
 pub mod run;

@@ -1,12 +1,15 @@
 use dcc_core::application::ActivateMcpDefinitionInput;
 use dcc_tauri::{
     commands::mcp_commands::{
-        self as mcp_command_impl, ActivateMcpIntegrationOutput, CreateMcpIntegrationInput,
-        CreateMcpIntegrationOutput, DisableMcpIntegrationInput, DisableMcpIntegrationOutput,
+        self as mcp_command_impl, ActivateMcpIntegrationOutput, CancelMcpConnectOutput,
+        CreateMcpIntegrationInput, CreateMcpIntegrationOutput, DisableMcpIntegrationInput,
+        DisableMcpIntegrationOutput, DisconnectMcpConnectorInput, DisconnectMcpConnectorOutput,
         DisconnectMcpOauthInput, DisconnectMcpOauthOutput, ListMcpIntegrationsOutput,
-        RemoveMcpIntegrationInput, RemoveMcpIntegrationOutput, SetMcpToolPolicyInput,
-        SetMcpToolPolicyOutput,
+        McpConnectLoginInput, RemoveMcpIntegrationInput, RemoveMcpIntegrationOutput,
+        SetMcpToolPolicyInput, SetMcpToolPolicyOutput, StartMcpConnectInput, StartMcpConnectOutput,
+        WaitMcpConnectOutput,
     },
+    mcp_connect::McpConnectCoordinator,
     state::WorkspaceCommandState,
 };
 use tauri::State;
@@ -64,4 +67,38 @@ pub async fn set_mcp_tool_policy(
     input: SetMcpToolPolicyInput,
 ) -> Result<SetMcpToolPolicyOutput, String> {
     mcp_command_impl::set_mcp_tool_policy(state, input).await
+}
+
+#[tauri::command]
+pub async fn start_mcp_connect(
+    state: State<'_, WorkspaceCommandState>,
+    coordinator: State<'_, McpConnectCoordinator>,
+    input: StartMcpConnectInput,
+) -> Result<StartMcpConnectOutput, String> {
+    mcp_command_impl::start_mcp_connect(state, coordinator, input).await
+}
+
+#[tauri::command]
+pub async fn wait_mcp_connect(
+    coordinator: State<'_, McpConnectCoordinator>,
+    input: McpConnectLoginInput,
+) -> Result<WaitMcpConnectOutput, String> {
+    mcp_command_impl::wait_mcp_connect(coordinator, input).await
+}
+
+#[tauri::command]
+pub async fn cancel_mcp_connect(
+    coordinator: State<'_, McpConnectCoordinator>,
+    input: McpConnectLoginInput,
+) -> Result<CancelMcpConnectOutput, String> {
+    mcp_command_impl::cancel_mcp_connect(coordinator, input).await
+}
+
+#[tauri::command]
+pub async fn disconnect_mcp_connector(
+    state: State<'_, WorkspaceCommandState>,
+    coordinator: State<'_, McpConnectCoordinator>,
+    input: DisconnectMcpConnectorInput,
+) -> Result<DisconnectMcpConnectorOutput, String> {
+    mcp_command_impl::disconnect_mcp_connector(state, coordinator, input).await
 }

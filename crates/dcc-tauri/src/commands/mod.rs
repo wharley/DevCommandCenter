@@ -42,8 +42,10 @@ pub use forge_commands::{
     workspace_review_state,
 };
 pub use mcp_commands::{
-    activate_mcp_integration, create_mcp_integration, disable_mcp_integration,
-    disconnect_mcp_oauth, list_mcp_integrations, remove_mcp_integration, set_mcp_tool_policy,
+    activate_mcp_integration, cancel_mcp_connect, create_mcp_integration,
+    disable_mcp_integration, disconnect_mcp_connector, disconnect_mcp_oauth,
+    list_mcp_integrations, remove_mcp_integration, set_mcp_tool_policy, start_mcp_connect,
+    wait_mcp_connect,
 };
 pub use provider_commands::{
     cancel_provider_account_sign_in, create_provider_account, get_provider_availability,

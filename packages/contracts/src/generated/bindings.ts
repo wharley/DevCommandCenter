@@ -4,7 +4,7 @@
 /* Constants */
 export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","cancelRunningDelegation":"cancel_running_delegation","completeDelegation":"complete_delegation","completeTask":"complete_task","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation","startTaskProposal":"start_task_proposal"} as const;
 
-export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy"} as const;
+export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","cancelMcpConnect":"cancel_mcp_connect","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpConnector":"disconnect_mcp_connector","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpToolPolicy":"set_mcp_tool_policy","startMcpConnect":"start_mcp_connect","waitMcpConnect":"wait_mcp_connect"} as const;
 
 export const PROVIDER_METHODS = {"cancelProviderAccountSignIn":"cancel_provider_account_sign_in","checkProviderExecutable":"check_provider_executable","connectAntigravity":"connect_antigravity","createProviderAccount":"create_provider_account","getAntigravityStatus":"get_antigravity_status","getProviderAvailability":"get_provider_availability","installAntigravity":"install_antigravity","listProviderAccounts":"list_provider_accounts","listProviders":"list_providers","providerAccountReset":"provider_account_reset","providerAccountStatus":"provider_account_status","providerAccountUsage":"provider_account_usage","removeProviderAccount":"remove_provider_account","renameProviderAccount":"rename_provider_account","setProviderAvailability":"set_provider_availability","signInProviderAccount":"sign_in_provider_account"} as const;
 
@@ -197,6 +197,10 @@ export type CancelDelegationInput = {
 
 export type CancelDelegationOutput = {
 	delegation: Delegation,
+};
+
+export type CancelMcpConnectOutput = {
+	cancelled: boolean,
 };
 
 export type CancelRunningDelegationInput = {
@@ -1016,6 +1020,14 @@ export type DisableMcpIntegrationOutput = {
 	changed: boolean,
 };
 
+export type DisconnectMcpConnectorInput = {
+	definitionId: McpDefinitionId,
+};
+
+export type DisconnectMcpConnectorOutput = {
+	disconnected: boolean,
+};
+
 export type DisconnectMcpOauthInput = {
 	definitionId: McpDefinitionId,
 	providerId: ProviderId,
@@ -1385,6 +1397,14 @@ export type McpConformanceEvidence = {
 export type McpConformanceTransportEvidence = {
 	transport: McpTransportKind,
 	checks: McpConformanceCheck[],
+};
+
+export type McpConnectFailure = "notMcpServer" |
+// The server needs the user's own OAuth app (client id/secret).
+"clientRequired" | "clientRejected" | "declined" | "cancelled" | "timedOut" | "transient" | "other";
+
+export type McpConnectLoginInput = {
+	loginId: string,
 };
 
 export type McpCredentialInput = {
@@ -2750,6 +2770,22 @@ export type StartDelegationOutput = {
 	delegation: Delegation,
 };
 
+export type StartMcpConnectInput = {
+	definitionId: McpDefinitionId,
+	/**
+	 *  The user's own OAuth app, for servers that register no clients
+	 *  (e.g. Slack). Write-only, like credential secrets.
+	 */
+	clientId?: string | null,
+	clientSecret?: string | null,
+};
+
+export type StartMcpConnectOutput =
+// The server works without a sign-in.
+{ kind: "noAuthRequired" } |
+// Open `authorizationUrl` in the browser, then call `wait_mcp_connect`.
+{ kind: "authorize"; loginId: string; authorizationUrl: string } | { kind: "failed"; reason: McpConnectFailure; message: string };
+
 export type StartMcpOauthInput = {
 	sessionId: string,
 	definitionId: string,
@@ -2974,6 +3010,8 @@ export type UsageTotals = {
 	totalTokens: number,
 	costUsd?: number | null,
 };
+
+export type WaitMcpConnectOutput = { kind: "connected" } | { kind: "failed"; reason: McpConnectFailure; message: string };
 
 export type WaitMcpOauthInput = {
 	sessionId: string,

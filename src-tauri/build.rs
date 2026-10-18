@@ -269,7 +269,9 @@ use dcc_tauri::commands::{
         DisableMcpIntegrationInput, DisableMcpIntegrationOutput, DisconnectMcpOauthInput,
         DisconnectMcpOauthOutput, ListMcpIntegrationsOutput, McpCredentialInput,
         McpIntegrationRecord, RemoveMcpIntegrationInput, RemoveMcpIntegrationOutput,
-        SetMcpToolPolicyInput, SetMcpToolPolicyOutput,
+        SetMcpToolPolicyInput, SetMcpToolPolicyOutput, StartMcpConnectInput,
+        StartMcpConnectOutput, McpConnectLoginInput, WaitMcpConnectOutput, McpConnectFailure,
+        CancelMcpConnectOutput, DisconnectMcpConnectorInput, DisconnectMcpConnectorOutput,
     },
     provider_commands::{
         AntigravityStatusInput, AntigravityStatusOutput, ConnectAntigravityInput,
@@ -655,6 +657,10 @@ struct McpMethods {
     remove_mcp_integration: String,
     disconnect_mcp_oauth: String,
     set_mcp_tool_policy: String,
+    start_mcp_connect: String,
+    wait_mcp_connect: String,
+    cancel_mcp_connect: String,
+    disconnect_mcp_connector: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1015,6 +1021,14 @@ fn main() {
         .typ::<DisconnectMcpOauthOutput>()
         .typ::<SetMcpToolPolicyInput>()
         .typ::<SetMcpToolPolicyOutput>()
+        .typ::<StartMcpConnectInput>()
+        .typ::<StartMcpConnectOutput>()
+        .typ::<McpConnectLoginInput>()
+        .typ::<WaitMcpConnectOutput>()
+        .typ::<McpConnectFailure>()
+        .typ::<CancelMcpConnectOutput>()
+        .typ::<DisconnectMcpConnectorInput>()
+        .typ::<DisconnectMcpConnectorOutput>()
         .typ::<StartThreadInput>()
         .typ::<StartThreadOutput>()
         .typ::<ApplyTaskTitleInput>()
@@ -1352,6 +1366,10 @@ fn main() {
             remove_mcp_integration: "remove_mcp_integration".to_string(),
             disconnect_mcp_oauth: "disconnect_mcp_oauth".to_string(),
             set_mcp_tool_policy: "set_mcp_tool_policy".to_string(),
+            start_mcp_connect: "start_mcp_connect".to_string(),
+            wait_mcp_connect: "wait_mcp_connect".to_string(),
+            cancel_mcp_connect: "cancel_mcp_connect".to_string(),
+            disconnect_mcp_connector: "disconnect_mcp_connector".to_string(),
         },
     );
 
