@@ -134,3 +134,57 @@ describe("UserMessage image attachments", () => {
 		expect(container.querySelector("img")).toBeNull();
 	});
 });
+
+describe("UserMessage file mentions", () => {
+	let container: HTMLDivElement;
+	let root: Root;
+
+	beforeEach(() => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		container = document.createElement("div");
+		document.body.append(container);
+		root = createRoot(container);
+	});
+
+	afterEach(() => {
+		act(() => root.unmount());
+		container.remove();
+	});
+
+	const path = "src/app/(private)/admin/[storeId]/collections/page.tsx";
+
+	it("shows a mention as an inline chip that opens the file", async () => {
+		const onOpenFileReference = vi.fn();
+		await act(async () => {
+			root.render(
+				<UserMessage
+					content={`ajusta @${path} para paginar`}
+					label="You"
+					workspacePath="/repo"
+					onOpenFileReference={onOpenFileReference}
+				/>,
+			);
+		});
+		await vi.waitFor(() => {
+			expect(container.querySelector("[data-file-mention]")).not.toBeNull();
+		});
+		const chip = container.querySelector<HTMLAnchorElement>("a[data-file-mention]")!;
+		expect(chip.dataset.fileMention).toBe(path);
+		expect(chip.textContent).toBe("collections/page.tsx");
+		// Stays in the sentence, not lifted into the attachment row.
+		expect(chip.closest("p")?.textContent).toBe("ajusta collections/page.tsx para paginar");
+		expect(container.querySelector("[data-testid=user-message-attachments]")).toBeNull();
+		await act(async () => chip.click());
+		expect(onOpenFileReference).toHaveBeenCalledWith({ path, line: null, column: null });
+	});
+
+	it("shows a plain chip when the file cannot be opened from here", async () => {
+		await act(async () => {
+			root.render(<UserMessage content={`olha @${path}`} label="You" />);
+		});
+		await vi.waitFor(() => {
+			expect(container.querySelector("span[data-file-mention]")).not.toBeNull();
+		});
+		expect(container.querySelector("a[data-file-mention]")).toBeNull();
+	});
+});

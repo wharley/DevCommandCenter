@@ -11,9 +11,9 @@ import {
 	type SerializedLexicalNode,
 	type Spread,
 } from "lexical";
-import { FileText } from "lucide-react";
 import type { ReactNode } from "react";
 import { ComposerInlineBadge } from "@/components/ComposerInlineBadge";
+import { FileMentionLabel } from "@/components/FileMentionLabel";
 import { pathBasename } from "@/lib/path-basename";
 
 type SerializedFileBadgeNode = Spread<{ filePath: string }, SerializedLexicalNode>;
@@ -30,10 +30,8 @@ function ComposerFileBadge({
 
 	return (
 		<ComposerInlineBadge
-			icon={
-				<FileText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.8} />
-			}
 			label={fileName}
+			title={filePath}
 			onRemove={() => {
 				editor.update(() => {
 					const node = $getNodeByKey(nodeKey);
@@ -42,7 +40,12 @@ function ComposerFileBadge({
 					}
 				});
 			}}
-		/>
+		>
+			<FileMentionLabel
+				path={filePath}
+				className="max-w-[260px] self-center text-foreground [&_svg]:text-muted-foreground [&_svg]:opacity-100"
+			/>
+		</ComposerInlineBadge>
 	);
 }
 

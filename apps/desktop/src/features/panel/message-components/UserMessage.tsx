@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import { Bug, Copy, File, FileImage, GitFork, Pencil, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TurnEvidenceSummary } from "@dcc/contracts";
@@ -11,6 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useImagePreview } from "@/lib/image-preview";
 import { LazyStreamdown } from "@/components/streamdown-loader";
+import { fileMentionMarkdown } from "@/components/streamdown-link-presentation";
+import { WorkspaceFileLinkProvider } from "@/components/workspace-file-link-context";
+import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import { pathBasename } from "@/lib/path-basename";
 import { isImageFilePath } from "@/lib/is-image-path";
 import { promptParts, type PromptPart } from "@/lib/prompt-attachments";
@@ -80,20 +83,34 @@ function ImageAttachment({ path }: { path: string }) {
 }
 
 function UserPromptContent({ content }: { content: string }) {
-	const parts = promptParts(content);
+	const parts = useMemo(() => promptParts(content), [content]);
 	const attachments = parts.filter(
 		(part): part is Extract<PromptPart, { kind: "attachment" }> =>
 			part.kind === "attachment",
 	);
 	const text = parts
-		.filter(
-			(part): part is Extract<PromptPart, { kind: "text" }> =>
-				part.kind === "text",
+		.map((part) =>
+			part.kind === "text" ? part.value : part.kind === "mention" ? `@${part.path}` : "",
 		)
-		.map((part) => part.value)
 		.join("")
 		.trim();
-	const markdown = useMemo(() => fenceBareJson(text), [text]);
+	// Workspace mentions stay where they were written, as inline file chips.
+	const markdown = useMemo(
+		() =>
+			fenceBareJson(
+				parts
+					.map((part) =>
+						part.kind === "text"
+							? part.value
+							: part.kind === "mention"
+								? fileMentionMarkdown(part.path)
+								: "",
+					)
+					.join("")
+					.trim(),
+			),
+		[parts],
+	);
 	return (
 		<div className="conversation-body-text w-full overflow-hidden rounded-xl border border-border/45 bg-accent/35 px-3.5 py-3 leading-7">
 			{attachments.length > 0 ? (
@@ -166,6 +183,8 @@ export function UserMessage({
 	createdAt,
 	evidence = null,
 	retryOfTurnId = null,
+	workspacePath = null,
+	onOpenFileReference,
 	onEdit,
 	onFork,
 }: {
@@ -175,87 +194,105 @@ export function UserMessage({
 	evidence?: TurnEvidenceSummary | null;
 	/** Set when this turn explicitly re-ran an aborted turn. */
 	retryOfTurnId?: string | null;
+	/** With `onOpenFileReference`, makes `@` file mentions open in the code column. */
+	workspacePath?: string | null;
+	onOpenFileReference?: (reference: WorkspaceFileReference) => void;
 	onEdit?: () => void;
 	/** Starts a new thread re-anchored on everything before this message. */
 	onFork?: () => void;
 }) {
 	const { t } = useTranslation("common");
+	const openFile = useCallback(
+		(reference: WorkspaceFileReference) => onOpenFileReference?.(reference),
+		[onOpenFileReference],
+	);
+	const getFileTitle = useCallback(
+		(reference: WorkspaceFileReference) =>
+			t("conversation.fileReference.open", { path: reference.path }),
+		[t],
+	);
 	return (
-		<div
-			data-message-role="user"
-			className="conversation-thread-enter conversation-fade-in group/user flex min-w-0 justify-end"
+		<WorkspaceFileLinkProvider
+			workspaceRoot={onOpenFileReference ? workspacePath : null}
+			onOpenFile={openFile}
+			getTitle={getFileTitle}
 		>
-			<div className="relative flex max-w-[75%] min-w-0 flex-col items-end pb-5">
-				<UserPromptContent content={content} />
-				<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
-					{retryOfTurnId ? (
-						<span
-							className="inline-flex items-center gap-1 rounded-full border border-border/60 px-1.5 py-px text-[10px] leading-4 text-muted-foreground"
-							title={t("conversation.message.retryChipHint")}
-							data-testid="user-message-retry"
-						>
-							<RotateCcw className="size-3" aria-hidden />
-							{t("conversation.message.retryChip")}
-						</span>
-					) : null}
-					{evidence && evidence.items.length > 0 ? (
-						<UserMessageEvidenceChip evidence={evidence} />
-					) : null}
-					<MessageTimestamp createdAt={createdAt} />
-				</div>
-				<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/user:pointer-events-auto group-hover/user:opacity-100 group-focus-within/user:pointer-events-auto group-focus-within/user:opacity-100">
-					{onFork ? (
+			<div
+				data-message-role="user"
+				className="conversation-thread-enter conversation-fade-in group/user flex min-w-0 justify-end"
+			>
+				<div className="relative flex max-w-[75%] min-w-0 flex-col items-end pb-5">
+					<UserPromptContent content={content} />
+					<div className="mt-1 flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/60">
+						{retryOfTurnId ? (
+							<span
+								className="inline-flex items-center gap-1 rounded-full border border-border/60 px-1.5 py-px text-[10px] leading-4 text-muted-foreground"
+								title={t("conversation.message.retryChipHint")}
+								data-testid="user-message-retry"
+							>
+								<RotateCcw className="size-3" aria-hidden />
+								{t("conversation.message.retryChip")}
+							</span>
+						) : null}
+						{evidence && evidence.items.length > 0 ? (
+							<UserMessageEvidenceChip evidence={evidence} />
+						) : null}
+						<MessageTimestamp createdAt={createdAt} />
+					</div>
+					<div className="pointer-events-none absolute right-1 bottom-0 flex items-center justify-end opacity-0 transition-opacity group-hover/user:pointer-events-auto group-hover/user:opacity-100 group-focus-within/user:pointer-events-auto group-focus-within/user:opacity-100">
+						{onFork ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								aria-label={t("conversation.message.forkUser")}
+								title={t("conversation.message.forkUser")}
+								className={cn(
+									"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
+									"bg-transparent hover:bg-transparent",
+								)}
+								onClick={onFork}
+							>
+								<GitFork className="size-3.5" aria-hidden />
+							</Button>
+						) : null}
+						{onEdit ? (
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-xs"
+								aria-label={t("conversation.message.editUser")}
+								className={cn(
+									"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
+									"bg-transparent hover:bg-transparent",
+								)}
+								onClick={onEdit}
+							>
+								<Pencil className="size-3.5" aria-hidden />
+							</Button>
+						) : null}
 						<Button
 							type="button"
 							variant="ghost"
 							size="icon-xs"
-							aria-label={t("conversation.message.forkUser")}
-							title={t("conversation.message.forkUser")}
+							aria-label={t("conversation.message.copyUser", { label })}
 							className={cn(
 								"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
 								"bg-transparent hover:bg-transparent",
 							)}
-							onClick={onFork}
+							onClick={async () => {
+								try {
+									await navigator.clipboard.writeText(content);
+								} catch {
+									// Clipboard availability varies across desktop shells; ignore gracefully.
+								}
+							}}
 						>
-							<GitFork className="size-3.5" aria-hidden />
+							<Copy className="size-3.5" aria-hidden />
 						</Button>
-					) : null}
-					{onEdit ? (
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon-xs"
-							aria-label={t("conversation.message.editUser")}
-							className={cn(
-								"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
-								"bg-transparent hover:bg-transparent",
-							)}
-							onClick={onEdit}
-						>
-							<Pencil className="size-3.5" aria-hidden />
-						</Button>
-					) : null}
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-xs"
-						aria-label={t("conversation.message.copyUser", { label })}
-						className={cn(
-							"pointer-events-auto size-5 shrink-0 text-muted-foreground/28 hover:text-muted-foreground",
-							"bg-transparent hover:bg-transparent",
-						)}
-						onClick={async () => {
-							try {
-								await navigator.clipboard.writeText(content);
-							} catch {
-								// Clipboard availability varies across desktop shells; ignore gracefully.
-							}
-						}}
-					>
-						<Copy className="size-3.5" aria-hidden />
-					</Button>
+					</div>
 				</div>
 			</div>
-		</div>
+		</WorkspaceFileLinkProvider>
 	);
 }

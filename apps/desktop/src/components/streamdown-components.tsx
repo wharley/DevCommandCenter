@@ -5,7 +5,10 @@ import { CodeBlock } from "@/components/ai/code-block";
 import { fenceStartLine } from "@/components/ai/code-presentation";
 import { openExternal, openPath } from "@/lib/shell-api";
 import { cn } from "@/lib/utils";
+import { FileMentionLabel } from "./FileMentionLabel";
 import {
+	FILE_MENTION_LINK_TITLE,
+	fileMentionPath,
 	getStreamdownLinkKind,
 	isCodeFileReference,
 	isLocalFileHref,
@@ -97,6 +100,40 @@ async function handleLinkClick(
 	await openExternal(href);
 }
 
+/** A file the person mentioned with `@`; opens in the code column when it can. */
+function FileMentionChip({ href }: { href: string }) {
+	const workspaceFileLink = useWorkspaceFileLink();
+	const path = fileMentionPath(href);
+	const chipClassName =
+		"mx-0.5 inline-flex max-w-full items-center rounded-md border border-border/60 bg-background/70 px-1.5 align-middle text-[12px] leading-5 text-foreground no-underline";
+	if (!workspaceFileLink?.workspaceRoot) {
+		return (
+			<span className={chipClassName} title={path} data-file-mention={path}>
+				<FileMentionLabel path={path} />
+			</span>
+		);
+	}
+	const reference = { path, line: null, column: null };
+	return (
+		<a
+			href={href}
+			title={workspaceFileLink.getTitle?.(reference) ?? path}
+			data-file-mention={path}
+			className={cn(
+				chipClassName,
+				"cursor-pointer transition-colors hover:border-primary/35 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+			)}
+			onClick={(event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				workspaceFileLink.onOpenFile(reference);
+			}}
+		>
+			<FileMentionLabel path={path} />
+		</a>
+	);
+}
+
 function StreamdownAnchor({
 	children,
 	className,
@@ -105,6 +142,9 @@ function StreamdownAnchor({
 	...props
 }: React.ComponentProps<"a"> & ExtraProps) {
 	const workspaceFileLink = useWorkspaceFileLink();
+	if (title === FILE_MENTION_LINK_TITLE && href) {
+		return <FileMentionChip href={href} />;
+	}
 	const workspaceReference = parseWorkspaceFileReference(
 		href,
 		workspaceFileLink?.workspaceRoot,

@@ -7,25 +7,33 @@ import { useTranslation } from "react-i18next";
 export function ComposerInlineBadge({
 	icon,
 	label,
+	children,
+	title,
 	onRemove,
 	className,
 }: {
-	icon: ReactNode;
+	icon?: ReactNode;
+	/** Accessible name; also the visible text when no `children` are given. */
 	label: string;
+	children?: ReactNode;
+	title?: string;
 	onRemove: () => void;
 	className?: string;
 }) {
 	const { t } = useTranslation("common");
 	return (
 		<span
+			title={title}
 			className={cn(
 				"mx-0.5 inline-flex items-baseline rounded-sm border border-border/60 text-[14px] leading-none transition-colors hover:border-muted-foreground/40 hover:bg-accent/40",
 				className,
 			)}
 		>
 			<span className="inline-flex min-w-0 items-baseline gap-1.5 py-[3px] pl-2 pr-1">
-				<span className="inline-flex self-center">{icon}</span>
-				<span className="max-w-[200px] truncate text-muted-foreground">{label}</span>
+				{icon ? <span className="inline-flex self-center">{icon}</span> : null}
+				{children ?? (
+					<span className="max-w-[200px] truncate text-muted-foreground">{label}</span>
+				)}
 			</span>
 			<button
 				type="button"

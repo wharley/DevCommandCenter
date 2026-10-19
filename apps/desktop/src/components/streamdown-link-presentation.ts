@@ -49,3 +49,27 @@ const FILE_LINK_TARGET = /\]\((<?)file:\/\/(?:localhost)?(?=\/|[a-zA-Z]:)/g;
 export function unwrapFileLinkTargets(markdown: string) {
 	return markdown.includes("file://") ? markdown.replace(FILE_LINK_TARGET, "]($1") : markdown;
 }
+
+/** Link title that marks a markdown link as an `@` workspace file mention. */
+export const FILE_MENTION_LINK_TITLE = "dcc-file-mention";
+
+/**
+ * A `@relative/path` mention as a markdown link the anchor renders as a file
+ * chip. The angle-bracket target keeps `(group)` and `[param]` segments intact;
+ * the `./` prefix is what gets a relative target past the link sanitizer.
+ */
+export function fileMentionMarkdown(path: string) {
+	const name = path.slice(path.lastIndexOf("/") + 1).replace(/[\\[\]*_`]/g, "\\$&");
+	return `[@${name}](<./${path}> "${FILE_MENTION_LINK_TITLE}")`;
+}
+
+/** The workspace path back from a mention link's sanitized `href`. */
+export function fileMentionPath(href: string) {
+	let path = href;
+	try {
+		path = decodeURIComponent(href);
+	} catch {
+		// Keep the encoded form; it still names the file.
+	}
+	return path.replace(/^\.?\//, "");
+}

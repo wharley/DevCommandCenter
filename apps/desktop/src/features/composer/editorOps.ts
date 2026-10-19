@@ -42,7 +42,7 @@ export function setEditorText(editor: LexicalEditor, text: string) {
 
 /**
  * Replaces the draft with a prompt that was sent before, turning its
- * `@/path` attachments back into badges so they travel again as attachments.
+ * `@/path` attachments and `@relative/path` mentions back into badges.
  */
 export function setEditorPrompt(editor: LexicalEditor, prompt: string) {
 	editor.update(() => {
@@ -59,6 +59,8 @@ export function setEditorPrompt(editor: LexicalEditor, prompt: string) {
 						? $createImageBadgeNode(part.path)
 						: $createFileBadgeNode(part.path),
 				);
+			} else if (part.kind === "mention") {
+				paragraph.append($createFileBadgeNode(part.path));
 			} else if (part.value.length > 0) {
 				paragraph.append($createTextNode(part.value));
 			}

@@ -207,12 +207,16 @@ const UserMessageRow = memo(function UserMessageRow({
 	canFork,
 	editFromMessage,
 	forkFromMessage,
+	workspacePath,
+	openFileReference,
 }: {
 	message: WorkspaceMessage;
 	canEdit: boolean;
 	canFork: boolean;
 	editFromMessage: (request: EditFromHereRequest) => void;
 	forkFromMessage: (messageId: string) => void;
+	workspacePath: string | null;
+	openFileReference?: (reference: WorkspaceFileReference) => void;
 }) {
 	const onFork = useMemo(
 		() => (canFork ? () => forkFromMessage(message.id) : undefined),
@@ -237,6 +241,8 @@ const UserMessageRow = memo(function UserMessageRow({
 			createdAt={message.createdAt}
 			evidence={message.evidence ?? null}
 			retryOfTurnId={message.retryOfTurnId ?? null}
+			workspacePath={workspacePath}
+			onOpenFileReference={openFileReference}
 			onFork={onFork}
 			onEdit={onEdit}
 		/>
@@ -1011,6 +1017,8 @@ export function ActiveThreadViewport({
 												canFork={Boolean(onForkFromMessage)}
 												editFromMessage={editFromMessage}
 												forkFromMessage={forkFromMessage}
+												workspacePath={workspacePath}
+												openFileReference={assistantRowContext.openFileReference}
 											/>
 										</div>
 									);
