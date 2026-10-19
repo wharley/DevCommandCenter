@@ -7,7 +7,9 @@ use dcc_tauri::{
         DisconnectMcpOauthInput, DisconnectMcpOauthOutput, ListMcpIntegrationsOutput,
         McpConnectLoginInput, RemoveMcpIntegrationInput, RemoveMcpIntegrationOutput,
         SetMcpToolPolicyInput, SetMcpToolPolicyOutput, StartMcpConnectInput, StartMcpConnectOutput,
-        SetMcpProjectEnabledInput, SetMcpProjectEnabledOutput, TestMcpIntegrationInput,
+        FetchMcpConnectorLogoInput, McpConnectorDetailsOutput, SetMcpConnectorLogoInput,
+        SetMcpConnectorScopesInput, SetMcpProjectEnabledInput, SetMcpProjectEnabledOutput,
+        TestMcpIntegrationInput,
         TestMcpIntegrationOutput, WaitMcpConnectOutput,
     },
     connector_gateway::ConnectorGateway,
@@ -92,6 +94,30 @@ pub async fn wait_mcp_connect(
     let _ = window.unminimize();
     let _ = window.set_focus();
     output
+}
+
+#[tauri::command]
+pub async fn set_mcp_connector_scopes(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetMcpConnectorScopesInput,
+) -> Result<McpConnectorDetailsOutput, String> {
+    mcp_command_impl::set_mcp_connector_scopes(state, input).await
+}
+
+#[tauri::command]
+pub async fn set_mcp_connector_logo(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetMcpConnectorLogoInput,
+) -> Result<McpConnectorDetailsOutput, String> {
+    mcp_command_impl::set_mcp_connector_logo(state, input).await
+}
+
+#[tauri::command]
+pub async fn fetch_mcp_connector_logo(
+    state: State<'_, WorkspaceCommandState>,
+    input: FetchMcpConnectorLogoInput,
+) -> Result<McpConnectorDetailsOutput, String> {
+    mcp_command_impl::fetch_mcp_connector_logo(state, input).await
 }
 
 #[tauri::command]

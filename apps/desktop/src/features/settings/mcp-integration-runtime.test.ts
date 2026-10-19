@@ -49,6 +49,8 @@ function integration(
 		credentialCount: 0,
 		oauthProviderIds: [],
 		connectionCheck: null,
+		scopes: null,
+		logo: null,
 	};
 }
 

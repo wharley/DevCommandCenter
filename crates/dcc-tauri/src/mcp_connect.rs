@@ -124,6 +124,17 @@ impl McpConnectCoordinator {
             .ok()
             .flatten()
             .map(|credential| credential.client);
+        let scopes = stores
+            .repo
+            .list_mcp_connector_details()
+            .await
+            .ok()
+            .and_then(|details| {
+                details
+                    .into_iter()
+                    .find(|details| details.definition_id == definition.id)
+            })
+            .and_then(|details| details.scopes);
         let started = begin_authorization(
             &self.http,
             url,
@@ -132,6 +143,7 @@ impl McpConnectCoordinator {
                 metadata_document_allowed: fixed_port && DCC_CLIENT_METADATA_PUBLISHED,
                 user_client,
                 previous_client,
+                scopes,
             },
         )
         .await;

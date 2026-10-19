@@ -9,6 +9,10 @@ use uuid::Uuid;
 /// Largest image a thumbnail is read for (the desktop's composer preview).
 pub const IMAGE_PREVIEW_MAX_BYTES: u64 = 15 * 1024 * 1024;
 
+/// Largest audio file the person's message plays inline (voice notes are far
+/// smaller; a podcast-sized file just stays a chip).
+pub const AUDIO_PREVIEW_MAX_BYTES: u64 = 30 * 1024 * 1024;
+
 /// Largest file the phone may attach, after its own compression.
 pub const MAX_PHONE_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
 
@@ -104,6 +108,39 @@ pub fn image_media_type(path: &Path) -> Option<&'static str> {
     }
 }
 
+pub fn audio_media_type(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("mp3") => Some("audio/mpeg"),
+        Some("m4a") | Some("mp4a") => Some("audio/mp4"),
+        Some("aac") => Some("audio/aac"),
+        Some("wav") => Some("audio/wav"),
+        Some("ogg") | Some("oga") | Some("opus") => Some("audio/ogg"),
+        Some("flac") => Some("audio/flac"),
+        Some("aif") | Some("aiff") => Some("audio/aiff"),
+        Some("caf") => Some("audio/x-caf"),
+        _ => None,
+    }
+}
+
+/// The bytes of an absolute audio path, for the player in the person's
+/// message. `None` when it is not audio, too large or gone.
+pub fn read_audio_bytes(path: &Path, max_bytes: u64) -> Option<Vec<u8>> {
+    if !path.is_absolute() {
+        return None;
+    }
+    audio_media_type(path)?;
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > max_bytes {
+        return None;
+    }
+    std::fs::read(path).ok()
+}
+
 /// An absolute image path as a data URL, for the thumbnail in the person's
 /// message. `None` when it is not an image, too large or gone (the OS cleans
 /// the temp dir): a normal outcome.
@@ -164,5 +201,20 @@ mod tests {
         assert!(read_image_data_url(&file, IMAGE_PREVIEW_MAX_BYTES).is_none());
         std::fs::remove_file(image).unwrap();
         std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn audio_is_read_only_for_audio_paths_within_the_cap() {
+        let voice = save_temp_file(b"OggS-fixture", "WhatsApp Audio.opus").unwrap();
+        assert_eq!(
+            read_audio_bytes(&voice, AUDIO_PREVIEW_MAX_BYTES).as_deref(),
+            Some(&b"OggS-fixture"[..])
+        );
+        assert!(read_audio_bytes(&voice, 4).is_none());
+        assert!(read_audio_bytes(Path::new("WhatsApp-Audio.opus"), AUDIO_PREVIEW_MAX_BYTES).is_none());
+        let notes = save_temp_file(b"hello", "notas.md").unwrap();
+        assert!(read_audio_bytes(&notes, AUDIO_PREVIEW_MAX_BYTES).is_none());
+        std::fs::remove_dir_all(voice.parent().unwrap()).unwrap();
+        std::fs::remove_dir_all(notes.parent().unwrap()).unwrap();
     }
 }

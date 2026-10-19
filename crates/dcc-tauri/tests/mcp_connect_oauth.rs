@@ -218,6 +218,33 @@ async fn a_dcc_sign_in_replaces_the_old_provider_grant() {
 }
 
 #[tokio::test]
+async fn chosen_scopes_replace_the_servers_suggestion() {
+    let harness = harness(OAuthFixtureConfig::default()).await;
+    connect(&harness).await.expect("connected");
+    assert_eq!(
+        harness.fixture.last_requested_scope().as_deref(),
+        Some("tasks:read"),
+        "the 401 challenge's scope by default"
+    );
+
+    harness
+        .stores
+        .repo
+        .save_mcp_connector_details(&dcc_core::domain::mcp::McpConnectorDetails {
+            definition_id: harness.definition.id.clone(),
+            scopes: Some("tasks:read tasks:write".into()),
+            logo: None,
+        })
+        .await
+        .unwrap();
+    connect(&harness).await.expect("reconnected");
+    assert_eq!(
+        harness.fixture.last_requested_scope().as_deref(),
+        Some("tasks:read tasks:write")
+    );
+}
+
+#[tokio::test]
 async fn concurrent_refreshes_share_one_exchange() {
     let harness = harness(OAuthFixtureConfig::default()).await;
     connect(&harness).await.expect("connected");

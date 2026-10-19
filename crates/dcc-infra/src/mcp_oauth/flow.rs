@@ -35,6 +35,9 @@ pub struct BeginOptions {
     /// Client from an earlier sign-in to the same connector, reused when its
     /// redirect still matches so reconnecting does not register again.
     pub previous_client: Option<McpOauthClient>,
+    /// Scopes the user chose for this connector; they replace the server's
+    /// suggestion (like `codex mcp login --scopes`).
+    pub scopes: Option<String>,
 }
 
 #[derive(Debug)]
@@ -105,10 +108,14 @@ pub async fn begin_authorization(
     )
     .await?;
 
-    let scope = challenge.scope.clone().or_else(|| {
-        (!resource_metadata.scopes_supported.is_empty())
-            .then(|| resource_metadata.scopes_supported.join(" "))
-    });
+    let scope = options
+        .scopes
+        .clone()
+        .or_else(|| challenge.scope.clone())
+        .or_else(|| {
+            (!resource_metadata.scopes_supported.is_empty())
+                .then(|| resource_metadata.scopes_supported.join(" "))
+        });
     let state = random_token();
     let code_verifier = random_token();
     let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));

@@ -6,6 +6,10 @@ import type {
 	DisconnectMcpConnectorInput,
 	DisconnectMcpConnectorOutput,
 	McpConnectLoginInput,
+	FetchMcpConnectorLogoInput,
+	McpConnectorDetailsOutput,
+	SetMcpConnectorLogoInput,
+	SetMcpConnectorScopesInput,
 	SetMcpProjectEnabledInput,
 	SetMcpProjectEnabledOutput,
 	StartMcpConnectInput,
@@ -128,6 +132,30 @@ export function testMcpIntegration(input: TestMcpIntegrationInput) {
 export function setMcpProjectEnabled(input: SetMcpProjectEnabledInput) {
 	requireTauriRuntime();
 	return invoke<SetMcpProjectEnabledOutput>(MCP_METHODS.setMcpProjectEnabled, {
+		input,
+	});
+}
+
+/** Scopes asked at the next sign-in; null or blank uses the server's. */
+export function setMcpConnectorScopes(input: SetMcpConnectorScopesInput) {
+	requireTauriRuntime();
+	return invoke<McpConnectorDetailsOutput>(MCP_METHODS.setMcpConnectorScopes, {
+		input,
+	});
+}
+
+/** Sets (data: URI) or removes (null) a connector's logo. */
+export function setMcpConnectorLogo(input: SetMcpConnectorLogoInput) {
+	requireTauriRuntime();
+	return invoke<McpConnectorDetailsOutput>(MCP_METHODS.setMcpConnectorLogo, {
+		input,
+	});
+}
+
+/** Uses the icon of the connector's own site as its logo, when it has one. */
+export function fetchMcpConnectorLogo(input: FetchMcpConnectorLogoInput) {
+	requireTauriRuntime();
+	return invoke<McpConnectorDetailsOutput>(MCP_METHODS.fetchMcpConnectorLogo, {
 		input,
 	});
 }

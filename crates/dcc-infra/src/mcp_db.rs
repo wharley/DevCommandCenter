@@ -11,6 +11,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use dcc_core::{
     domain::mcp::{
         McpBinding, McpBindingId, McpBindingScope, McpConnectionCheck, McpConnectionState,
+        McpConnectorDetails,
         McpDefinition, McpDefinitionId, McpDefinitionOwnership, McpOauthGrant, McpOauthResourceFingerprint, McpSecretReferenceId,
         McpToolPolicy, McpToolPolicyDecision, McpTransport, McpTrust,
     },
@@ -90,6 +91,13 @@ CREATE TABLE IF NOT EXISTS dcc_mcp_oauth_grants (
 
 CREATE INDEX IF NOT EXISTS idx_dcc_mcp_oauth_grants_definition
 ON dcc_mcp_oauth_grants(definition_id, provider_id);
+
+CREATE TABLE IF NOT EXISTS dcc_mcp_connector_details (
+    definition_id TEXT PRIMARY KEY NOT NULL,
+    scopes TEXT,
+    logo TEXT,
+    FOREIGN KEY (definition_id) REFERENCES dcc_mcp_definitions(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS dcc_mcp_project_exclusions (
     definition_id TEXT NOT NULL,
@@ -684,6 +692,53 @@ impl McpRepo for SqliteMcpRepo {
                 check.checked_at,
             ],
         )
+        .map_err(repository_error)?;
+        Ok(())
+    }
+
+    async fn list_mcp_connector_details(&self) -> Result<Vec<McpConnectorDetails>> {
+        let conn = self.lock_connection()?;
+        let mut statement = conn
+            .prepare(
+                "SELECT definition_id, scopes, logo FROM dcc_mcp_connector_details \
+                 ORDER BY definition_id ASC",
+            )
+            .map_err(repository_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(McpConnectorDetails {
+                    definition_id: McpDefinitionId(row.get(0)?),
+                    scopes: row.get(1)?,
+                    logo: row.get(2)?,
+                })
+            })
+            .map_err(repository_error)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(repository_error)
+    }
+
+    async fn save_mcp_connector_details(&self, details: &McpConnectorDetails) -> Result<()> {
+        details
+            .validate()
+            .map_err(|error| CoreError::InvalidInput(error.to_string()))?;
+        let conn = self.lock_connection()?;
+        if details.scopes.is_none() && details.logo.is_none() {
+            conn.execute(
+                "DELETE FROM dcc_mcp_connector_details WHERE definition_id = ?1",
+                params![details.definition_id.0],
+            )
+        } else {
+            conn.execute(
+                r#"
+                INSERT INTO dcc_mcp_connector_details (definition_id, scopes, logo)
+                VALUES (?1, ?2, ?3)
+                ON CONFLICT(definition_id) DO UPDATE SET
+                    scopes = excluded.scopes,
+                    logo = excluded.logo
+                "#,
+                params![details.definition_id.0, details.scopes, details.logo],
+            )
+        }
         .map_err(repository_error)?;
         Ok(())
     }

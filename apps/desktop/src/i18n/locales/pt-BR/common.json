@@ -2723,15 +2723,32 @@
         "urlLabel": "URL do servidor MCP",
         "nameLabel": "Nome",
         "invalidUrl": "Use uma URL https completa, sem usuário ou senha.",
-        "continue": "Continuar"
+        "continue": "Continuar",
+        "moreOptions": "Mais opções",
+        "scopesLabel": "Permissões (opcional)",
+        "scopesHint": "Separadas por espaço, como support:read reports:read. Vazio usa o que o servidor sugere.",
+        "invalidScopes": "Use nomes de permissão separados por espaço, sem aspas.",
+        "logoLabel": "Logo (opcional)",
+        "logoHint": "Sem imagem, o DCC usa o ícone do site do servidor.",
+        "chooseLogo": "Escolher imagem",
+        "removeLogo": "Remover",
+        "invalidLogo": "Use uma imagem PNG, JPG, GIF, SVG ou WebP de até 256 KB."
       },
       "manage": {
         "lastChecked": "Último teste: {{date}}",
         "toolsTitle": "Ferramentas",
         "toolsHint": "Por padrão cada ferramenta segue o modo da tarefa: pede aprovação em Supervisionado e roda direto em Acesso total. Permitir ou Negar vale sempre.",
-      "policyDefault": "Padrão",
-      "projectsTitle": "Projetos",
-      "projectsHint": "Desligue o conector nos projetos onde ele não deve aparecer. Vale a partir da próxima mensagem.",
+        "policyDefault": "Padrão",
+        "projectsTitle": "Projetos",
+        "projectsHint": "Desligue o conector nos projetos onde ele não deve aparecer. Vale a partir da próxima mensagem.",
+        "scopesTitle": "Permissões",
+        "scopesHint": "Pedidas no próximo login. Vazio usa o que o servidor sugere.",
+        "saveAndReconnect": "Salvar e reconectar",
+        "logoTitle": "Logo",
+        "logoChange": "Trocar imagem",
+        "logoFromSite": "Usar ícone do site",
+        "logoRemove": "Remover",
+        "logoNotFound": "O site não tem um ícone para usar.",
         "noTools": "Teste a conexão para ver as ferramentas.",
         "disconnectConfirm": "Desconectar {{name}}? Os agentes perdem as ferramentas dele e o DCC apaga o login deste computador.",
         "removeConfirm": "Remover {{name}}? Os agentes perdem as ferramentas dele e o DCC esquece este conector."
@@ -4264,7 +4281,10 @@
       "openAtPosition": "Abrir {{path}} no Code Dock em {{position}}"
     },
     "attachment": {
-      "openImage": "Abrir imagem {{name}}"
+      "openImage": "Abrir imagem {{name}}",
+      "playAudio": "Tocar {{name}}",
+      "pauseAudio": "Pausar {{name}}",
+      "audioPosition": "Posição em {{name}}"
     },
     "turnFooter": {
       "tokens": "{{input}} entrada · {{output}} saída",

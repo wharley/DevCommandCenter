@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
@@ -14,14 +14,25 @@ import {
 } from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Switch } from "@/components/ui/switch";
-import { setMcpProjectEnabled, setMcpToolPolicy } from "@/lib/mcp-api";
+import {
+	fetchMcpConnectorLogo,
+	setMcpConnectorLogo,
+	setMcpConnectorScopes,
+	setMcpProjectEnabled,
+	setMcpToolPolicy,
+} from "@/lib/mcp-api";
+import { Input } from "@/components/ui/input";
 import { listRepositories } from "@/lib/workspace-api";
 import {
 	getMcpToolPolicyDecision,
 	listMcpToolAnnotationHints,
 } from "../mcp-integration-runtime";
 import { ConnectorGlyph } from "./connector-logos";
-import type { ConnectorView } from "./connector-model";
+import {
+	isValidScopeList,
+	readLogoFile,
+	type ConnectorView,
+} from "./connector-model";
 
 type ManageConnectorDialogProps = {
 	view: ConnectorView | null;
@@ -30,6 +41,8 @@ type ManageConnectorDialogProps = {
 	onTest: (integration: McpIntegrationRecord) => void;
 	onDisconnect: (view: ConnectorView) => void;
 	onRemove: (view: ConnectorView) => void;
+	/** Opens the sign-in again, e.g. after the scopes changed. */
+	onReconnect: (view: ConnectorView) => void;
 	onChanged: () => void;
 };
 
@@ -40,10 +53,19 @@ export function ManageConnectorDialog({
 	onTest,
 	onDisconnect,
 	onRemove,
+	onReconnect,
 	onChanged,
 }: ManageConnectorDialogProps) {
 	const { t } = useTranslation();
 	const [policyBusy, setPolicyBusy] = useState<string | null>(null);
+	const [scopesDraft, setScopesDraft] = useState("");
+	const [logoBusy, setLogoBusy] = useState(false);
+	const fileInput = useRef<HTMLInputElement>(null);
+	const definitionId = view?.integration.definition.id ?? null;
+	const savedScopes = view?.integration.scopes ?? "";
+	useEffect(() => {
+		setScopesDraft(savedScopes);
+	}, [definitionId, savedScopes]);
 	const repositories = useQuery({
 		queryKey: ["connectorProjects"],
 		queryFn: listRepositories,
@@ -86,6 +108,36 @@ export function ManageConnectorDialog({
 	const appliesGlobally = integration.bindings.some(
 		(binding) => binding.enabled && binding.scope.type === "global",
 	);
+	const customizable = view.isRemote && !view.preset;
+	const scopesChanged = scopesDraft.trim() !== savedScopes;
+	const scopesInvalid = scopesDraft.trim().length > 0 && !isValidScopeList(scopesDraft);
+	const saveScopesAndReconnect = async () => {
+		setPolicyBusy("scopes");
+		try {
+			await setMcpConnectorScopes({ definitionId: id, scopes: scopesDraft.trim() || null });
+			onChanged();
+			onReconnect(view);
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		} finally {
+			setPolicyBusy(null);
+		}
+	};
+	const changeLogo = async (change: () => Promise<{ logo: string | null }>, notFound = false) => {
+		setLogoBusy(true);
+		try {
+			const result = await change();
+			if (notFound && !result.logo) {
+				toast.info(t("settings.connectors.manage.logoNotFound"));
+			}
+			onChanged();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : String(error));
+		} finally {
+			setLogoBusy(false);
+		}
+	};
+
 	const toggleProject = async (projectId: string, enabled: boolean) => {
 		setPolicyBusy(`project:${projectId}`);
 		try {
@@ -127,7 +179,7 @@ export function ManageConnectorDialog({
 		<Dialog open onOpenChange={onOpenChange}>
 			<DialogContent className="flex max-h-[min(640px,calc(100vh-4rem))] w-[520px] max-w-[calc(100vw-4rem)] flex-col gap-0 p-0 sm:max-w-[520px]">
 				<div className="flex items-center gap-3 border-b border-border/50 px-5 py-4 pr-12">
-					<ConnectorGlyph logoId={view.logoId} name={view.name} />
+					<ConnectorGlyph logoId={view.logoId} logoUri={view.logoUri} name={view.name} />
 					<div className="min-w-0 flex-1">
 						<DialogTitle className="truncate text-[14px] font-semibold">
 							{view.name}
@@ -159,6 +211,103 @@ export function ManageConnectorDialog({
 				</div>
 
 				<div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+					{customizable ? (
+						<div className="mb-5 space-y-4">
+							<div>
+								<p className="text-[12px] font-medium text-foreground">
+									{t("settings.connectors.manage.logoTitle")}
+								</p>
+								<div className="mt-2 flex flex-wrap items-center gap-2">
+									<ConnectorGlyph logoId={null} logoUri={view.logoUri} name={view.name} />
+									<Button
+										type="button"
+										variant="outline"
+										size="xs"
+										disabled={logoBusy}
+										onClick={() => fileInput.current?.click()}
+									>
+										<span className="text-[12px]">{t("settings.connectors.manage.logoChange")}</span>
+									</Button>
+									<Button
+										type="button"
+										variant="ghost"
+										size="xs"
+										disabled={logoBusy}
+										onClick={() =>
+											void changeLogo(() => fetchMcpConnectorLogo({ definitionId: id }), true)
+										}
+									>
+										{logoBusy ? <Loader2 className="size-3 animate-spin" /> : null}
+										<span className="text-[12px]">{t("settings.connectors.manage.logoFromSite")}</span>
+									</Button>
+									{view.logoUri ? (
+										<Button
+											type="button"
+											variant="ghost"
+											size="xs"
+											disabled={logoBusy}
+											onClick={() =>
+												void changeLogo(() => setMcpConnectorLogo({ definitionId: id, logo: null }))
+											}
+										>
+											<span className="text-[12px]">{t("settings.connectors.manage.logoRemove")}</span>
+										</Button>
+									) : null}
+									<input
+										ref={fileInput}
+										type="file"
+										accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+										className="hidden"
+										onChange={(event) => {
+											const file = event.target.files?.[0];
+											event.target.value = "";
+											if (!file) return;
+											readLogoFile(file)
+												.then((logo) =>
+													changeLogo(() => setMcpConnectorLogo({ definitionId: id, logo })),
+												)
+												.catch(() => toast.error(t("settings.connectors.custom.invalidLogo")));
+										}}
+									/>
+								</div>
+							</div>
+							<div>
+								<p className="text-[12px] font-medium text-foreground">
+									{t("settings.connectors.manage.scopesTitle")}
+								</p>
+								<div className="mt-2 flex items-center gap-2">
+									<Input
+										spellCheck={false}
+										placeholder="support:read reports:read"
+										value={scopesDraft}
+										onChange={(event) => setScopesDraft(event.target.value)}
+										className="h-8 font-mono text-[12px]"
+									/>
+									<Button
+										type="button"
+										size="sm"
+										disabled={!scopesChanged || scopesInvalid || policyBusy !== null}
+										onClick={() => void saveScopesAndReconnect()}
+									>
+										<span className="text-[12px]">
+											{t("settings.connectors.manage.saveAndReconnect")}
+										</span>
+									</Button>
+								</div>
+								<p
+									className={
+										scopesInvalid
+											? "mt-1 text-[11px] text-destructive"
+											: "mt-1 text-[11px] text-muted-foreground"
+									}
+								>
+									{scopesInvalid
+										? t("settings.connectors.custom.invalidScopes")
+										: t("settings.connectors.manage.scopesHint")}
+								</p>
+							</div>
+						</div>
+					) : null}
 					{appliesGlobally && projects.length > 0 ? (
 						<div className="mb-5">
 							<p className="text-[12px] font-medium text-foreground">

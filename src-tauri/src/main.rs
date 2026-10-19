@@ -4114,6 +4114,26 @@ async fn read_image_preview(path: String) -> ApiResult<Value> {
     Ok(serde_json::json!({ "dataUrl": data_url }))
 }
 
+/// Audio a prompt referenced (`@/path.opus`), as raw bytes for the inline
+/// player in the person's message. Same rules as `read_image_preview`.
+#[tauri::command]
+async fn read_audio_preview(path: String) -> ApiResult<tauri::ipc::Response> {
+    use dev_command_center_tauri::prompt_attachments::{read_audio_bytes, AUDIO_PREVIEW_MAX_BYTES};
+
+    let path = std::path::PathBuf::from(path);
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        read_audio_bytes(&path, AUDIO_PREVIEW_MAX_BYTES)
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or_else(|| ApiError {
+        code: "AUDIO_PREVIEW_UNAVAILABLE",
+        message: "audio preview unavailable".into(),
+    })?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[tauri::command]
 fn window_minimize(app: AppHandle) -> ApiResult<Value> {
     let window = app.get_webview_window("main").ok_or_else(|| ApiError {
@@ -7027,6 +7047,7 @@ pub fn run() {
             remote_access_respond,
             terminal_save_temp_image,
             read_image_preview,
+            read_audio_preview,
             attachment_commands::preview_composer_attachment,
             menu_bar::menu_bar_snapshot,
             menu_bar::menu_bar_visible,
@@ -7205,6 +7226,9 @@ pub fn run() {
             mcp_commands::disconnect_mcp_connector,
             mcp_commands::test_mcp_integration,
             mcp_commands::set_mcp_project_enabled,
+            mcp_commands::set_mcp_connector_scopes,
+            mcp_commands::set_mcp_connector_logo,
+            mcp_commands::fetch_mcp_connector_logo,
             provider_commands::list_providers,
             provider_commands::get_provider_availability,
             provider_commands::check_provider_executable,

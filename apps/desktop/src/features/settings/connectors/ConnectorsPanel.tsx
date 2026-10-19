@@ -320,7 +320,11 @@ export function ConnectorsPanel(props: ConnectorsPanelProps) {
 						const rowBusy = busy?.endsWith(`:${id}`) ?? false;
 						return (
 							<div key={id} className={ROW_CLASS}>
-								<ConnectorGlyph logoId={view.logoId} name={view.name} />
+								<ConnectorGlyph
+									logoId={view.logoId}
+									logoUri={view.logoUri}
+									name={view.name}
+								/>
 								<RowText title={view.name}>{statusLine(view)}</RowText>
 								{rowBusy ? (
 									<Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
@@ -481,6 +485,10 @@ export function ConnectorsPanel(props: ConnectorsPanelProps) {
 				onTest={(integration) => void runTest(integration)}
 				onDisconnect={(view) => void disconnect(view)}
 				onRemove={(view) => void remove(view)}
+				onReconnect={(view) => {
+					setManaged(null);
+					reconnect(view);
+				}}
 				onChanged={() => void refresh()}
 			/>
 		</section>

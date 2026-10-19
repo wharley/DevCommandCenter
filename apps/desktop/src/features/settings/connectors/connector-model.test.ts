@@ -11,6 +11,9 @@ import {
 import {
 	deriveConnectorView,
 	findIntegrationForUrl,
+	isValidScopeList,
+	MAX_LOGO_BYTES,
+	readLogoFile,
 	sortConnectorViews,
 } from "./connector-model";
 import {
@@ -58,6 +61,8 @@ function record(
 		toolPolicies: [],
 		credentialCount: 0,
 		oauthProviderIds: overrides.signedIn ? ["dcc"] : [],
+		scopes: null,
+		logo: null,
 		connectionCheck: overrides.check
 			? {
 					definitionId: `mcp-${overrides.name ?? "clickup"}`,
@@ -169,5 +174,39 @@ describe("custom connector URL", () => {
 		expect(defaultConnectorName(url)).toBe("Supabase");
 		expect(defaultConnectorName(new URL("https://app.zedy.com.br/mcp"))).toBe("Zedy");
 		expect(defaultConnectorName(new URL("https://localhost:3000/mcp"))).toBe("Localhost");
+		expect(
+			defaultConnectorName(
+				new URL("https://zedy-git-dcc-analisar-api-zedy-checkout.vercel.app/mcp/internal"),
+			),
+		).toBe("Zedy");
+	});
+});
+
+describe("custom connector details", () => {
+	it("accepts OAuth scope lists only", () => {
+		expect(isValidScopeList("support:read reports:read")).toBe(true);
+		expect(isValidScopeList("  catalog:read   store:read ")).toBe(true);
+		expect(isValidScopeList("")).toBe(false);
+		expect(isValidScopeList('bad"scope')).toBe(false);
+		expect(isValidScopeList("a\\b")).toBe(false);
+	});
+
+	it("reads small images and refuses other files", async () => {
+		const png = new File([new Uint8Array([137, 80, 78, 71])], "logo.png", { type: "image/png" });
+		await expect(readLogoFile(png)).resolves.toMatch(/^data:image\/png;base64,/);
+		const html = new File(["<h1>"], "logo.html", { type: "text/html" });
+		await expect(readLogoFile(html)).rejects.toThrow();
+		const huge = new File([new Uint8Array(MAX_LOGO_BYTES + 1)], "big.png", { type: "image/png" });
+		await expect(readLogoFile(huge)).rejects.toThrow();
+	});
+
+	it("shows a saved logo only for connectors outside the catalog", () => {
+		const custom = {
+			...record({ name: "Zedy", url: "https://zedy.example.com/mcp" }),
+			logo: "data:image/png;base64,AAAA",
+		} as McpIntegrationRecord;
+		expect(deriveConnectorView(custom).logoUri).toBe("data:image/png;base64,AAAA");
+		const preset = { ...record(), logo: "data:image/png;base64,AAAA" } as McpIntegrationRecord;
+		expect(deriveConnectorView(preset).logoUri).toBeNull();
 	});
 });

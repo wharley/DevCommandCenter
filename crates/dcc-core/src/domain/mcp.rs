@@ -620,6 +620,77 @@ impl McpProbeReport {
     }
 }
 
+/// Presentation and sign-in preferences a user set on a connector. None of
+/// it changes what the connector executes or contacts, so it is outside the
+/// trust fingerprint.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConnectorDetails {
+    pub definition_id: McpDefinitionId,
+    /// Space-separated OAuth scopes to request instead of the server's
+    /// suggestion, e.g. `support:read reports:read`.
+    pub scopes: Option<String>,
+    /// `data:image/...;base64,` URI shown as the connector's logo.
+    pub logo: Option<String>,
+}
+
+pub const MAX_CONNECTOR_SCOPES_CHARS: usize = 1024;
+/// About 256 KiB of image once base64-encoded.
+pub const MAX_CONNECTOR_LOGO_CHARS: usize = 350 * 1024;
+const CONNECTOR_LOGO_TYPES: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+    "image/x-icon",
+    "image/vnd.microsoft.icon",
+];
+
+impl McpConnectorDetails {
+    pub fn validate(&self) -> Result<(), McpValidationError> {
+        validate_non_empty("definitionId", &self.definition_id.0)?;
+        if let Some(scopes) = &self.scopes {
+            if !is_valid_scope_list(scopes) {
+                return Err(McpValidationError::InvalidConnectorScopes);
+            }
+        }
+        if let Some(logo) = &self.logo {
+            if !is_valid_logo_uri(logo) {
+                return Err(McpValidationError::InvalidConnectorLogo);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// RFC 6749 §3.3: scope tokens are printable ASCII except `"` and `\`,
+/// separated by single spaces.
+pub fn is_valid_scope_list(scopes: &str) -> bool {
+    let token_byte =
+        |byte: u8| byte == 0x21 || (0x23..=0x5b).contains(&byte) || (0x5d..=0x7e).contains(&byte);
+    !scopes.is_empty()
+        && scopes.len() <= MAX_CONNECTOR_SCOPES_CHARS
+        && scopes
+            .split(' ')
+            .all(|token| !token.is_empty() && token.bytes().all(token_byte))
+}
+
+pub fn is_valid_logo_uri(logo: &str) -> bool {
+    let Some(rest) = logo.strip_prefix("data:") else {
+        return false;
+    };
+    let Some((media_type, payload)) = rest.split_once(";base64,") else {
+        return false;
+    };
+    logo.len() <= MAX_CONNECTOR_LOGO_CHARS
+        && CONNECTOR_LOGO_TYPES.contains(&media_type)
+        && !payload.is_empty()
+        && payload
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
+}
+
 /// Outcome of the last connection check DCC ran itself, independent of any
 /// provider session. It is what Settings shows for a connector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -758,6 +829,10 @@ pub enum McpValidationError {
     UnexpectedRuntimeError,
     #[error("runtime error exceeds the domain size limit")]
     RuntimeErrorTooLong,
+    #[error("scopes must be OAuth scope names separated by single spaces")]
+    InvalidConnectorScopes,
+    #[error("logo must be a PNG, JPEG, GIF, WebP, SVG, or ICO image up to 256 KB")]
+    InvalidConnectorLogo,
 }
 
 struct TrustFingerprintEncoder(Sha256);
@@ -881,6 +956,27 @@ fn is_valid_tool_name(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connector_scopes_follow_the_oauth_scope_grammar() {
+        assert!(is_valid_scope_list("support:read reports:read"));
+        assert!(is_valid_scope_list("catalog:read"));
+        assert!(!is_valid_scope_list(""));
+        assert!(!is_valid_scope_list("support:read  reports:read"));
+        assert!(!is_valid_scope_list("support:read\nreports:read"));
+        assert!(!is_valid_scope_list("bad\"scope"));
+    }
+
+    #[test]
+    fn connector_logos_are_bounded_image_data_uris() {
+        assert!(is_valid_logo_uri("data:image/png;base64,iVBORw0KGgo="));
+        assert!(is_valid_logo_uri("data:image/svg+xml;base64,PHN2Zy8+"));
+        assert!(!is_valid_logo_uri("data:text/html;base64,PGgxPg=="));
+        assert!(!is_valid_logo_uri("https://example.com/logo.png"));
+        assert!(!is_valid_logo_uri("data:image/png;base64,<script>"));
+        let huge = format!("data:image/png;base64,{}", "A".repeat(MAX_CONNECTOR_LOGO_CHARS));
+        assert!(!is_valid_logo_uri(&huge));
+    }
 
     fn fingerprint(character: char) -> McpTrustFingerprint {
         McpTrustFingerprint(character.to_string().repeat(64))

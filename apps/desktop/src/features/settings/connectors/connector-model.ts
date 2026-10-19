@@ -6,6 +6,9 @@ import type {
 import {
 	activateMcpIntegration,
 	createMcpIntegration,
+	fetchMcpConnectorLogo,
+	setMcpConnectorLogo,
+	setMcpConnectorScopes,
 	startMcpConnect,
 	testMcpIntegration,
 	waitMcpConnect,
@@ -36,6 +39,8 @@ export type ConnectorView = {
 	preset: ConnectorPreset | undefined;
 	name: string;
 	logoId: string | null;
+	/** The user's or the site's logo (`data:` URI), for non-catalog connectors. */
+	logoUri: string | null;
 	status: ConnectorStatus;
 	toolCount: number;
 	message: string | null;
@@ -83,6 +88,7 @@ export function deriveConnectorView(
 		preset,
 		name: integration.definition.displayName,
 		logoId: preset?.logoId ?? null,
+		logoUri: preset ? null : (integration.logo ?? null),
 		status,
 		toolCount: check?.tools?.length ?? 0,
 		message: check?.message ?? null,
@@ -115,6 +121,10 @@ export type ConnectorTarget = {
 	name: string;
 	url: string;
 	preset?: ConnectorPreset;
+	/** Custom connectors: scopes to request instead of the server's. */
+	scopes?: string;
+	/** Custom connectors: an uploaded logo (`data:` URI). */
+	logo?: string;
 };
 
 /**
@@ -145,6 +155,7 @@ export async function ensureConnectorIntegration(
 				: [],
 		});
 		integration = created.integration;
+		await applyNewConnectorDetails(integration, target);
 	}
 	if (!integration.definition.enabled || mcpIntegrationNeedsTrust(integration)) {
 		const activated = await activateMcpIntegration({
@@ -154,6 +165,52 @@ export async function ensureConnectorIntegration(
 		integration = activated.integration;
 	}
 	return integration;
+}
+
+/**
+ * Saves what the user chose when adding a custom connector. Without an
+ * uploaded logo, the site's icon is looked up in the background.
+ */
+async function applyNewConnectorDetails(
+	integration: McpIntegrationRecord,
+	target: ConnectorTarget,
+) {
+	const definitionId = integration.definition.id;
+	if (target.scopes?.trim()) {
+		await setMcpConnectorScopes({ definitionId, scopes: target.scopes });
+	}
+	if (target.logo) {
+		await setMcpConnectorLogo({ definitionId, logo: target.logo });
+	} else if (!target.preset) {
+		void fetchMcpConnectorLogo({ definitionId }).catch(() => undefined);
+	}
+}
+
+/** RFC 6749 scope tokens separated by spaces; mirrors the backend check. */
+export function isValidScopeList(value: string): boolean {
+	const scopes = value.trim().split(/\s+/).filter(Boolean);
+	return (
+		scopes.length > 0 &&
+		scopes.join(" ").length <= 1024 &&
+		scopes.every((scope) => /^[\x21\x23-\x5B\x5D-\x7E]+$/.test(scope))
+	);
+}
+
+const LOGO_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
+export const MAX_LOGO_BYTES = 256 * 1024;
+
+/** Reads an image the user picked into a `data:` URI, or rejects it. */
+export function readLogoFile(file: File): Promise<string> {
+	if (!LOGO_TYPES.includes(file.type) || file.size > MAX_LOGO_BYTES) {
+		return Promise.reject(new Error("invalid-logo"));
+	}
+	return new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onload = () =>
+			typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("invalid-logo"));
+		reader.onerror = () => reject(new Error("invalid-logo"));
+		reader.readAsDataURL(file);
+	});
 }
 
 export type ConnectOutcome =

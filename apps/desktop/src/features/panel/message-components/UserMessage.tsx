@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useMemo, useState } from "react";
-import { Bug, Copy, File, FileImage, GitFork, Pencil, RotateCcw } from "lucide-react";
+import { Bug, Copy, File, FileHeadphone, FileImage, GitFork, Pencil, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TurnEvidenceSummary } from "@dcc/contracts";
 import {
@@ -15,14 +15,16 @@ import { fileMentionMarkdown } from "@/components/streamdown-link-presentation";
 import { WorkspaceFileLinkProvider } from "@/components/workspace-file-link-context";
 import type { WorkspaceFileReference } from "@/components/workspace-file-reference";
 import { pathBasename } from "@/lib/path-basename";
+import { isAudioFilePath } from "@/lib/audio-attachment";
 import { isImageFilePath } from "@/lib/is-image-path";
 import { promptParts, type PromptPart } from "@/lib/prompt-attachments";
 import { cn } from "@/lib/utils";
 import { MessageTimestamp } from "./message-metadata";
 import { ASSISTANT_STREAMDOWN_SHIKI_THEME } from "./assistant-streaming-rendering";
+import { AudioAttachment } from "./AudioAttachment";
 
 function AttachmentChip({ path }: { path: string }) {
-	const Icon = isImageFilePath(path) ? FileImage : File;
+	const Icon = isImageFilePath(path) ? FileImage : isAudioFilePath(path) ? FileHeadphone : File;
 	return (
 		<span
 			title={path}
@@ -118,6 +120,12 @@ function UserPromptContent({ content }: { content: string }) {
 					{attachments.map(({ path }, index) =>
 						isImageFilePath(path) ? (
 							<ImageAttachment key={`${path}-${index}`} path={path} />
+						) : isAudioFilePath(path) ? (
+							<AudioAttachment
+								key={`${path}-${index}`}
+								path={path}
+								fallback={<AttachmentChip path={path} />}
+							/>
 						) : (
 							<AttachmentChip key={`${path}-${index}`} path={path} />
 						),

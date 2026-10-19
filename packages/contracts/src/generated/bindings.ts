@@ -4,7 +4,7 @@
 /* Constants */
 export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","cancelRunningDelegation":"cancel_running_delegation","completeDelegation":"complete_delegation","completeTask":"complete_task","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation","startTaskProposal":"start_task_proposal"} as const;
 
-export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","cancelMcpConnect":"cancel_mcp_connect","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpConnector":"disconnect_mcp_connector","disconnectMcpOauth":"disconnect_mcp_oauth","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpProjectEnabled":"set_mcp_project_enabled","setMcpToolPolicy":"set_mcp_tool_policy","startMcpConnect":"start_mcp_connect","testMcpIntegration":"test_mcp_integration","waitMcpConnect":"wait_mcp_connect"} as const;
+export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","cancelMcpConnect":"cancel_mcp_connect","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpConnector":"disconnect_mcp_connector","disconnectMcpOauth":"disconnect_mcp_oauth","fetchMcpConnectorLogo":"fetch_mcp_connector_logo","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpConnectorLogo":"set_mcp_connector_logo","setMcpConnectorScopes":"set_mcp_connector_scopes","setMcpProjectEnabled":"set_mcp_project_enabled","setMcpToolPolicy":"set_mcp_tool_policy","startMcpConnect":"start_mcp_connect","testMcpIntegration":"test_mcp_integration","waitMcpConnect":"wait_mcp_connect"} as const;
 
 export const PROVIDER_METHODS = {"cancelProviderAccountSignIn":"cancel_provider_account_sign_in","checkProviderExecutable":"check_provider_executable","connectAntigravity":"connect_antigravity","createProviderAccount":"create_provider_account","getAntigravityStatus":"get_antigravity_status","getProviderAvailability":"get_provider_availability","installAntigravity":"install_antigravity","listProviderAccounts":"list_provider_accounts","listProviders":"list_providers","providerAccountReset":"provider_account_reset","providerAccountStatus":"provider_account_status","providerAccountUsage":"provider_account_usage","removeProviderAccount":"remove_provider_account","renameProviderAccount":"rename_provider_account","setProviderAvailability":"set_provider_availability","signInProviderAccount":"sign_in_provider_account"} as const;
 
@@ -1086,6 +1086,10 @@ export type FailDelegationOutput = {
 	delegation: Delegation,
 };
 
+export type FetchMcpConnectorLogoInput = {
+	definitionId: McpDefinitionId,
+};
+
 export type ForgeCliAccountEntry = {
 	login: string,
 	name: string | null,
@@ -1435,6 +1439,11 @@ export type McpConnectionState = "connected" |
 // The sign-in expired or was revoked; the user must reconnect.
 "needsAuth" | "failed";
 
+export type McpConnectorDetailsOutput = {
+	scopes: string | null,
+	logo: string | null,
+};
+
 export type McpCredentialInput = {
 	target: McpSecretTarget,
 	/**
@@ -1484,6 +1493,10 @@ export type McpIntegrationRecord = {
 	connectionCheck: McpConnectionCheck | null,
 	// Projects where this integration is switched off.
 	excludedProjectIds?: ProjectId[],
+	// OAuth scopes the user chose; `None` uses the server's suggestion.
+	scopes: string | null,
+	// `data:image/...` logo the user set or DCC found on the server's site.
+	logo: string | null,
 };
 
 /**
@@ -2774,6 +2787,18 @@ export type SessionUsageLimit = {
 	 *  before the hit.
 	 */
 	autoResumesUsed: number,
+};
+
+export type SetMcpConnectorLogoInput = {
+	definitionId: McpDefinitionId,
+	// `data:image/...;base64,` URI, or `null` to remove the logo.
+	logo: string | null,
+};
+
+export type SetMcpConnectorScopesInput = {
+	definitionId: McpDefinitionId,
+	// Space-separated scopes; `null` or blank goes back to the server's.
+	scopes: string | null,
 };
 
 export type SetMcpProjectEnabledInput = {

@@ -1,4 +1,5 @@
 pub mod ai_memory;
+pub mod connector_icon;
 pub mod credential_store;
 pub mod db;
 pub mod decision_context;

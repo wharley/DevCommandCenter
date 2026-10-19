@@ -2723,15 +2723,32 @@
         "urlLabel": "MCP server URL",
         "nameLabel": "Name",
         "invalidUrl": "Use a full https URL without a username or password.",
-        "continue": "Continue"
+        "continue": "Continue",
+        "moreOptions": "More options",
+        "scopesLabel": "Permissions (optional)",
+        "scopesHint": "Separated by spaces, like support:read reports:read. Empty uses what the server suggests.",
+        "invalidScopes": "Use permission names separated by spaces, without quotes.",
+        "logoLabel": "Logo (optional)",
+        "logoHint": "Without an image, DCC uses the icon of the server's site.",
+        "chooseLogo": "Choose image",
+        "removeLogo": "Remove",
+        "invalidLogo": "Use a PNG, JPG, GIF, SVG, or WebP image up to 256 KB."
       },
       "manage": {
         "lastChecked": "Last check: {{date}}",
         "toolsTitle": "Tools",
         "toolsHint": "By default each tool follows the task's mode: it asks in Supervised and runs right away in Full access. Allow or Deny always applies.",
-      "policyDefault": "Default",
-      "projectsTitle": "Projects",
-      "projectsHint": "Switch the connector off in projects where it shouldn't appear. Applies from the next message.",
+        "policyDefault": "Default",
+        "projectsTitle": "Projects",
+        "projectsHint": "Switch the connector off in projects where it shouldn't appear. Applies from the next message.",
+        "scopesTitle": "Permissions",
+        "scopesHint": "Requested at the next sign-in. Empty uses what the server suggests.",
+        "saveAndReconnect": "Save and reconnect",
+        "logoTitle": "Logo",
+        "logoChange": "Change image",
+        "logoFromSite": "Use the site's icon",
+        "logoRemove": "Remove",
+        "logoNotFound": "The site has no icon to use.",
         "noTools": "Test the connection to see the tools.",
         "disconnectConfirm": "Disconnect {{name}}? Agents lose its tools, and DCC deletes its sign-in from this computer.",
         "removeConfirm": "Remove {{name}}? Agents lose its tools, and DCC forgets this connector."
@@ -4264,7 +4281,10 @@
       "openAtPosition": "Open {{path}} in Code Dock at {{position}}"
     },
     "attachment": {
-      "openImage": "Open image {{name}}"
+      "openImage": "Open image {{name}}",
+      "playAudio": "Play {{name}}",
+      "pauseAudio": "Pause {{name}}",
+      "audioPosition": "Position in {{name}}"
     },
     "turnFooter": {
       "tokens": "{{input}} in · {{output}} out",

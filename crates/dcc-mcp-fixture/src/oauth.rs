@@ -63,6 +63,7 @@ struct Ledger {
     refreshes: usize,
     revoked: Vec<String>,
     last_resource: Option<String>,
+    last_requested_scope: Option<String>,
 }
 
 struct IssuedCode {
@@ -131,6 +132,10 @@ impl OAuthFixture {
 
     pub fn revoked(&self) -> Vec<String> {
         self.ledger().revoked.clone()
+    }
+
+    pub fn last_requested_scope(&self) -> Option<String> {
+        self.ledger().last_requested_scope.clone()
     }
 
     pub fn last_resource(&self) -> Option<String> {
@@ -292,6 +297,7 @@ async fn authorize(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let mut ledger = state.ledger();
+    ledger.last_requested_scope = query.get("scope").cloned();
     ledger.next_id += 1;
     let code = format!("code-{}", ledger.next_id);
     ledger.codes.insert(

@@ -36,10 +36,13 @@ export function connectorBrandColor(logoId: string | null): string | undefined {
 /** A connector's mark in a neutral tile; falls back to its initial. */
 export function ConnectorGlyph({
 	logoId,
+	logoUri,
 	name,
 	className,
 }: {
 	logoId: string | null;
+	/** A `data:` image; shown as an <img>, so SVG scripts never run. */
+	logoUri?: string | null;
 	name: string;
 	className?: string;
 }) {
@@ -52,7 +55,14 @@ export function ConnectorGlyph({
 				className,
 			)}
 		>
-			{logo ? (
+			{logoUri ? (
+				<img
+					src={logoUri}
+					alt=""
+					draggable={false}
+					className="size-[22px] rounded-[5px] object-contain"
+				/>
+			) : logo ? (
 				<svg
 					viewBox="0 0 24 24"
 					className="size-[18px]"

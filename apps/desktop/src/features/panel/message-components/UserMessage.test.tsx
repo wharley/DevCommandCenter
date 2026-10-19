@@ -133,6 +133,40 @@ describe("UserMessage image attachments", () => {
 		});
 		expect(container.querySelector("img")).toBeNull();
 	});
+
+	it("plays an attached voice note in place, with its waveform and duration", async () => {
+		const samples = new Float32Array(4_000).map((_, i) => Math.sin(i / 10) * (i / 4_000));
+		vi.stubGlobal(
+			"OfflineAudioContext",
+			class {
+				decodeAudioData = async () => ({ duration: 23.97, getChannelData: () => samples });
+			},
+		);
+		invokeMock.mockResolvedValue(new ArrayBuffer(8));
+		const path = "/Users/me/Downloads/WhatsApp Audio 2026-10-19 at 16.39.25.opus";
+		await render(`@${path} ela mandou isso, pode validar?`);
+		await vi.waitFor(() => {
+			expect(container.querySelector('[role="slider"]')).not.toBeNull();
+		});
+		const card = container.querySelector('[data-testid="user-message-audio"]')!;
+		expect(card.textContent).toContain("WhatsApp Audio 2026-10-19 at 16.39.25 · OPUS");
+		expect(card.textContent).toContain("0:23");
+		expect(card.querySelector("button")?.getAttribute("aria-label")).toBe(
+			"conversation.attachment.playAudio",
+		);
+		expect(invokeMock).toHaveBeenCalledWith("read_audio_preview", { path });
+		expect(container.textContent).toContain("ela mandou isso, pode validar?");
+		vi.unstubAllGlobals();
+	});
+
+	it("falls back to the file chip when the audio cannot be read", async () => {
+		invokeMock.mockRejectedValue(new Error("gone"));
+		await render("@/tmp/nota.opus escuta");
+		await vi.waitFor(() => {
+			expect(container.textContent).toContain("nota.opus");
+		});
+		expect(container.querySelector('[data-testid="user-message-audio"]')).toBeNull();
+	});
 });
 
 describe("UserMessage file mentions", () => {

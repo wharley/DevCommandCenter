@@ -28,7 +28,7 @@ use crate::{
 use dcc_core::domain::project::ProjectId;
 use dcc_core::{
     application::probe_mcp_definition,
-    domain::mcp::{McpConnectionCheck, McpConnectionState, McpErrorCategory},
+    domain::mcp::{McpConnectionCheck, McpConnectionState, McpConnectorDetails, McpErrorCategory},
 };
 use dcc_infra::mcp_probe::{CommandLookup, McpProbeLimits, SecureMcpProbe};
 use std::time::Duration;
@@ -48,6 +48,10 @@ pub struct McpIntegrationRecord {
     /// Projects where this integration is switched off.
     #[serde(default)]
     pub excluded_project_ids: Vec<ProjectId>,
+    /// OAuth scopes the user chose; `None` uses the server's suggestion.
+    pub scopes: Option<String>,
+    /// `data:image/...` logo the user set or DCC found on the server's site.
+    pub logo: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -216,6 +220,35 @@ pub enum McpConnectFailure {
 #[serde(rename_all = "camelCase")]
 pub struct CancelMcpConnectOutput {
     pub cancelled: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMcpConnectorScopesInput {
+    pub definition_id: McpDefinitionId,
+    /// Space-separated scopes; `null` or blank goes back to the server's.
+    pub scopes: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMcpConnectorLogoInput {
+    pub definition_id: McpDefinitionId,
+    /// `data:image/...;base64,` URI, or `null` to remove the logo.
+    pub logo: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConnectorDetailsOutput {
+    pub scopes: Option<String>,
+    pub logo: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchMcpConnectorLogoInput {
+    pub definition_id: McpDefinitionId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -426,6 +459,97 @@ pub async fn disconnect_mcp_connector(
     Ok(DisconnectMcpConnectorOutput { disconnected })
 }
 
+/// Sets the scopes requested at the next sign-in. Blank means "use what the
+/// server suggests".
+#[tauri::command]
+pub async fn set_mcp_connector_scopes(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetMcpConnectorScopesInput,
+) -> Result<McpConnectorDetailsOutput, String> {
+    let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let scopes = input
+        .scopes
+        .map(|scopes| scopes.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|scopes| !scopes.is_empty());
+    update_connector_details(&repo, &input.definition_id, |details| {
+        details.scopes = scopes;
+    })
+    .await
+}
+
+/// Sets or removes a connector's logo.
+#[tauri::command]
+pub async fn set_mcp_connector_logo(
+    state: State<'_, WorkspaceCommandState>,
+    input: SetMcpConnectorLogoInput,
+) -> Result<McpConnectorDetailsOutput, String> {
+    let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    update_connector_details(&repo, &input.definition_id, |details| {
+        details.logo = input.logo;
+    })
+    .await
+}
+
+/// Looks for the icon of the connector's own site and keeps it as its logo.
+/// Leaves the current logo when the site has none.
+#[tauri::command]
+pub async fn fetch_mcp_connector_logo(
+    state: State<'_, WorkspaceCommandState>,
+    input: FetchMcpConnectorLogoInput,
+) -> Result<McpConnectorDetailsOutput, String> {
+    let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let definition = repo
+        .get_mcp_definition(&input.definition_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "MCP integration not found".to_string())?;
+    let McpTransport::Http { url } = &definition.transport else {
+        return Err("Only remote connectors have a site".to_string());
+    };
+    let found = dcc_infra::connector_icon::fetch_site_icon(url)
+        .await
+        .filter(|logo| dcc_core::domain::mcp::is_valid_logo_uri(logo));
+    update_connector_details(&repo, &input.definition_id, |details| {
+        if found.is_some() {
+            details.logo = found;
+        }
+    })
+    .await
+}
+
+async fn update_connector_details(
+    repo: &SqliteMcpRepo,
+    definition_id: &McpDefinitionId,
+    change: impl FnOnce(&mut McpConnectorDetails),
+) -> Result<McpConnectorDetailsOutput, String> {
+    repo.get_mcp_definition(definition_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "MCP integration not found".to_string())?;
+    let mut details = repo
+        .list_mcp_connector_details()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|details| &details.definition_id == definition_id)
+        .unwrap_or(McpConnectorDetails {
+            definition_id: definition_id.clone(),
+            scopes: None,
+            logo: None,
+        });
+    change(&mut details);
+    details
+        .validate()
+        .map_err(|error| error.to_string())?;
+    repo.save_mcp_connector_details(&details)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(McpConnectorDetailsOutput {
+        scopes: details.scopes,
+        logo: details.logo,
+    })
+}
+
 /// Switches an integration off (or back on) in one project. New sessions in
 /// that project leave it out; other projects keep it.
 #[tauri::command]
@@ -588,6 +712,12 @@ where
         .into_iter()
         .map(|check| (check.definition_id.clone(), check))
         .collect::<HashMap<_, _>>();
+    let mut details_by_definition = repo
+        .list_mcp_connector_details()
+        .await?
+        .into_iter()
+        .map(|details| (details.definition_id.clone(), details))
+        .collect::<HashMap<_, _>>();
     let mut exclusions_by_definition = HashMap::<McpDefinitionId, Vec<ProjectId>>::new();
     for (definition_id, project_id) in repo.list_mcp_project_exclusions().await? {
         exclusions_by_definition
@@ -611,9 +741,12 @@ where
             let grants = grants_by_definition
                 .remove(&definition.id)
                 .unwrap_or_default();
+            let details = details_by_definition.remove(&definition.id);
             McpIntegrationRecord {
                 connection_check,
                 excluded_project_ids,
+                scopes: details.as_ref().and_then(|details| details.scopes.clone()),
+                logo: details.and_then(|details| details.logo),
                 ..integration_record(definition, bindings, policies, grants)
             }
         })
@@ -882,6 +1015,8 @@ fn integration_record(
             .collect(),
         connection_check: None,
         excluded_project_ids: Vec::new(),
+        scopes: None,
+        logo: None,
     }
 }
 

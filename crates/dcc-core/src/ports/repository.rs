@@ -164,6 +164,23 @@ pub trait McpRepo: Send + Sync {
         Ok(())
     }
 
+    async fn list_mcp_connector_details(
+        &self,
+    ) -> Result<Vec<crate::domain::mcp::McpConnectorDetails>> {
+        Ok(Vec::new())
+    }
+
+    /// Replaces a connector's details; empty details delete the row.
+    async fn save_mcp_connector_details(
+        &self,
+        details: &crate::domain::mcp::McpConnectorDetails,
+    ) -> Result<()> {
+        let _ = details;
+        Err(crate::CoreError::Repository(
+            "MCP connector details are unavailable".to_string(),
+        ))
+    }
+
     /// Projects where a definition stays off even though a binding selects it.
     async fn list_mcp_project_exclusions(
         &self,

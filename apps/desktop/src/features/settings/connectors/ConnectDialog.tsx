@@ -66,6 +66,10 @@ export function ConnectDialog({
 	}
 	const name = target.name;
 	const usesToken = target.preset?.auth === "token";
+	// An uploaded logo, or the one already saved for this connector.
+	const logoUri =
+		target.logo ??
+		(target.preset ? null : (findIntegrationForUrl(integrations, target.url)?.logo ?? null));
 	const glow = connectorBrandColor(target.preset?.logoId ?? null);
 
 	const close = () => {
@@ -178,6 +182,7 @@ export function ConnectDialog({
 				>
 					<ConnectorGlyph
 						logoId={target.preset?.logoId ?? null}
+						logoUri={logoUri}
 						name={name}
 						className="size-12 rounded-xl [&_svg]:size-6"
 					/>
