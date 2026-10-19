@@ -2522,14 +2522,7 @@ pub async fn send_turn_with_state(
         .map_err(|error| error.to_string())?
         == McpOauthSupport::InteractivePreflight
     {
-        match wait_for_mcp_preflight(&state, &session.id).await? {
-            McpPreflightReadiness::Ready => {}
-            McpPreflightReadiness::AuthenticationRequired(_) => {
-                return Err("MCP authentication must complete before sending the turn".to_string());
-            }
-            McpPreflightReadiness::Failed(message) => return Err(message),
-            McpPreflightReadiness::Attaching => unreachable!("bounded wait resolves attaching"),
-        }
+        settle_mcp_preflight(state, &session.id).await;
     }
 
     let preflight_model_route = input.decision_provider_model_route.clone();
@@ -3096,25 +3089,58 @@ pub async fn prepare_turn(
         });
     }
 
-    match wait_for_mcp_preflight(&state, &session.id).await? {
-        McpPreflightReadiness::Ready => Ok(PrepareTurnOutput {
-            preflight: McpTurnPreflightState::Ready,
-        }),
-        McpPreflightReadiness::AuthenticationRequired(definition_id) => {
-            let result = state
-                .start_mcp_oauth(&session.id, &definition_id)
-                .await
-                .map_err(|error| error.to_string())?;
-            Ok(PrepareTurnOutput {
-                preflight: McpTurnPreflightState::AuthenticationRequired {
-                    definition_id,
-                    authorization_url: result.authorization_url,
-                },
-            })
+    settle_mcp_preflight(&state, &session.id).await;
+    Ok(PrepareTurnOutput {
+        preflight: McpTurnPreflightState::Ready,
+    })
+}
+
+/// A user's MCP integration never holds the user's turn. DCC signs
+/// connectors in itself (Settings → Connectors); a provider-side login here
+/// would open a browser in the middle of the work and block every turn while
+/// the vendor is down. A failed or signed-out integration is left out of
+/// the turn, and a lost sign-in is recorded so Settings and the composer
+/// offer Reconnect.
+async fn settle_mcp_preflight(state: &SessionCommandState, session_id: &SessionId) {
+    match wait_for_mcp_preflight(state, session_id).await {
+        Ok(McpPreflightReadiness::Ready) => {}
+        Ok(McpPreflightReadiness::AuthenticationRequired(definition_id)) => {
+            eprintln!("[DCC] MCP integration needs a sign-in; the turn goes on without it");
+            record_mcp_needs_auth(state, &definition_id).await;
         }
-        McpPreflightReadiness::Failed(message) => Err(message),
-        McpPreflightReadiness::Attaching => unreachable!("bounded wait resolves attaching"),
+        Ok(McpPreflightReadiness::Failed(message)) | Err(message) => {
+            eprintln!("[DCC] MCP integration unavailable for this turn: {message}");
+        }
+        Ok(McpPreflightReadiness::Attaching) => {}
     }
+}
+
+async fn record_mcp_needs_auth(state: &SessionCommandState, definition_id: &McpDefinitionId) {
+    use dcc_core::ports::McpRepo as _;
+    let db_path = crate::state::WorkspaceCommandState::from_session(state).db_path;
+    let Ok(repo) = dcc_infra::mcp_db::SqliteMcpRepo::open(&db_path) else {
+        return;
+    };
+    let tools = repo
+        .list_mcp_connection_checks()
+        .await
+        .ok()
+        .and_then(|checks| {
+            checks
+                .into_iter()
+                .find(|check| &check.definition_id == definition_id)
+        })
+        .map(|check| check.tools)
+        .unwrap_or_default();
+    let _ = repo
+        .save_mcp_connection_check(&dcc_core::domain::mcp::McpConnectionCheck {
+            definition_id: definition_id.clone(),
+            state: dcc_core::domain::mcp::McpConnectionState::NeedsAuth,
+            tools,
+            message: Some("The sign-in is missing or expired. Reconnect to keep using it".to_string()),
+            checked_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .await;
 }
 
 #[tauri::command]

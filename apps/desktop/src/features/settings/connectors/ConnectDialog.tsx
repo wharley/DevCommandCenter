@@ -49,6 +49,7 @@ export function ConnectDialog({
 	const [phase, setPhase] = useState<Phase>({ type: "intro" });
 	const [token, setToken] = useState("");
 	const loginId = useRef<string | null>(null);
+	const createdId = useRef<string | null>(null);
 	const active = useRef(false);
 
 	useEffect(() => {
@@ -79,6 +80,16 @@ export function ConnectDialog({
 		}
 		active.current = false;
 		onOpenChange(false);
+	};
+
+	const discardCreated = async () => {
+		const definitionId = createdId.current;
+		createdId.current = null;
+		if (definitionId) {
+			await removeMcpIntegration({ definitionId, deleteCredentials: true }).catch(
+				() => undefined,
+			);
+		}
 	};
 
 	const failureText = (outcome: Extract<ConnectOutcome, { kind: "failed" }>) =>
@@ -135,7 +146,13 @@ export function ConnectDialog({
 				return;
 			}
 
+			// A connector added by this attempt is removed again if the sign-in
+			// does not finish, so a half-set-up connector never reaches the
+			// agents.
+			const isNew = !findIntegrationForUrl(integrations, target.url);
+			createdId.current = null;
 			const integration = await ensureConnectorIntegration(target, integrations);
+			if (isNew) createdId.current = integration.definition.id;
 			const outcome = await connectIntegration(integration, {
 				openBrowser: openExternal,
 				onLoginStarted: (id) => {
@@ -143,6 +160,11 @@ export function ConnectDialog({
 				},
 			});
 			loginId.current = null;
+			if (outcome.kind !== "connected") {
+				await discardCreated();
+			} else {
+				createdId.current = null;
+			}
 			if (!active.current) return;
 			if (outcome.kind === "connected") {
 				finishConnected(outcome.check?.tools?.length ?? null);
@@ -152,6 +174,7 @@ export function ConnectDialog({
 				setPhase({ type: "failed", message: failureText(outcome) });
 			}
 		} catch (error) {
+			await discardCreated();
 			if (!active.current) return;
 			setPhase({
 				type: "failed",

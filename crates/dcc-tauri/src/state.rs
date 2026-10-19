@@ -5681,6 +5681,29 @@ impl SessionCommandState {
             .filter(|grant| grant.provider_id.0 == crate::mcp_connect::DCC_OAUTH_GRANT_OWNER)
             .map(|grant| grant.definition_id)
             .collect::<HashSet<_>>();
+        // A remote server that asked for a sign-in DCC does not hold would only
+        // fail inside the provider (or start the provider's own login), so it
+        // stays out until the user reconnects it.
+        let needs_sign_in = repo
+            .list_mcp_connection_checks()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|check| check.state == dcc_core::domain::mcp::McpConnectionState::NeedsAuth)
+            .map(|check| check.definition_id)
+            .collect::<HashSet<_>>();
+        let servers = servers
+            .into_iter()
+            .filter(|server| {
+                let unauthenticated_http = matches!(
+                    &server.transport,
+                    dcc_core::ports::ProviderMcpTransport::Http { headers, .. } if headers.is_empty()
+                );
+                !(unauthenticated_http
+                    && !signed_in.contains(&server.definition_id)
+                    && needs_sign_in.contains(&server.definition_id))
+            })
+            .collect::<Vec<_>>();
         if signed_in.is_empty() {
             return (servers, Vec::new());
         }
@@ -12230,6 +12253,62 @@ mod tests {
             oauth_state: None,
             tool_policies: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn signed_out_remote_servers_stay_out_of_the_session() {
+        use dcc_core::domain::mcp::{
+            McpConnectionCheck, McpConnectionState, McpDefinition, McpDefinitionOwnership,
+            McpTransport, McpTrust, McpTrustDecision, McpTrustFingerprint,
+        };
+        use dcc_core::ports::McpRepo as _;
+        let temp = tempfile::tempdir().expect("root");
+        let root = std::fs::canonicalize(temp.path()).expect("physical root");
+        let db_path = root.join("sessions.sqlite");
+        let state = SessionCommandState::new_headless(db_path.clone(), root.join("app-data"));
+        let repo = SqliteMcpRepo::open(&db_path).expect("repo");
+        for id in ["lost", "fine"] {
+            let mut definition = McpDefinition {
+                id: McpDefinitionId(id.to_string()),
+                display_name: id.to_string(),
+                transport: McpTransport::Http {
+                    url: format!("https://{id}.example.com/mcp"),
+                },
+                secret_refs: Vec::new(),
+                enabled: true,
+                ownership: McpDefinitionOwnership::DccManaged,
+                trust: McpTrust {
+                    current_fingerprint: McpTrustFingerprint("0".repeat(64)),
+                    decision: McpTrustDecision::Untrusted,
+                },
+                created_at: "2026-10-19T00:00:00Z".to_string(),
+                updated_at: "2026-10-19T00:00:00Z".to_string(),
+            };
+            definition.synchronize_trust_fingerprint();
+            repo.save_mcp_definition(&definition).await.expect("definition");
+        }
+        repo.save_mcp_connection_check(&McpConnectionCheck {
+            definition_id: McpDefinitionId("lost".to_string()),
+            state: McpConnectionState::NeedsAuth,
+            tools: Vec::new(),
+            message: None,
+            checked_at: "2026-10-19T00:00:00Z".to_string(),
+        })
+        .await
+        .expect("check");
+
+        let (direct, connectors) = state
+            .split_gateway_connectors(vec![
+                fake_ephemeral_server("lost", "dcc-lost"),
+                fake_ephemeral_server("fine", "dcc-fine"),
+            ])
+            .await;
+        let kept = direct
+            .iter()
+            .map(|server| server.definition_id.0.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(kept, vec!["fine"]);
+        assert!(connectors.is_empty());
     }
 
     #[test]
