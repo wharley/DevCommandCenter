@@ -60,6 +60,17 @@ describe("appendStartupPrompt", () => {
 		expect(shown).toBe(messages);
 		expect(shouldShowConversationStarting(shown, "Investigate", "running")).toBe(false);
 	});
+
+	it("does not repeat the running turn's prompt below a steer", () => {
+		const messages = [
+			{ ...message("u", "user", "t"), content: "Commit and push" },
+			{ ...message("a", "assistant", "t"), streaming: true },
+			{ ...message("user-steer-s-t", "user"), content: "Follow the refactor" },
+		];
+		const shown = appendStartupPrompt(messages, "Commit and push");
+		expect(shown).toBe(messages);
+		expect(shouldShowConversationStarting(shown, "Commit and push", "running")).toBe(false);
+	});
 });
 
 describe("conversationStartupStage", () => {
@@ -95,7 +106,10 @@ describe("shouldShowConversationStarting", () => {
 	it("shows while an optimistic prompt is being accepted", () => {
 		expect(
 			shouldShowConversationStarting(
-				[message("assistant-1", "assistant"), message("pending-user", "user")],
+				[
+					message("assistant-1", "assistant"),
+					{ ...message("pending-user", "user"), content: "Next prompt" },
+				],
 				"Next prompt",
 				null,
 			),

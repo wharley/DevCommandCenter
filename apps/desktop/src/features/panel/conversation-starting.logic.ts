@@ -67,15 +67,17 @@ export function appendStartupPrompt(
 ): WorkspaceMessage[] {
 	const trimmed = prompt?.trim();
 	if (!trimmed) return messages;
-	const latestUserIndex = messages.findLastIndex((message) => message.role === "user");
-	const latestUser = messages[latestUserIndex];
 	// While a turn runs its own prompt comes back here (the panel keeps it
 	// visible until history catches up); a reply still in progress answers
 	// nothing yet, or the prompt would be repeated below the agent's work.
-	const answered = messages
-		.slice(latestUserIndex + 1)
-		.some((message) => message.role === "assistant" && message.turnSettled === true);
-	if (latestUser && !answered && latestUser.content.trim() === trimmed) return messages;
+	// A steer sent meanwhile sits below that prompt, so look past it.
+	const latestAnsweredIndex = messages.findLastIndex(
+		(message) => message.role === "assistant" && message.turnSettled === true,
+	);
+	const alreadyShown = messages
+		.slice(latestAnsweredIndex + 1)
+		.some((message) => message.role === "user" && message.content.trim() === trimmed);
+	if (alreadyShown) return messages;
 	return [
 		...messages,
 		{ id: "pending-user", role: "user", label: "User", content: trimmed },
@@ -98,8 +100,11 @@ export function shouldShowConversationStarting(
 	if (latestUserIndex < 0) return false;
 
 	const latestUserMessage = messages[latestUserIndex];
+	// The running turn's prompt stays pending while history catches up; a
+	// steer below it is not a turn waiting for its first response.
+	const trimmedPending = pendingPrompt?.trim();
 	const isAwaitingActivity =
-		Boolean(pendingPrompt?.trim()) ||
+		(Boolean(trimmedPending) && latestUserMessage?.content.trim() === trimmedPending) ||
 		(lastTurnState === "running" && Boolean(latestUserMessage?.turnId));
 	if (!isAwaitingActivity) return false;
 
