@@ -1043,7 +1043,38 @@ export default function App() {
 			),
 		[baseProviderCatalog, configuredExecutablesQuery.data, configuredProviderExecutables.length],
 	);
-	const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+	// The open conversation is kept per task, never as one id for the whole
+	// window. A write that lands late (a task that finished starting after the
+	// person moved on) can only touch its own task, so the composer of the
+	// task on screen can never be pointed at another task's run.
+	const [selectedSessionIdByWorkspace, setSelectedSessionIdByWorkspace] = useState<
+		Record<string, string | null>
+	>({});
+	const selectedSessionId = selectedWorkspace
+		? (selectedSessionIdByWorkspace[selectedWorkspace.id] ?? null)
+		: null;
+	const selectedWorkspaceIdRef = useRef<string | null>(null);
+	selectedWorkspaceIdRef.current = selectedWorkspace?.id ?? null;
+	const selectSessionInWorkspace = useCallback(
+		(workspaceId: string, sessionId: string | null) => {
+			setSelectedSessionIdByWorkspace((current) =>
+				(current[workspaceId] ?? null) === sessionId
+					? current
+					: { ...current, [workspaceId]: sessionId },
+			);
+		},
+		[],
+	);
+	/** For clicks inside the task on screen; anything after an await names its task. */
+	const selectSessionOnScreen = useCallback(
+		(sessionId: string | null) => {
+			const workspaceId = selectedWorkspaceIdRef.current;
+			if (workspaceId) {
+				selectSessionInWorkspace(workspaceId, sessionId);
+			}
+		},
+		[selectSessionInWorkspace],
+	);
 	const [pendingSessionClose, setPendingSessionClose] =
 		useState<PendingSessionClose | null>(null);
 	const [pendingSessionNavigation, setPendingSessionNavigation] =
@@ -1723,7 +1754,7 @@ export default function App() {
 	useEffect(() => {
 		const scope = {
 			workspaceId: selectedWorkspaceId ?? "",
-			sessionId: selectedSessionId,
+			sessionId: effectiveSelectedSessionId,
 			providerId: selectedProviderId,
 		};
 		if (selectedWorkspaceId) {
@@ -1736,7 +1767,7 @@ export default function App() {
 			// scope different from the render scope. Always clear on effect cleanup.
 			contextAttachmentLedgerRef.current.clear();
 		};
-	}, [selectedProviderId, selectedSessionId, selectedWorkspaceId]);
+	}, [effectiveSelectedSessionId, selectedProviderId, selectedWorkspaceId]);
 	const providerAccountsQuery = useQuery({
 		queryKey: PROVIDER_ACCOUNTS_QUERY_KEY,
 		queryFn: listProviderAccounts,
@@ -2160,7 +2191,7 @@ export default function App() {
 	}, [providerChoices, selectedProjectKey, hasSelectedSession]);
 
 	useEffect(() => {
-		setSelectedSessionId(null);
+		setSelectedSessionIdByWorkspace({});
 		setPendingSessionClose(null);
 		setSessionActionSessionId(null);
 		setSessionSnapshotsById({});
@@ -2173,7 +2204,7 @@ export default function App() {
 	useEffect(() => {
 		setIsCommandPaletteOpen(false);
 		setIsCreateWorkspaceOpen(false);
-		setSelectedSessionId(null);
+		setSelectedSessionIdByWorkspace({});
 		setPendingSessionNavigation((current) => current?.workspaceId === selectedWorkspace?.id ? current : null);
 		setPendingSessionClose(null);
 		setSessionActionSessionId(null);
@@ -2204,7 +2235,10 @@ export default function App() {
 			return;
 		}
 
-		setSelectedSessionId(pendingSessionNavigation.sessionId);
+		selectSessionInWorkspace(
+			pendingSessionNavigation.workspaceId,
+			pendingSessionNavigation.sessionId,
+		);
 		setPendingSessionNavigation(null);
 	}, [pendingSessionNavigation, selectedWorkspace?.id, workspaceSessions]);
 
@@ -2234,8 +2268,9 @@ export default function App() {
 			return;
 		}
 
+		const workspaceId = selectedWorkspace.id;
 		if (visibleWorkspaceSessions.length === 0) {
-			setSelectedSessionId(null);
+			selectSessionInWorkspace(workspaceId, null);
 			return;
 		}
 
@@ -2247,17 +2282,21 @@ export default function App() {
 			return next;
 		});
 
-		setSelectedSessionId((current) => {
+		setSelectedSessionIdByWorkspace((selections) => {
+			const current = selections[workspaceId] ?? null;
 			if (
 				current &&
 				visibleWorkspaceSessions.some((session) => session.session.id === current)
 			) {
-				return current;
+				return selections;
 			}
 
-			return visibleWorkspaceSessions[0]?.session.id ?? null;
+			return {
+				...selections,
+				[workspaceId]: visibleWorkspaceSessions[0]?.session.id ?? null,
+			};
 		});
-	}, [selectedWorkspace?.id, visibleWorkspaceSessions, workspaceSessions]);
+	}, [selectSessionInWorkspace, selectedWorkspace?.id, visibleWorkspaceSessions, workspaceSessions]);
 
 	const handleStartSession = useCallback(async () => {
 		if (!selectedProvider || !selectedWorkspace) {
@@ -2300,7 +2339,7 @@ export default function App() {
 				...current,
 				[result.session.id]: snapshot,
 			}));
-			setSelectedSessionId(result.session.id);
+			selectSessionInWorkspace(result.session.workspaceId, result.session.id);
 			if (previousSessionId && previousSessionId !== result.session.id) {
 				void checkpointAiMemorySession(previousSessionId).catch((error) => {
 					console.warn("[dcc] automatic ai-memory checkpoint failed:", error);
@@ -2402,9 +2441,7 @@ export default function App() {
 				workspaceId: session.workspaceId,
 			});
 			requestWorkspaceSelection(session.workspaceId);
-			if (selectedWorkspace?.id === session.workspaceId) {
-				setSelectedSessionId(session.sessionId);
-			}
+			selectSessionInWorkspace(session.workspaceId, session.sessionId);
 		},
 		[requestWorkspaceSelection, selectedWorkspace?.id],
 	);
@@ -2488,7 +2525,7 @@ export default function App() {
 				if (reviewSessionId) {
 					const previous = await loadLatestReview(reviewSessionId);
 					setGlobalSurface(null);
-					setSelectedSessionId(reviewSessionId);
+					selectSessionInWorkspace(workspaceId, reviewSessionId);
 					await sendTurn({
 						sessionId: reviewSessionId,
 						// No review in the conversation yet (its first run failed): start over.
@@ -2552,7 +2589,7 @@ export default function App() {
 					...current.filter((summary) => summary.session.id !== started.session.id),
 				]);
 				setGlobalSurface(null);
-				setSelectedSessionId(started.session.id);
+				selectSessionInWorkspace(workspaceId, started.session.id);
 				if (target) {
 					// The new task may not be selected yet; open the session once it is.
 					setPendingSessionNavigation({ workspaceId, sessionId: started.session.id });
@@ -3143,7 +3180,7 @@ export default function App() {
 					...current,
 					[sessionId]: startedSnapshot,
 				}));
-				setSelectedSessionId(startedSessionId);
+				selectSessionInWorkspace(started.session.workspaceId, sessionId);
 				queryClient.setQueryData<WorkspaceSessionSummary[]>(
 					getWorkspaceSessionsCacheKey(backendCacheKey, selectedWorkspace.id),
 					(current = []) => {
@@ -3304,7 +3341,25 @@ export default function App() {
 			targetSessionSummary != null
 				? workspaceSessionSnapshotFromSummary(targetSessionSummary)
 				: selectedSessionSnapshot;
-		let currentSessionId = targetSessionSummary?.session.id ?? selectedSessionId;
+		// The id comes from the snapshot the composer reflects (provider, model,
+		// running state), never from raw selection state that can lag behind a
+		// task switch: that mismatch sent one task's prompt and model into
+		// another task's running session.
+		let currentSessionId = currentSession?.sessionId ?? null;
+		if (
+			currentSession &&
+			selectedWorkspace &&
+			currentSession.workspaceId !== selectedWorkspace.id
+		) {
+			// Last line of defense: a prompt typed in one task never runs in another.
+			console.error("[dcc] refused a send into another task's session", {
+				sessionId: currentSession.sessionId,
+				sessionWorkspaceId: currentSession.workspaceId,
+				workspaceOnScreen: selectedWorkspace.id,
+			});
+			toast.error(t("conversation.sendWrongTask"));
+			return false;
+		}
 		const willStartSession = Boolean(
 			options?.forceNewSession || !currentSession || !currentSessionId,
 		);
@@ -3351,7 +3406,31 @@ export default function App() {
 				};
 				const startedSessionId = started.session.id;
 				currentSessionId = startedSessionId;
-				setSelectedSessionId(currentSessionId);
+				selectSessionInWorkspace(started.session.workspaceId, startedSessionId);
+				if (selectedWorkspaceIdRef.current !== started.session.workspaceId) {
+					// The person moved on while the task was starting: keep their place
+					// and say where the run is, instead of pulling them back.
+					const startedWorkspaceId = started.session.workspaceId;
+					toast.info(
+						t("conversation.taskStartedElsewhere", {
+							task: automaticTaskTitle ?? selectedWorkspace.name,
+						}),
+						{
+							action: {
+								label: t("conversation.openTask"),
+								onClick: () => {
+									setGlobalSurface(null);
+									setPendingSessionNavigation({
+										workspaceId: startedWorkspaceId,
+										sessionId: startedSessionId,
+									});
+									requestWorkspaceSelection(startedWorkspaceId);
+									selectSessionInWorkspace(startedWorkspaceId, startedSessionId);
+								},
+							},
+						},
+					);
+				}
 				const startedSnapshot = currentSession as RuntimeSessionSnapshot;
 				setSessionSnapshotsById((current) => ({
 					...current,
@@ -3395,7 +3474,7 @@ export default function App() {
 				targetSessionSummary?.session.providerRuntime ?? selectedProviderRuntime;
 
 			if (targetSessionSummary) {
-				setSelectedSessionId(currentSessionId);
+				selectSessionInWorkspace(targetSessionSummary.session.workspaceId, currentSessionId);
 			}
 			setPendingPrompt(trimmedPrompt);
 			setPendingPromptSessionId(currentSessionId);
@@ -4067,8 +4146,8 @@ export default function App() {
 	}, []);
 
 	const handleSelectSession = useCallback((sessionId: string) => {
-		setSelectedSessionId(sessionId);
-	}, []);
+		selectSessionOnScreen(sessionId);
+	}, [selectSessionOnScreen]);
 
 	const handleOpenSessionSearch = useCallback(() => {
 		setIsSessionSearchOpen(true);
@@ -4199,7 +4278,7 @@ export default function App() {
 						...current.filter((summary) => summary.session.id !== forkedSessionId),
 					],
 				);
-				setSelectedSessionId(forkedSessionId);
+				selectSessionInWorkspace(result.session.workspaceId, forkedSessionId);
 				if (forkPoint.forkedPrompt.trim().length > 0) {
 					workspaceComposerPrefillSequenceRef.current += 1;
 					setWorkspaceComposerPrefill({
@@ -4249,12 +4328,12 @@ export default function App() {
 					: undefined;
 			if (parentSessionId) {
 				setGlobalSurface(null);
-				setSelectedSessionId(parentSessionId);
+				selectSessionInWorkspace(workspaceId, parentSessionId);
 				return;
 			}
 			handleSelectWorkspaceSurface(workspaceId);
 		},
-		[effectiveSelectedSessionId, handleSelectWorkspaceSurface, parentSessionByChild, selectedWorkspace?.id],
+		[effectiveSelectedSessionId, handleSelectWorkspaceSurface, parentSessionByChild, selectSessionInWorkspace, selectedWorkspace?.id],
 	);
 
 	/** The sidebar's nested task rows: open one conversation of a workspace. */
@@ -4263,11 +4342,9 @@ export default function App() {
 			setGlobalSurface(null);
 			setPendingSessionNavigation({ sessionId, workspaceId });
 			requestWorkspaceSelection(workspaceId);
-			if (selectedWorkspace?.id === workspaceId) {
-				setSelectedSessionId(sessionId);
-			}
+			selectSessionInWorkspace(workspaceId, sessionId);
 		},
-		[requestWorkspaceSelection, selectedWorkspace?.id],
+		[requestWorkspaceSelection, selectSessionInWorkspace],
 	);
 
 	const handleSelectSessionSearchResult = useCallback(
@@ -4288,9 +4365,7 @@ export default function App() {
 						result.workspaceId,
 					),
 				});
-				if (selectedWorkspace?.id === result.workspaceId) {
-					setSelectedSessionId(result.sessionId);
-				}
+				selectSessionInWorkspace(result.workspaceId, result.sessionId);
 			} catch (error) {
 				const message =
 					error instanceof Error
@@ -4524,7 +4599,7 @@ export default function App() {
 					return false;
 				}
 				targetSessionId = authorId;
-				setSelectedSessionId(authorId);
+				selectSessionOnScreen(authorId);
 			}
 			workspaceComposerPrefillSequenceRef.current += 1;
 			setWorkspaceComposerPrefill({
@@ -4576,10 +4651,10 @@ export default function App() {
 	}, [gitDiffExpanded, requestSurfaceSelection]);
 	const handleOpenAgentSession = useCallback(
 		(sessionId: string) => {
-			setSelectedSessionId(sessionId);
+			selectSessionOnScreen(sessionId);
 			handleCloseSurface();
 		},
-		[handleCloseSurface],
+		[handleCloseSurface, selectSessionOnScreen],
 	);
 
 	const handleAbortSession = useCallback(async () => {
@@ -4754,7 +4829,7 @@ export default function App() {
 				);
 
 				if (closesSelectedSession) {
-					setSelectedSessionId(replacementSessionId);
+					selectSessionInWorkspace(selectedWorkspace.id, replacementSessionId);
 					if (shouldCreateReplacement) {
 						await handleStartSession();
 					}
@@ -4851,7 +4926,7 @@ export default function App() {
 				return;
 			}
 			if (!isSessionArchived(summary)) {
-				setSelectedSessionId(sessionId);
+				selectSessionInWorkspace(selectedWorkspace.id, sessionId);
 				return;
 			}
 
@@ -4873,7 +4948,7 @@ export default function App() {
 								: candidate,
 						),
 				);
-				setSelectedSessionId(sessionId);
+				selectSessionInWorkspace(selectedWorkspace.id, sessionId);
 			} catch (error) {
 				const message =
 					error instanceof Error
@@ -5376,7 +5451,7 @@ export default function App() {
 				setGlobalSurface(null);
 				if (sessionId) {
 					setPendingSessionNavigation({ sessionId, workspaceId });
-					if (selectedWorkspace?.id === workspaceId) setSelectedSessionId(sessionId);
+					selectSessionInWorkspace(workspaceId, sessionId);
 				}
 				requestWorkspaceSelection(workspaceId);
 				workspaceComposerPrefillSequenceRef.current += 1;

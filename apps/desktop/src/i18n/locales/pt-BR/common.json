@@ -4026,6 +4026,9 @@
       "next": "Próxima ocorrência",
       "close": "Fechar busca"
     },
+    "sendWrongTask": "Mensagem não enviada: a conversa aberta não pertence a esta tarefa. Abra a tarefa de novo e reenvie.",
+    "taskStartedElsewhere": "\"{{task}}\" começou a rodar.",
+    "openTask": "Abrir",
     "compactUnsupported": "{{provider}} não trata /compact como compactação. A mensagem foi enviada como texto e nenhum re-anchor seguirá.",
     "evidence": {
       "chip": "Evidências · {{count}} · {{stage}}",

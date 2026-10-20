@@ -4026,6 +4026,9 @@
       "next": "Next match",
       "close": "Close find"
     },
+    "sendWrongTask": "Message not sent: the open conversation does not belong to this task. Reopen the task and send again.",
+    "taskStartedElsewhere": "\"{{task}}\" started running.",
+    "openTask": "Open",
     "compactUnsupported": "{{provider}} does not treat /compact as compaction. The message was sent as text and no re-anchor will follow.",
     "evidence": {
       "chip": "Evidence · {{count}} · {{stage}}",

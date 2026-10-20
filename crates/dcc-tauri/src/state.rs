@@ -5491,9 +5491,8 @@ impl SessionCommandState {
             .ok_or_else(|| dcc_core::CoreError::Repository("session not found".to_string()))?;
         // Validate the selected runtime capability contract before changing a
         // durable selection or cancelling a still-valid provider binding.
-        self.validate_provider_turn_selection(&current, input)
-            .await?;
-        if send_turn_selection_differs_from_session(&current, input) {
+        let selection_changes = send_turn_selection_differs_from_session(&current, input);
+        if selection_changes {
             // Switching provider/model cancels the binding, and with it the
             // running turn, before send_turn's own "active turn" check can
             // refuse. A turn sent with another task's selection must never
@@ -5509,6 +5508,10 @@ impl SessionCommandState {
                     "session already has an active turn".to_string(),
                 ));
             }
+        }
+        self.validate_provider_turn_selection(&current, input)
+            .await?;
+        if selection_changes {
             if self.provider_binding(&input.session_id)?.is_some() {
                 // A failed cancellation leaves the prior binding authoritative;
                 // do not persist or attach a different selection over it.
@@ -10262,6 +10265,68 @@ mod tests {
                 .expect("session events")
                 .is_empty()
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn running_turn_rejects_another_selection_instead_of_cancelling_it() {
+        let root = tempfile::tempdir().expect("state root");
+        let root = std::fs::canonicalize(root.path()).expect("physical state root");
+        let state =
+            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
+        let session = sample_session("selection-running-turn");
+        SessionRepo::save_session(&state, &session)
+            .await
+            .expect("save session");
+        save_active_session_thread(&state, &session).await;
+        state
+            .append_session_event(
+                &session.id,
+                SessionEventKind::TurnStarted {
+                    turn_id: TurnId("turn-in-flight".to_string()),
+                    prompt: "work in flight".to_string(),
+                    plan_mode: None,
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                    approval_policy: None,
+                },
+            )
+            .await
+            .expect("turn started");
+        state
+            .store
+            .lock()
+            .expect("store")
+            .provider_sessions
+            .insert(session.id.clone(), inert_provider_binding(&session.id));
+
+        // Another task's composer selection aimed at this running session.
+        let input = selection_input(session.id.clone(), Some("droid"), None);
+        let error = state
+            .prepare_provider_session_for_turn(&input)
+            .await
+            .expect_err("a running turn is never cancelled by a send");
+        assert!(error.to_string().contains("active turn"), "{error}");
+        assert!(state
+            .provider_binding(&session.id)
+            .expect("binding")
+            .is_some());
+        assert_eq!(
+            state
+                .peek_session(&session.id)
+                .await
+                .expect("reload")
+                .expect("session")
+                .provider_id,
+            "codex"
+        );
+        let events = SessionEventRepo::list_events_by_session(&state, &session.id)
+            .await
+            .expect("events");
+        assert_eq!(events.len(), 1);
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event.kind, SessionEventKind::TurnAborted { .. })));
     }
 
     #[tokio::test(flavor = "current_thread")]
