@@ -47,10 +47,10 @@ pub const DCC_OAUTH_CALLBACK_PATH: &str = "/oauth/mcp/callback";
 /// Client ID Metadata Document hosted on the DCC site. The URL is the
 /// client_id, so it must be served without redirects.
 pub const DCC_CLIENT_METADATA_URL: &str = "https://www.devcommandcenter.com/oauth/mcp-client.json";
-/// Flip once the document above is live. Until then a server that prefers
-/// metadata documents would fetch a missing client_id and refuse the
-/// sign-in, so DCC registers dynamically instead.
-pub const DCC_CLIENT_METADATA_PUBLISHED: bool = false;
+/// The document above is live (site commit b9d27f4). Turning this off makes
+/// DCC register dynamically even with servers that accept metadata
+/// documents.
+pub const DCC_CLIENT_METADATA_PUBLISHED: bool = true;
 pub const DCC_CLIENT_NAME: &str = "Dev Command Center";
 pub const DCC_CLIENT_URI: &str = "https://www.devcommandcenter.com";
 /// A sign-in the user abandons in the browser expires after this long.
