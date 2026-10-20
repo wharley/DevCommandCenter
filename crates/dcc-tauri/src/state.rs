@@ -5675,9 +5675,9 @@ impl SessionCommandState {
             .filter(|grant| grant.provider_id.0 == crate::mcp_connect::DCC_OAUTH_GRANT_OWNER)
             .map(|grant| grant.definition_id)
             .collect::<HashSet<_>>();
-        // A remote server that asked for a sign-in DCC does not hold would only
-        // fail inside the provider (or start the provider's own login), so it
-        // stays out until the user reconnects it.
+        // A remote server whose sign-in is missing or expired would only fail
+        // inside the provider, whichever it is, so it stays out of the turn
+        // until the user reconnects it (Settings or the composer strip).
         let needs_sign_in = repo
             .list_mcp_connection_checks()
             .await
@@ -5693,9 +5693,7 @@ impl SessionCommandState {
                     &server.transport,
                     dcc_core::ports::ProviderMcpTransport::Http { headers, .. } if headers.is_empty()
                 );
-                !(unauthenticated_http
-                    && !signed_in.contains(&server.definition_id)
-                    && needs_sign_in.contains(&server.definition_id))
+                !(unauthenticated_http && needs_sign_in.contains(&server.definition_id))
             })
             .collect::<Vec<_>>();
         if signed_in.is_empty() {
@@ -12034,7 +12032,8 @@ mod tests {
     async fn signed_out_remote_servers_stay_out_of_the_session() {
         use dcc_core::domain::mcp::{
             McpConnectionCheck, McpConnectionState, McpDefinition, McpDefinitionOwnership,
-            McpTransport, McpTrust, McpTrustDecision, McpTrustFingerprint,
+            McpOauthGrant, McpOauthResourceFingerprint, McpSecretReferenceId, McpTransport,
+            McpTrust, McpTrustDecision, McpTrustFingerprint,
         };
         use dcc_core::ports::McpRepo as _;
         let temp = tempfile::tempdir().expect("root");
@@ -12042,7 +12041,7 @@ mod tests {
         let db_path = root.join("sessions.sqlite");
         let state = SessionCommandState::new_headless(db_path.clone(), root.join("app-data"));
         let repo = SqliteMcpRepo::open(&db_path).expect("repo");
-        for id in ["lost", "fine"] {
+        for id in ["lost", "fine", "expired"] {
             let mut definition = McpDefinition {
                 id: McpDefinitionId(id.to_string()),
                 display_name: id.to_string(),
@@ -12062,20 +12061,35 @@ mod tests {
             definition.synchronize_trust_fingerprint();
             repo.save_mcp_definition(&definition).await.expect("definition");
         }
-        repo.save_mcp_connection_check(&McpConnectionCheck {
-            definition_id: McpDefinitionId("lost".to_string()),
-            state: McpConnectionState::NeedsAuth,
-            tools: Vec::new(),
-            message: None,
-            checked_at: "2026-10-19T00:00:00Z".to_string(),
+        for id in ["lost", "expired"] {
+            repo.save_mcp_connection_check(&McpConnectionCheck {
+                definition_id: McpDefinitionId(id.to_string()),
+                state: McpConnectionState::NeedsAuth,
+                tools: Vec::new(),
+                message: None,
+                checked_at: "2026-10-19T00:00:00Z".to_string(),
+            })
+            .await
+            .expect("check");
+        }
+        // A DCC sign-in whose refresh failed: the gateway could only answer
+        // with an error, so the provider never sees the server.
+        repo.save_mcp_oauth_grant(&McpOauthGrant {
+            definition_id: McpDefinitionId("expired".to_string()),
+            provider_id: ProviderId(crate::mcp_connect::DCC_OAUTH_GRANT_OWNER.to_string()),
+            resource_fingerprint: McpOauthResourceFingerprint("a".repeat(64)),
+            secret_ref: McpSecretReferenceId("oauth-grant:dcc:expired".to_string()),
+            created_at: "2026-10-19T00:00:00Z".to_string(),
+            updated_at: "2026-10-19T00:00:00Z".to_string(),
         })
         .await
-        .expect("check");
+        .expect("grant");
 
         let (direct, connectors) = state
             .split_gateway_connectors(vec![
                 fake_ephemeral_server("lost", "dcc-lost"),
                 fake_ephemeral_server("fine", "dcc-fine"),
+                fake_ephemeral_server("expired", "dcc-expired"),
             ])
             .await;
         let kept = direct
