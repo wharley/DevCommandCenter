@@ -89,6 +89,16 @@ itself and serves them to providers through a narrow gateway.
   their connectors are marked as needing a reconnect. A remote server that
   asks for a sign-in DCC does not hold is left out of the turn.
 
+- **The user's own config.** DCC reads, never writes, the remote servers in
+  Claude Code (`.claude.json`), Codex (`config.toml`) and Cursor (`mcp.json`).
+  It offers once to import them as connectors, and it does not send a provider
+  a DCC connector that provider already loads from its own file (same URL):
+  that provider keeps its own copy, every other provider gets DCC's.
+- **The user's own app.** Servers that register no clients (Slack) sign in
+  with an app the user creates; its redirect is
+  `http://localhost:46327/oauth/mcp/callback`, served on both loopback
+  addresses.
+
 ### Tools-first boundary
 
 The first compatibility contract covers MCP initialization, tool discovery,

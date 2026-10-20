@@ -4,7 +4,7 @@
 /* Constants */
 export const DELEGATION_METHODS = {"approveDelegation":"approve_delegation","cancelDelegation":"cancel_delegation","cancelRunningDelegation":"cancel_running_delegation","completeDelegation":"complete_delegation","completeTask":"complete_task","createDelegation":"create_delegation","delegationResultTurn":"delegation_result_turn","failDelegation":"fail_delegation","getDelegation":"get_delegation","listDelegations":"list_delegations","runDelegation":"run_delegation","startDelegation":"start_delegation","startTaskProposal":"start_task_proposal"} as const;
 
-export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","cancelMcpConnect":"cancel_mcp_connect","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpConnector":"disconnect_mcp_connector","fetchMcpConnectorLogo":"fetch_mcp_connector_logo","listMcpIntegrations":"list_mcp_integrations","removeMcpIntegration":"remove_mcp_integration","setMcpConnectorLogo":"set_mcp_connector_logo","setMcpConnectorScopes":"set_mcp_connector_scopes","setMcpProjectEnabled":"set_mcp_project_enabled","setMcpToolPolicy":"set_mcp_tool_policy","startMcpConnect":"start_mcp_connect","testMcpIntegration":"test_mcp_integration","waitMcpConnect":"wait_mcp_connect"} as const;
+export const MCP_METHODS = {"activateMcpIntegration":"activate_mcp_integration","cancelMcpConnect":"cancel_mcp_connect","createMcpIntegration":"create_mcp_integration","disableMcpIntegration":"disable_mcp_integration","disconnectMcpConnector":"disconnect_mcp_connector","fetchMcpConnectorLogo":"fetch_mcp_connector_logo","importNativeMcpServers":"import_native_mcp_servers","listMcpIntegrations":"list_mcp_integrations","listNativeMcpServers":"list_native_mcp_servers","removeMcpIntegration":"remove_mcp_integration","setMcpConnectorLogo":"set_mcp_connector_logo","setMcpConnectorScopes":"set_mcp_connector_scopes","setMcpProjectEnabled":"set_mcp_project_enabled","setMcpToolPolicy":"set_mcp_tool_policy","startMcpConnect":"start_mcp_connect","testMcpIntegration":"test_mcp_integration","waitMcpConnect":"wait_mcp_connect"} as const;
 
 export const PROVIDER_METHODS = {"cancelProviderAccountSignIn":"cancel_provider_account_sign_in","checkProviderExecutable":"check_provider_executable","connectAntigravity":"connect_antigravity","createProviderAccount":"create_provider_account","getAntigravityStatus":"get_antigravity_status","getProviderAvailability":"get_provider_availability","installAntigravity":"install_antigravity","listProviderAccounts":"list_provider_accounts","listProviders":"list_providers","providerAccountReset":"provider_account_reset","providerAccountStatus":"provider_account_status","providerAccountUsage":"provider_account_usage","removeProviderAccount":"remove_provider_account","renameProviderAccount":"rename_provider_account","setProviderAvailability":"set_provider_availability","signInProviderAccount":"sign_in_provider_account"} as const;
 
@@ -1222,6 +1222,20 @@ export type HealthStatus = "Healthy" | ({ Degraded: {
 	reason: string,
 } }) & { Degraded?: never };
 
+export type ImportNativeMcpServer = {
+	app: NativeMcpApp,
+	name: string,
+	displayName: string,
+};
+
+export type ImportNativeMcpServersInput = {
+	servers: ImportNativeMcpServer[],
+};
+
+export type ImportNativeMcpServersOutput = {
+	integrations: McpIntegrationRecord[],
+};
+
 export type InheritSessionObjectiveInput = {
 	parentSessionId: SessionId,
 	childSessionId: SessionId,
@@ -1301,6 +1315,10 @@ export type ListMissionSpecsInput = {
 
 export type ListMissionSpecsOutput = {
 	specs: MissionSpecEntry[],
+};
+
+export type ListNativeMcpServersOutput = {
+	servers: NativeMcpServerSummary[],
 };
 
 export type ListProviderAccountsOutput = {
@@ -1674,6 +1692,20 @@ export type ModelUsageSummary = {
 	reasoningOutputTokens: number,
 	totalTokens: number,
 	costUsd?: number | null,
+};
+
+// The app a server was found in.
+export type NativeMcpApp = "claudeCode" | "codex" | "cursor";
+
+/**
+ *  A remote server in another app's config. Header values stay in the
+ *  backend; the renderer only learns that there are some.
+ */
+export type NativeMcpServerSummary = {
+	app: NativeMcpApp,
+	name: string,
+	url: string,
+	hasHeaders: boolean,
 };
 
 export type NativeSubagentControlOutput = {

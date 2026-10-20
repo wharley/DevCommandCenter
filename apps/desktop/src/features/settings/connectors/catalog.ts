@@ -5,6 +5,8 @@
  * sign-in was verified (docs/PLANO_CONECTORES_MCP.md, D7).
  */
 
+import { SLACK_READ_SCOPES } from "./user-app";
+
 export type ConnectorCategory = "popular" | "developer" | "productivity";
 
 export type ConnectorPreset = {
@@ -15,9 +17,14 @@ export type ConnectorPreset = {
 	docsUrl: string;
 	/** Key into connector-logos; null falls back to the initial. */
 	logoId: string | null;
-	/** Servers without client registration: a personal access token. */
-	auth?: "token";
+	/**
+	 * Servers without client registration: a personal access token, or an
+	 * app the user creates with the vendor (Slack, guided).
+	 */
+	auth?: "token" | "slackApp";
 	tokenHelpUrl?: string;
+	/** Scopes requested at sign-in instead of the server's suggestion. */
+	scopes?: string;
 	/** Hidden until the server is live or its sign-in path is verified. */
 	hidden?: boolean;
 };
@@ -72,15 +79,16 @@ export const CONNECTOR_PRESETS: ConnectorPreset[] = [
 		logoId: "sentry",
 	},
 	{
-		// Needs the user's own Slack app (no client registration); the guided
-		// setup ships with the custom-connector flow (F5).
+		// No client registration: the user creates an internal Slack app from
+		// DCC's manifest and pastes its Client ID (user-app.ts).
 		id: "slack",
 		name: "Slack",
 		category: "productivity",
 		url: "https://mcp.slack.com/mcp",
-		docsUrl: "https://api.slack.com/apps",
+		docsUrl: "https://docs.slack.dev/ai/mcp-server/",
 		logoId: "slack",
-		hidden: true,
+		auth: "slackApp",
+		scopes: SLACK_READ_SCOPES.join(" "),
 	},
 	{
 		// Production answers 403 until the server is deployed.

@@ -10,7 +10,8 @@ use dcc_tauri::{
         FetchMcpConnectorLogoInput, McpConnectorDetailsOutput, SetMcpConnectorLogoInput,
         SetMcpConnectorScopesInput, SetMcpProjectEnabledInput, SetMcpProjectEnabledOutput,
         TestMcpIntegrationInput,
-        TestMcpIntegrationOutput, WaitMcpConnectOutput,
+        TestMcpIntegrationOutput, WaitMcpConnectOutput, ImportNativeMcpServersInput,
+        ImportNativeMcpServersOutput, ListNativeMcpServersOutput,
     },
     connector_gateway::ConnectorGateway,
     mcp_connect::McpConnectCoordinator,
@@ -102,6 +103,19 @@ pub async fn set_mcp_connector_logo(
     input: SetMcpConnectorLogoInput,
 ) -> Result<McpConnectorDetailsOutput, String> {
     mcp_command_impl::set_mcp_connector_logo(state, input).await
+}
+
+#[tauri::command]
+pub async fn list_native_mcp_servers() -> Result<ListNativeMcpServersOutput, String> {
+    mcp_command_impl::list_native_mcp_servers().await
+}
+
+#[tauri::command]
+pub async fn import_native_mcp_servers(
+    state: State<'_, WorkspaceCommandState>,
+    input: ImportNativeMcpServersInput,
+) -> Result<ImportNativeMcpServersOutput, String> {
+    mcp_command_impl::import_native_mcp_servers(state, input).await
 }
 
 #[tauri::command]

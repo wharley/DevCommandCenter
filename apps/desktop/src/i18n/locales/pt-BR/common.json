@@ -2649,6 +2649,13 @@
       "footerUnsupported": "{{providers}} ainda não usam conectores.",
       "loadError": "Não foi possível carregar os conectores.",
       "retry": "Tentar de novo",
+      "import": {
+        "offer": "Encontramos {{names}} em {{apps}}. Trazer para o DCC? Assim valem em todos os agentes.",
+        "bring": "Trazer",
+        "notNow": "Agora não",
+        "done_one": "{{count}} conector trazido. Se pedir login, aparece para reconectar.",
+        "done_other": "{{count}} conectores trazidos. Os que pedirem login aparecem para reconectar."
+      },
       "desktopOnly": "Os conectores funcionam no app desktop.",
       "status": {
         "connected": "Conectado",
@@ -2675,7 +2682,7 @@
         "notion": "Busque, leia e edite páginas e bancos de dados.",
         "github": "Repositórios, issues, pull requests e Actions.",
         "sentry": "Investigue erros, issues e releases.",
-        "slack": "Busque, leia e poste no seu workspace.",
+        "slack": "Busque e leia mensagens, canais e arquivos do seu workspace.",
         "zedy": "Produtos, coleções e links de checkout da sua loja."
       },
       "connect": {
@@ -2694,7 +2701,28 @@
         "tokenLabel": "Token de acesso",
         "tokenHint": "O {{name}} não cadastra apps automaticamente. Crie um token de acesso pessoal com acesso só ao que o agente precisa.",
         "createToken": "Criar token no {{name}}",
-        "connectWithToken": "Conectar com token"
+        "connectWithToken": "Conectar com token",
+        "clientIdLabel": "Client ID",
+        "copy": "Copiar",
+        "copied": "Copiado",
+        "copyFailed": "Não foi possível copiar.",
+        "slack": {
+          "intro": "O Slack só aceita apps criados no seu workspace. Leva um minuto e só precisa ser feito uma vez.",
+          "createTitle": "Crie o app do Slack",
+          "createButton": "Criar app no Slack",
+          "copyManifest": "Copiar manifesto",
+          "installTitle": "Instale no seu workspace",
+          "installBody": "No Slack, confirme com Create e depois clique em Install to Workspace e em Allow.",
+          "clientIdTitle": "Cole o Client ID",
+          "clientIdBody": "Fica em Basic Information → App Credentials. Não precisa do Client Secret."
+        },
+        "ownApp": {
+          "intro": "O {{name}} não aceita o cadastro automático do DCC. Use um app seu no {{name}} ou um token de acesso.",
+          "title": "Com um app seu",
+          "redirectLabel": "Cadastre este endereço de retorno (redirect URL) no app:",
+          "secretLabel": "Client Secret (se o app tiver)",
+          "tokenTitle": "Ou com um token de acesso"
+        }
       },
       "toast": {
         "connected": "{{name}} conectado. Já vale a partir da próxima mensagem.",
@@ -3715,10 +3743,12 @@
           "Clique no conector que quer usar, leia o aviso e clique em continuar para entrar pelo navegador.",
           "Volte ao DCC: o conector aparece em [Conectados] e já vale a partir da próxima mensagem.",
           "Para um servidor fora do catálogo, use [Adicionar personalizado] e cole a [URL do servidor MCP].",
-          "Se o login expirar, clique em [Reconectar]. Em [Gerenciar] você testa a conexão e ajusta cada ferramenta."
+          "Se o login expirar, clique em [Reconectar]. Em [Gerenciar] você testa a conexão e ajusta cada ferramenta.",
+          "Para o Slack, siga os 3 passos do diálogo: o DCC abre o Slack com o app pronto e você só cola o [Client ID].",
+          "Se você já usa servidores no Claude Code, Codex ou Cursor, o DCC oferece trazê-los uma vez para valerem em todos os agentes: clique em [Trazer]. Os arquivos desses apps nunca são alterados."
         ],
         "tip": "O login fica guardado com segurança e nunca é enviado aos providers de IA. Comandos locais e cabeçalhos ficam em [Avançado].",
-        "keywords": "mcp conector conectores integração integrações servidor ferramentas oauth login clickup linear notion github sentry"
+        "keywords": "mcp conector conectores integração integrações servidor ferramentas oauth login clickup linear notion github sentry slack importar claude code codex cursor client id"
       },
       "codeRabbit": {
         "label": "Review com CodeRabbit",

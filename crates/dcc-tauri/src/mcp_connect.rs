@@ -25,10 +25,11 @@ use dcc_core::{
 };
 use dcc_infra::mcp_oauth::{
     begin_authorization, bind_callback_listener, callback_redirect_uri, complete_authorization,
-    refresh_credential, revoke_credential, serve_callback_connection, AuthorizationStart,
-    BeginOptions, CallbackPage, CallbackParams, McpOauthCredential, McpOauthError, McpOauthHttp,
-    McpOauthResult, PendingAuthorization, UserProvidedClient, AUTHORIZATION_TTL,
-    DCC_CLIENT_METADATA_PUBLISHED, DCC_OAUTH_CALLBACK_PORT, TOKEN_REFRESH_LEEWAY,
+    refresh_credential, revoke_credential, serve_callback_connection, user_app_redirect_uri,
+    AuthorizationStart, BeginOptions, CallbackPage, CallbackParams, ClientRegistrationKind,
+    McpOauthCredential, McpOauthError, McpOauthHttp, McpOauthResult, PendingAuthorization,
+    UserProvidedClient, AUTHORIZATION_TTL, DCC_CLIENT_METADATA_PUBLISHED, DCC_OAUTH_CALLBACK_PORT,
+    TOKEN_REFRESH_LEEWAY,
 };
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 use uuid::Uuid;
@@ -124,6 +125,23 @@ impl McpConnectCoordinator {
             .ok()
             .flatten()
             .map(|credential| credential.client);
+        // The user's own app (Slack) is registered with the `localhost`
+        // redirect on the fixed port; a reconnect reuses that app.
+        let user_app = user_client.is_some()
+            || previous_client
+                .as_ref()
+                .is_some_and(|client| client.registration == ClientRegistrationKind::UserProvided);
+        if user_app && !fixed_port {
+            self.stop_listener_if_idle();
+            return Err(McpOauthError::Transient(format!(
+                "Another app is using port {DCC_OAUTH_CALLBACK_PORT}, which your app's redirect needs. Close it and try again"
+            )));
+        }
+        let redirect_uri = if user_app {
+            user_app_redirect_uri(port)
+        } else {
+            callback_redirect_uri(port)
+        };
         let scopes = stores
             .repo
             .list_mcp_connector_details()
@@ -139,7 +157,7 @@ impl McpConnectCoordinator {
             &self.http,
             url,
             BeginOptions {
-                redirect_uri: callback_redirect_uri(port),
+                redirect_uri,
                 metadata_document_allowed: fixed_port && DCC_CLIENT_METADATA_PUBLISHED,
                 user_client,
                 previous_client,
@@ -330,11 +348,28 @@ impl McpConnectCoordinator {
         }
         let coordinator = self.clone();
         let listener = bound.listener;
+        let listener_v6 = bound.listener_v6;
         tokio::spawn(async move {
             loop {
+                let accept_v6 = async {
+                    match &listener_v6 {
+                        Some(listener) => listener.accept().await,
+                        None => std::future::pending().await,
+                    }
+                };
                 tokio::select! {
                     _ = &mut shutdown_signal => break,
                     accepted = listener.accept() => {
+                        let Ok((stream, _)) = accepted else { continue };
+                        let coordinator = coordinator.clone();
+                        tokio::spawn(async move {
+                            serve_callback_connection(stream, |params| {
+                                coordinator.handle_callback(params)
+                            })
+                            .await;
+                        });
+                    }
+                    accepted = accept_v6 => {
                         let Ok((stream, _)) = accepted else { continue };
                         let coordinator = coordinator.clone();
                         tokio::spawn(async move {

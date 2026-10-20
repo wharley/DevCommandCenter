@@ -7228,6 +7228,8 @@ pub fn run() {
             mcp_commands::set_mcp_connector_scopes,
             mcp_commands::set_mcp_connector_logo,
             mcp_commands::fetch_mcp_connector_logo,
+            mcp_commands::list_native_mcp_servers,
+            mcp_commands::import_native_mcp_servers,
             provider_commands::list_providers,
             provider_commands::get_provider_availability,
             provider_commands::check_provider_executable,

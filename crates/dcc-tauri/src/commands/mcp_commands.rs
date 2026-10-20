@@ -33,6 +33,7 @@ use dcc_core::{
 use dcc_infra::mcp_probe::{CommandLookup, McpProbeLimits, SecureMcpProbe};
 use std::time::Duration;
 use dcc_infra::mcp_oauth::{McpOauthError, UserProvidedClient};
+use dcc_infra::native_mcp::{same_server_url, NativeMcpSource, NativeRemoteServer};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -491,6 +492,171 @@ pub async fn fetch_mcp_connector_logo(
         }
     })
     .await
+}
+
+/// The app a server was found in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum NativeMcpApp {
+    ClaudeCode,
+    Codex,
+    Cursor,
+}
+
+impl From<NativeMcpSource> for NativeMcpApp {
+    fn from(source: NativeMcpSource) -> Self {
+        match source {
+            NativeMcpSource::ClaudeCode => Self::ClaudeCode,
+            NativeMcpSource::Codex => Self::Codex,
+            NativeMcpSource::Cursor => Self::Cursor,
+        }
+    }
+}
+
+/// A remote server in another app's config. Header values stay in the
+/// backend; the renderer only learns that there are some.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeMcpServerSummary {
+    pub app: NativeMcpApp,
+    pub name: String,
+    pub url: String,
+    pub has_headers: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListNativeMcpServersOutput {
+    pub servers: Vec<NativeMcpServerSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportNativeMcpServer {
+    pub app: NativeMcpApp,
+    pub name: String,
+    pub display_name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportNativeMcpServersInput {
+    pub servers: Vec<ImportNativeMcpServer>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportNativeMcpServersOutput {
+    pub integrations: Vec<McpIntegrationRecord>,
+}
+
+const MAX_IMPORTED_SERVERS: usize = 64;
+
+/// Remote servers in Claude Code, Codex and Cursor (read-only).
+#[tauri::command]
+pub async fn list_native_mcp_servers() -> Result<ListNativeMcpServersOutput, String> {
+    let found = tokio::task::spawn_blocking(crate::native_connectors::discover_importable)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(ListNativeMcpServersOutput {
+        servers: found
+            .into_iter()
+            .map(|server| NativeMcpServerSummary {
+                app: server.source.into(),
+                has_headers: !server.headers.is_empty(),
+                name: server.name,
+                url: server.url,
+            })
+            .collect(),
+    })
+}
+
+/// Copies the chosen servers into DCC as global connectors. The source files
+/// are only read; header values go straight to the credential store.
+#[tauri::command]
+pub async fn import_native_mcp_servers(
+    state: State<'_, WorkspaceCommandState>,
+    input: ImportNativeMcpServersInput,
+) -> Result<ImportNativeMcpServersOutput, String> {
+    let found = tokio::task::spawn_blocking(crate::native_connectors::discover_importable)
+        .await
+        .map_err(|error| error.to_string())?;
+    let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    import_native_servers(&repo, &SystemCredentialStore::default(), &found, input)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn import_native_servers<R, C>(
+    repo: &R,
+    credential_store: &C,
+    found: &[NativeRemoteServer],
+    input: ImportNativeMcpServersInput,
+) -> McpCommandResult<ImportNativeMcpServersOutput>
+where
+    R: McpRepo + Sync + ?Sized,
+    C: CredentialStore + Sync + ?Sized,
+{
+    let mut known_urls = repo
+        .list_mcp_definitions()
+        .await?
+        .into_iter()
+        .filter_map(|definition| match definition.transport {
+            McpTransport::Http { url } => Some(url),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut integrations = Vec::new();
+    for wanted in input.servers.into_iter().take(MAX_IMPORTED_SERVERS) {
+        let Some(server) = found.iter().find(|server| {
+            NativeMcpApp::from(server.source) == wanted.app && server.name == wanted.name
+        }) else {
+            continue;
+        };
+        if known_urls
+            .iter()
+            .any(|known| same_server_url(known, &server.url))
+        {
+            continue;
+        }
+        let display_name = match wanted.display_name.trim() {
+            "" => server.name.clone(),
+            name => name.to_string(),
+        };
+        let created = create_integration(
+            repo,
+            credential_store,
+            CreateMcpIntegrationInput {
+                display_name,
+                transport: McpTransport::Http {
+                    url: server.url.clone(),
+                },
+                scope: McpBindingScope::Global,
+                credentials: server
+                    .headers
+                    .iter()
+                    .map(|(name, value)| McpCredentialInput {
+                        target: McpSecretTarget::HttpHeader { name: name.clone() },
+                        secret: value.clone(),
+                    })
+                    .collect(),
+            },
+        )
+        .await?;
+        // Choosing "Import" is the consent, as clicking Connect is for a
+        // catalog connector.
+        let activated = activate_integration(
+            repo,
+            ActivateMcpDefinitionInput {
+                definition_id: created.integration.definition.id.clone(),
+                expected_fingerprint: created.integration.definition.trust.current_fingerprint,
+            },
+        )
+        .await?;
+        known_urls.push(server.url.clone());
+        integrations.push(activated.integration);
+    }
+    Ok(ImportNativeMcpServersOutput { integrations })
 }
 
 async fn update_connector_details(
@@ -1248,6 +1414,62 @@ mod tests {
             .await
             .expect("resolve deleted credential")
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn imports_remote_servers_as_active_connectors_once() {
+        use dcc_infra::native_mcp::{NativeMcpSource, NativeRemoteServer};
+        let repo = repo();
+        let credentials = TestCredentialStore::default();
+        let found = vec![
+            NativeRemoteServer {
+                source: NativeMcpSource::ClaudeCode,
+                name: "github".to_string(),
+                url: "https://api.githubcopilot.com/mcp/".to_string(),
+                headers: vec![("Authorization".to_string(), "Bearer ghp_x".to_string())],
+            },
+            NativeRemoteServer {
+                source: NativeMcpSource::Codex,
+                name: "github-again".to_string(),
+                url: "https://api.githubcopilot.com/mcp".to_string(),
+                headers: Vec::new(),
+            },
+        ];
+        let wanted = |app: NativeMcpApp, name: &str| ImportNativeMcpServer {
+            app,
+            name: name.to_string(),
+            display_name: "GitHub".to_string(),
+        };
+        let imported = import_native_servers(
+            &repo,
+            &credentials,
+            &found,
+            ImportNativeMcpServersInput {
+                servers: vec![
+                    wanted(NativeMcpApp::ClaudeCode, "github"),
+                    // Same URL from another app: already imported.
+                    wanted(NativeMcpApp::Codex, "github-again"),
+                    // Not in the files: ignored.
+                    wanted(NativeMcpApp::Cursor, "invented"),
+                ],
+            },
+        )
+        .await
+        .expect("import");
+
+        assert_eq!(imported.integrations.len(), 1);
+        let integration = &imported.integrations[0];
+        assert_eq!(integration.definition.display_name, "GitHub");
+        assert!(integration.definition.enabled);
+        assert!(matches!(
+            integration.definition.trust.decision,
+            McpTrustDecision::Trusted { .. }
+        ));
+        assert_eq!(integration.credential_count, 1);
+        assert!(integration
+            .bindings
+            .iter()
+            .any(|binding| binding.scope == McpBindingScope::Global));
     }
 
     #[tokio::test]

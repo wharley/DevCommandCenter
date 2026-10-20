@@ -16,6 +16,13 @@ import {
 	readLogoFile,
 	sortConnectorViews,
 } from "./connector-model";
+import { importCandidates, importDisplayName, joinNames } from "./import-offer";
+import {
+	SLACK_READ_SCOPES,
+	slackAppManifest,
+	slackCreateAppUrl,
+	USER_APP_REDIRECT_URI,
+} from "./user-app";
 import {
 	defaultConnectorName,
 	parseCustomConnectorUrl,
@@ -86,7 +93,7 @@ describe("connector catalog", () => {
 
 	it("keeps unverified presets out of the shelves", () => {
 		const visible = visibleConnectorPresets().map((preset) => preset.id);
-		expect(visible).toEqual(["clickup", "linear", "notion", "github", "sentry"]);
+		expect(visible).toEqual(["clickup", "linear", "notion", "github", "sentry", "slack"]);
 	});
 
 	it("matches URLs ignoring a trailing slash and host case", () => {
@@ -208,5 +215,71 @@ describe("custom connector details", () => {
 		expect(deriveConnectorView(custom).logoUri).toBe("data:image/png;base64,AAAA");
 		const preset = { ...record(), logo: "data:image/png;base64,AAAA" } as McpIntegrationRecord;
 		expect(deriveConnectorView(preset).logoUri).toBeNull();
+	});
+});
+
+describe("Slack app", () => {
+	it("registers DCC's localhost callback with PKCE and MCP on", () => {
+		const manifest = slackAppManifest();
+		expect(USER_APP_REDIRECT_URI).toBe("http://localhost:46327/oauth/mcp/callback");
+		expect(manifest.oauth_config.redirect_urls).toEqual([USER_APP_REDIRECT_URI]);
+		expect(manifest.oauth_config.pkce_enabled).toBe(true);
+		expect(manifest.settings.is_mcp_enabled).toBe(true);
+	});
+
+	it("asks only for read scopes and requests the same at sign-in", () => {
+		expect(SLACK_READ_SCOPES.every((scope) => !scope.endsWith(":write"))).toBe(true);
+		expect(findPresetForUrl("https://mcp.slack.com/mcp")?.scopes).toBe(
+			SLACK_READ_SCOPES.join(" "),
+		);
+		expect(isValidScopeList(SLACK_READ_SCOPES.join(" "))).toBe(true);
+	});
+
+	it("opens Slack with the manifest filled in", () => {
+		const url = new URL(slackCreateAppUrl());
+		expect(url.origin).toBe("https://api.slack.com");
+		expect(url.searchParams.get("new_app")).toBe("1");
+		expect(JSON.parse(url.searchParams.get("manifest_json")!)).toEqual(slackAppManifest());
+	});
+});
+
+describe("import offer", () => {
+	const server = (url: string, name = "server", app: "claudeCode" | "codex" | "cursor" = "claudeCode") => ({
+		app,
+		name,
+		url,
+		hasHeaders: false,
+	});
+
+	it("offers each new server once, under its catalog name", () => {
+		const candidates = importCandidates(
+			[
+				server("https://mcp.clickup.com/mcp/", "clickup"),
+				server("https://mcp.linear.app/mcp", "linear", "codex"),
+				server("https://mcp.linear.app/mcp/", "linear-copy", "cursor"),
+				server("https://mcp.notion.com/mcp", "notion"),
+				server("https://internal.example.com/mcp", "my_tools"),
+			],
+			[record()],
+			["https://mcp.notion.com/mcp"],
+		);
+		expect(candidates.map((candidate) => candidate.displayName)).toEqual([
+			"Linear",
+			"My tools",
+		]);
+	});
+
+	it("turns config keys into readable names", () => {
+		expect(importDisplayName(server("https://developers.openai.com/mcp", "openaiDeveloperDocs"))).toBe(
+			"Openai Developer Docs",
+		);
+		expect(importDisplayName(server("https://mcp.mercadopago.com/mcp", "mercadopago-mcp"))).toBe(
+			"Mercadopago mcp",
+		);
+	});
+
+	it("joins names in the UI language", () => {
+		expect(joinNames(["ClickUp", "Linear"], "pt-BR")).toBe("ClickUp e Linear");
+		expect(joinNames(["ClickUp", "Linear"], "en")).toBe("ClickUp and Linear");
 	});
 });

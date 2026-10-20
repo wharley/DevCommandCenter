@@ -274,7 +274,9 @@ use dcc_tauri::commands::{
         CancelMcpConnectOutput, DisconnectMcpConnectorInput, DisconnectMcpConnectorOutput,
         TestMcpIntegrationInput, TestMcpIntegrationOutput, SetMcpProjectEnabledInput,
         SetMcpProjectEnabledOutput, SetMcpConnectorScopesInput, SetMcpConnectorLogoInput,
-        FetchMcpConnectorLogoInput, McpConnectorDetailsOutput,
+        FetchMcpConnectorLogoInput, McpConnectorDetailsOutput, ImportNativeMcpServer,
+        ImportNativeMcpServersInput, ImportNativeMcpServersOutput, ListNativeMcpServersOutput,
+        NativeMcpApp, NativeMcpServerSummary,
     },
     provider_commands::{
         AntigravityStatusInput, AntigravityStatusOutput, ConnectAntigravityInput,
@@ -664,6 +666,8 @@ struct McpMethods {
     set_mcp_connector_scopes: String,
     set_mcp_connector_logo: String,
     fetch_mcp_connector_logo: String,
+    list_native_mcp_servers: String,
+    import_native_mcp_servers: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1037,6 +1041,12 @@ fn main() {
         .typ::<SetMcpConnectorScopesInput>()
         .typ::<SetMcpConnectorLogoInput>()
         .typ::<FetchMcpConnectorLogoInput>()
+        .typ::<NativeMcpApp>()
+        .typ::<NativeMcpServerSummary>()
+        .typ::<ListNativeMcpServersOutput>()
+        .typ::<ImportNativeMcpServer>()
+        .typ::<ImportNativeMcpServersInput>()
+        .typ::<ImportNativeMcpServersOutput>()
         .typ::<McpConnectorDetailsOutput>()
         .typ::<dcc_core::domain::mcp::McpConnectionCheck>()
         .typ::<dcc_core::domain::mcp::McpConnectionState>()
@@ -1376,6 +1386,8 @@ fn main() {
             set_mcp_connector_scopes: "set_mcp_connector_scopes".to_string(),
             set_mcp_connector_logo: "set_mcp_connector_logo".to_string(),
             fetch_mcp_connector_logo: "fetch_mcp_connector_logo".to_string(),
+            list_native_mcp_servers: "list_native_mcp_servers".to_string(),
+            import_native_mcp_servers: "import_native_mcp_servers".to_string(),
         },
     );
 

@@ -47,6 +47,7 @@ import {
 } from "./connector-model";
 import { ConnectDialog } from "./ConnectDialog";
 import { AddCustomConnectorDialog } from "./AddCustomConnectorDialog";
+import { ImportOffer } from "./ImportOffer";
 import { ManageConnectorDialog } from "./ManageConnectorDialog";
 import { useConnectorNeedsAuthEvents } from "./use-connector-events";
 
@@ -311,6 +312,10 @@ export function ConnectorsPanel(props: ConnectorsPanelProps) {
 						<span className="text-[12px]">{t("settings.connectors.retry")}</span>
 					</Button>
 				</div>
+			) : null}
+
+			{isTauriRuntime() && integrationsQuery.isSuccess ? (
+				<ImportOffer integrations={integrations} onImported={refresh} />
 			) : null}
 
 			{connected.length > 0 ? (

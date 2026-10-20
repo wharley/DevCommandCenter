@@ -44,7 +44,8 @@ pub use forge_commands::{
 pub use mcp_commands::{
     activate_mcp_integration, cancel_mcp_connect, create_mcp_integration,
     disable_mcp_integration, disconnect_mcp_connector,
-    fetch_mcp_connector_logo, list_mcp_integrations, remove_mcp_integration,
+    fetch_mcp_connector_logo, import_native_mcp_servers, list_mcp_integrations,
+    list_native_mcp_servers, remove_mcp_integration,
     set_mcp_connector_logo, set_mcp_connector_scopes, set_mcp_project_enabled,
     set_mcp_tool_policy, start_mcp_connect, test_mcp_integration, wait_mcp_connect,
 };

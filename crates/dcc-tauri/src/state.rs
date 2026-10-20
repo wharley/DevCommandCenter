@@ -4909,6 +4909,11 @@ impl SessionCommandState {
         let mcp_servers = self
             .resolve_provider_mcp_servers(session, mcp_projection_version.as_deref())
             .await?;
+        let mcp_servers = crate::native_connectors::drop_native_duplicates(
+            &session.provider_id,
+            &provider_runtime,
+            mcp_servers,
+        );
         let (mut mcp_servers, connectors) = self.split_gateway_connectors(mcp_servers).await;
         let mut projected_definition_ids = mcp_servers
             .iter()

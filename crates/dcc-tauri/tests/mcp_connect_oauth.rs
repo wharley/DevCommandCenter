@@ -12,7 +12,9 @@ use dcc_core::{
     ports::McpRepo,
 };
 use dcc_infra::{
-    credential_store::InMemoryCredentialStore, mcp_db::SqliteMcpRepo, mcp_oauth::McpOauthError,
+    credential_store::InMemoryCredentialStore,
+    mcp_db::SqliteMcpRepo,
+    mcp_oauth::{McpOauthError, UserProvidedClient},
 };
 use dcc_mcp_fixture::oauth::{OAuthFixture, OAuthFixtureConfig};
 use dcc_tauri::mcp_connect::{
@@ -319,6 +321,80 @@ async fn asks_for_the_users_app_when_registration_is_unavailable() {
         connect(&forbidden).await,
         Err(McpOauthError::ClientRegistrationRejected(_))
     ));
+}
+
+#[tokio::test]
+async fn signs_in_with_the_users_own_app_through_localhost() {
+    let free_port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut harness = harness(OAuthFixtureConfig {
+        dynamic_registration: false,
+        ..OAuthFixtureConfig::default()
+    })
+    .await;
+    harness.coordinator = McpConnectCoordinator::with_callback_port(free_port).unwrap();
+    let redirect = format!("http://localhost:{free_port}/oauth/mcp/callback");
+    harness.fixture.register_user_app("users-app", &redirect);
+
+    let start = harness
+        .coordinator
+        .start(
+            harness.stores.clone(),
+            &harness.definition,
+            Some(UserProvidedClient {
+                client_id: "users-app".into(),
+                client_secret: None,
+            }),
+        )
+        .await
+        .expect("start");
+    let ConnectStart::Authorize {
+        login_id,
+        authorization_url,
+    } = start
+    else {
+        panic!("fixture requires a sign-in");
+    };
+    assert!(
+        authorization_url.contains(&format!(
+            "redirect_uri=http%3A%2F%2Flocalhost%3A{free_port}%2F"
+        )),
+        "{authorization_url}"
+    );
+    approve_in_browser(&authorization_url).await;
+    harness
+        .coordinator
+        .wait(&login_id)
+        .await
+        .expect("connected");
+
+    // A reconnect from the composer passes no app: the saved one is reused.
+    connect(&harness).await.expect("reconnected");
+    assert_eq!(harness.fixture.registrations(), 0);
+}
+
+#[tokio::test]
+async fn the_users_app_needs_the_fixed_port() {
+    let harness = harness(OAuthFixtureConfig {
+        dynamic_registration: false,
+        ..OAuthFixtureConfig::default()
+    })
+    .await;
+    let started = harness
+        .coordinator
+        .start(
+            harness.stores.clone(),
+            &harness.definition,
+            Some(UserProvidedClient {
+                client_id: "users-app".into(),
+                client_secret: None,
+            }),
+        )
+        .await;
+    assert!(matches!(started, Err(McpOauthError::Transient(_))));
 }
 
 #[tokio::test]

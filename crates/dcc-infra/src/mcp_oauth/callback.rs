@@ -2,7 +2,11 @@
 //! `GET /oauth/mcp/callback?…` per connection, hands the query to the caller,
 //! and answers with a static page. Nothing else is served.
 
-use std::{io, net::Ipv4Addr, time::Duration};
+use std::{
+    io,
+    net::{Ipv4Addr, Ipv6Addr},
+    time::Duration,
+};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -18,29 +22,30 @@ const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct BoundCallbackListener {
     pub listener: TcpListener,
+    /// The same port on `::1`, so a `localhost` redirect lands whichever
+    /// loopback address the browser tries. Absent when IPv6 is off.
+    pub listener_v6: Option<TcpListener>,
     pub port: u16,
     /// False when the fixed port was taken and an ephemeral one was used.
     pub fixed_port: bool,
 }
 
-/// Binds the fixed callback port on 127.0.0.1, falling back to an ephemeral
-/// port when another process holds it.
+/// Binds the fixed callback port on 127.0.0.1 (and on ::1 when it can),
+/// falling back to an ephemeral port when another process holds it.
 pub async fn bind_callback_listener(preferred_port: u16) -> io::Result<BoundCallbackListener> {
-    match TcpListener::bind((Ipv4Addr::LOCALHOST, preferred_port)).await {
-        Ok(listener) => Ok(BoundCallbackListener {
-            port: listener.local_addr()?.port(),
-            listener,
-            fixed_port: true,
-        }),
-        Err(_) => {
-            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
-            Ok(BoundCallbackListener {
-                port: listener.local_addr()?.port(),
-                listener,
-                fixed_port: false,
-            })
-        }
-    }
+    let (listener, fixed_port) =
+        match TcpListener::bind((Ipv4Addr::LOCALHOST, preferred_port)).await {
+            Ok(listener) => (listener, true),
+            Err(_) => (TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?, false),
+        };
+    let port = listener.local_addr()?.port();
+    let listener_v6 = TcpListener::bind((Ipv6Addr::LOCALHOST, port)).await.ok();
+    Ok(BoundCallbackListener {
+        listener,
+        listener_v6,
+        port,
+        fixed_port,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,6 +146,24 @@ Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_apps_register_the_localhost_redirect() {
+        // The desktop app shows and the Slack manifest carries this exact
+        // string (connectors/user-app.ts).
+        assert_eq!(
+            super::super::user_app_redirect_uri(super::super::DCC_OAUTH_CALLBACK_PORT),
+            "http://localhost:46327/oauth/mcp/callback"
+        );
+    }
+
+    #[tokio::test]
+    async fn answers_on_both_loopback_addresses() {
+        let bound = bind_callback_listener(0).await.expect("listener");
+        if let Some(listener_v6) = &bound.listener_v6 {
+            assert_eq!(listener_v6.local_addr().unwrap().port(), bound.port);
+        }
+    }
 
     #[test]
     fn parses_the_callback_query() {

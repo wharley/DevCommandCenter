@@ -7,6 +7,9 @@ import type {
 	DisconnectMcpConnectorOutput,
 	McpConnectLoginInput,
 	FetchMcpConnectorLogoInput,
+	ImportNativeMcpServersInput,
+	ImportNativeMcpServersOutput,
+	ListNativeMcpServersOutput,
 	McpConnectorDetailsOutput,
 	SetMcpConnectorLogoInput,
 	SetMcpConnectorScopesInput,
@@ -147,6 +150,20 @@ export function setMcpConnectorLogo(input: SetMcpConnectorLogoInput) {
 export function fetchMcpConnectorLogo(input: FetchMcpConnectorLogoInput) {
 	requireTauriRuntime();
 	return invoke<McpConnectorDetailsOutput>(MCP_METHODS.fetchMcpConnectorLogo, {
+		input,
+	});
+}
+
+/** Remote servers configured in Claude Code, Codex and Cursor (read-only). */
+export function listNativeMcpServers() {
+	requireTauriRuntime();
+	return invoke<ListNativeMcpServersOutput>(MCP_METHODS.listNativeMcpServers);
+}
+
+/** Copies the chosen servers into DCC; the source files are never edited. */
+export function importNativeMcpServers(input: ImportNativeMcpServersInput) {
+	requireTauriRuntime();
+	return invoke<ImportNativeMcpServersOutput>(MCP_METHODS.importNativeMcpServers, {
 		input,
 	});
 }

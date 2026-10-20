@@ -2649,6 +2649,13 @@
       "footerUnsupported": "{{providers}} don't support connectors yet.",
       "loadError": "Connectors could not be loaded.",
       "retry": "Try again",
+      "import": {
+        "offer": "Found {{names}} in {{apps}}. Bring them into DCC so every agent can use them?",
+        "bring": "Bring them in",
+        "notNow": "Not now",
+        "done_one": "{{count}} connector brought in. If it needs a sign-in, it shows as Reconnect.",
+        "done_other": "{{count}} connectors brought in. Those that need a sign-in show as Reconnect."
+      },
       "desktopOnly": "Connectors work in the desktop app.",
       "status": {
         "connected": "Connected",
@@ -2675,7 +2682,7 @@
         "notion": "Search, read, and edit pages and databases.",
         "github": "Repositories, issues, pull requests, and Actions.",
         "sentry": "Investigate errors, issues, and releases.",
-        "slack": "Search, read, and post in your workspace.",
+        "slack": "Search and read messages, channels, and files in your workspace.",
         "zedy": "Your store's products, collections, and checkout links."
       },
       "connect": {
@@ -2694,7 +2701,28 @@
         "tokenLabel": "Access token",
         "tokenHint": "{{name}} doesn't register apps automatically. Create a personal access token with access only to what the agent needs.",
         "createToken": "Create a token on {{name}}",
-        "connectWithToken": "Connect with token"
+        "connectWithToken": "Connect with token",
+        "clientIdLabel": "Client ID",
+        "copy": "Copy",
+        "copied": "Copied",
+        "copyFailed": "Could not copy.",
+        "slack": {
+          "intro": "Slack only accepts apps created in your workspace. It takes a minute and you only do it once.",
+          "createTitle": "Create the Slack app",
+          "createButton": "Create app in Slack",
+          "copyManifest": "Copy manifest",
+          "installTitle": "Install it in your workspace",
+          "installBody": "In Slack, confirm with Create, then click Install to Workspace and Allow.",
+          "clientIdTitle": "Paste the Client ID",
+          "clientIdBody": "It is under Basic Information → App Credentials. The Client Secret is not needed."
+        },
+        "ownApp": {
+          "intro": "{{name}} does not accept DCC's automatic registration. Use your own {{name}} app or an access token.",
+          "title": "With your own app",
+          "redirectLabel": "Add this redirect URL to the app:",
+          "secretLabel": "Client Secret (if the app has one)",
+          "tokenTitle": "Or with an access token"
+        }
       },
       "toast": {
         "connected": "{{name}} connected. New messages can use it.",
@@ -3715,10 +3743,12 @@
           "Click the connector you want, read the notice, and continue to sign in through the browser.",
           "Back in DCC, the connector shows under [Connected] and works from the next message on.",
           "For a server outside the catalog, use [Add custom] and paste the [MCP server URL].",
-          "If the sign-in expires, click [Reconnect]. Under [Manage] you can test the connection and adjust each tool."
+          "If the sign-in expires, click [Reconnect]. Under [Manage] you can test the connection and adjust each tool.",
+          "For Slack, follow the dialog's 3 steps: DCC opens Slack with the app ready and you only paste the [Client ID].",
+          "If you already use servers in Claude Code, Codex or Cursor, DCC offers once to bring them in so every agent gets them: click [Bring them in]. Those apps' files are never changed."
         ],
         "tip": "The sign-in is stored securely and never sent to AI providers. Local commands and headers live under [Advanced].",
-        "keywords": "mcp connector connectors integration integrations server tools oauth sign-in clickup linear notion github sentry"
+        "keywords": "mcp connector connectors integration integrations server tools oauth sign-in clickup linear notion github sentry slack import claude code codex cursor client id"
       },
       "codeRabbit": {
         "label": "Review with CodeRabbit",

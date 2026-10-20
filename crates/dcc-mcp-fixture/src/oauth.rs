@@ -126,6 +126,14 @@ impl OAuthFixture {
         self.ledger().registrations
     }
 
+    /// An app the user registered with the vendor by hand (Slack), with its
+    /// redirect URL. It is a public client: no secret.
+    pub fn register_user_app(&self, client_id: &str, redirect_uri: &str) {
+        self.ledger()
+            .clients
+            .insert(client_id.to_string(), vec![redirect_uri.to_string()]);
+    }
+
     pub fn refreshes(&self) -> usize {
         self.ledger().refreshes
     }

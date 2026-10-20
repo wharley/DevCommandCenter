@@ -15,6 +15,7 @@ pub mod mcp_db;
 pub mod mcp_gateway;
 pub mod mcp_oauth;
 pub mod mcp_probe;
+pub mod native_mcp;
 pub mod notes;
 pub mod process;
 mod repo_config;

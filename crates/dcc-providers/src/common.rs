@@ -2493,7 +2493,7 @@ fn expand_home_path(path: &str) -> PathBuf {
     PathBuf::from(trimmed)
 }
 
-pub(crate) fn resolve_runtime_home_path(path: Option<&str>) -> Option<PathBuf> {
+pub fn resolve_runtime_home_path(path: Option<&str>) -> Option<PathBuf> {
     let value = path?.trim();
     if value.is_empty() {
         return None;

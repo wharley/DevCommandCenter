@@ -62,6 +62,14 @@ pub fn callback_redirect_uri(port: u16) -> String {
     format!("http://127.0.0.1:{port}{DCC_OAUTH_CALLBACK_PATH}")
 }
 
+/// Redirect for an app the user registers with the vendor (Slack). Slack
+/// treats `http://localhost:<port>` as a desktop redirect once PKCE is on and
+/// documents no `127.0.0.1` form, so user apps get the `localhost` spelling;
+/// the callback listener answers on both loopback addresses.
+pub fn user_app_redirect_uri(port: u16) -> String {
+    format!("http://localhost:{port}{DCC_OAUTH_CALLBACK_PATH}")
+}
+
 /// Errors carry short, user-safe text. They never include tokens, codes, or
 /// response bodies beyond a bounded OAuth `error_description`.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]

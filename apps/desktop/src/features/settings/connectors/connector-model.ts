@@ -176,8 +176,9 @@ async function applyNewConnectorDetails(
 	target: ConnectorTarget,
 ) {
 	const definitionId = integration.definition.id;
-	if (target.scopes?.trim()) {
-		await setMcpConnectorScopes({ definitionId, scopes: target.scopes });
+	const scopes = target.scopes?.trim() || target.preset?.scopes;
+	if (scopes) {
+		await setMcpConnectorScopes({ definitionId, scopes });
 	}
 	if (target.logo) {
 		await setMcpConnectorLogo({ definitionId, logo: target.logo });
