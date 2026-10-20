@@ -9,7 +9,6 @@ import type {
 	NativeSubagentControlOutput,
 	PrepareGuardedUndoInput,
 	PrepareGuardedUndoOutput,
-	PrepareTurnOutput,
 	SessionEventRecord,
 	SessionLiveEventEnvelope,
 	SessionLiveSnapshot,
@@ -75,14 +74,9 @@ import type {
 	QueuedTurn,
 	RemoveQueuedTurnInput,
 	ReorderTurnQueueInput,
-	StartMcpOauthInput,
-	StartMcpOauthOutput,
 	StartThreadInput,
 	StartThreadOutput,
-	WaitMcpOauthOutput,
 } from "@dcc/contracts";
-import { resolveMcpTurnPreflight } from "./mcp-turn-preflight";
-import { openExternal } from "./shell-api";
 
 // Re-exported only because a few consumers still listen for it. Safe to drop
 // once the remote-core-event listeners are removed.
@@ -188,23 +182,7 @@ export function applyTaskTitle(input: ApplyTaskTitleInput) {
 	return invoke<ApplyTaskTitleOutput>(SESSION_METHODS.applyTaskTitle, { input });
 }
 
-function prepareTurn(input: SendTurnInput) {
-	return invoke<PrepareTurnOutput>(SESSION_METHODS.prepareTurn, { input });
-}
-
-function waitMcpOauth(sessionId: string, definitionId: string) {
-	return invoke<WaitMcpOauthOutput>(SESSION_METHODS.waitMcpOauth, {
-		input: { sessionId, definitionId },
-	});
-}
-
-export async function sendTurn(input: SendTurnInput) {
-	await resolveMcpTurnPreflight(input, {
-		prepareTurn,
-		openAuthorizationUrl: openExternal,
-		waitForOauth: ({ sessionId, definitionId }) =>
-			waitMcpOauth(sessionId, definitionId),
-	});
+export function sendTurn(input: SendTurnInput) {
 	return invoke<SendTurnOutput>(SESSION_METHODS.sendTurn, { input });
 }
 
@@ -352,10 +330,6 @@ export function loadMcpRuntimeStatuses(sessionId: string) {
 		SESSION_METHODS.listMcpRuntimeStatuses,
 		{ input: { sessionId } },
 	);
-}
-
-export function startMcpOauth(input: StartMcpOauthInput) {
-	return invoke<StartMcpOauthOutput>(SESSION_METHODS.startMcpOauth, { input });
 }
 
 export async function listenMcpRuntimeStatusEvents(

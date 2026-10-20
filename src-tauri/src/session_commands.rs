@@ -23,12 +23,12 @@ use dcc_tauri::{
         LastTurnReviewInput, ListMcpRuntimeStatusesInput, ListMcpRuntimeStatusesOutput,
         NativeSubagentControlOutput, PrepareConversationRewindInput,
         PrepareConversationRewindOutput, PrepareGuardedUndoInput, PrepareGuardedUndoOutput,
-        PrepareTurnOutput, RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
+        RespondToPermissionRequestInput, RespondToPermissionRequestOutput,
         RespondToUserInputInput, RespondToUserInputOutput, RunPullRequestReviewAgentInput,
         RunPullRequestReviewAgentOutput, SearchSessionsInput, SessionLiveSnapshot,
-        SessionObjectiveOutput, SetSessionObjectiveInput, StartMcpOauthInput, StartMcpOauthOutput,
+        SessionObjectiveOutput, SetSessionObjectiveInput,
         SteerNativeSubagentInput, TransitionSessionObjectiveInput, TurnReviewFileDiffInput,
-        TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput, WaitMcpOauthOutput,
+        TurnReviewFileDiffOutput, TurnReviewSummary,
     },
     state::SessionCommandState,
 };
@@ -407,22 +407,6 @@ pub async fn dispatch_next_queued_turn(
 }
 
 #[tauri::command]
-pub async fn prepare_turn(
-    state: State<'_, SessionCommandState>,
-    input: SendTurnInput,
-) -> Result<PrepareTurnOutput, String> {
-    session_command_impl::prepare_turn(state, input).await
-}
-
-#[tauri::command]
-pub async fn wait_mcp_oauth(
-    state: State<'_, SessionCommandState>,
-    input: WaitMcpOauthInput,
-) -> Result<WaitMcpOauthOutput, String> {
-    session_command_impl::wait_mcp_oauth(state, input).await
-}
-
-#[tauri::command]
 pub async fn abort_run(
     state: State<'_, SessionCommandState>,
     app: AppHandle,
@@ -497,14 +481,6 @@ pub async fn list_mcp_runtime_statuses(
     input: ListMcpRuntimeStatusesInput,
 ) -> Result<ListMcpRuntimeStatusesOutput, String> {
     session_command_impl::list_mcp_runtime_statuses(state, input).await
-}
-
-#[tauri::command]
-pub async fn start_mcp_oauth(
-    state: State<'_, SessionCommandState>,
-    input: StartMcpOauthInput,
-) -> Result<StartMcpOauthOutput, String> {
-    session_command_impl::start_mcp_oauth(state, input).await
 }
 
 #[tauri::command]

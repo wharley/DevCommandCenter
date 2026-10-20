@@ -126,8 +126,6 @@ beforeEach(() => {
 			case "start_thread":
 				if (failStart) throw new Error("Provider unavailable");
 				return { session: { id: "session" } };
-			case "prepare_turn":
-				return { preflight: { state: "ready" } };
 			case "send_turn":
 				return {};
 			case "quick_composer_hide":

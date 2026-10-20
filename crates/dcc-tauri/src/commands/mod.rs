@@ -43,7 +43,7 @@ pub use forge_commands::{
 };
 pub use mcp_commands::{
     activate_mcp_integration, cancel_mcp_connect, create_mcp_integration,
-    disable_mcp_integration, disconnect_mcp_connector, disconnect_mcp_oauth,
+    disable_mcp_integration, disconnect_mcp_connector,
     fetch_mcp_connector_logo, list_mcp_integrations, remove_mcp_integration,
     set_mcp_connector_logo, set_mcp_connector_scopes, set_mcp_project_enabled,
     set_mcp_tool_policy, start_mcp_connect, test_mcp_integration, wait_mcp_connect,
@@ -57,10 +57,10 @@ pub use provider_commands::{
 pub use session_commands::{
     abort_run, apply_task_title, approve_plan, execute_conversation_rewind, execute_guarded_undo,
     interrupt_native_subagent, last_turn_review, list_mcp_runtime_statuses, list_thread_events,
-    prepare_conversation_rewind, prepare_guarded_undo, prepare_turn, record_plan_handoff,
+    prepare_conversation_rewind, prepare_guarded_undo, record_plan_handoff,
     respond_to_permission_request, respond_to_user_input, resume_session,
-    run_pull_request_review_agent, send_turn, session_live_snapshot, start_mcp_oauth, start_thread,
-    steer_native_subagent, turn_review_file_diff, wait_mcp_oauth,
+    run_pull_request_review_agent, send_turn, session_live_snapshot, start_thread,
+    steer_native_subagent, turn_review_file_diff,
 };
 pub use workspace_commands::{
     archive_workspace, archive_workspace_bundle, compile_mission_spec_context, complete_workspace,

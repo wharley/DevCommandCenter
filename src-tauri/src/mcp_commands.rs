@@ -4,7 +4,7 @@ use dcc_tauri::{
         self as mcp_command_impl, ActivateMcpIntegrationOutput, CancelMcpConnectOutput,
         CreateMcpIntegrationInput, CreateMcpIntegrationOutput, DisableMcpIntegrationInput,
         DisableMcpIntegrationOutput, DisconnectMcpConnectorInput, DisconnectMcpConnectorOutput,
-        DisconnectMcpOauthInput, DisconnectMcpOauthOutput, ListMcpIntegrationsOutput,
+        ListMcpIntegrationsOutput,
         McpConnectLoginInput, RemoveMcpIntegrationInput, RemoveMcpIntegrationOutput,
         SetMcpToolPolicyInput, SetMcpToolPolicyOutput, StartMcpConnectInput, StartMcpConnectOutput,
         FetchMcpConnectorLogoInput, McpConnectorDetailsOutput, SetMcpConnectorLogoInput,
@@ -55,14 +55,6 @@ pub async fn remove_mcp_integration(
     input: RemoveMcpIntegrationInput,
 ) -> Result<RemoveMcpIntegrationOutput, String> {
     mcp_command_impl::remove_mcp_integration(state, input).await
-}
-
-#[tauri::command]
-pub async fn disconnect_mcp_oauth(
-    state: State<'_, WorkspaceCommandState>,
-    input: DisconnectMcpOauthInput,
-) -> Result<DisconnectMcpOauthOutput, String> {
-    mcp_command_impl::disconnect_mcp_oauth(state, input).await
 }
 
 #[tauri::command]

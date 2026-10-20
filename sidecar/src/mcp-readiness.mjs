@@ -1,6 +1,8 @@
 import { readDccMcpStatus } from "./mcp-config.mjs";
 
-const DEFAULT_ATTACH_TIMEOUT_MS = 180_000;
+// Servers still pending after this are reported as failed and the turn goes
+// on without them.
+const DEFAULT_ATTACH_TIMEOUT_MS = 30_000;
 const DEFAULT_POLL_INTERVAL_MS = 250;
 
 export function userMessage(prompt, imageBlocks = []) {

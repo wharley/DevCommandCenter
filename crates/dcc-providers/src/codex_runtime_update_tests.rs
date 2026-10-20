@@ -1,7 +1,7 @@
 use super::*;
 use crate::test_cli::TestCli;
 use dcc_core::{
-    domain::workspace::WorkspaceId,
+    domain::{mcp::McpDefinitionId, workspace::WorkspaceId},
     ports::{ProviderMcpServerConfig, ProviderMcpTransport},
 };
 
@@ -32,7 +32,6 @@ fn config(session: &str) -> SessionConfig {
                 cwd: None,
                 environment: Vec::new(),
             },
-            oauth_state: None,
             tool_policies: Vec::new(),
         }],
         native_resume_id: None,

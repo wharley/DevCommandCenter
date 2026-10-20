@@ -2,7 +2,6 @@ const MAX_SERVER_COUNT = 32;
 const MAX_SERVER_NAME_LENGTH = 64;
 const MAX_ARGUMENT_COUNT = 128;
 const MAX_SECRET_COUNT = 64;
-const MAX_OAUTH_STATE_LENGTH = 64 * 1024;
 const TOOL_NAME_LIMIT = 128;
 
 const STATUS_VALUES = new Set([
@@ -138,7 +137,6 @@ export function normalizeDccMcpServers(value) {
 	const servers = {};
 	const definitionIds = {};
 	const toolPolicies = {};
-	const oauthStates = {};
 	for (const entry of value) {
 		if (
 			!isRecord(entry) ||
@@ -150,17 +148,6 @@ export function normalizeDccMcpServers(value) {
 			throw invalidConfiguration();
 		}
 		const transport = normalizeTransport(entry.transport);
-		const oauthState = entry.oauthState;
-		if (
-			oauthState !== undefined &&
-			(typeof oauthState !== "string" ||
-				oauthState.length === 0 ||
-				oauthState.length > MAX_OAUTH_STATE_LENGTH ||
-				oauthState.includes("\0") ||
-				transport.type !== "http")
-		) {
-			throw invalidConfiguration();
-		}
 		// Claude Code's per-call MCP timeout would cut a blocking delegation
 		// wait (dcc_task_wait, up to 600s). Raised only for DCC's own server.
 		servers[entry.name] =
@@ -169,11 +156,8 @@ export function normalizeDccMcpServers(value) {
 				: transport;
 		definitionIds[entry.name] = entry.definitionId;
 		toolPolicies[entry.name] = normalizeToolPolicies(entry.toolPolicies ?? []);
-		if (oauthState !== undefined) {
-			oauthStates[entry.name] = oauthState;
-		}
 	}
-	return { servers, definitionIds, toolPolicies, oauthStates };
+	return { servers, definitionIds, toolPolicies };
 }
 
 export function resolveDccMcpToolPolicy(projection, toolName) {

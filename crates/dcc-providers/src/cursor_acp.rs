@@ -1646,7 +1646,6 @@ done
                             cwd: None,
                             environment: Vec::new(),
                         },
-                        oauth_state: None,
                         tool_policies: Vec::new(),
                     }],
                     native_resume_id: None,

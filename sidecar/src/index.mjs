@@ -10,10 +10,6 @@ import {
 	failedDccMcpStatus,
 	normalizeDccMcpServers,
 } from "./mcp-config.mjs";
-import {
-	createEphemeralMcpOAuthBridge,
-	runBundledMcpRemoteProxy,
-} from "./mcp-oauth-bridge.mjs";
 import { waitForDccMcpReadiness } from "./mcp-readiness.mjs";
 import { promptImageBlocks } from "./prompt-images.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
@@ -284,12 +280,9 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 	} catch {
 		// Rust validates and serializes this value. Ignore malformed manual overrides.
 	}
-	const runtimeMcpProjection = state.mcpOauthBridge.project(
-		state.mcpProjection,
-	);
-	const mcpOptions = dccMcpQueryOptions(runtimeMcpProjection);
+	const mcpOptions = dccMcpQueryOptions(state.mcpProjection);
 	const hasDccMcpServers =
-		Object.keys(runtimeMcpProjection.servers).length > 0;
+		Object.keys(state.mcpProjection.servers).length > 0;
 	const approvalOptions = resolveClaudeApprovalOptions(
 		payload,
 		additionalDirectories,
@@ -351,15 +344,6 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 		},
 	});
 	let terminalResult = null;
-	const publishMcpOauthUpdates = () => {
-		for (const update of state.mcpOauthBridge.collectUpdates()) {
-			emit({
-				type: "dcc_mcp_oauth_state",
-				definition_id: update.definitionId,
-				state: update.state,
-			});
-		}
-	};
 
 	try {
 		let mcpStatus;
@@ -384,12 +368,9 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 				failed: mcpStatus.failed,
 				servers: mcpStatus.servers,
 			});
-			throw new Error("DCC MCP attachment failed");
 		}
-		if (mcpStatus.failed.length > 0) {
-			throw new Error("one or more DCC MCP servers failed to attach");
-		}
-		publishMcpOauthUpdates();
+		// A server that failed to attach is reported in the status above and
+		// simply left out: one broken integration never stops the turn.
 		turnInput.start(prompt, imageBlocks);
 		for await (const message of q) {
 			updateResumeSessionId(message, state, trace);
@@ -404,7 +385,6 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 			}
 			emit(message);
 		}
-		publishMcpOauthUpdates();
 	} catch (error) {
 		if (!terminalResult) {
 			terminalResult = {
@@ -458,10 +438,6 @@ async function handleSteer(payload, state) {
 }
 
 async function main() {
-	if (await runBundledMcpRemoteProxy()) {
-		return;
-	}
-
 	if (process.argv.includes("--version")) {
 		process.stdout.write(`dcc-claude-sidecar ${SIDECAR_VERSION}\n`);
 		return;
@@ -490,7 +466,6 @@ async function main() {
 		pendingUserInputs: new Map(),
 		pendingPermissions: new Map(),
 		mcpProjection: normalizeDccMcpServers([]),
-		mcpOauthBridge: createEphemeralMcpOAuthBridge(import.meta.url),
 	};
 
 	const rl = readline.createInterface({

@@ -1433,54 +1433,6 @@ pub struct ListMcpRuntimeStatusesOutput {
     pub statuses: Vec<McpRuntimeStatus>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct StartMcpOauthInput {
-    pub session_id: String,
-    pub definition_id: String,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct StartMcpOauthOutput {
-    pub authorization_url: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(
-    tag = "state",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum McpTurnPreflightState {
-    Ready,
-    AuthenticationRequired {
-        #[serde(rename = "definitionId")]
-        definition_id: McpDefinitionId,
-        #[serde(rename = "authorizationUrl")]
-        authorization_url: String,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct PrepareTurnOutput {
-    pub preflight: McpTurnPreflightState,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WaitMcpOauthInput {
-    pub session_id: String,
-    pub definition_id: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WaitMcpOauthOutput {
-    pub connected: bool,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum McpPreflightReadiness {
     Ready,
@@ -1490,7 +1442,6 @@ enum McpPreflightReadiness {
 }
 
 const MCP_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(30);
-const MCP_OAUTH_COMPLETION_TIMEOUT: Duration = Duration::from_secs(300);
 const MCP_PREFLIGHT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 fn classify_mcp_preflight(statuses: &[McpRuntimeStatus]) -> McpPreflightReadiness {
@@ -3054,47 +3005,6 @@ pub async fn list_mcp_runtime_statuses(
     Ok(ListMcpRuntimeStatusesOutput { statuses })
 }
 
-#[tauri::command]
-pub async fn prepare_turn(
-    state: State<'_, SessionCommandState>,
-    input: SendTurnInput,
-) -> Result<PrepareTurnOutput, String> {
-    let transition = state
-        .acquire_provider_transition(&input.session_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    let session = state
-        .select_provider_session_for_turn_under_transition(&transition, &input)
-        .await
-        .map_err(|error| error.to_string())?;
-    // A provider that cannot start is not a preflight error: the send goes
-    // ahead and records the failure as an interrupted turn with the reason.
-    if let Err(error) = state
-        .attach_current_provider_session_under_transition(&transition, &session)
-        .await
-    {
-        eprintln!("[DCC] provider did not start in turn preflight: {error}");
-        return Ok(PrepareTurnOutput {
-            preflight: McpTurnPreflightState::Ready,
-        });
-    }
-    drop(transition);
-    if state
-        .session_mcp_oauth_support(&session.id)
-        .map_err(|error| error.to_string())?
-        != McpOauthSupport::InteractivePreflight
-    {
-        return Ok(PrepareTurnOutput {
-            preflight: McpTurnPreflightState::Ready,
-        });
-    }
-
-    settle_mcp_preflight(&state, &session.id).await;
-    Ok(PrepareTurnOutput {
-        preflight: McpTurnPreflightState::Ready,
-    })
-}
-
 /// A user's MCP integration never holds the user's turn. DCC signs
 /// connectors in itself (Settings → Connectors); a provider-side login here
 /// would open a browser in the middle of the work and block every turn while
@@ -3141,105 +3051,6 @@ async fn record_mcp_needs_auth(state: &SessionCommandState, definition_id: &McpD
             checked_at: chrono::Utc::now().to_rfc3339(),
         })
         .await;
-}
-
-#[tauri::command]
-pub async fn wait_mcp_oauth(
-    state: State<'_, SessionCommandState>,
-    input: WaitMcpOauthInput,
-) -> Result<WaitMcpOauthOutput, String> {
-    let session_id = SessionId(input.session_id.trim().to_string());
-    let definition_id = McpDefinitionId(input.definition_id.trim().to_string());
-    if session_id.0.is_empty() || definition_id.0.is_empty() {
-        return Err("sessionId and definitionId are required".to_string());
-    }
-    if state
-        .session_mcp_oauth_support(&session_id)
-        .map_err(|error| error.to_string())?
-        != McpOauthSupport::InteractivePreflight
-    {
-        return Err("provider does not expose interactive MCP OAuth preflight".to_string());
-    }
-
-    let deadline = Instant::now() + MCP_OAUTH_COMPLETION_TIMEOUT;
-    loop {
-        let statuses = state
-            .list_mcp_runtime_statuses(&session_id)
-            .map_err(|error| error.to_string())?;
-        let status = statuses
-            .iter()
-            .find(|status| status.definition_id == definition_id)
-            .ok_or_else(|| "MCP integration is no longer attached to this session".to_string())?;
-        match status.state {
-            McpRuntimeState::Connected => {
-                return Ok(WaitMcpOauthOutput { connected: true });
-            }
-            McpRuntimeState::Failed
-                if status
-                    .bounded_error
-                    .as_ref()
-                    .is_some_and(|error| error.category == McpErrorCategory::Authentication) => {}
-            McpRuntimeState::ProbingServer
-            | McpRuntimeState::ServerReachable
-            | McpRuntimeState::AttachingProvider => {}
-            McpRuntimeState::Failed => {
-                return Err(status
-                    .bounded_error
-                    .as_ref()
-                    .map(|error| error.message.clone())
-                    .unwrap_or_else(|| "MCP provider attachment failed".to_string()));
-            }
-            McpRuntimeState::Disabled => {
-                return Err("MCP integration was disabled during authentication".to_string());
-            }
-            McpRuntimeState::NeedsTrust => {
-                return Err(
-                    "MCP integration requires trust approval during authentication".to_string(),
-                );
-            }
-            McpRuntimeState::Unsupported => {
-                return Err("MCP integration became unsupported during authentication".to_string());
-            }
-        }
-        if Instant::now() >= deadline {
-            return Err("MCP OAuth authentication timed out".to_string());
-        }
-        sleep(MCP_PREFLIGHT_POLL_INTERVAL).await;
-    }
-}
-
-#[tauri::command]
-pub async fn start_mcp_oauth(
-    state: State<'_, SessionCommandState>,
-    input: StartMcpOauthInput,
-) -> Result<StartMcpOauthOutput, String> {
-    let session_id = SessionId(input.session_id.trim().to_string());
-    let definition_id = McpDefinitionId(input.definition_id.trim().to_string());
-    if session_id.0.is_empty() || definition_id.0.is_empty() {
-        return Err("sessionId and definitionId are required".to_string());
-    }
-    let status = state
-        .list_mcp_runtime_statuses(&session_id)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|status| status.definition_id == definition_id)
-        .ok_or_else(|| "MCP integration is not attached to this session".to_string())?;
-    let requires_authentication = status.state == McpRuntimeState::Failed
-        && status
-            .bounded_error
-            .as_ref()
-            .is_some_and(|error| error.category == McpErrorCategory::Authentication);
-    if !requires_authentication {
-        return Err("MCP integration does not require authentication".to_string());
-    }
-
-    let result = state
-        .start_mcp_oauth(&session_id, &definition_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(StartMcpOauthOutput {
-        authorization_url: result.authorization_url,
-    })
 }
 
 #[tauri::command]

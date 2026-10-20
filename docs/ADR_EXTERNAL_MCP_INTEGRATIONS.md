@@ -51,7 +51,8 @@ and renderer state, and clean up its plaintext session projection with the
 provider session. A DCC-owned OAuth grant may survive in the OS credential
 store behind provider, definition, and resource-bound metadata. This is not a
 general shared DCC gateway and does not change other providers' direct
-attachment paths.
+attachment paths. *Removed in October 2026: the connector gateway below
+replaced this exception.*
 
 ### October 2026 amendment: DCC-owned sign-in and connector gateway
 
@@ -80,10 +81,13 @@ itself and serves them to providers through a narrow gateway.
   start OAuth against DCC. A lost sign-in becomes a JSON-RPC error the model
   can relay plus a `mcp-connector-needs-auth` event for the UI.
 - **Scope of the exception.** Only HTTP definitions with a DCC-owned grant use
-  the gateway. Stdio servers, header-secret servers, and grants still owned by
-  an adapter keep their direct paths. Server-initiated messages in streamed
+  the gateway. Stdio and header-secret servers keep their direct paths. Server-initiated messages in streamed
   answers are dropped; resources, prompts, sampling, and elicitation remain
   out of scope.
+- **No provider login.** The Claude `mcp-remote` bridge and the Codex
+  in-turn login are removed. Grants they stored are deleted at startup and
+  their connectors are marked as needing a reconnect. A remote server that
+  asks for a sign-in DCC does not hold is left out of the turn.
 
 ### Tools-first boundary
 
@@ -114,35 +118,26 @@ live in an operating-system credential store. Secret values must not be
 returned to the renderer or written to project files, generated provider
 configuration, logs, analytics, crash reports, or snapshots.
 
-Adapter-owned remote OAuth grants follow the same boundary. SQLite stores only
-the definition, adapter owner, resource fingerprint, timestamps, and opaque
+Remote OAuth grants follow the same boundary. SQLite stores only the
+definition, the `dcc` owner, resource fingerprint, timestamps, and opaque
 credential reference. Access tokens, refresh tokens, and dynamic client
 registration secrets live together in a versioned credential-store envelope.
 Provider-native grants remain owned by the provider and are never copied into
 DCC storage.
 
-### Turn-bound OAuth negotiation
+### Turn preflight
 
-Interactive OAuth behavior is an adapter capability, not a provider-name check
-in the renderer. An adapter declares one of three contracts:
+*Amended October 2026.* A user's MCP integration never holds the turn. Before
+the turn is recorded DCC attaches the provider session and, for runtimes that
+report MCP status (`interactivePreflight`), waits a bounded time for the
+projected servers to settle. A server that fails or asks for a sign-in is
+left out of that turn; a lost sign-in is recorded so Settings and the
+composer offer Reconnect. No browser opens from inside a turn, and the
+renderer sends the turn in one call.
 
-- `unsupported`: DCC cannot coordinate interactive OAuth for that runtime;
-- `managedDuringTurn`: the adapter withholds the prompt and resolves attachment
-  as part of its own turn lifecycle;
-- `interactivePreflight`: DCC can start OAuth and observe the resulting runtime
-  status before creating the durable turn.
-
-For `interactivePreflight`, DCC first applies the composer's provider, model,
-and runtime selection, attaches the provider session, and resolves each
-reported authentication challenge. The renderer opens only the validated URL
-returned by the backend and waits for the exact definition to become connected.
-Only then is the original `SendTurnInput` committed and sent. Authentication,
-attachment, timeout, trust, and protocol failures therefore do not create a
-failed user turn or require the user to retype the prompt.
-
-The command that finally records the turn repeats the readiness check. This
-keeps non-renderer callers from bypassing preflight and protects against state
-changes between authorization and send.
+The earlier contract (open the provider's authorization URL, wait for the
+definition to connect, then send) is removed together with provider-owned
+sign-in.
 
 ### Trust and ownership
 

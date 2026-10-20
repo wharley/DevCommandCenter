@@ -106,8 +106,6 @@ Object.assign(window, {
 					if (params.has("failure"))
 						throw new Error("Fixture: provider unavailable");
 					return { session: { id: "session" } };
-				case "prepare_turn":
-					return { preflight: { state: "ready" } };
 				case "send_turn":
 					return {};
 				case "appshots_status":

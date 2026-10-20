@@ -310,7 +310,6 @@ where
             definition_id: self.definition_id.clone(),
             server_name: SERVER_NAME.to_string(),
             transport: projected_transport,
-            oauth_state: None,
             tool_policies: Vec::new(),
         })
     }

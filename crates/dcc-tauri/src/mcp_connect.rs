@@ -7,7 +7,7 @@
 //! connector because some vendors issue single-use refresh tokens.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex as StdMutex},
     time::Instant,
 };
@@ -16,8 +16,8 @@ use chrono::Utc;
 use dcc_core::{
     domain::{
         mcp::{
-            mcp_oauth_resource_fingerprint, McpDefinition, McpDefinitionId, McpOauthGrant,
-            McpSecretReferenceId, McpTransport,
+            mcp_oauth_resource_fingerprint, McpConnectionCheck, McpConnectionState, McpDefinition,
+            McpDefinitionId, McpOauthGrant, McpSecretReferenceId, McpTransport,
         },
         provider::ProviderId,
     },
@@ -33,8 +33,8 @@ use dcc_infra::mcp_oauth::{
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 use uuid::Uuid;
 
-/// Grant owner for sign-ins DCC performs itself. Provider-owned grants keep
-/// their provider id.
+/// Grant owner for sign-ins DCC performs itself. Grants under any other
+/// owner come from the retired provider login and are deleted at startup.
 pub const DCC_OAUTH_GRANT_OWNER: &str = "dcc";
 const MAX_PENDING_SIGN_INS: usize = 16;
 
@@ -451,6 +451,73 @@ async fn forget_provider_grants(stores: &ConnectStores, definition_id: &McpDefin
     }
 }
 
+/// Retires the sign-ins the agents' own MCP login (mcp-remote) used to
+/// store. Nothing reads them since DCC signs connectors in itself, so a
+/// connector that only had one shows Reconnect instead of failing inside the
+/// agent. Runs at startup; once those grants are gone it does nothing.
+pub async fn retire_provider_grants(stores: &ConnectStores) -> usize {
+    let Ok(grants) = stores.repo.list_mcp_oauth_grants(None).await else {
+        return 0;
+    };
+    let signed_in_by_dcc = grants
+        .iter()
+        .filter(|grant| grant.provider_id.0 == DCC_OAUTH_GRANT_OWNER)
+        .map(|grant| grant.definition_id.clone())
+        .collect::<HashSet<_>>();
+    let mut retired = 0;
+    let mut needs_auth = HashSet::new();
+    for grant in grants
+        .into_iter()
+        .filter(|grant| grant.provider_id.0 != DCC_OAUTH_GRANT_OWNER)
+    {
+        if stores
+            .credentials
+            .delete_secret(&grant.secret_ref)
+            .await
+            .is_err()
+            || stores
+                .repo
+                .delete_mcp_oauth_grant(&grant.definition_id, &grant.provider_id)
+                .await
+                .is_err()
+        {
+            continue;
+        }
+        retired += 1;
+        if !signed_in_by_dcc.contains(&grant.definition_id) {
+            needs_auth.insert(grant.definition_id);
+        }
+    }
+    if needs_auth.is_empty() {
+        return retired;
+    }
+    let previous = stores
+        .repo
+        .list_mcp_connection_checks()
+        .await
+        .unwrap_or_default();
+    for definition_id in needs_auth {
+        let tools = previous
+            .iter()
+            .find(|check| check.definition_id == definition_id)
+            .map(|check| check.tools.clone())
+            .unwrap_or_default();
+        let _ = stores
+            .repo
+            .save_mcp_connection_check(&McpConnectionCheck {
+                definition_id,
+                state: McpConnectionState::NeedsAuth,
+                tools,
+                message: Some(
+                    "The sign-in is missing or expired. Reconnect to keep using it".to_string(),
+                ),
+                checked_at: Utc::now().to_rfc3339(),
+            })
+            .await;
+    }
+    retired
+}
+
 pub fn dcc_grant_secret_reference(definition_id: &McpDefinitionId) -> McpSecretReferenceId {
     McpSecretReferenceId(format!(
         "oauth-grant:{DCC_OAUTH_GRANT_OWNER}:{}",
@@ -549,5 +616,107 @@ mod tests {
             ..CallbackParams::default()
         });
         assert_eq!(page, CallbackPage::Failed);
+    }
+
+    #[tokio::test]
+    async fn provider_sign_ins_are_retired_and_ask_to_reconnect() {
+        use dcc_core::domain::mcp::{
+            McpDefinitionOwnership, McpOauthResourceFingerprint, McpToolAnnotations,
+            McpToolSummary, McpTrust, McpTrustDecision, McpTrustFingerprint,
+        };
+        use dcc_core::ports::SecretValue;
+        use dcc_infra::{credential_store::InMemoryCredentialStore, mcp_db::SqliteMcpRepo};
+
+        let repo = SqliteMcpRepo::from_connection(Arc::new(StdMutex::new(
+            rusqlite::Connection::open_in_memory().expect("open sqlite"),
+        )))
+        .expect("MCP repo");
+        let credentials = InMemoryCredentialStore::default();
+        for id in ["legacy", "moved"] {
+            let mut definition = McpDefinition {
+                id: McpDefinitionId(id.to_string()),
+                display_name: id.to_string(),
+                transport: McpTransport::Http {
+                    url: format!("https://{id}.example.com/mcp"),
+                },
+                secret_refs: vec![],
+                enabled: true,
+                ownership: McpDefinitionOwnership::DccManaged,
+                trust: McpTrust {
+                    current_fingerprint: McpTrustFingerprint("0".repeat(64)),
+                    decision: McpTrustDecision::Untrusted,
+                },
+                created_at: "2026-10-20T00:00:00Z".to_string(),
+                updated_at: "2026-10-20T00:00:00Z".to_string(),
+            };
+            definition.synchronize_trust_fingerprint();
+            repo.save_mcp_definition(&definition)
+                .await
+                .expect("save definition");
+        }
+        let grant = |definition: &str, owner: &str| McpOauthGrant {
+            definition_id: McpDefinitionId(definition.to_string()),
+            provider_id: ProviderId(owner.to_string()),
+            resource_fingerprint: McpOauthResourceFingerprint("a".repeat(64)),
+            secret_ref: McpSecretReferenceId(format!("oauth-grant:{owner}:{definition}")),
+            created_at: "2026-10-20T00:00:00Z".to_string(),
+            updated_at: "2026-10-20T00:00:00Z".to_string(),
+        };
+        for grant in [
+            grant("legacy", "claude_code"),
+            grant("moved", "codex"),
+            grant("moved", DCC_OAUTH_GRANT_OWNER),
+        ] {
+            credentials
+                .store_secret(
+                    &grant.secret_ref,
+                    SecretValue::new(b"state".to_vec()).expect("secret"),
+                )
+                .await
+                .expect("store secret");
+            repo.save_mcp_oauth_grant(&grant).await.expect("save grant");
+        }
+        let tool = McpToolSummary {
+            name: "get_task".to_string(),
+            annotations: McpToolAnnotations::default(),
+        };
+        repo.save_mcp_connection_check(&McpConnectionCheck {
+            definition_id: McpDefinitionId("legacy".to_string()),
+            state: McpConnectionState::Connected,
+            tools: vec![tool.clone()],
+            message: None,
+            checked_at: "2026-10-20T00:00:00Z".to_string(),
+        })
+        .await
+        .expect("save check");
+        let stores = ConnectStores {
+            repo: Arc::new(repo),
+            credentials: Arc::new(credentials.clone()),
+        };
+
+        assert_eq!(retire_provider_grants(&stores).await, 2);
+        let left = stores
+            .repo
+            .list_mcp_oauth_grants(None)
+            .await
+            .expect("grants");
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].provider_id.0, DCC_OAUTH_GRANT_OWNER);
+        assert!(credentials
+            .resolve_secret(&grant("legacy", "claude_code").secret_ref)
+            .await
+            .expect("resolve")
+            .is_none());
+        let checks = stores
+            .repo
+            .list_mcp_connection_checks()
+            .await
+            .expect("checks");
+        assert_eq!(checks.len(), 1, "a connector DCC holds keeps its state");
+        assert_eq!(checks[0].definition_id.0, "legacy");
+        assert_eq!(checks[0].state, McpConnectionState::NeedsAuth);
+        assert_eq!(checks[0].tools, vec![tool]);
+
+        assert_eq!(retire_provider_grants(&stores).await, 0);
     }
 }

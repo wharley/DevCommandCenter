@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use specta::Type;
 use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
@@ -38,8 +37,7 @@ use dcc_core::{
             DelegationWorktreeOperationState,
         },
         mcp::{
-            mcp_oauth_resource_fingerprint, McpDefinitionId, McpErrorCategory, McpOauthGrant,
-            McpRuntimeError, McpRuntimeState, McpRuntimeStatus, McpSecretReferenceId, McpTransport,
+            McpDefinitionId, McpErrorCategory, McpRuntimeError, McpRuntimeState, McpRuntimeStatus,
         },
         project::{Project, ProjectId},
         provider::{
@@ -57,10 +55,9 @@ use dcc_core::{
         workspace_bundle::WorkspaceBundleState,
     },
     ports::{
-        AppendEventOutcome, CredentialStore, DelegationApplyTransactionRepo, DelegationRepo,
+        AppendEventOutcome, DelegationApplyTransactionRepo, DelegationRepo,
         DelegationWorktreeOperationRepo, EventBus, Input, McpRepo, ProjectRepo, Provider,
-        ProviderMcpOauthStart, ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo,
-        SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo,
+        ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo,
         WorkspaceRepo,
     },
     Result,
@@ -1247,9 +1244,6 @@ struct ProviderSessionBinding {
     terminal_token: Arc<TerminalTokenState>,
     usage_turn_id: Arc<AsyncMutex<Option<String>>>,
     assistant_messages: Arc<AsyncMutex<AssistantMessageTracker>>,
-    /// Persistent registry definition ids only; ephemeral app-owned MCP
-    /// projections are tracked by their opaque lease instead.
-    projected_mcp_definition_ids: Arc<HashSet<McpDefinitionId>>,
     ephemeral_mcp_lease_id: Option<String>,
     /// What the provider said about the plan's usage limit (see
     /// `ProviderEvent::UsageLimitReached`).
@@ -5027,9 +5021,6 @@ impl SessionCommandState {
             terminal_token: Arc::new(TerminalTokenState::default()),
             usage_turn_id: Arc::new(AsyncMutex::new(None)),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
-            projected_mcp_definition_ids: Arc::new(
-                projected_definition_ids.iter().cloned().collect(),
-            ),
             ephemeral_mcp_lease_id: ephemeral_lease_id.clone(),
             usage_limit: Default::default(),
         };
@@ -5183,21 +5174,6 @@ impl SessionCommandState {
             guard: Some(Arc::clone(&lock).lock_owned().await),
             lock,
         })
-    }
-
-    /// MCP OAuth is the only flow that needs both provider-wide availability
-    /// and a stable session binding. Keep acquisition centralized in the same
-    /// order as disable draining: provider availability first, then session.
-    async fn acquire_mcp_oauth_transitions(
-        &self,
-        provider_id: &str,
-        session_id: &SessionId,
-    ) -> Result<(ProviderAvailabilityTransitionGuard, ProviderTransitionGuard)> {
-        let availability = self
-            .acquire_provider_availability_transition(provider_id)
-            .await?;
-        let session = self.acquire_provider_transition(session_id).await?;
-        Ok((availability, session))
     }
 
     fn provider_availability_snapshot(&self, provider_id: &str) -> Result<ProviderAvailability> {
@@ -5518,6 +5494,21 @@ impl SessionCommandState {
         self.validate_provider_turn_selection(&current, input)
             .await?;
         if send_turn_selection_differs_from_session(&current, input) {
+            // Switching provider/model cancels the binding, and with it the
+            // running turn, before send_turn's own "active turn" check can
+            // refuse. A turn sent with another task's selection must never
+            // kill the work in flight here.
+            let history =
+                SessionEventRepo::list_events_by_session(&self.session_repo, &input.session_id)
+                    .await?;
+            if dcc_core::domain::session::SessionProjection::fold(&history)
+                .and_then(|projection| projection.active_turn_id)
+                .is_some()
+            {
+                return Err(dcc_core::CoreError::InvalidInput(
+                    "session already has an active turn".to_string(),
+                ));
+            }
             if self.provider_binding(&input.session_id)?.is_some() {
                 // A failed cancellation leaves the prior binding authoritative;
                 // do not persist or attach a different selection over it.
@@ -5864,117 +5855,6 @@ impl SessionCommandState {
             },
         )
         .await
-    }
-
-    fn mcp_oauth_credential_reference(
-        provider_id: &str,
-        definition_id: &McpDefinitionId,
-    ) -> McpSecretReferenceId {
-        let mut digest = Sha256::new();
-        digest.update(b"dcc-mcp-oauth-grant-v1\0");
-        digest.update(provider_id.as_bytes());
-        digest.update(b"\0");
-        digest.update(definition_id.0.as_bytes());
-        McpSecretReferenceId(format!("oauth-grant:{:x}", digest.finalize()))
-    }
-
-    async fn persist_provider_mcp_oauth_updates(
-        &self,
-        binding: &ProviderSessionBinding,
-        provider: &dyn Provider,
-        signaled_definition_id: &McpDefinitionId,
-    ) -> Result<()> {
-        if !binding
-            .projected_mcp_definition_ids
-            .contains(signaled_definition_id)
-        {
-            return Err(dcc_core::CoreError::Provider(
-                "provider returned OAuth state for an unknown MCP definition".to_string(),
-            ));
-        }
-
-        let updates = provider.take_mcp_oauth_updates(&binding.handle).await?;
-        if updates.is_empty() {
-            return Ok(());
-        }
-
-        let repo = SqliteMcpRepo::open(&self.db_path)?;
-        let credential_store = SystemCredentialStore::default();
-        let provider_id = ProviderId(binding.provider_id.clone());
-        for update in updates {
-            if !binding
-                .projected_mcp_definition_ids
-                .contains(&update.definition_id)
-            {
-                return Err(dcc_core::CoreError::Provider(
-                    "provider returned OAuth state for an unknown MCP definition".to_string(),
-                ));
-            }
-            let definition = repo
-                .get_mcp_definition(&update.definition_id)
-                .await?
-                .ok_or_else(|| {
-                    dcc_core::CoreError::Repository(
-                        "OAuth state references a missing MCP definition".to_string(),
-                    )
-                })?;
-            let McpTransport::Http { .. } = &definition.transport else {
-                return Err(dcc_core::CoreError::Provider(
-                    "provider returned OAuth state for a non-HTTP MCP definition".to_string(),
-                ));
-            };
-            let resource_fingerprint =
-                mcp_oauth_resource_fingerprint(&definition).map_err(|_| {
-                    dcc_core::CoreError::Provider(
-                        "provider returned OAuth state for an invalid MCP resource".to_string(),
-                    )
-                })?;
-            let existing = repo
-                .get_mcp_oauth_grant(&update.definition_id, &provider_id)
-                .await?;
-            let Some(state) = update.state else {
-                if let Some(existing) = existing {
-                    credential_store
-                        .delete_secret(&existing.secret_ref)
-                        .await
-                        .map_err(|_| {
-                            dcc_core::CoreError::Provider(
-                                "MCP OAuth credential persistence failed".to_string(),
-                            )
-                        })?;
-                    repo.delete_mcp_oauth_grant(&update.definition_id, &provider_id)
-                        .await?;
-                }
-                continue;
-            };
-            let now = Utc::now().to_rfc3339();
-            let secret_ref =
-                Self::mcp_oauth_credential_reference(&binding.provider_id, &update.definition_id);
-            let created_at = existing
-                .as_ref()
-                .filter(|grant| grant.resource_fingerprint == resource_fingerprint)
-                .map(|grant| grant.created_at.clone())
-                .unwrap_or_else(|| now.clone());
-
-            credential_store
-                .store_secret(&secret_ref, state.into_secret())
-                .await
-                .map_err(|_| {
-                    dcc_core::CoreError::Provider(
-                        "MCP OAuth credential persistence failed".to_string(),
-                    )
-                })?;
-            repo.save_mcp_oauth_grant(&McpOauthGrant {
-                definition_id: update.definition_id,
-                provider_id: provider_id.clone(),
-                resource_fingerprint,
-                secret_ref,
-                created_at,
-                updated_at: now,
-            })
-            .await?;
-        }
-        Ok(())
     }
 
     /// Marks a session for a one-shot re-anchor when its provider runtime is
@@ -6548,47 +6428,6 @@ impl SessionCommandState {
                                 eprintln!(
                                     "[DCC] provider native checkpoint persistence failed: {error}"
                                 );
-                            }
-                        }
-                    }
-                    Ok(ProviderEvent::McpOauthStateChanged { definition_id }) => {
-                        if state
-                            .persist_provider_mcp_oauth_updates(
-                                &binding,
-                                provider.as_ref(),
-                                &definition_id,
-                            )
-                            .await
-                            .is_err()
-                        {
-                            if let Some(provider_version) = mcp_projection_version.as_deref() {
-                                let mut statuses = state
-                                    .lock_store()
-                                    .ok()
-                                    .and_then(|store| {
-                                        store.mcp_runtime_statuses.get(&session_id).cloned()
-                                    })
-                                    .unwrap_or_default();
-                                if let Some(status) = statuses
-                                    .iter_mut()
-                                    .find(|status| status.definition_id == definition_id)
-                                {
-                                    status.state = McpRuntimeState::Failed;
-                                    status.tools.clear();
-                                    status.checked_at = Utc::now().to_rfc3339();
-                                    status.bounded_error = Some(McpRuntimeError::bounded(
-                                        McpErrorCategory::Authentication,
-                                        "MCP OAuth credential persistence failed",
-                                    ));
-                                    let _ = state
-                                        .replace_mcp_runtime_statuses(
-                                            &session_id,
-                                            &binding.provider_id,
-                                            provider_version,
-                                            statuses,
-                                        )
-                                        .await;
-                                }
                             }
                         }
                     }
@@ -7884,51 +7723,6 @@ impl SessionCommandState {
             .await
     }
 
-    pub async fn start_mcp_oauth(
-        &self,
-        session_id: &SessionId,
-        definition_id: &dcc_core::domain::mcp::McpDefinitionId,
-    ) -> Result<ProviderMcpOauthStart> {
-        let binding = self.provider_binding(session_id)?.ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!(
-                "no provider binding for session {}",
-                session_id.0
-            ))
-        })?;
-        // OAuth starts new adapter work. The disable drain takes these locks
-        // in exactly this order (availability, then session), so preserve it
-        // here to avoid ABBA with close/switch/send. Re-read the binding only
-        // after both guards are held; it stays stable through adapter
-        // acceptance below.
-        let (availability_transition, session_transition) = self
-            .acquire_mcp_oauth_transitions(&binding.provider_id, session_id)
-            .await?;
-        let current_binding = self.provider_binding(session_id)?.ok_or_else(|| {
-            dcc_core::CoreError::Provider(format!(
-                "no provider binding for session {}",
-                session_id.0
-            ))
-        })?;
-        if current_binding.provider_id != binding.provider_id
-            || current_binding.handle.handle_id != binding.handle.handle_id
-        {
-            return Err(dcc_core::CoreError::Provider(
-                "provider binding changed before MCP OAuth could start".to_string(),
-            ));
-        }
-        let provider = self
-            .require_provider_available(&current_binding.provider_id)?
-            .runtime;
-        let result = provider
-            .start_mcp_oauth(&current_binding.handle, definition_id)
-            .await;
-        // Keep both transitions through adapter acceptance, then release the
-        // session before availability, mirroring the acquisition order.
-        drop(session_transition);
-        drop(availability_transition);
-        result
-    }
-
     async fn multi_workspace_scope_instructions(
         &self,
         session: &Session,
@@ -9021,7 +8815,6 @@ mod tests {
             terminal_token: Arc::new(TerminalTokenState::default()),
             usage_turn_id: Arc::new(AsyncMutex::new(None)),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
-            projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
             usage_limit: Default::default(),
         }
@@ -10672,88 +10465,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn mcp_oauth_lock_order_stabilizes_binding_without_abba() {
-        let root = tempfile::tempdir().expect("state root");
-        let root = std::fs::canonicalize(root.path()).expect("physical state root");
-        let state =
-            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
-        let session_id = SessionId("oauth-availability-order".to_string());
-        state.store.lock().expect("store").provider_sessions.insert(
-            session_id.clone(),
-            inert_provider_binding_for(&session_id, "droid"),
-        );
-        let initial = state
-            .provider_binding(&session_id)
-            .expect("initial binding")
-            .expect("binding exists");
-
-        // This is the exact lock pair used by start_mcp_oauth. It proves the
-        // binding identity while both guards are held and makes a concurrent
-        // session transition wait. The disable contender waits on the same
-        // provider guard, so both paths share availability -> session order.
-        let (availability, session) = state
-            .acquire_mcp_oauth_transitions(&initial.provider_id, &session_id)
-            .await
-            .expect("oauth transitions");
-        let current = state
-            .provider_binding(&session_id)
-            .expect("current binding")
-            .expect("binding remains");
-        assert_eq!(current.provider_id, initial.provider_id);
-        assert_eq!(current.handle.handle_id, initial.handle.handle_id);
-
-        let (session_done, mut session_result) = tokio::sync::oneshot::channel();
-        let session_waiter = {
-            let state = state.clone();
-            let session_id = session_id.clone();
-            tokio::spawn(async move {
-                let result = state.acquire_provider_transition(&session_id).await;
-                let _ = session_done.send(result.is_ok());
-            })
-        };
-        let (disable_done, mut disable_result) = tokio::sync::oneshot::channel();
-        let disable_waiter = {
-            let state = state.clone();
-            tokio::spawn(async move {
-                let _ = disable_done.send(state.set_provider_enabled("droid", false).await);
-            })
-        };
-        tokio::task::yield_now().await;
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(25), &mut session_result)
-                .await
-                .is_err()
-        );
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(25), &mut disable_result)
-                .await
-                .is_err()
-        );
-
-        // Release in reverse acquisition order. The session waiter may now
-        // finish, while disable remains blocked on availability. Once OAuth's
-        // availability guard drops, disable can take the session lock and
-        // complete, demonstrating there is no ABBA cycle.
-        drop(session);
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_secs(1), &mut session_result)
-                .await
-                .expect("session transition unblocked")
-                .expect("session result")
-        );
-        drop(availability);
-        let disable = tokio::time::timeout(std::time::Duration::from_secs(1), &mut disable_result)
-            .await
-            .expect("disable unblocked")
-            .expect("disable result");
-        // The inert adapter intentionally makes cancellation fail, but the
-        // durable disable must still finish fail-closed rather than deadlock.
-        assert!(disable.is_err());
-        session_waiter.await.expect("session waiter join");
-        disable_waiter.await.expect("disable waiter join");
-    }
-
-    #[tokio::test(flavor = "current_thread")]
     async fn failed_provider_cancel_keeps_the_durable_gate_disabled_for_retry() {
         let root = tempfile::tempdir().expect("state root");
         let root = std::fs::canonicalize(root.path()).expect("physical state root");
@@ -12250,7 +11961,6 @@ mod tests {
                 url: "http://127.0.0.1:1/mcp".to_string(),
                 headers: Vec::new(),
             },
-            oauth_state: None,
             tool_policies: Vec::new(),
         }
     }
@@ -12367,7 +12077,6 @@ mod tests {
             terminal_token: Arc::new(TerminalTokenState::default()),
             usage_turn_id: Arc::new(AsyncMutex::new(None)),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
-            projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: Some(winner.lease_id.clone()),
             usage_limit: Default::default(),
         };
@@ -12492,7 +12201,6 @@ mod tests {
             terminal_token: Arc::new(TerminalTokenState::default()),
             usage_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
-            projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
             usage_limit: Default::default(),
         };
@@ -12553,7 +12261,6 @@ mod tests {
             terminal_token: Arc::new(TerminalTokenState::default()),
             usage_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
-            projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
             usage_limit: Default::default(),
         };
@@ -12629,7 +12336,6 @@ mod tests {
             terminal_token: Arc::new(TerminalTokenState::default()),
             usage_turn_id: Arc::new(AsyncMutex::new(Some(turn_id.0.clone()))),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
-            projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
             usage_limit: Default::default(),
         };
@@ -12698,7 +12404,6 @@ mod tests {
             terminal_token: Arc::new(TerminalTokenState::default()),
             usage_turn_id: Arc::new(AsyncMutex::new(Some(old_turn.0.clone()))),
             assistant_messages: Arc::new(AsyncMutex::new(AssistantMessageTracker::default())),
-            projected_mcp_definition_ids: Arc::new(HashSet::new()),
             ephemeral_mcp_lease_id: None,
             usage_limit: Default::default(),
         };

@@ -19,8 +19,7 @@ independent `.mcp.json`/`settingSources` path in the
 
 The bundled integration dependencies are:
 
-- `@anthropic-ai/claude-agent-sdk` `0.2.126`;
-- `mcp-remote` `0.1.38`, pinned for the Claude remote-OAuth transport bridge.
+- `@anthropic-ai/claude-agent-sdk` `0.2.126`.
 
 Claude Code itself is an external prerequisite installed and authenticated by
 the user. The previous bundled baseline was `2.1.258`; it is not a pinned DCC
@@ -90,71 +89,27 @@ before DCC treats tools as available.
 
 ### Remote HTTPS OAuth
 
-The installed Claude Agent SDK can report `needs-auth`, but it does not expose
-the interactive OAuth-start operation through its programmatic query surface.
-For a DCC-owned remote HTTPS definition, the sidecar therefore projects an
-adapter-local stdio transport backed by the pinned
-[`mcp-remote`](https://github.com/geelen/mcp-remote) bridge. ClickUp documents
-this bridge for Claude clients that need to connect to its remote MCP endpoint.
+DCC signs remote connectors in itself (Settings → Connectors) and no provider
+runs an OAuth login of its own. A connector with a DCC sign-in reaches every
+provider as an HTTP server on DCC's loopback gateway
+(`/mcp/connectors/<id>`), authenticated with the session lease; the gateway
+adds the vendor token, refreshes it once on a 401 and never hands the token to
+the agent. A remote server that asks for a sign-in DCC does not hold is left
+out of the turn and shows Reconnect in Settings and the composer.
 
-This remains one DCC definition. Codex receives the original HTTPS definition
-and uses its native OAuth operation; Claude receives the session-local transport
-projection. No provider configuration file or duplicate integration is
-created.
-
-The Claude OAuth bridge:
-
-- launches only from the already bundled sidecar, never through `npx` or a
-  floating package version;
-- forces Streamable HTTP instead of transport fallback;
-- binds the OAuth callback server to loopback and uses the upstream PKCE flow;
-- passes resolved DCC headers through child-only environment variables, never
-  command arguments or renderer state;
-- suppresses proxy diagnostics that could contain authorization URLs or header
-  metadata;
-- stores OAuth registration, verifier, and token files only inside a
-  mode-`0700` random temporary directory owned by the provider session;
-- restores only the matching definition, provider, and resource-bound grant
-  from the OS credential store before the proxy starts;
-- captures updated tokens and dynamic client registration through a
-  backend-private adapter channel, then stores their versioned envelope under
-  an opaque credential reference; and
-- recursively removes that exact directory when the Claude sidecar exits.
-
-The plaintext files remain ephemeral even though the grant survives. SQLite
-contains only grant metadata and an opaque credential reference; the renderer
-never receives the envelope. A resource or protected-header reference change
-invalidates reuse. The settings UI can explicitly disconnect the DCC-owned
-grant for the selected provider. Provider-native grants, including Codex OAuth,
-remain outside this path.
-
-The persisted envelope deliberately excludes the PKCE verifier and proxy
-lockfile. Those values remain session-only. Static OAuth client configuration,
-custom scopes, and explicit resource parameters are separate registry
-capabilities; the current bridge covers standards-compatible discovery and
-dynamic registration rather than claiming every proprietary OAuth client
-policy.
-
-`mcp-remote@0.1.38` also required a narrow pinned patch: after forwarding the
-`initialize` response, the upstream proxy did not propagate the negotiated
-protocol version to its HTTP transport. The postinstall patch sets that
-version so subsequent requests carry `MCP-Protocol-Version`. It fails closed if
-the pinned package layout or version changes, and the local strict HTTP fixture
-exercises `initialize` followed by `tools/list`. The published package also
-embeds an older internal version in its state-directory name. The same pinned
-patch makes the proxy honor the exact private state directory supplied by DCC,
-so capture and restoration do not depend on inconsistent or future upstream
-directory names.
+The earlier Claude path, a session-local `mcp-remote` stdio proxy whose tokens
+were captured into the credential store, is removed. At startup DCC deletes
+the grants that path stored and marks those connectors as needing a reconnect.
 
 The Agent SDK can report a projected server as `pending` while its OAuth
 callback and tool discovery are still completing. For queries with DCC-owned
 MCP servers, the sidecar starts the provider process with an async prompt stream
 but withholds the user message until every projected server leaves `pending`.
-It publishes changed status snapshots during that wait. The prompt is released
-only after attachment succeeds; authentication, provider, and bounded timeout
-failures close the query without delivering the prompt. This prevents the
-first model turn from taking a tool snapshot before a newly authorized server
-is available.
+It publishes changed status snapshots during that wait (bounded at 30 seconds).
+A server that fails, asks for a sign-in or times out is reported and left out;
+the prompt is then released, so a broken integration never holds the turn.
+This keeps the first model turn from taking a tool snapshot before an
+attaching server is available.
 
 ## Scope and credential resolution
 
@@ -298,7 +253,6 @@ cargo test -p dcc-mcp-fixture --test provider_conformance
 node --test sidecar/src/mcp-config.test.mjs sidecar/src/permission-bridge.test.mjs \
   sidecar/src/turn-lifecycle.test.mjs
 node --check sidecar/src/index.mjs
-node scripts/patch-mcp-remote.mjs
 ```
 
 The tests use placeholder credentials, make no provider request, and require no

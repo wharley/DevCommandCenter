@@ -122,19 +122,6 @@ pub struct RemoveMcpIntegrationOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct DisconnectMcpOauthInput {
-    pub definition_id: McpDefinitionId,
-    pub provider_id: ProviderId,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct DisconnectMcpOauthOutput {
-    pub disconnected: bool,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
 pub struct SetMcpToolPolicyInput {
     pub definition_id: McpDefinitionId,
     pub tool_name: String,
@@ -349,17 +336,6 @@ pub async fn remove_mcp_integration(
 ) -> Result<RemoveMcpIntegrationOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     remove_integration(&repo, &SystemCredentialStore::default(), input)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub async fn disconnect_mcp_oauth(
-    state: State<'_, WorkspaceCommandState>,
-    input: DisconnectMcpOauthInput,
-) -> Result<DisconnectMcpOauthOutput, String> {
-    let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    disconnect_oauth(&repo, &SystemCredentialStore::default(), input)
         .await
         .map_err(|error| error.to_string())
 }
@@ -973,29 +949,6 @@ where
     })
 }
 
-async fn disconnect_oauth<R, C>(
-    repo: &R,
-    credential_store: &C,
-    input: DisconnectMcpOauthInput,
-) -> McpCommandResult<DisconnectMcpOauthOutput>
-where
-    R: McpRepo + Sync + ?Sized,
-    C: CredentialStore + Sync + ?Sized,
-{
-    let Some(grant) = repo
-        .get_mcp_oauth_grant(&input.definition_id, &input.provider_id)
-        .await?
-    else {
-        return Ok(DisconnectMcpOauthOutput {
-            disconnected: false,
-        });
-    };
-    let _ = credential_store.delete_secret(&grant.secret_ref).await?;
-    repo.delete_mcp_oauth_grant(&input.definition_id, &input.provider_id)
-        .await?;
-    Ok(DisconnectMcpOauthOutput { disconnected: true })
-}
-
 fn integration_record(
     definition: McpDefinition,
     bindings: Vec<McpBinding>,
@@ -1294,66 +1247,6 @@ mod tests {
             .resolve_secret(&deleted_reference)
             .await
             .expect("resolve deleted credential")
-            .is_none());
-    }
-
-    #[tokio::test]
-    async fn disconnect_oauth_deletes_the_keychain_value_and_grant_metadata() {
-        let repo = repo();
-        let credentials = TestCredentialStore::default();
-        let created = create_integration(&repo, &credentials, create_input("header"))
-            .await
-            .expect("create integration");
-        let definition_id = created.integration.definition.id;
-        let provider_id = ProviderId("claude_code".to_string());
-        let oauth_reference = McpSecretReferenceId("oauth-grant:fixture".to_string());
-        credentials
-            .store_secret(
-                &oauth_reference,
-                SecretValue::new(b"oauth-state".to_vec()).expect("OAuth state"),
-            )
-            .await
-            .expect("store OAuth state");
-        repo.save_mcp_oauth_grant(&dcc_core::domain::mcp::McpOauthGrant {
-            definition_id: definition_id.clone(),
-            provider_id: provider_id.clone(),
-            resource_fingerprint: dcc_core::domain::mcp::McpOauthResourceFingerprint(
-                "a".repeat(64),
-            ),
-            secret_ref: oauth_reference.clone(),
-            created_at: "2026-07-30T00:00:00Z".to_string(),
-            updated_at: "2026-07-30T00:00:00Z".to_string(),
-        })
-        .await
-        .expect("save OAuth grant");
-
-        let listed = list_integrations(&repo).await.expect("list integrations");
-        assert_eq!(listed.integrations[0].credential_count, 2);
-        assert_eq!(
-            listed.integrations[0].oauth_provider_ids,
-            vec![provider_id.clone()]
-        );
-
-        let result = disconnect_oauth(
-            &repo,
-            &credentials,
-            DisconnectMcpOauthInput {
-                definition_id: definition_id.clone(),
-                provider_id: provider_id.clone(),
-            },
-        )
-        .await
-        .expect("disconnect OAuth");
-        assert!(result.disconnected);
-        assert!(credentials
-            .resolve_secret(&oauth_reference)
-            .await
-            .expect("resolve deleted OAuth state")
-            .is_none());
-        assert!(repo
-            .get_mcp_oauth_grant(&definition_id, &provider_id)
-            .await
-            .expect("load deleted OAuth grant")
             .is_none());
     }
 

@@ -266,8 +266,8 @@ use dcc_tauri::commands::{
     },
     mcp_commands::{
         ActivateMcpIntegrationOutput, CreateMcpIntegrationInput, CreateMcpIntegrationOutput,
-        DisableMcpIntegrationInput, DisableMcpIntegrationOutput, DisconnectMcpOauthInput,
-        DisconnectMcpOauthOutput, ListMcpIntegrationsOutput, McpCredentialInput,
+        DisableMcpIntegrationInput, DisableMcpIntegrationOutput,
+        ListMcpIntegrationsOutput, McpCredentialInput,
         McpIntegrationRecord, RemoveMcpIntegrationInput, RemoveMcpIntegrationOutput,
         SetMcpToolPolicyInput, SetMcpToolPolicyOutput, StartMcpConnectInput,
         StartMcpConnectOutput, McpConnectLoginInput, WaitMcpConnectOutput, McpConnectFailure,
@@ -294,14 +294,13 @@ use dcc_tauri::commands::{
         ExecuteConversationRewindInput, ExecuteConversationRewindOutput, ExecuteGuardedUndoInput,
         ExecuteGuardedUndoOutput, GuardedUndoOperationSummary, GuardedUndoPreviewFile,
         InterruptNativeSubagentInput, LastTurnReviewInput, ListMcpRuntimeStatusesInput,
-        ListMcpRuntimeStatusesOutput, McpTurnPreflightState, NativeSubagentControlOutput,
+        ListMcpRuntimeStatusesOutput, NativeSubagentControlOutput,
         PrepareConversationRewindInput, PrepareConversationRewindOutput, PrepareGuardedUndoInput,
-        PrepareGuardedUndoOutput, PrepareTurnOutput, RespondToPermissionRequestInput,
+        PrepareGuardedUndoOutput, RespondToPermissionRequestInput,
         RespondToPermissionRequestOutput, RespondToUserInputInput, RespondToUserInputOutput,
         RunPullRequestReviewAgentInput, RunPullRequestReviewAgentOutput, SearchSessionsInput,
-        SessionLiveSnapshot, StartMcpOauthInput, StartMcpOauthOutput, SteerNativeSubagentInput,
-        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary, WaitMcpOauthInput,
-        WaitMcpOauthOutput,
+        SessionLiveSnapshot, SteerNativeSubagentInput,
+        TurnReviewFileDiffInput, TurnReviewFileDiffOutput, TurnReviewSummary,
     },
     workspace_commands::{
         CompileMissionSpecContextInput, CompileMissionSpecContextOutput,
@@ -589,7 +588,6 @@ struct SessionMethods {
     decision_provider_model_route: String,
     decision_provider_completion_action: String,
     apply_task_title: String,
-    prepare_turn: String,
     send_turn: String,
     steer_turn: String,
     steer_native_subagent: String,
@@ -619,8 +617,6 @@ struct SessionMethods {
     prepare_conversation_rewind: String,
     execute_conversation_rewind: String,
     list_mcp_runtime_statuses: String,
-    start_mcp_oauth: String,
-    wait_mcp_oauth: String,
     list_workspace_sessions: String,
     search_sessions: String,
     usage_dashboard: String,
@@ -658,7 +654,6 @@ struct McpMethods {
     activate_mcp_integration: String,
     disable_mcp_integration: String,
     remove_mcp_integration: String,
-    disconnect_mcp_oauth: String,
     set_mcp_tool_policy: String,
     start_mcp_connect: String,
     wait_mcp_connect: String,
@@ -1025,8 +1020,6 @@ fn main() {
         .typ::<DisableMcpIntegrationOutput>()
         .typ::<RemoveMcpIntegrationInput>()
         .typ::<RemoveMcpIntegrationOutput>()
-        .typ::<DisconnectMcpOauthInput>()
-        .typ::<DisconnectMcpOauthOutput>()
         .typ::<SetMcpToolPolicyInput>()
         .typ::<SetMcpToolPolicyOutput>()
         .typ::<StartMcpConnectInput>()
@@ -1051,8 +1044,6 @@ fn main() {
         .typ::<StartThreadOutput>()
         .typ::<ApplyTaskTitleInput>()
         .typ::<ApplyTaskTitleOutput>()
-        .typ::<McpTurnPreflightState>()
-        .typ::<PrepareTurnOutput>()
         .typ::<SendTurnInput>()
         .typ::<SendTurnOutput>()
         .typ::<SteerTurnInput>()
@@ -1114,10 +1105,6 @@ fn main() {
         .typ::<ExecuteConversationRewindOutput>()
         .typ::<ListMcpRuntimeStatusesInput>()
         .typ::<ListMcpRuntimeStatusesOutput>()
-        .typ::<StartMcpOauthInput>()
-        .typ::<StartMcpOauthOutput>()
-        .typ::<WaitMcpOauthInput>()
-        .typ::<WaitMcpOauthOutput>()
         .typ::<RespondToUserInputInput>()
         .typ::<RespondToUserInputOutput>()
         .typ::<RespondToPermissionRequestInput>()
@@ -1311,7 +1298,6 @@ fn main() {
             decision_provider_model_route: "decision_provider_model_route".to_string(),
             decision_provider_completion_action: "decision_provider_completion_action".to_string(),
             apply_task_title: "apply_task_title".to_string(),
-            prepare_turn: "prepare_turn".to_string(),
             send_turn: "send_turn".to_string(),
             steer_turn: "steer_turn".to_string(),
             steer_native_subagent: "steer_native_subagent".to_string(),
@@ -1341,8 +1327,6 @@ fn main() {
             prepare_conversation_rewind: "prepare_conversation_rewind".to_string(),
             execute_conversation_rewind: "execute_conversation_rewind".to_string(),
             list_mcp_runtime_statuses: "list_mcp_runtime_statuses".to_string(),
-            start_mcp_oauth: "start_mcp_oauth".to_string(),
-            wait_mcp_oauth: "wait_mcp_oauth".to_string(),
             list_workspace_sessions: "list_workspace_sessions".to_string(),
             search_sessions: "search_sessions".to_string(),
             usage_dashboard: "usage_dashboard".to_string(),
@@ -1382,7 +1366,6 @@ fn main() {
             activate_mcp_integration: "activate_mcp_integration".to_string(),
             disable_mcp_integration: "disable_mcp_integration".to_string(),
             remove_mcp_integration: "remove_mcp_integration".to_string(),
-            disconnect_mcp_oauth: "disconnect_mcp_oauth".to_string(),
             set_mcp_tool_policy: "set_mcp_tool_policy".to_string(),
             start_mcp_connect: "start_mcp_connect".to_string(),
             wait_mcp_connect: "wait_mcp_connect".to_string(),

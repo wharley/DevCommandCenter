@@ -10,11 +10,9 @@ use tokio::{
     sync::{broadcast, oneshot, Mutex},
 };
 use uuid::Uuid;
-use zeroize::Zeroize;
 
 use dcc_core::{
     domain::{
-        mcp::McpDefinitionId,
         provider::{
             Capabilities, HealthStatus, ProviderAccountStatus, ProviderAccountUsage,
             ProviderAccountUsageState, ProviderEvent, ProviderId, ProviderUsageWindow,
@@ -22,10 +20,7 @@ use dcc_core::{
         },
         session::SessionId,
     },
-    ports::{
-        Input, Provider, ProviderMcpOauthState, ProviderMcpOauthUpdate, ProviderRuntimeConfig,
-        SecretValue, SessionConfig, STEER_WINDOW_CLOSED,
-    },
+    ports::{Input, Provider, ProviderRuntimeConfig, SessionConfig, STEER_WINDOW_CLOSED},
     CoreError, Result,
 };
 
@@ -77,34 +72,12 @@ struct SessionRuntime {
     stdin: Mutex<Option<ChildStdin>>,
     child: Mutex<Child>,
     events_tx: broadcast::Sender<ProviderEvent>,
-    mcp_oauth_updates: Mutex<Vec<ProviderMcpOauthUpdate>>,
     /// Steers written to the sidecar, by request id, until it accepts or refuses.
     pending_steers: Mutex<HashMap<String, oneshot::Sender<bool>>>,
 }
 
 /// The sidecar answers a steer at once; past this the turn is left alone.
 const STEER_ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ClaudeMcpOauthStateMessage {
-    #[serde(rename = "type")]
-    _type: String,
-    definition_id: String,
-    state: ClaudeMcpOauthWireState,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum ClaudeMcpOauthWireState {
-    Stored(String),
-    Cleared(()),
-}
-
-#[derive(serde::Deserialize)]
-struct ClaudeSidecarMessageType {
-    r#type: String,
-}
 
 #[derive(serde::Deserialize)]
 struct ClaudeExecutable {
@@ -156,41 +129,6 @@ fn claude_command_path(existing: &str, home: Option<&str>, augmented: &str) -> S
     }
     paths.push(augmented.to_string());
     paths.join(if cfg!(windows) { ";" } else { ":" })
-}
-
-fn parse_claude_mcp_oauth_update(raw: &str) -> Option<Result<ProviderMcpOauthUpdate>> {
-    let message_type = serde_json::from_str::<ClaudeSidecarMessageType>(raw).ok()?;
-    if message_type.r#type != "dcc_mcp_oauth_state" {
-        return None;
-    }
-    let message = match serde_json::from_str::<ClaudeMcpOauthStateMessage>(raw) {
-        Ok(message) => message,
-        Err(_) => {
-            return Some(Err(CoreError::Provider(
-                "invalid Claude MCP OAuth state payload".to_string(),
-            )));
-        }
-    };
-    if message.definition_id.trim().is_empty() {
-        return Some(Err(CoreError::Provider(
-            "invalid Claude MCP OAuth state payload".to_string(),
-        )));
-    }
-    let state = match message.state {
-        ClaudeMcpOauthWireState::Stored(state) => match SecretValue::new(state.into_bytes()) {
-            Ok(state) => Some(ProviderMcpOauthState::new(state)),
-            Err(_) => {
-                return Some(Err(CoreError::Provider(
-                    "invalid Claude MCP OAuth state payload".to_string(),
-                )));
-            }
-        },
-        ClaudeMcpOauthWireState::Cleared(()) => None,
-    };
-    Some(Ok(ProviderMcpOauthUpdate {
-        definition_id: McpDefinitionId(message.definition_id),
-        state,
-    }))
 }
 
 /// `(request_id, accepted)` from the sidecar's answer to a steer.
@@ -958,7 +896,6 @@ impl ClaudeSdkSidecarAdapter {
             stdin: Mutex::new(Some(stdin)),
             child: Mutex::new(child),
             events_tx: events_tx.clone(),
-            mcp_oauth_updates: Mutex::new(Vec::new()),
             pending_steers: Mutex::new(HashMap::new()),
         });
 
@@ -992,25 +929,6 @@ impl ClaudeSdkSidecarAdapter {
             while let Ok(Some(mut content)) = reader.next_line().await {
                 content.truncate(content.trim_end().len());
                 if content.is_empty() {
-                    continue;
-                }
-                if let Some(update) = parse_claude_mcp_oauth_update(&content) {
-                    content.zeroize();
-                    match update {
-                        Ok(update) => {
-                            let definition_id = update.definition_id.clone();
-                            runtime_for_task.mcp_oauth_updates.lock().await.push(update);
-                            let _ = runtime_for_task
-                                .events_tx
-                                .send(ProviderEvent::McpOauthStateChanged { definition_id });
-                        }
-                        Err(_) => {
-                            let _ = runtime_for_task.events_tx.send(ProviderEvent::Failed {
-                                message: "invalid Claude MCP OAuth state payload".to_string(),
-                                at: now_iso(),
-                            });
-                        }
-                    }
                     continue;
                 }
                 if let Ok(value) = serde_json::from_str::<Value>(&content) {
@@ -1377,23 +1295,6 @@ impl Provider for ClaudeSdkSidecarAdapter {
                 )))
             }
         }
-    }
-
-    async fn take_mcp_oauth_updates(
-        &self,
-        handle: &SessionHandle,
-    ) -> Result<Vec<ProviderMcpOauthUpdate>> {
-        let runtime = self
-            .runtime_for_session(&handle.session_id)
-            .await
-            .ok_or_else(|| {
-                CoreError::Provider(format!(
-                    "no runtime for session {} on provider {}",
-                    handle.session_id.0, self.label
-                ))
-            })?;
-        let mut updates = runtime.mcp_oauth_updates.lock().await;
-        Ok(std::mem::take(&mut *updates))
     }
 
     fn stream_events(&self, handle: &SessionHandle) -> BoxStream<'static, Result<ProviderEvent>> {
@@ -1976,35 +1877,6 @@ done
             parse_claude_steer_result(&json!({ "type": "result", "request_id": "r1" })),
             None
         );
-    }
-
-    #[test]
-    fn captures_mcp_oauth_state_only_on_the_private_adapter_channel() {
-        let update = parse_claude_mcp_oauth_update(
-            r#"{"type":"dcc_mcp_oauth_state","definition_id":"remote","state":"{\"version\":1,\"tokens\":{\"access_token\":\"oauth-canary\"}}"}"#,
-        )
-        .expect("recognized OAuth state message")
-        .expect("valid OAuth state message");
-
-        assert_eq!(update.definition_id.0, "remote");
-        assert!(
-            std::str::from_utf8(update.state.as_ref().expect("stored state").expose_secret())
-                .expect("UTF-8 state")
-                .contains("oauth-canary")
-        );
-        assert!(!format!("{update:?}").contains("oauth-canary"));
-        assert!(parse_claude_mcp_oauth_update(
-            r#"{"type":"dcc_mcp_oauth_state","definition_id":"remote"}"#
-        )
-        .expect("recognized malformed OAuth message")
-        .is_err());
-        assert!(parse_claude_mcp_oauth_update(
-            r#"{"type":"dcc_mcp_oauth_state","definition_id":"remote","state":null}"#
-        )
-        .expect("recognized cleared OAuth message")
-        .expect("valid cleared OAuth message")
-        .state
-        .is_none());
     }
 
     #[test]

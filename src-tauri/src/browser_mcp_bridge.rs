@@ -523,7 +523,6 @@ impl BrowserMcpBridge {
                 url: self.endpoint.clone(),
                 headers: bearer()?,
             },
-            oauth_state: None,
             tool_policies: policies,
         }];
         // Connectors share the lease's bearer; the gateway checks the grant
@@ -539,7 +538,6 @@ impl BrowserMcpBridge {
                         url: format!("{}/connectors/{}", self.endpoint, connector.definition_id.0),
                         headers: bearer()?,
                     },
-                    oauth_state: None,
                     tool_policies: connector.tool_policies.clone(),
                 });
             }

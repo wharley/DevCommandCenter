@@ -521,11 +521,6 @@ pub enum ProviderEvent {
     McpRuntimeStatusSnapshot {
         statuses: Vec<McpRuntimeStatus>,
     },
-    /// Backend-only signal that an adapter captured new OAuth state. The
-    /// credential bytes remain in the provider's private drain channel.
-    McpOauthStateChanged {
-        definition_id: crate::domain::mcp::McpDefinitionId,
-    },
     /// Backend-only signal carrying the provider-native conversation id that
     /// a later runtime can resume. `None` means the provider refused the
     /// persisted id and it must be forgotten.

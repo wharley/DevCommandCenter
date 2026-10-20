@@ -812,7 +812,6 @@ mod tests {
                     cwd: Some("/workspace/tools".to_string()),
                     environment: vec![secret("FIXTURE_TOKEN", "stdio-secret-canary")],
                 },
-                oauth_state: None,
                 tool_policies: vec![ProviderMcpToolPolicy {
                     tool_name: "fixture.mutate".to_string(),
                     decision: McpToolPolicyDecision::Deny,
@@ -825,7 +824,6 @@ mod tests {
                     url: "https://mcp.example.test/rpc".to_string(),
                     headers: vec![secret("Authorization", "Bearer http-secret-canary")],
                 },
-                oauth_state: None,
                 tool_policies: Vec::new(),
             },
         ]

@@ -7218,7 +7218,6 @@ pub fn run() {
             mcp_commands::activate_mcp_integration,
             mcp_commands::disable_mcp_integration,
             mcp_commands::remove_mcp_integration,
-            mcp_commands::disconnect_mcp_oauth,
             mcp_commands::set_mcp_tool_policy,
             mcp_commands::start_mcp_connect,
             mcp_commands::wait_mcp_connect,
@@ -7247,7 +7246,6 @@ pub fn run() {
             provider_commands::connect_antigravity,
             session_commands::start_thread,
             session_commands::apply_task_title,
-            session_commands::prepare_turn,
             session_commands::run_pull_request_review_agent,
             session_commands::sync_session_to_ai_memory,
             session_commands::query_ai_memory,
@@ -7294,8 +7292,6 @@ pub fn run() {
             session_commands::prepare_conversation_rewind,
             session_commands::execute_conversation_rewind,
             session_commands::list_mcp_runtime_statuses,
-            session_commands::start_mcp_oauth,
-            session_commands::wait_mcp_oauth,
             session_commands::approve_plan,
             session_commands::record_plan_handoff,
             session_commands::list_workspace_sessions,
@@ -7400,6 +7396,24 @@ pub fn run() {
                 .map_err(|error| eprintln!("[DCC][mcp-connect] gateway unavailable: {error}"))
                 .ok()
             });
+            // Sign-ins the agents' own MCP login stored are no longer read;
+            // retire them so those connectors ask to reconnect.
+            if let Ok(repo) = SqliteMcpRepo::open(
+                &WorkspaceCommandState::from_session(&session_command_state).db_path,
+            ) {
+                tauri::async_runtime::spawn(async move {
+                    let stores = dcc_tauri::mcp_connect::ConnectStores {
+                        repo: Arc::new(repo),
+                        credentials: Arc::new(
+                            dcc_infra::credential_store::SystemCredentialStore::default(),
+                        ),
+                    };
+                    let retired = dcc_tauri::mcp_connect::retire_provider_grants(&stores).await;
+                    if retired > 0 {
+                        eprintln!("[DCC][mcp-connect] retired {retired} agent-held sign-ins");
+                    }
+                });
+            }
             let browser_mcp_bridge = match tauri::async_runtime::block_on(BrowserMcpBridge::start(
                 Some(app.handle().clone()),
                 browser_state.clone(),
