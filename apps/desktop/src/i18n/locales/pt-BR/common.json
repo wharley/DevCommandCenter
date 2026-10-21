@@ -4947,6 +4947,13 @@
     "close": "Fechar",
     "save": "Salvar configuração"
   },
+  "imageView": {
+    "zoomIn": "Aproximar",
+    "zoomOut": "Afastar",
+    "fit": "Ajustar à tela",
+    "actualSize": "Tamanho real (100%)",
+    "unavailable": "Não foi possível mostrar esta imagem. O arquivo pode ter sido removido ou passa de 15 MB."
+  },
   "fileSurface": {
     "ariaLabel": "Visualização do arquivo inteiro",
     "viewDiff": "Diff",

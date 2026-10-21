@@ -6,6 +6,8 @@ import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-
 import { cn } from "@/lib/utils";
 import type { DiffAnnotationPayload } from "./diff-types";
 import { useFileIndentation } from "./use-file-indentation";
+import { ImageFileView } from "./image-file-view";
+import { isViewableImagePath } from "./image-file-view.logic";
 import { StageChatTab, type StageChat } from "./stage-chat-tab";
 import { EditStateManager } from "@pierre/diffs/edit";
 import type {
@@ -586,50 +588,55 @@ export function FileTabsSurface({
 								: "pointer-events-none invisible z-0 opacity-0",
 						)}
 					>
-						<WorkspaceFileSurface
-							ref={(handle) => {
-								if (handle) {
-									surfaceRefs.current.set(file.path, handle);
-								} else {
-									surfaceRefs.current.delete(file.path);
+						{isViewableImagePath(file.path) ? (
+							<ImageFileView workspaceRoot={workspaceRoot} path={file.path} />
+						) : (
+							<WorkspaceFileSurface
+								ref={(handle) => {
+									if (handle) {
+										surfaceRefs.current.set(file.path, handle);
+									} else {
+										surfaceRefs.current.delete(file.path);
+									}
+								}}
+								embedded
+								editable
+								useSharedEditor
+								editorBridge={
+									file.path === activePath ? sharedEditorRef : undefined
 								}
-							}}
-							embedded
-							editable
-							useSharedEditor
-							editorBridge={
-								file.path === activePath ? sharedEditorRef : undefined
-							}
-							workspaceRoot={workspaceRoot}
-							initialBuffer={
-								buffersRef.current.has(file.path)
-									? (buffersRef.current.get(file.path) ?? null)
-									: null
-							}
-							onBufferSnapshot={(content) =>
-								handleBufferSnapshot(file.path, content)
-							}
-							onContentReady={(content) => handleContentReady(file.path, content)}
-							source={{
-								kind: "path",
-								path: file.path,
-								name: file.name,
-								focusLine: file.focusLine,
-								focusColumn: file.focusColumn,
-							}}
-							onStateChange={(next) => handleStateChange(file.path, next)}
-							onClose={onClose}
-							onSubmitAnnotation={onSubmitAnnotation}
-							onEditInComposer={onEditInComposer}
-							onAddToReview={onAddToReview}
-						/>
+								workspaceRoot={workspaceRoot}
+								initialBuffer={
+									buffersRef.current.has(file.path)
+										? (buffersRef.current.get(file.path) ?? null)
+										: null
+								}
+								onBufferSnapshot={(content) =>
+									handleBufferSnapshot(file.path, content)
+								}
+								onContentReady={(content) => handleContentReady(file.path, content)}
+								source={{
+									kind: "path",
+									path: file.path,
+									name: file.name,
+									focusLine: file.focusLine,
+									focusColumn: file.focusColumn,
+								}}
+								onStateChange={(next) => handleStateChange(file.path, next)}
+								onClose={onClose}
+								onSubmitAnnotation={onSubmitAnnotation}
+								onEditInComposer={onEditInComposer}
+								onAddToReview={onAddToReview}
+							/>
+						)}
 					</div>
 				))}
 				{sharedEditorStarted ? (
 					<div
 						className={cn(
 							"absolute inset-0 z-20 flex min-h-0 flex-col",
-							(sharedEditorPayload?.path ?? activePath) !== activePath &&
+							((sharedEditorPayload?.path ?? activePath) !== activePath ||
+								isViewableImagePath(activePath)) &&
 								"pointer-events-none invisible",
 						)}
 					>

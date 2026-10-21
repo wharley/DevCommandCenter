@@ -4947,6 +4947,13 @@
     "close": "Close",
     "save": "Save configuration"
   },
+  "imageView": {
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "fit": "Fit to view",
+    "actualSize": "Actual size (100%)",
+    "unavailable": "This image can't be shown. The file may have been removed or is larger than 15 MB."
+  },
   "fileSurface": {
     "ariaLabel": "Whole file view",
     "viewDiff": "Diff",
