@@ -4,6 +4,7 @@ import {
 	changeGroupBelongsToScope,
 	defaultInspectorChangesScope,
 	reviewCardDiffHeight,
+	reviewCardsStartOpen,
 	resolveInspectorReviewScope,
 	shouldEagerLoadReviewCard,
 	summarizeInspectorChanges,
@@ -76,5 +77,14 @@ describe("inspector changes presentation", () => {
 		expect(shouldEagerLoadReviewCard(1)).toBe(true);
 		expect(shouldEagerLoadReviewCard(2)).toBe(false);
 		expect(shouldEagerLoadReviewCard(-1)).toBe(false);
+	});
+});
+
+describe("reviewCardsStartOpen", () => {
+	it("opens short reviews and collapses long ones", () => {
+		expect(reviewCardsStartOpen(0)).toBe(true);
+		expect(reviewCardsStartOpen(3)).toBe(true);
+		expect(reviewCardsStartOpen(4)).toBe(false);
+		expect(reviewCardsStartOpen(100)).toBe(false);
 	});
 });

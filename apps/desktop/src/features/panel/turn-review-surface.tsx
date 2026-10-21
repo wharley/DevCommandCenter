@@ -38,6 +38,7 @@ import {
 	prepareGuardedUndo,
 } from "@/lib/session-api";
 import { cn } from "@/lib/utils";
+import { useReviewCardOpen } from "@/features/inspector/review-cards-open";
 import {
 	canPrepareGuardedUndo,
 	hasTurnReviewLineStats,
@@ -64,7 +65,7 @@ function TurnReviewCard({
 	selected?: boolean;
 }) {
 	const cardRef = useRef<HTMLElement | null>(null);
-	const [open, setOpen] = useState(true);
+	const [open, setOpen] = useReviewCardOpen(selected);
 	const [shouldLoad, setShouldLoad] = useState(() =>
 		selected || shouldEagerLoadReviewCard(index),
 	);

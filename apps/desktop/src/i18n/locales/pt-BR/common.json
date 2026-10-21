@@ -1708,6 +1708,8 @@
         "unstaged": "Não preparadas"
       },
       "listView": "Mostrar como lista",
+      "expandAll": "Expandir todos os arquivos",
+      "collapseAll": "Recolher todos os arquivos",
       "treeView": "Mostrar como árvore",
       "backToList": "Voltar aos arquivos alterados",
       "expandDiff": "Abrir diff ampliado",

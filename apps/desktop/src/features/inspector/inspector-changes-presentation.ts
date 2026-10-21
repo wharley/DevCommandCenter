@@ -93,3 +93,11 @@ export function reviewCardDiffHeight(
 export function shouldEagerLoadReviewCard(index: number): boolean {
 	return index >= 0 && index < 2;
 }
+
+/** Up to this many files, every diff card starts open; more start collapsed. */
+export const REVIEW_CARDS_OPEN_LIMIT = 3;
+
+/** A short review reads straight through; a long one starts as a file list. */
+export function reviewCardsStartOpen(fileCount: number): boolean {
+	return fileCount <= REVIEW_CARDS_OPEN_LIMIT;
+}

@@ -16,6 +16,8 @@ import {
 	AlertCircle,
 	ChevronDown,
 	ChevronRight,
+	ChevronsDownUp,
+	ChevronsUpDown,
 	CloudIcon,
 	Expand,
 	GitCompareArrows,
@@ -62,6 +64,11 @@ import {
 	workspaceGitUnstageFile,
 } from "@/lib/workspace-api";
 import { cn } from "@/lib/utils";
+import {
+	ReviewCardsOpenProvider,
+	useReviewCardOpen,
+	type ReviewCardsCommand,
+} from "./review-cards-open";
 import { useCodeRabbitIntegrationEnabled } from "@/features/settings/coderabbit-preferences";
 import { TurnReviewSurface } from "@/features/panel/turn-review-surface";
 import type { TurnUndoWorkspace } from "@/features/panel/turn-undo-across-projects";
@@ -79,6 +86,7 @@ import {
 	availableInspectorReviewScopes,
 	changeGroupBelongsToScope,
 	reviewCardDiffHeight,
+	reviewCardsStartOpen,
 	resolveInspectorReviewScope,
 	shouldEagerLoadReviewCard,
 	summarizeInspectorChanges,
@@ -635,7 +643,7 @@ function ReviewChangeCard({
 	);
 	const { t } = useTranslation("common");
 	const cardRef = useRef<HTMLElement | null>(null);
-	const [open, setOpen] = useState(true);
+	const [open, setOpen] = useReviewCardOpen();
 	const [shouldLoad, setShouldLoad] = useState(() =>
 		shouldEagerLoadReviewCard(index),
 	);
@@ -1128,6 +1136,9 @@ export function InspectorChangesSection({
 	const [stagedOpen, setStagedOpen] = useState(true);
 	const [unstagedOpen, setUnstagedOpen] = useState(true);
 	const [changesTreeView, setChangesTreeView] = useState(false);
+	const [cardsCommand, setCardsCommand] = useState<
+		(ReviewCardsCommand & { root: string; scope: InspectorReviewScope }) | null
+	>(null);
 	const [scopePreference, setScopePreference] = useState<{
 		root: string;
 		scope: InspectorReviewScope;
@@ -1381,6 +1392,23 @@ export function InspectorChangesSection({
 					deletions: lastTurnReview.deletions,
 				}
 			: summarizeInspectorChanges(visibleChanges);
+	// Long reviews start as a list of collapsed files; the header opens them all.
+	const cardsDefaultOpen = reviewCardsStartOpen(visibleSummary.fileCount);
+	const activeCardsCommand =
+		cardsCommand?.root === root && cardsCommand.scope === activeScope
+			? cardsCommand
+			: null;
+	const cardsAllOpen = activeCardsCommand?.open ?? cardsDefaultOpen;
+	const showCardsToggle =
+		visibleSummary.fileCount > 1 &&
+		(activeScope === "last-turn" || !changesTreeView);
+	const toggleAllCards = () =>
+		setCardsCommand((prev) => ({
+			root,
+			scope: activeScope,
+			open: !cardsAllOpen,
+			version: (prev?.version ?? 0) + 1,
+		}));
 	const reviewScopes = availableInspectorReviewScopes(
 		Boolean(sessionId && workspaceId),
 	);
@@ -1419,275 +1447,310 @@ export function InspectorChangesSection({
 	}
 
 	return (
-		<div className="dcc-review-inspector relative flex min-h-0 flex-1 flex-col">
-			<div className="shrink-0 border-b border-border/50 bg-background">
-				<div className="flex min-h-10 items-center gap-1 px-2 py-1.5">
-					<span className="dcc-review-heading-mark">
-						<GitCompareArrows size={14} aria-hidden />
-					</span>
-					<h3 className="dcc-review-heading-title">{t("review.changes")}</h3>
-					{scopeCounts[activeScope] !== null && <div
-						className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums"
-						aria-label={t("inspector.changes.fileCount", {
-							count: visibleSummary.fileCount,
-						})}
-					>
-						<span className="text-emerald-600 dark:text-emerald-400">+{visibleSummary.insertions}</span>
-						<span className="text-destructive">−{visibleSummary.deletions}</span>
-					</div>}
+		<ReviewCardsOpenProvider
+			value={{ defaultOpen: cardsDefaultOpen, command: activeCardsCommand }}
+		>
+			<div className="dcc-review-inspector relative flex min-h-0 flex-1 flex-col">
+				<div className="shrink-0 border-b border-border/50 bg-background">
+					<div className="flex min-h-10 items-center gap-1 px-2 py-1.5">
+						<span className="dcc-review-heading-mark">
+							<GitCompareArrows size={14} aria-hidden />
+						</span>
+						<h3 className="dcc-review-heading-title">{t("review.changes")}</h3>
+						{scopeCounts[activeScope] !== null && <div
+							className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums"
+							aria-label={t("inspector.changes.fileCount", {
+								count: visibleSummary.fileCount,
+							})}
+						>
+							<span className="text-emerald-600 dark:text-emerald-400">+{visibleSummary.insertions}</span>
+							<span className="text-destructive">−{visibleSummary.deletions}</span>
+						</div>}
 
-					{activeScope !== "last-turn" ? (
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-xs"
-									className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
-									aria-label={t(
+						{showCardsToggle ? (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+										aria-label={t(
+											cardsAllOpen
+												? "inspector.changes.collapseAll"
+												: "inspector.changes.expandAll",
+										)}
+										onClick={toggleAllCards}
+									>
+										{cardsAllOpen ? (
+											<ChevronsDownUp className="size-4" />
+										) : (
+											<ChevronsUpDown className="size-4" />
+										)}
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="bottom">
+									{t(
+										cardsAllOpen
+											? "inspector.changes.collapseAll"
+											: "inspector.changes.expandAll",
+									)}
+								</TooltipContent>
+							</Tooltip>
+						) : null}
+						{activeScope !== "last-turn" ? (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon-xs"
+										className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+										aria-label={t(
+											changesTreeView
+												? "inspector.changes.listView"
+												: "inspector.changes.treeView",
+										)}
+										onClick={() => setChangesTreeView((value) => !value)}
+									>
+										{changesTreeView ? (
+											<ListIcon className="size-4" />
+										) : (
+											<ListTree className="size-4" />
+										)}
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="bottom">
+									{t(
 										changesTreeView
 											? "inspector.changes.listView"
 											: "inspector.changes.treeView",
 									)}
-									onClick={() => setChangesTreeView((value) => !value)}
-								>
-									{changesTreeView ? (
-										<ListIcon className="size-4" />
-									) : (
-										<ListTree className="size-4" />
-									)}
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent side="bottom">
-								{t(
-									changesTreeView
-										? "inspector.changes.listView"
-										: "inspector.changes.treeView",
-								)}
-							</TooltipContent>
-						</Tooltip>
-					) : null}
-				</div>
-				<InspectorReviewScopes
-					scopes={reviewScopes}
-					active={activeScope}
-					counts={scopeCounts}
-					onChange={handleScopeChange}
-				/>
-				{activeScope === "branch" && (
-					<div className="dcc-review-scope-branches">
-						<ReviewBranchContext
-							head={data.currentBranch}
-							base={branchDiffQuery.data?.baseBranch}
-						/>
+								</TooltipContent>
+							</Tooltip>
+						) : null}
 					</div>
-				)}
-			</div>
-			{activeScope === "last-turn" && sessionId && reviewWorkspaceId ? (
-				<TurnReviewSurface
-					sessionId={sessionId}
-					workspaceId={reviewWorkspaceId}
-					turnWorkspaces={turnWorkspaces}
-				/>
-			) : (
-				<ScrollArea
-					viewportProps={{ "data-inspector-scroll-key": "git-changes" }}
-					className="min-h-0 flex-1 bg-muted/[0.08] text-[11.5px]"
-					aria-label="Git changes"
-				>
-					<div
-						className={cn(
-							"min-w-0 max-w-full overflow-x-hidden py-1",
-							activeScope === "working" && hasAny && "pb-16",
-						)}
-					>
-					{activeScope === "working" && data.staged.length > 0 ? (
-						<ChangesGroup
-							label={t("inspector.changes.groups.staged")}
-							count={data.staged.length}
-							open={stagedOpen}
-							onToggle={() => setStagedOpen((v) => !v)}
-							entries={data.staged}
-							group="staged"
-							workspaceRoot={root}
-							gitBusy={gitBusy}
-							runGit={runGit}
-							onBatchAll={() => unstageAll(data.staged.map((e) => e.path))}
-							batchAriaLabel="Unstage all changes"
-							BatchIcon={MinusIcon}
-							treeView={changesTreeView}
-							onToggleTreeView={() => setChangesTreeView((v) => !v)}
-							showViewToggle={false}
-							selectedPath={selectedPathIn("staged")}
-							reviewCommentCounts={reviewCommentCounts}
-							onSelect={handleExpandPreview}
-							onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
-						/>
-					) : null}
-					{activeScope === "working" && data.unstaged.length > 0 ? (
-						<ChangesGroup
-							label={t("inspector.changes.groups.unstaged")}
-							count={data.unstaged.length}
-							open={unstagedOpen}
-							onToggle={() => setUnstagedOpen((v) => !v)}
-							entries={data.unstaged}
-							group="unstaged"
-							workspaceRoot={root}
-							gitBusy={gitBusy}
-							runGit={runGit}
-							onBatchAll={stageAll}
-							batchDisabled={data.conflictCount > 0}
-							batchAriaLabel="Stage all changes"
-							BatchIcon={PlusIcon}
-							treeView={changesTreeView}
-							onToggleTreeView={() => setChangesTreeView((v) => !v)}
-							showViewToggle={false}
-							icon={
-								<LaptopIcon
-									className="size-3 shrink-0 text-muted-foreground"
-									strokeWidth={2}
-								/>
-							}
-							selectedPath={selectedPathIn("unstaged")}
-							reviewCommentCounts={reviewCommentCounts}
-							onSelect={handleExpandPreview}
-							onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
-						/>
-					) : null}
-					{activeScope === "working" && !hasAny ? (
-						<div className="flex min-h-36 flex-col items-center justify-center px-5 py-8 text-center text-[11px] leading-5 text-muted-foreground">
-							<div className="mb-2 flex size-8 items-center justify-center rounded-full bg-muted/60">
-								<GitCompareArrows className="size-4" strokeWidth={1.7} />
-							</div>
-							{t("inspector.changes.emptyWorking")}
+					<InspectorReviewScopes
+						scopes={reviewScopes}
+						active={activeScope}
+						counts={scopeCounts}
+						onChange={handleScopeChange}
+					/>
+					{activeScope === "branch" && (
+						<div className="dcc-review-scope-branches">
+							<ReviewBranchContext
+								head={data.currentBranch}
+								base={branchDiffQuery.data?.baseBranch}
+							/>
 						</div>
-					) : null}
-					{activeScope === "branch" &&
-					!branchDiffQuery.isPending &&
-					branchChanges.length === 0 ? (
-						<div className="flex min-h-36 flex-col items-center justify-center px-5 py-8 text-center text-[11px] leading-5 text-muted-foreground">
-							<div className="mb-2 flex size-8 items-center justify-center rounded-full bg-muted/60">
-								<CloudIcon className="size-4" strokeWidth={1.7} />
-							</div>
-							{t("inspector.changes.emptyBranch")}
-						</div>
-					) : null}
-					{activeScope === "branch" && Boolean(root) ? (
-						<BranchDiffSection
-							workspaceRoot={root}
-							gitBusy={gitBusy}
-							treeView={changesTreeView}
-							selectedPath={selectedPathIn("committed")}
-							reviewCommentCounts={reviewCommentCounts}
-							onExpand={handleExpandPreview}
-							onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
-						/>
-					) : null}
-					{codeRabbitEnabled &&
-					hasReviewableChanges &&
-					visibleChanges.length > 0 ? (
-						<CodeRabbitReviewSection
-							workspaceRoot={root}
-							staged={data.staged}
-							unstaged={data.unstaged}
-							baseBranch={branchDiffQuery.data?.baseBranch ?? null}
-							onSelectPreview={handleSelectPreview}
-							onPrefillComposer={onPrefillComposer}
-						/>
-					) : null}
+					)}
 				</div>
-				</ScrollArea>
-			)}
-			{activeScope === "working" && hasAny ? (
-				<div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
-					<div className="pointer-events-auto flex items-center rounded-full border border-border/70 bg-background/95 p-1 shadow-lg backdrop-blur">
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							className="h-8 rounded-full gap-1.5 px-3"
-							disabled={gitBusy || data.conflictCount > 0}
-							onClick={() => setDiscardAllDialogOpen(true)}
+				{activeScope === "last-turn" && sessionId && reviewWorkspaceId ? (
+					<TurnReviewSurface
+						sessionId={sessionId}
+						workspaceId={reviewWorkspaceId}
+						turnWorkspaces={turnWorkspaces}
+					/>
+				) : (
+					<ScrollArea
+						viewportProps={{ "data-inspector-scroll-key": "git-changes" }}
+						className="min-h-0 flex-1 bg-muted/[0.08] text-[11.5px]"
+						aria-label="Git changes"
+					>
+						<div
+							className={cn(
+								"min-w-0 max-w-full overflow-x-hidden py-1",
+								activeScope === "working" && hasAny && "pb-16",
+							)}
 						>
-							<Undo2Icon className="size-3.5" />
-							{t("inspector.changes.revertAll")}
-						</Button>
-						<div className="mx-0.5 h-5 w-px bg-border/70" aria-hidden />
-						{data.unstaged.length > 0 ? (
+						{activeScope === "working" && data.staged.length > 0 ? (
+							<ChangesGroup
+								label={t("inspector.changes.groups.staged")}
+								count={data.staged.length}
+								open={stagedOpen}
+								onToggle={() => setStagedOpen((v) => !v)}
+								entries={data.staged}
+								group="staged"
+								workspaceRoot={root}
+								gitBusy={gitBusy}
+								runGit={runGit}
+								onBatchAll={() => unstageAll(data.staged.map((e) => e.path))}
+								batchAriaLabel="Unstage all changes"
+								BatchIcon={MinusIcon}
+								treeView={changesTreeView}
+								onToggleTreeView={() => setChangesTreeView((v) => !v)}
+								showViewToggle={false}
+								selectedPath={selectedPathIn("staged")}
+								reviewCommentCounts={reviewCommentCounts}
+								onSelect={handleExpandPreview}
+								onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
+							/>
+						) : null}
+						{activeScope === "working" && data.unstaged.length > 0 ? (
+							<ChangesGroup
+								label={t("inspector.changes.groups.unstaged")}
+								count={data.unstaged.length}
+								open={unstagedOpen}
+								onToggle={() => setUnstagedOpen((v) => !v)}
+								entries={data.unstaged}
+								group="unstaged"
+								workspaceRoot={root}
+								gitBusy={gitBusy}
+								runGit={runGit}
+								onBatchAll={stageAll}
+								batchDisabled={data.conflictCount > 0}
+								batchAriaLabel="Stage all changes"
+								BatchIcon={PlusIcon}
+								treeView={changesTreeView}
+								onToggleTreeView={() => setChangesTreeView((v) => !v)}
+								showViewToggle={false}
+								icon={
+									<LaptopIcon
+										className="size-3 shrink-0 text-muted-foreground"
+										strokeWidth={2}
+									/>
+								}
+								selectedPath={selectedPathIn("unstaged")}
+								reviewCommentCounts={reviewCommentCounts}
+								onSelect={handleExpandPreview}
+								onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
+							/>
+						) : null}
+						{activeScope === "working" && !hasAny ? (
+							<div className="flex min-h-36 flex-col items-center justify-center px-5 py-8 text-center text-[11px] leading-5 text-muted-foreground">
+								<div className="mb-2 flex size-8 items-center justify-center rounded-full bg-muted/60">
+									<GitCompareArrows className="size-4" strokeWidth={1.7} />
+								</div>
+								{t("inspector.changes.emptyWorking")}
+							</div>
+						) : null}
+						{activeScope === "branch" &&
+						!branchDiffQuery.isPending &&
+						branchChanges.length === 0 ? (
+							<div className="flex min-h-36 flex-col items-center justify-center px-5 py-8 text-center text-[11px] leading-5 text-muted-foreground">
+								<div className="mb-2 flex size-8 items-center justify-center rounded-full bg-muted/60">
+									<CloudIcon className="size-4" strokeWidth={1.7} />
+								</div>
+								{t("inspector.changes.emptyBranch")}
+							</div>
+						) : null}
+						{activeScope === "branch" && Boolean(root) ? (
+							<BranchDiffSection
+								workspaceRoot={root}
+								gitBusy={gitBusy}
+								treeView={changesTreeView}
+								selectedPath={selectedPathIn("committed")}
+								reviewCommentCounts={reviewCommentCounts}
+								onExpand={handleExpandPreview}
+								onAnnotate={workspaceId ? handleAnnotatePreview : undefined}
+							/>
+						) : null}
+						{codeRabbitEnabled &&
+						hasReviewableChanges &&
+						visibleChanges.length > 0 ? (
+							<CodeRabbitReviewSection
+								workspaceRoot={root}
+								staged={data.staged}
+								unstaged={data.unstaged}
+								baseBranch={branchDiffQuery.data?.baseBranch ?? null}
+								onSelectPreview={handleSelectPreview}
+								onPrefillComposer={onPrefillComposer}
+							/>
+						) : null}
+					</div>
+					</ScrollArea>
+				)}
+				{activeScope === "working" && hasAny ? (
+					<div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
+						<div className="pointer-events-auto flex items-center rounded-full border border-border/70 bg-background/95 p-1 shadow-lg backdrop-blur">
 							<Button
 								type="button"
 								variant="ghost"
 								size="sm"
 								className="h-8 rounded-full gap-1.5 px-3"
 								disabled={gitBusy || data.conflictCount > 0}
-								onClick={() => void stageAll()}
+								onClick={() => setDiscardAllDialogOpen(true)}
 							>
-								<PlusIcon className="size-3.5" />
-								{t("inspector.changes.stageAll")}
+								<Undo2Icon className="size-3.5" />
+								{t("inspector.changes.revertAll")}
 							</Button>
-						) : (
+							<div className="mx-0.5 h-5 w-px bg-border/70" aria-hidden />
+							{data.unstaged.length > 0 ? (
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="h-8 rounded-full gap-1.5 px-3"
+									disabled={gitBusy || data.conflictCount > 0}
+									onClick={() => void stageAll()}
+								>
+									<PlusIcon className="size-3.5" />
+									{t("inspector.changes.stageAll")}
+								</Button>
+							) : (
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="h-8 rounded-full gap-1.5 px-3"
+									disabled={gitBusy}
+									onClick={() =>
+										void unstageAll(data.staged.map((entry) => entry.path))
+									}
+								>
+									<MinusIcon className="size-3.5" />
+									{t("inspector.changes.unstageAll")}
+								</Button>
+							)}
+						</div>
+					</div>
+				) : null}
+				{isGitActionInProgress ? (
+					<div
+						className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-md border border-border/60 bg-background/95 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm backdrop-blur-[1px]"
+						role="status"
+						aria-live="polite"
+					>
+						<LoaderCircleIcon className="size-3.5 animate-spin text-primary" aria-hidden />
+						{t("inspector.changes.updatingGit")}
+					</div>
+				) : null}
+				<Dialog open={discardAllDialogOpen} onOpenChange={setDiscardAllDialogOpen}>
+					<DialogContent className="sm:max-w-md">
+						<DialogHeader>
+							<DialogTitle>{t("inspector.changes.revertAllConfirmTitle")}</DialogTitle>
+							<DialogDescription>
+								{t("inspector.changes.revertAllConfirmDescription", {
+									count: workingChanges.length,
+								})}
+							</DialogDescription>
+						</DialogHeader>
+						<DialogFooter>
 							<Button
 								type="button"
-								variant="ghost"
-								size="sm"
-								className="h-8 rounded-full gap-1.5 px-3"
-								disabled={gitBusy}
-								onClick={() =>
-									void unstageAll(data.staged.map((entry) => entry.path))
-								}
+								variant="outline"
+								onClick={() => setDiscardAllDialogOpen(false)}
 							>
-								<MinusIcon className="size-3.5" />
-								{t("inspector.changes.unstageAll")}
+								{t("inspector.changes.cancel")}
 							</Button>
-						)}
-					</div>
-				</div>
-			) : null}
-			{isGitActionInProgress ? (
-				<div
-					className="absolute right-2 top-2 z-20 flex items-center gap-2 rounded-md border border-border/60 bg-background/95 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-sm backdrop-blur-[1px]"
-					role="status"
-					aria-live="polite"
-				>
-					<LoaderCircleIcon className="size-3.5 animate-spin text-primary" aria-hidden />
-					{t("inspector.changes.updatingGit")}
-				</div>
-			) : null}
-			<Dialog open={discardAllDialogOpen} onOpenChange={setDiscardAllDialogOpen}>
-				<DialogContent className="sm:max-w-md">
-					<DialogHeader>
-						<DialogTitle>{t("inspector.changes.revertAllConfirmTitle")}</DialogTitle>
-						<DialogDescription>
-							{t("inspector.changes.revertAllConfirmDescription", {
-								count: workingChanges.length,
-							})}
-						</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button
-							type="button"
-							variant="outline"
-							onClick={() => setDiscardAllDialogOpen(false)}
-						>
-							{t("inspector.changes.cancel")}
-						</Button>
-						<Button
-							type="button"
-							variant="destructive"
-							disabled={gitBusy}
-							onClick={() => {
-								setDiscardAllDialogOpen(false);
-								void discardAllWorkingChanges(
-									data.staged.map((entry) => entry.path),
-									workingChanges.map((entry) => entry.path),
-								);
-							}}
-						>
-							{t("inspector.changes.revertAllConfirmAction")}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
-		</div>
+							<Button
+								type="button"
+								variant="destructive"
+								disabled={gitBusy}
+								onClick={() => {
+									setDiscardAllDialogOpen(false);
+									void discardAllWorkingChanges(
+										data.staged.map((entry) => entry.path),
+										workingChanges.map((entry) => entry.path),
+									);
+								}}
+							>
+								{t("inspector.changes.revertAllConfirmAction")}
+							</Button>
+						</DialogFooter>
+					</DialogContent>
+				</Dialog>
+			</div>
+		</ReviewCardsOpenProvider>
 	);
 }

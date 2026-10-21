@@ -1708,6 +1708,8 @@
         "unstaged": "Not staged"
       },
       "listView": "Show as list",
+      "expandAll": "Expand all files",
+      "collapseAll": "Collapse all files",
       "treeView": "Show as tree",
       "backToList": "Back to changed files",
       "expandDiff": "Open expanded diff",
