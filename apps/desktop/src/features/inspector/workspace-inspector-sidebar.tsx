@@ -117,6 +117,8 @@ import { buildWorkspaceRecap, workspaceRecapActionForMode } from "./workspace-re
 import { WorkspaceRecapStrip } from "./workspace-recap-strip";
 import { useWorkspacePrStatus, WORKSPACE_PR_STATUS_QUERY_KEY } from "./use-workspace-pr-status";
 import { useWorkspacePrReviewComments } from "./use-workspace-pr-review-comments";
+import { WorkspaceReviewThreadsSection } from "./workspace-review-threads-section";
+import type { ReviewThread } from "@/features/editor/review-threads.logic";
 import {
 	useWorkspacePipeline,
 	WORKSPACE_PIPELINE_QUERY_KEY,
@@ -1661,6 +1663,38 @@ export function WorkspaceInspectorSidebar({
 			reviewSource,
 		],
 	);
+	const handleOpenReviewThread = useCallback(
+		(thread: ReviewThread) => {
+			const path = thread.comments[0]?.path;
+			if (!path) return;
+			const baseBranch =
+				reviewBranchDiffQuery.data?.baseBranch ?? prStatus?.baseBranch ?? null;
+			const change = reviewBranchDiffQuery.data?.changes.find(
+				(entry) => entry.path === path,
+			);
+			onSelectPreview({
+				// Review lines live in the PR diff; without a base the file
+				// still opens on its conversation list.
+				group: baseBranch ? "committed" : "unstaged",
+				path,
+				name: path.slice(path.lastIndexOf("/") + 1),
+				status: change?.status ?? "M",
+				baseBranch,
+				reviewComments: reviewCommentsByPath.get(path) ?? [],
+				reviewSource,
+				reviewFocus: true,
+				reviewThreadId: thread.id,
+			});
+		},
+		[
+			onSelectPreview,
+			prStatus?.baseBranch,
+			reviewBranchDiffQuery.data?.baseBranch,
+			reviewBranchDiffQuery.data?.changes,
+			reviewCommentsByPath,
+			reviewSource,
+		],
+	);
 	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
 	const [codeRabbitConnectOpen, setCodeRabbitConnectOpen] = useState(false);
 	const codeRabbitEnabled = useCodeRabbitIntegrationEnabled();
@@ -3080,6 +3114,16 @@ export function WorkspaceInspectorSidebar({
 									forgeLogin={selectedForgeLogin}
 									enabled={forgeConnected && Boolean(prStatus?.number)}
 								/>
+								{prReviewCommentsEnabled ? (
+									<WorkspaceReviewThreadsSection
+										comments={prReviewCommentsQuery.data?.comments ?? []}
+										pullRequestUrl={
+											prReviewCommentsQuery.data?.url ?? prStatus?.url ?? null
+										}
+										onOpenThread={handleOpenReviewThread}
+										onAskAgent={onPrefillComposer}
+									/>
+								) : null}
 								<GitlabPipelineSection
 									workspaceRoot={workspacePath}
 									forgeLogin={selectedForgeLogin}

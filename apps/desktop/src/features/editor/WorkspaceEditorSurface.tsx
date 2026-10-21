@@ -568,7 +568,13 @@ export function WorkspaceEditorSurface({
 		setActiveReviewThreadId(null);
 		setReviewFocus(null);
 		setPreferPullRequestDiff(selection.reviewFocus === true);
-	}, [selection.path, selection.group, selection.baseBranch, selection.reviewFocus]);
+	}, [
+		selection.path,
+		selection.group,
+		selection.baseBranch,
+		selection.reviewFocus,
+		selection.reviewThreadId,
+	]);
 
 	const openReviewThread = useCallback(
 		(thread: ReviewThread) => {
@@ -592,18 +598,21 @@ export function WorkspaceEditorSurface({
 	const pullRequestDiffSettled = showingPullRequestDiff || branchDiffQuery.isFetched;
 	useEffect(() => {
 		if (!selection.reviewFocus || !pullRequestDiffSettled) return;
-		const key = `${selection.path}:${selection.group}`;
+		const key = `${selection.path}:${selection.group}:${selection.reviewThreadId ?? ""}`;
 		if (reviewFocusHandledRef.current === key) return;
-		const firstThread = listedReviewThreads[0];
-		if (!firstThread) return;
+		const target =
+			listedReviewThreads.find((thread) => thread.id === selection.reviewThreadId) ??
+			listedReviewThreads[0];
+		if (!target) return;
 		reviewFocusHandledRef.current = key;
-		openReviewThread(firstThread);
+		openReviewThread(target);
 	}, [
 		listedReviewThreads,
 		openReviewThread,
 		selection.group,
 		selection.path,
 		selection.reviewFocus,
+		selection.reviewThreadId,
 		pullRequestDiffSettled,
 	]);
 

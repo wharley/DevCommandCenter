@@ -39,6 +39,8 @@ export type WorkspaceGitPreviewSelection = {
 	reviewSource?: WorkspaceReviewSource | null;
 	/** Opened from a file's comment badge: show the PR diff and its first thread. */
 	reviewFocus?: boolean;
+	/** With `reviewFocus`: the conversation to land on instead of the first open one. */
+	reviewThreadId?: string | null;
 };
 
 export type WorkspaceReviewSource = {

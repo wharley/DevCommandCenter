@@ -4721,6 +4721,15 @@
       "showPullRequestDiff": "Ver no diff do PR",
       "showLocalDiff": "Mudanças locais",
       "localDiffHint": "Este diff mostra as mudanças locais. Os comentários apontam linhas do diff do PR."
+    },
+    "section": {
+      "title": "Conversas do PR",
+      "askAgent_one": "Pedir ao agente ({{count}})",
+      "askAgent_other": "Pedir ao agente ({{count}})",
+      "askAgentHint": "Leva as conversas marcadas ao composer, num pedido só que você pode editar",
+      "inComposer_one": "{{count}} conversa está no composer",
+      "inComposer_other": "{{count}} conversas estão no composer",
+      "pick": "Incluir “{{label}}”"
     }
   },
   "mergeConflict": {

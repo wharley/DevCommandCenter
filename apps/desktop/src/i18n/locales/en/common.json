@@ -4721,6 +4721,15 @@
       "showPullRequestDiff": "See in PR diff",
       "showLocalDiff": "Local changes",
       "localDiffHint": "This diff shows local changes. The comments point at lines of the PR diff."
+    },
+    "section": {
+      "title": "PR conversations",
+      "askAgent_one": "Ask agent ({{count}})",
+      "askAgent_other": "Ask agent ({{count}})",
+      "askAgentHint": "Puts the picked conversations in the composer as one editable request",
+      "inComposer_one": "{{count}} conversation is in the composer",
+      "inComposer_other": "{{count}} conversations are in the composer",
+      "pick": "Include “{{label}}”"
     }
   },
   "mergeConflict": {

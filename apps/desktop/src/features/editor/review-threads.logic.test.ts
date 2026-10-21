@@ -2,6 +2,7 @@ import type { WorkspacePrReviewComment } from "@dcc/contracts";
 import { describe, expect, it } from "vitest";
 import {
 	buildReviewThreads,
+	buildReviewThreadsAgentPrompt,
 	countOpenReviewThreads,
 	reviewThreadAnchorable,
 	reviewThreadRoot,
@@ -80,5 +81,31 @@ describe("review threads", () => {
 			sortReviewThreadsForList(buildReviewThreads(comments)).map((thread) => thread.id),
 		).toEqual(["early", "late", "outdated", "resolved"]);
 		expect(countOpenReviewThreads(comments)).toBe(3);
+	});
+});
+
+describe("buildReviewThreadsAgentPrompt", () => {
+	it("quotes each thread with its place, authors and reviewed code", () => {
+		const threads = buildReviewThreads([
+			comment({
+				threadId: "a",
+				id: "1",
+				line: 12,
+				htmlUrl: "https://github.com/acme/app/pull/7#discussion_r1",
+				diffHunk: "@@ -1,2 +1,2 @@\n-old\n+new",
+			}),
+			comment({ threadId: "a", id: "2", parentId: "1", body: "Agreed.", author: { login: "bob", avatarUrl: null, htmlUrl: null } }),
+			comment({ threadId: "b", id: "3", path: "src/gone.ts", outdated: true, line: null, body: "Drop this." }),
+		]);
+		const prompt = buildReviewThreadsAgentPrompt({
+			threads,
+			pullRequestUrl: "https://github.com/acme/app/pull/7",
+		});
+		expect(prompt).toContain("Address these 2 code review threads on the pull request https://github.com/acme/app/pull/7.");
+		expect(prompt).toContain("### 1. src/gone.ts (outdated: the code changed after this review)");
+		expect(prompt).toContain("### 2. src/app.ts:12");
+		expect(prompt).toContain("@alice:\nPlease rename.\n\n@bob:\nAgreed.");
+		expect(prompt).toContain("```diff\n@@ -1,2 +1,2 @@\n-old\n+new\n```");
+		expect(prompt).toContain("Do not reply to or resolve the threads on the forge");
 	});
 });
