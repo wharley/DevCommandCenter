@@ -4700,7 +4700,28 @@
     "unresolved": "Aberta",
     "outdated": "Desatualizada",
     "composer": "Composer",
-    "sendToAgent": "Enviar ao agente"
+    "sendToAgent": "Enviar ao agente",
+    "reply": "Responder",
+    "replyPlaceholder": "Responder no pull request…",
+    "resolve": "Resolver",
+    "reopen": "Reabrir",
+    "badge_one": "{{count}} conversa aberta no PR",
+    "badge_other": "{{count}} conversas abertas no PR",
+    "bar": {
+      "title_one": "{{count}} conversa do PR",
+      "title_other": "{{count}} conversas do PR",
+      "open_one": "{{count}} aberta",
+      "open_other": "{{count}} abertas",
+      "outdated_one": "{{count}} desatualizada",
+      "outdated_other": "{{count}} desatualizadas",
+      "resolved_one": "{{count}} resolvida",
+      "resolved_other": "{{count}} resolvidas",
+      "replies_one": "{{count}} resposta",
+      "replies_other": "{{count}} respostas",
+      "showPullRequestDiff": "Ver no diff do PR",
+      "showLocalDiff": "Mudanças locais",
+      "localDiffHint": "Este diff mostra as mudanças locais. Os comentários apontam linhas do diff do PR."
+    }
   },
   "mergeConflict": {
     "title": "Resolver conflitos",

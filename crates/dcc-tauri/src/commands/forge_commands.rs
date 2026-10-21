@@ -1860,6 +1860,10 @@ fn github_thread_inline_comments(raw: &Value) -> Vec<PullRequestHubInlineComment
                 .and_then(Value::as_str)
                 .map(ToString::to_string);
             let resolved = thread.get("isResolved").and_then(Value::as_bool);
+            let thread_side = thread
+                .get("diffSide")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
             let thread_path = thread
                 .get("path")
                 .and_then(Value::as_str)
@@ -1910,6 +1914,7 @@ fn github_thread_inline_comments(raw: &Value) -> Vec<PullRequestHubInlineComment
                         side: comment
                             .get("side")
                             .and_then(Value::as_str)
+                            .or(thread_side.as_deref())
                             .map(|side| side.to_ascii_lowercase()),
                         body: comment
                             .get("body")
@@ -3333,42 +3338,58 @@ pub async fn workspace_pr_review_comments(
     };
 
     let comments = match forge_context.provider {
-        ForgeCliProvider::Github => crate::commands::forge::github::list_pull_review_comments(
-            &forge_context.host,
-            &forge_context.namespace,
-            &forge_context.repo,
-            number,
-            forge_context.effective_login.as_deref(),
-        )?
-        .into_iter()
-        .map(|comment| {
-            let thread_id = comment.in_reply_to_id.unwrap_or(comment.id);
-            WorkspacePrReviewComment {
-                id: comment.id.to_string(),
-                parent_id: comment.in_reply_to_id.map(|id| id.to_string()),
-                thread_id: thread_id.to_string(),
-                path: comment.path,
-                body: comment.body.unwrap_or_default(),
-                diff_hunk: comment.diff_hunk,
-                html_url: comment.html_url,
-                side: comment.side,
-                line: comment.line,
-                start_line: comment.start_line,
-                original_line: comment.original_line,
-                original_start_line: comment.original_start_line,
-                author: comment.user.map(|user| WorkspacePrReviewCommentAuthor {
-                    login: user.login,
-                    avatar_url: user.avatar_url,
-                    html_url: user.html_url,
-                }),
-                created_at: comment.created_at,
-                updated_at: comment.updated_at,
-                resolvable: None,
-                resolved: None,
-                outdated: None,
+        // GraphQL threads carry the node id (needed to resolve), resolution and
+        // outdated state; REST is only the fallback when GraphQL is unavailable.
+        ForgeCliProvider::Github => {
+            match crate::commands::forge::github::pull_request_review_threads_json(
+                root,
+                &forge_context.host,
+                &forge_context.namespace,
+                &forge_context.repo,
+                number,
+                forge_context.effective_login.as_deref(),
+            ) {
+                Ok(raw) => github_thread_review_comments(&raw),
+                Err(_) => crate::commands::forge::github::list_pull_review_comments(
+                    &forge_context.host,
+                    &forge_context.namespace,
+                    &forge_context.repo,
+                    number,
+                    forge_context.effective_login.as_deref(),
+                )?
+                .into_iter()
+                .map(|comment| {
+                    let thread_id = comment.in_reply_to_id.unwrap_or(comment.id);
+                    // REST drops `line` once the commented code changed.
+                    let outdated = comment.line.is_none() && comment.original_line.is_some();
+                    WorkspacePrReviewComment {
+                        id: comment.id.to_string(),
+                        parent_id: comment.in_reply_to_id.map(|id| id.to_string()),
+                        thread_id: thread_id.to_string(),
+                        path: comment.path,
+                        body: comment.body.unwrap_or_default(),
+                        diff_hunk: comment.diff_hunk,
+                        html_url: comment.html_url,
+                        side: comment.side,
+                        line: comment.line,
+                        start_line: comment.start_line,
+                        original_line: comment.original_line,
+                        original_start_line: comment.original_start_line,
+                        author: comment.user.map(|user| WorkspacePrReviewCommentAuthor {
+                            login: user.login,
+                            avatar_url: user.avatar_url,
+                            html_url: user.html_url,
+                        }),
+                        created_at: comment.created_at,
+                        updated_at: comment.updated_at,
+                        resolvable: None,
+                        resolved: None,
+                        outdated: Some(outdated),
+                    }
+                })
+                .collect(),
             }
-        })
-        .collect(),
+        }
         ForgeCliProvider::Gitlab => {
             let discussions = crate::commands::forge::gitlab::list_merge_request_discussions(
                 root,
@@ -3888,6 +3909,82 @@ fn map_gitlab_pipeline(
     }
 }
 
+fn github_thread_review_comments(raw: &Value) -> Vec<WorkspacePrReviewComment> {
+    fn text(value: &Value, key: &str) -> Option<String> {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+    }
+    fn number(value: &Value, key: &str) -> Option<i64> {
+        value.get(key).and_then(Value::as_i64)
+    }
+
+    let pages = raw
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| std::slice::from_ref(raw));
+    let mut comments = Vec::new();
+    for thread in pages.iter().flat_map(|page| {
+        page.pointer("/data/repository/pullRequest/reviewThreads/nodes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+    }) {
+        let Some(thread_id) = text(thread, "id") else {
+            continue;
+        };
+        let resolved = thread.get("isResolved").and_then(Value::as_bool);
+        let outdated = thread.get("isOutdated").and_then(Value::as_bool);
+        let side = text(thread, "diffSide");
+        let thread_path = text(thread, "path");
+        for comment in thread
+            .pointer("/comments/nodes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(id) = number(comment, "databaseId") else {
+                continue;
+            };
+            let Some(path) = text(comment, "path").or_else(|| thread_path.clone()) else {
+                continue;
+            };
+            comments.push(WorkspacePrReviewComment {
+                id: id.to_string(),
+                parent_id: comment
+                    .pointer("/replyTo/databaseId")
+                    .and_then(Value::as_i64)
+                    .map(|parent| parent.to_string()),
+                thread_id: thread_id.clone(),
+                path,
+                body: text(comment, "body").unwrap_or_default(),
+                diff_hunk: text(comment, "diffHunk"),
+                html_url: text(comment, "url"),
+                side: side.clone(),
+                // Anchor every comment where its thread sits today.
+                line: number(thread, "line"),
+                start_line: number(thread, "startLine"),
+                original_line: number(thread, "originalLine"),
+                original_start_line: number(thread, "originalStartLine"),
+                author: comment
+                    .get("author")
+                    .map(|author| WorkspacePrReviewCommentAuthor {
+                        login: text(author, "login"),
+                        avatar_url: text(author, "avatarUrl"),
+                        html_url: text(author, "url"),
+                    }),
+                created_at: text(comment, "createdAt"),
+                updated_at: text(comment, "updatedAt"),
+                resolvable: Some(true),
+                resolved,
+                outdated,
+            });
+        }
+    }
+    comments
+}
+
 fn map_gitlab_review_comments(
     discussions: Vec<crate::commands::forge::gitlab::GitlabDiscussion>,
     request_url: Option<&str>,
@@ -4005,9 +4102,9 @@ fn map_gitlab_review_comments(
 mod tests {
     use super::{
         github_checks, github_comment, github_hub_file, github_merge_capabilities,
-        github_thread_inline_comments, gitlab_hub_file, is_provisional_task_title,
-        map_github_review_state, map_gitlab_review_comments, map_gitlab_review_state,
-        preferred_change_request_title, PullRequestHubMergeMethod,
+        github_thread_inline_comments, github_thread_review_comments, gitlab_hub_file,
+        is_provisional_task_title, map_github_review_state, map_gitlab_review_comments,
+        map_gitlab_review_state, preferred_change_request_title, PullRequestHubMergeMethod,
     };
     use crate::commands::forge::gitlab::{
         GitlabApproval, GitlabApprovals, GitlabDiscussion, GitlabDiscussionAuthor,
@@ -4103,6 +4200,66 @@ mod tests {
         assert_eq!(comments[0].thread_id.as_deref(), Some("PRRT_thread"));
         assert_eq!(comments[0].side.as_deref(), Some("right"));
         assert_eq!(comments[0].resolved, Some(true));
+    }
+
+    #[test]
+    fn maps_github_review_threads_for_the_task_diff() {
+        let comments = github_thread_review_comments(&json!([{
+            "data": { "repository": { "pullRequest": { "reviewThreads": { "nodes": [{
+                "id": "PRRT_open",
+                "isResolved": false,
+                "isOutdated": false,
+                "path": "src/review.ts",
+                "line": 14,
+                "startLine": 12,
+                "originalLine": 10,
+                "originalStartLine": null,
+                "diffSide": "RIGHT",
+                "comments": { "nodes": [
+                    {
+                        "databaseId": 101,
+                        "body": "Rename this.",
+                        "createdAt": "2026-10-01T10:00:00Z",
+                        "url": "https://github.com/acme/app/pull/12#discussion_r101",
+                        "diffHunk": "@@ -1,3 +1,4 @@",
+                        "replyTo": null,
+                        "author": { "login": "alice", "avatarUrl": null, "url": null },
+                        "path": "src/review.ts"
+                    },
+                    {
+                        "databaseId": 102,
+                        "body": "Done.",
+                        "replyTo": { "databaseId": 101 },
+                        "author": { "login": "bob" },
+                        "path": "src/review.ts"
+                    }
+                ] }
+            }, {
+                "id": "PRRT_old",
+                "isResolved": true,
+                "isOutdated": true,
+                "path": "src/old.ts",
+                "line": null,
+                "originalLine": 3,
+                "diffSide": "LEFT",
+                "comments": { "nodes": [{ "databaseId": 201, "body": "Gone." }] }
+            }] } } } }
+        }]));
+
+        assert_eq!(comments.len(), 3);
+        assert_eq!(comments[0].thread_id, "PRRT_open");
+        assert_eq!(comments[0].parent_id, None);
+        assert_eq!(comments[0].line, Some(14));
+        assert_eq!(comments[0].start_line, Some(12));
+        assert_eq!(comments[0].side.as_deref(), Some("RIGHT"));
+        assert_eq!(comments[0].resolvable, Some(true));
+        assert_eq!(comments[0].resolved, Some(false));
+        assert_eq!(comments[1].parent_id.as_deref(), Some("101"));
+        assert_eq!(comments[1].line, Some(14));
+        assert_eq!(comments[2].path, "src/old.ts");
+        assert_eq!(comments[2].line, None);
+        assert_eq!(comments[2].outdated, Some(true));
+        assert_eq!(comments[2].resolved, Some(true));
     }
 
     #[test]

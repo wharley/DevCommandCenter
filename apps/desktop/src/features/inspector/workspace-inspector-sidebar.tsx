@@ -1605,17 +1605,30 @@ export function WorkspaceInspectorSidebar({
 		selectedForgeLogin,
 	);
 	const prStatus = prStatusQuery.data ?? null;
+	const prReviewCommentsEnabled =
+		(workspaceForgeContext?.provider === "github" ||
+			workspaceForgeContext?.provider === "gitlab") &&
+		Boolean(prStatus?.number);
 	const prReviewCommentsQuery = useWorkspacePrReviewComments(
 		workspacePath,
 		gitBranch,
 		selectedForgeLogin,
-		(workspaceForgeContext?.provider === "github" ||
-			workspaceForgeContext?.provider === "gitlab") &&
-			Boolean(prStatus?.number),
+		prReviewCommentsEnabled,
 	);
 	const reviewCommentsByPath = useMemo(
 		() => groupReviewCommentsByPath(prReviewCommentsQuery.data?.comments ?? []),
 		[prReviewCommentsQuery.data?.comments],
+	);
+	const reviewSource = useMemo(
+		() =>
+			prReviewCommentsEnabled && workspacePath
+				? {
+						workspaceRoot: workspacePath,
+						branch: gitBranch ?? null,
+						forgeLogin: selectedForgeLogin ?? null,
+					}
+				: null,
+		[gitBranch, prReviewCommentsEnabled, selectedForgeLogin, workspacePath],
 	);
 	const reviewBranchDiffQuery = useWorkspaceGitBranchDiff(workspacePath);
 	const handleOpenCodeFileFromTree = useCallback(
@@ -1633,6 +1646,7 @@ export function WorkspaceInspectorSidebar({
 					status: change?.status ?? "M",
 					baseBranch,
 					reviewComments: comments,
+					reviewSource,
 				});
 				return;
 			}
@@ -1644,6 +1658,7 @@ export function WorkspaceInspectorSidebar({
 			reviewBranchDiffQuery.data?.baseBranch,
 			reviewBranchDiffQuery.data?.changes,
 			reviewCommentsByPath,
+			reviewSource,
 		],
 	);
 	const [forgeConnectOpen, setForgeConnectOpen] = useState(false);
@@ -3233,6 +3248,7 @@ export function WorkspaceInspectorSidebar({
 									onSelectPreview={onSelectPreview}
 									onPrefillComposer={onPrefillComposer}
 									reviewCommentsByPath={reviewCommentsByPath}
+									reviewSource={reviewSource}
 									isGitActionInProgress={isGitActionInProgress || isSyncingBase}
 									targetSessionId={
 										activeDelegationReview?.delegation.childSessionId ??

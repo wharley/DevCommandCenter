@@ -1,4 +1,5 @@
 import type { WorkspacePrReviewComment } from "@dcc/contracts";
+import { countOpenReviewThreads } from "@/features/editor/review-threads.logic";
 import { useQuery } from "@tanstack/react-query";
 import { getMaterialFileIcon, getMaterialFolderIcon } from "file-extension-icon-js";
 import { AtSign, ChevronRight, Copy, Loader2, MessageSquare, Search } from "lucide-react";
@@ -65,12 +66,12 @@ function countReviewComments(
 	row: CodeTreeRow,
 	commentsByPath: Map<string, WorkspacePrReviewComment[]>,
 ): number {
-	if (row.kind === "file") return commentsByPath.get(row.path)?.length ?? 0;
+	if (row.kind === "file") return countOpenReviewThreads(commentsByPath.get(row.path) ?? []);
 	if (commentsByPath.size === 0) return 0;
 	const prefix = `${row.path}/`;
 	let count = 0;
 	for (const [path, comments] of commentsByPath) {
-		if (path.startsWith(prefix)) count += comments.length;
+		if (path.startsWith(prefix)) count += countOpenReviewThreads(comments);
 	}
 	return count;
 }

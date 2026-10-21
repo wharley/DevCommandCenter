@@ -35,6 +35,16 @@ export type WorkspaceGitPreviewSelection = {
 	focusLine?: number | null;
 	machineAnnotations?: WorkspaceGitPreviewMachineAnnotation[];
 	reviewComments?: WorkspacePrReviewComment[];
+	/** Where to keep the review threads live (same query as the file badges). */
+	reviewSource?: WorkspaceReviewSource | null;
+	/** Opened from a file's comment badge: show the PR diff and its first thread. */
+	reviewFocus?: boolean;
+};
+
+export type WorkspaceReviewSource = {
+	workspaceRoot: string;
+	branch: string | null;
+	forgeLogin: string | null;
 };
 
 type WorkspaceGitFilePreviewProps = {

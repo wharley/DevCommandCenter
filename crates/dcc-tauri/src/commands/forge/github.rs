@@ -489,7 +489,9 @@ pub(crate) fn pull_request_review_threads_json(
     pull_number: u32,
     login: Option<&str>,
 ) -> Result<Value, String> {
-    const QUERY: &str = r#"query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved path line originalLine comments(first:100){nodes{databaseId body createdAt url author{login avatarUrl url} path line originalLine side}}}pageInfo{hasNextPage endCursor}}}}}"#;
+    // `side` lives on the thread (`diffSide`); asking for it on a comment fails
+    // the whole query.
+    const QUERY: &str = r#"query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved isOutdated path line originalLine startLine originalStartLine diffSide comments(first:100){nodes{databaseId body createdAt updatedAt url diffHunk replyTo{databaseId} author{login avatarUrl url} path line originalLine}}}pageInfo{hasNextPage endCursor}}}}}"#;
     run_hub_gh_json(
         root,
         host,

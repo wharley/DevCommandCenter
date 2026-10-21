@@ -72,7 +72,9 @@ import { useWorkspaceGitBranchDiff, WORKSPACE_GIT_BRANCH_DIFF_QUERY_KEY } from "
 import {
 	WorkspaceGitFilePreview,
 	type WorkspaceGitPreviewSelection,
+	type WorkspaceReviewSource,
 } from "./workspace-git-file-preview";
+import { countOpenReviewThreads } from "@/features/editor/review-threads.logic";
 import {
 	availableInspectorReviewScopes,
 	changeGroupBelongsToScope,
@@ -196,6 +198,44 @@ function collectFolderPaths(node: TreeNode): string[] {
 	return paths;
 }
 
+/** Open PR conversations on a file; clicking lands on them in the PR diff. */
+function ReviewCommentBadge({
+	count,
+	onOpen,
+}: {
+	count: number;
+	onOpen?: () => void;
+}) {
+	const { t } = useTranslation("common");
+	const label = t("reviewThread.badge", { count });
+	const className =
+		"inline-flex h-4 shrink-0 items-center gap-0.5 rounded-full bg-primary/10 px-1 text-[9.5px] font-semibold tabular-nums text-primary";
+	if (!onOpen) {
+		return (
+			<span className={className} title={label}>
+				<MessageSquare className="size-2.5" strokeWidth={2} />
+				{count}
+			</span>
+		);
+	}
+	return (
+		<button
+			type="button"
+			className={cn(className, "hover:bg-primary/20")}
+			title={label}
+			aria-label={label}
+			onClick={(event) => {
+				event.stopPropagation();
+				onOpen();
+			}}
+			onKeyDown={(event) => event.stopPropagation()}
+		>
+			<MessageSquare className="size-2.5" strokeWidth={2} />
+			{count}
+		</button>
+	);
+}
+
 function ChangeRow({
 	entry,
 	group,
@@ -272,6 +312,24 @@ function ChangeRow({
 			>
 				{folder}
 			</span>
+			{reviewCommentCount > 0 ? (
+				<ReviewCommentBadge
+					count={reviewCommentCount}
+					onOpen={
+						onSelect
+							? () =>
+									onSelect({
+										group,
+										path: entry.path,
+										name: entry.name,
+										status: entry.status,
+										baseBranch: null,
+										reviewFocus: true,
+									})
+							: undefined
+					}
+				/>
+			) : null}
 			<span
 				className={cn(
 					"flex shrink-0 items-center gap-1 tabular-nums",
@@ -286,15 +344,6 @@ function ChangeRow({
 				{entry.deletions > 0 ? (
 					<span className="text-[10px] text-destructive">
 						−<NumberTicker value={entry.deletions} className="text-[10px]" direction="down" />
-					</span>
-				) : null}
-				{reviewCommentCount > 0 ? (
-					<span
-						className="inline-flex h-4 items-center gap-0.5 rounded-full bg-primary/10 px-1 text-[9.5px] font-semibold text-primary"
-						title={`${reviewCommentCount} review comment${reviewCommentCount === 1 ? "" : "s"}`}
-					>
-						<MessageSquare className="size-2.5" strokeWidth={2} />
-						{reviewCommentCount}
 					</span>
 				) : null}
 				<span
@@ -681,10 +730,14 @@ function ReviewChangeCard({
 						<span className="text-destructive">−{entry.deletions}</span>
 					) : null}
 					{reviewCommentCount > 0 ? (
-						<span className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">
-							<MessageSquare className="size-2.5" />
-							{reviewCommentCount}
-						</span>
+						<ReviewCommentBadge
+							count={reviewCommentCount}
+							onOpen={
+								onExpand
+									? () => onExpand({ ...selection, reviewFocus: true })
+									: undefined
+							}
+						/>
 					) : null}
 					<span
 						className={cn(
@@ -1035,6 +1088,7 @@ type InspectorChangesSectionProps = {
 	onSelectPreview: (selection: WorkspaceGitPreviewSelection | null) => void;
 	onPrefillComposer?: (text: string) => boolean;
 	reviewCommentsByPath?: Map<string, WorkspacePrReviewComment[]>;
+	reviewSource?: WorkspaceReviewSource | null;
 	targetSessionId?: string | null;
 	onOpenExpandedPreview?: (selection?: WorkspaceGitPreviewSelection) => void;
 	/** Show the selected diff in place of the list (off: it opens on the stage). */
@@ -1060,6 +1114,7 @@ export function InspectorChangesSection({
 	onSelectPreview,
 	onPrefillComposer,
 	reviewCommentsByPath = EMPTY_REVIEW_COMMENTS_BY_PATH,
+	reviewSource = null,
 	targetSessionId = null,
 	onOpenExpandedPreview,
 	isGitActionInProgress = false,
@@ -1128,8 +1183,9 @@ export function InspectorChangesSection({
 	const reviewCommentCounts = useMemo(() => {
 		const counts = new Map<string, number>();
 		for (const [path, comments] of reviewCommentsByPath) {
-			if (comments.length > 0) {
-				counts.set(path, comments.length);
+			const open = countOpenReviewThreads(comments);
+			if (open > 0) {
+				counts.set(path, open);
 			}
 		}
 		return counts;
@@ -1140,8 +1196,9 @@ export function InspectorChangesSection({
 			workspaceRootOverride: selection.workspaceRootOverride ?? root,
 			targetSessionId: selection.targetSessionId ?? targetSessionId,
 			reviewComments: reviewCommentsByPath.get(selection.path) ?? [],
+			reviewSource: selection.reviewSource ?? reviewSource,
 		}),
-		[reviewCommentsByPath, root, targetSessionId],
+		[reviewCommentsByPath, reviewSource, root, targetSessionId],
 	);
 	const handleSelectPreview = useCallback(
 		(selection: WorkspaceGitPreviewSelection | null) => {

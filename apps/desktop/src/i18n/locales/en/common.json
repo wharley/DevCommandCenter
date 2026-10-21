@@ -4700,7 +4700,28 @@
     "unresolved": "Open",
     "outdated": "Outdated",
     "composer": "Composer",
-    "sendToAgent": "Send to agent"
+    "sendToAgent": "Send to agent",
+    "reply": "Reply",
+    "replyPlaceholder": "Reply on the pull request…",
+    "resolve": "Resolve",
+    "reopen": "Reopen",
+    "badge_one": "{{count}} open PR conversation",
+    "badge_other": "{{count}} open PR conversations",
+    "bar": {
+      "title_one": "{{count}} PR conversation",
+      "title_other": "{{count}} PR conversations",
+      "open_one": "{{count}} open",
+      "open_other": "{{count}} open",
+      "outdated_one": "{{count}} outdated",
+      "outdated_other": "{{count}} outdated",
+      "resolved_one": "{{count}} resolved",
+      "resolved_other": "{{count}} resolved",
+      "replies_one": "{{count}} reply",
+      "replies_other": "{{count}} replies",
+      "showPullRequestDiff": "See in PR diff",
+      "showLocalDiff": "Local changes",
+      "localDiffHint": "This diff shows local changes. The comments point at lines of the PR diff."
+    }
   },
   "mergeConflict": {
     "title": "Resolve conflicts",

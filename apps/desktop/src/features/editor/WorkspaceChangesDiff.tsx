@@ -30,6 +30,10 @@ export type WorkspaceChangesDiffProps = {
 	modifiedText: string;
 	inline: boolean;
 	focusLine?: number | null;
+	/** Which side `focusLine` counts on; the new code by default. */
+	focusSide?: "original" | "modified";
+	/** Bump to scroll to the same line again. */
+	focusRequestId?: number;
 	machineAnnotations?: DiffMachineAnnotation[];
 	onAnnotate?: (payload: DiffAnnotationPayload) => void;
 	annotateLabel?: string;
@@ -70,10 +74,11 @@ export function AnnotationCallout({
 	onClick?: WorkspaceChangesDiffProps["onMachineAnnotationClick"];
 }) {
 	const isReview = annotation.source === "forge-review";
+	// Review threads lead with who said what, so the diff reads like the PR.
 	const content = (
 		<>
 			<MessageSquare className="size-3 shrink-0" aria-hidden />
-			<span className="truncate">{isReview ? reviewCommentLabel : annotation.title}</span>
+			<span className="truncate">{annotation.title}</span>
 		</>
 	);
 	const className =
@@ -86,6 +91,7 @@ export function AnnotationCallout({
 				type="button"
 				className={`${className} cursor-pointer hover:bg-muted`}
 				title={annotation.title}
+				aria-label={isReview ? `${reviewCommentLabel}: ${annotation.title}` : annotation.title}
 				onClick={(event) =>
 					onClick({
 						annotation,
@@ -111,6 +117,8 @@ export default function WorkspaceChangesDiff({
 	modifiedText,
 	inline,
 	focusLine,
+	focusSide = "modified",
+	focusRequestId,
 	machineAnnotations = [],
 	onAnnotate,
 	annotateLabel = "Annotate selection",
@@ -174,12 +182,12 @@ export default function WorkspaceChangesDiff({
 				type: "line",
 				id: ITEM_ID,
 				lineNumber: focusLine,
-				side: "additions",
+				side: focusSide === "original" ? "deletions" : "additions",
 				align: "center",
 			});
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [focusLine, modifiedHash, originalHash]);
+	}, [focusLine, focusRequestId, focusSide, modifiedHash, originalHash]);
 
 	useEffect(
 		() => () => {
