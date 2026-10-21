@@ -4998,7 +4998,9 @@
     "closeAll": "Close editor",
     "chat": "Chat",
     "chatWorking": "The agent is working",
-    "chatUnread": "The agent replied"
+    "chatUnread": "The agent replied",
+    "scrollLeft": "Show tabs on the left",
+    "scrollRight": "Show tabs on the right"
   },
   "quickOpen": {
     "title": "Quick open",

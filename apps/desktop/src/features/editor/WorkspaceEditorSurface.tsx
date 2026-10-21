@@ -24,6 +24,7 @@ import {
 } from "@/features/inspector/use-workspace-pr-review-comments";
 import { openExternal } from "@/lib/shell-api";
 import { pullRequestHubReplyThread, pullRequestHubResolveThread } from "@/lib/workspace-api";
+import { ScrollableTabStrip } from "./scrollable-tab-strip";
 import { cn } from "@/lib/utils";
 import type { WorkspaceGitPreviewSelection } from "@/features/inspector/workspace-git-file-preview";
 import type { WorkspacePrReviewComment } from "@dcc/contracts";
@@ -830,10 +831,7 @@ export function WorkspaceEditorSurface({
 		>
 			{stage ? (
 				<div className="flex h-9 items-center border-b border-border">
-					<div
-						role="tablist"
-						className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2"
-					>
+					<ScrollableTabStrip revealKey={chatActive ? "chat" : "diff"}>
 						<StageChatTab stage={stage} />
 						<div
 							role="tab"
@@ -861,7 +859,7 @@ export function WorkspaceEditorSurface({
 								<X className="size-3" strokeWidth={2} />
 							</button>
 						</div>
-					</div>
+					</ScrollableTabStrip>
 				</div>
 			) : (
 			<div

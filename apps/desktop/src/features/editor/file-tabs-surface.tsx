@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { shouldIgnoreGlobalShortcutTarget } from "@/features/shortcuts/shortcut-utils";
+import { ScrollableTabStrip } from "./scrollable-tab-strip";
 import { cn } from "@/lib/utils";
 import type { DiffAnnotationPayload } from "./diff-types";
 import { useFileIndentation } from "./use-file-indentation";
@@ -519,10 +520,7 @@ export function FileTabsSurface({
 			className="flex h-full min-h-0 flex-col overflow-hidden bg-background text-foreground"
 		>
 			<div className="flex h-9 items-center border-b border-border">
-				<div
-					role="tablist"
-					className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2"
-				>
+				<ScrollableTabStrip revealKey={chatActive ? "\u0000chat" : activePath}>
 					{stage ? (
 						<StageChatTab stage={stage} />
 					) : null}
@@ -541,7 +539,7 @@ export function FileTabsSurface({
 							onClose={() => closeTab(file.path)}
 						/>
 					))}
-				</div>
+				</ScrollableTabStrip>
 				<div className="flex shrink-0 items-center gap-1 pr-2">
 					<Button
 						type="button"

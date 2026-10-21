@@ -2,6 +2,7 @@ import { Activity, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { StageChatTab, type StageChat } from "@/features/editor/stage-chat-tab";
+import { ScrollableTabStrip } from "@/features/editor/scrollable-tab-strip";
 import { cn } from "@/lib/utils";
 
 /** The session's activity, context and spec as a tab on the stage. */
@@ -18,10 +19,7 @@ export function SessionStageSurface({
 	return (
 		<section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background text-foreground">
 			<div className="flex h-9 shrink-0 items-center border-b border-border">
-				<div
-					role="tablist"
-					className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2"
-				>
+				<ScrollableTabStrip revealKey={stage.chatActive ? "chat" : "session"}>
 					<StageChatTab stage={stage} />
 					<div
 						role="tab"
@@ -48,7 +46,7 @@ export function SessionStageSurface({
 							<X className="size-3" strokeWidth={2} />
 						</button>
 					</div>
-				</div>
+				</ScrollableTabStrip>
 			</div>
 			<div
 				className={cn(
