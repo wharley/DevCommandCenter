@@ -194,6 +194,34 @@ describe("deriveProviderIdFromSessions", () => {
 		expect(deriveProviderIdFromSessions([latest, running])).toBe("claude_code");
 	});
 
+	it("keeps the task's own provider when a delegated child is newer", () => {
+		const review = makeSummary({
+			session: { id: "session-review", providerId: "claude_code" },
+			thread: { id: "thread-review", session_id: "session-review" },
+		});
+		const own = makeSummary({ session: { id: "session-own", providerId: "codex" } });
+
+		expect(deriveProviderIdFromSessions([review, own], new Set(["session-review"]))).toBe("codex");
+	});
+
+	it("does not let a running child stand for the task", () => {
+		const child = makeSummary({
+			session: { id: "session-child", providerId: "claude_code" },
+			thread: { id: "thread-child", session_id: "session-child" },
+			projection: { sessionId: "session-child", activeTurnId: "turn-1" },
+			lastTurnState: "running",
+		});
+		const own = makeSummary({ session: { id: "session-own", providerId: "codex" } });
+
+		expect(deriveProviderIdFromSessions([child, own], new Set(["session-child"]))).toBe("codex");
+	});
+
+	it("falls back to the children when the task has nothing else", () => {
+		const child = makeSummary({ session: { id: "session-child", providerId: "claude_code" } });
+
+		expect(deriveProviderIdFromSessions([child], new Set(["session-child"]))).toBe("claude_code");
+	});
+
 	it("falls back to the latest session provider", () => {
 		expect(deriveProviderIdFromSessions([makeSummary({ session: { providerId: "codex" } })])).toBe(
 			"codex",

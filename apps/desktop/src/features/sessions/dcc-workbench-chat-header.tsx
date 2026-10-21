@@ -19,6 +19,7 @@ import { canResumeSession } from "./session-chrome-state";
 import { isSessionArchived, visibleSessions } from "./session-close";
 import { sessionStateLabel } from "@/i18n/session-state-label";
 import { cn } from "@/lib/utils";
+import { ProviderIcon } from "@/features/providers/provider-icons";
 import type { TerminalScopeTarget } from "@/features/terminal/terminal-scope";
 import { useActiveTerminalCount, useGlobalActiveTerminalCount } from "@/features/terminal/use-active-terminal-count";
 import { getToggleTerminalShortcutKeys } from "@/features/shortcuts/shortcut-utils";
@@ -180,6 +181,11 @@ export const DccWorkbenchChatHeader = memo(function DccWorkbenchChatHeader({
 							<DropdownMenuItem key={session.session.id} onSelect={() => onSelectSession(session.session.id)} className={cn("group/session gap-2", depth > 0 && "pl-5")}>
 								{depth > 0 ? <span aria-hidden className="-ml-2 text-[10px] text-muted-foreground/60">↳</span> : null}
 								<span className={cn("size-1.5 shrink-0 rounded-full", session.session.id === selectedSessionId ? "bg-emerald-500" : "bg-muted-foreground/45")} />
+								{session.session.providerId ? (
+									<span data-provider={session.session.providerId} title={[session.session.providerId, session.session.model].filter(Boolean).join(" · ")} className="flex shrink-0 text-muted-foreground">
+										<ProviderIcon provider={session.session.providerId} className="size-3.5" />
+									</span>
+								) : null}
 								<SessionAgentBadge sessionId={session.session.id} size={16} />
 								<span className="min-w-0 flex-1 truncate">{session.thread.title}</span>
 								<span className="text-[10px] text-muted-foreground">{sessionStateLabel(session.projection.state, t)}</span>

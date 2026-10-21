@@ -1,6 +1,6 @@
 import type { Delegation } from "@dcc/contracts";
 import { describe, expect, it } from "vitest";
-import { childTasksByWorkspace, withLiveTaskState } from "./sidebar-child-tasks.logic";
+import { childTasksByWorkspace, delegatedSessionIds, withLiveTaskState } from "./sidebar-child-tasks.logic";
 
 function delegation(overrides: Partial<Delegation>): Delegation {
 	return {
@@ -36,10 +36,10 @@ describe("childTasksByWorkspace", () => {
 			delegation({ id: "t3", title: "Outro", workspaceId: "w2" }),
 		]);
 		expect(tasks.get("w1")).toEqual([
-			{ id: "t0", title: "Fase 0", state: "review", sessionId: "c0" },
-			{ id: "t1", title: "Fase 1", state: "idle", sessionId: "child" },
+			{ id: "t0", title: "Fase 0", state: "review", sessionId: "c0", providerId: "codex" },
+			{ id: "t1", title: "Fase 1", state: "idle", sessionId: "child", providerId: "codex" },
 			// A proposal opens the parent, where its card waits.
-			{ id: "t2", title: "Fase 2", state: "proposed", sessionId: "parent" },
+			{ id: "t2", title: "Fase 2", state: "proposed", sessionId: "parent", providerId: "codex" },
 		]);
 		expect(tasks.get("w2")?.map((task) => task.id)).toEqual(["t3"]);
 	});
@@ -71,5 +71,16 @@ describe("childTasksByWorkspace", () => {
 			"proposed",
 		]);
 		expect(withLiveTaskState(tasks, null)).toEqual(tasks);
+	});
+});
+
+describe("delegatedSessionIds", () => {
+	it("collects every child conversation, plain delegations included", () => {
+		const ids = delegatedSessionIds([
+			delegation({ id: "review", kind: "delegation", status: "completed", childSessionId: "r1" }),
+			delegation({ id: "task", childSessionId: "t1" }),
+			delegation({ id: "proposal", status: "draft", childSessionId: null }),
+		]);
+		expect([...ids].sort()).toEqual(["r1", "t1"]);
 	});
 });

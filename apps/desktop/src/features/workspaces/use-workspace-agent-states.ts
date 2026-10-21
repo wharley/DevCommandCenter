@@ -357,11 +357,20 @@ export function deriveAgentStateFromSessions(
 	return deriveAgentActivityFromSessions(summaries)?.state ?? null;
 }
 
-/** The running provider wins; otherwise use the most recent workspace session. */
+/**
+ * The provider of the task's own conversation: a child the agent delegated to
+ * (often another provider) never stands for the task. Among the task's own
+ * conversations the running one wins, then the most recent.
+ */
 export function deriveProviderIdFromSessions(
 	summaries: WorkspaceSessionSummary[],
+	delegatedSessionIds?: ReadonlySet<string>,
 ): string | null {
-	const summary = summaries.find(isRunningSession) ?? summaries[0];
+	const own = delegatedSessionIds?.size
+		? summaries.filter((summary) => !delegatedSessionIds.has(summary.session.id))
+		: summaries;
+	const candidates = own.length > 0 ? own : summaries;
+	const summary = candidates.find(isRunningSession) ?? candidates[0];
 	const providerId = summary?.session.providerId?.trim();
 	return providerId || null;
 }
@@ -407,7 +416,7 @@ export function useWorkspaceAgentActivities(
 
 export function useWorkspaceProviderIds(
 	workspaces: Pick<WorkspaceSummary, "id">[],
-	input?: { enabled?: boolean; scope?: string },
+	input?: { enabled?: boolean; scope?: string; delegatedSessionIds?: ReadonlySet<string> },
 ): Record<string, string> {
 	const isEnabled = input?.enabled ?? true;
 	const scope = input?.scope ?? "local";
@@ -423,7 +432,10 @@ export function useWorkspaceProviderIds(
 
 	return trackedWorkspaces.reduce<Record<string, string>>(
 		(providerIds, workspace, index) => {
-			const providerId = deriveProviderIdFromSessions(sessionQueries[index]?.data ?? []);
+			const providerId = deriveProviderIdFromSessions(
+				sessionQueries[index]?.data ?? [],
+				input?.delegatedSessionIds,
+			);
 			if (providerId) {
 				providerIds[workspace.id] = providerId;
 			}

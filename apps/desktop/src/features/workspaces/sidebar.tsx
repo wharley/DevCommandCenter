@@ -135,7 +135,7 @@ import { repositoryDisplayName } from "./repository-display-name";
 import { SidebarChildTaskRow } from "./sidebar-child-task-row";
 import { SidebarProjectMenu } from "./sidebar-project-menu";
 import { withLiveTaskState, type ChildTaskEntry } from "./sidebar-child-tasks.logic";
-import { useChildTasksByWorkspace } from "./use-child-tasks";
+import { useChildTasksByWorkspace, useDelegatedSessionIds } from "./use-child-tasks";
 import {
 	formatDiskBytes,
 	workspaceDiskUsageIds,
@@ -486,9 +486,11 @@ export const WorkspacesSidebar = memo(function WorkspacesSidebar({
 		enabled: showAgentStates,
 		scope: sessionQueryScope,
 	});
+	const delegatedSessionIds = useDelegatedSessionIds(showAgentStates && sessionQueryScope === "local");
 	const workspaceProviderIds = useWorkspaceProviderIds(workspaces, {
 		enabled: showAgentStates,
 		scope: sessionQueryScope,
+		delegatedSessionIds,
 	});
 	// The header counts only agents at work; one waiting on the person is
 	// already under "Precisa de você" and is not running.

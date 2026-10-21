@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
+import { ProviderIcon } from "@/features/providers/provider-icons";
 import { cn } from "@/lib/utils";
 import type { ChildTaskEntry } from "./sidebar-child-tasks.logic";
 
@@ -57,6 +58,11 @@ export const SidebarChildTaskRow = memo(function SidebarChildTaskRow({
 					task.state === "proposed" && "border border-amber-500 bg-transparent",
 				)}
 			/>
+			{task.providerId ? (
+				<span data-provider={task.providerId} className="flex shrink-0 opacity-75">
+					<ProviderIcon provider={task.providerId} className="size-[11px]" />
+				</span>
+			) : null}
 			{/* Sized on spans: a global font reset on button would undo it here. */}
 			<span className="min-w-0 flex-1 truncate text-[12px] leading-5">{task.title}</span>
 			{waitsOnPerson ? (

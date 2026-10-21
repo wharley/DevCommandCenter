@@ -13,6 +13,8 @@ export type ChildTaskEntry = {
 	state: ChildTaskState;
 	/** The conversation a click opens: the task's own, or the parent's while it is only a proposal. */
 	sessionId: string;
+	/** The provider the task runs on, which can differ from its parent's. */
+	providerId: string | null;
 };
 
 const STATE_BY_STATUS: Partial<Record<Delegation["status"], ChildTaskState>> = {
@@ -38,12 +40,23 @@ export function childTasksByWorkspace(delegations: readonly Delegation[]): Map<s
 			title: delegation.title?.trim() || delegation.instruction?.trim().split("\n")[0] || delegation.id,
 			state,
 			sessionId: delegation.childSessionId ?? delegation.parentSessionId,
+			providerId: delegation.targetProviderId?.trim() || null,
 		};
 		const list = byWorkspace.get(delegation.workspaceId);
 		if (list) list.push(entry);
 		else byWorkspace.set(delegation.workspaceId, [entry]);
 	}
 	return byWorkspace;
+}
+
+/** Every conversation an agent delegated to, plain delegations and tasks alike. */
+export function delegatedSessionIds(delegations: readonly Delegation[]): ReadonlySet<string> {
+	const ids = new Set<string>();
+	for (const delegation of delegations) {
+		const child = delegation.childSessionId;
+		if (child && child !== delegation.parentSessionId) ids.add(child);
+	}
+	return ids;
 }
 
 /** What each open task is doing right now, from its conversation's live turn. */
