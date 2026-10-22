@@ -1508,3 +1508,130 @@ mod tests {
             .is_some_and(|sha| !sha.is_empty()));
     }
 }
+
+fn run_hub_gh_json_input(
+    root: &str,
+    host: &str,
+    login: Option<&str>,
+    args: &[&str],
+    payload: &Value,
+) -> Result<Value, String> {
+    let auth = resolve_auth_context(host, login)?;
+    let gh = resolve_cli_binary("gh")?;
+    let mut command = Command::new(gh);
+    command
+        .current_dir(root)
+        .args(args)
+        .args(["--input", "-"])
+        .env("GH_HOST", host)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let body = serde_json::to_vec(payload)
+        .map_err(|error| format!("Failed to encode GitHub request: {error}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "Failed to open GitHub request input.".to_string())?
+        .write_all(&body)
+        .map_err(|error| error.to_string())?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let detail = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            "GitHub CLI request failed.".to_string()
+        } else {
+            detail.to_string()
+        });
+    }
+    if output.stdout.iter().all(u8::is_ascii_whitespace) {
+        return Ok(Value::Null);
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitHub response: {error}"))
+}
+
+/// People who can be asked to review a pull request: GitHub's suggestions plus
+/// the users assignable in the repository, filtered by `query` when given.
+pub(crate) fn pull_request_reviewer_candidates_json(
+    root: &str,
+    host: &str,
+    owner: &str,
+    repo: &str,
+    number: u32,
+    query: Option<&str>,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let graphql = "query($owner: String!, $repo: String!, $number: Int!, $q: String) { \
+        repository(owner: $owner, name: $repo) { \
+          pullRequest(number: $number) { \
+            author { login } \
+            suggestedReviewers { reviewer { login name avatarUrl } } \
+          } \
+          assignableUsers(first: 50, query: $q) { nodes { login name avatarUrl } } \
+        } \
+      }";
+    let mut args = vec![
+        "api".to_string(),
+        "graphql".to_string(),
+        "--hostname".to_string(),
+        host.to_string(),
+        "--raw-field".to_string(),
+        format!("query={graphql}"),
+        "--raw-field".to_string(),
+        format!("owner={owner}"),
+        "--raw-field".to_string(),
+        format!("repo={repo}"),
+        "--field".to_string(),
+        format!("number={number}"),
+    ];
+    if let Some(query) = query.map(str::trim).filter(|value| !value.is_empty()) {
+        args.push("--raw-field".to_string());
+        args.push(format!("q={query}"));
+    }
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+    run_hub_gh_json(root, host, login, &args)
+}
+
+/// Asks (`add`) or stops asking (`remove`) people to review a pull request.
+/// Asking someone who already reviewed sends them a new request.
+pub(crate) fn update_pull_request_requested_reviewers_json(
+    root: &str,
+    host: &str,
+    owner: &str,
+    repo: &str,
+    number: u32,
+    logins: &[String],
+    remove: bool,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let endpoint = format!("/repos/{owner}/{repo}/pulls/{number}/requested_reviewers");
+    let method = if remove { "DELETE" } else { "POST" };
+    run_hub_gh_json_input(
+        root,
+        host,
+        login,
+        &[
+            "api",
+            "--hostname",
+            host,
+            "--method",
+            method,
+            "-H",
+            "Accept: application/vnd.github+json",
+            &endpoint,
+        ],
+        &serde_json::json!({ "reviewers": logins }),
+    )
+}

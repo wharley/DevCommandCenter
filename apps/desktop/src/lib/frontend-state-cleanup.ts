@@ -88,6 +88,7 @@ const HEAVY_QUERY_ROOTS = new Set([
 	"workspacePipeline",
 	"workspaceDeliveryFailureSnapshot",
 	"workspaceReviewState",
+	"workspaceReviewerCandidates",
 ]);
 
 function underRoot(value: unknown, roots: readonly string[]) {

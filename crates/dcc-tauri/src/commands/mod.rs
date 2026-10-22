@@ -38,8 +38,9 @@ pub use forge_commands::{
     workspace_forge_cli_status, workspace_forge_context, workspace_gh_pr_create_fill,
     workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
     workspace_pipeline_job_log, workspace_pipeline_job_retry, workspace_pipeline_status,
-    workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
-    workspace_review_state,
+    workspace_pr_review_comments, workspace_pr_status, workspace_request_reviewers,
+    workspace_retry_repository_forge_binding, workspace_review_state,
+    workspace_reviewer_candidates,
 };
 pub use mcp_commands::{
     activate_mcp_integration, cancel_mcp_connect, create_mcp_integration,

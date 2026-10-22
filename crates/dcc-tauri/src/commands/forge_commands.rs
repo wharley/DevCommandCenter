@@ -523,6 +523,9 @@ pub struct WorkspaceReviewer {
     pub avatar_url: Option<String>,
     pub html_url: Option<String>,
     pub state: String,
+    /// A team asked to review (GitHub). Teams can't be re-asked from here.
+    #[serde(default)]
+    pub is_team: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -546,6 +549,53 @@ pub struct WorkspaceReviewStateOutput {
     pub behind_by: Option<u32>,
     pub discussions_resolved: Option<bool>,
     pub draft: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceReviewerCandidatesInput {
+    pub workspace_root: String,
+    pub number: u32,
+    pub query: Option<String>,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceReviewerCandidate {
+    pub login: String,
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
+    /// The forge suggested this person (for example, they touched these files).
+    pub suggested: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceReviewerCandidatesOutput {
+    pub provider: String,
+    pub candidates: Vec<WorkspaceReviewerCandidate>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRequestReviewersInput {
+    pub workspace_root: String,
+    pub number: u32,
+    /// Logins to ask for a review. Someone who already reviewed gets asked again.
+    #[serde(default)]
+    pub add: Vec<String>,
+    /// Logins whose pending review request is withdrawn.
+    #[serde(default)]
+    pub remove: Vec<String>,
+    pub forge_login: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRequestReviewersOutput {
+    pub requested: Vec<String>,
+    pub removed: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -2918,6 +2968,340 @@ pub async fn workspace_review_state(
     }
 }
 
+pub async fn workspace_reviewer_candidates(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceReviewerCandidatesInput,
+) -> Result<WorkspaceReviewerCandidatesOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    let context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+    let query = input
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match context.provider {
+        ForgeCliProvider::Github => {
+            let raw = crate::commands::forge::github::pull_request_reviewer_candidates_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                query,
+                context.effective_login.as_deref(),
+            )?;
+            Ok(WorkspaceReviewerCandidatesOutput {
+                provider: "github".to_string(),
+                candidates: map_github_reviewer_candidates(&raw, query),
+            })
+        }
+        ForgeCliProvider::Gitlab => {
+            let members = crate::commands::forge::gitlab::merge_request_reviewer_candidates_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                query,
+                context.effective_login.as_deref(),
+            )?;
+            let author = crate::commands::forge::gitlab::merge_request_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                context.effective_login.as_deref(),
+            )
+            .ok()
+            .and_then(|detail| {
+                detail
+                    .pointer("/author/username")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+            });
+            Ok(WorkspaceReviewerCandidatesOutput {
+                provider: "gitlab".to_string(),
+                candidates: map_gitlab_reviewer_candidates(&members, author.as_deref()),
+            })
+        }
+    }
+}
+
+pub async fn workspace_request_reviewers(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRequestReviewersInput,
+) -> Result<WorkspaceRequestReviewersOutput, String> {
+    preflight_workspace_root(&state, &input.workspace_root).await?;
+    let root = input.workspace_root.trim();
+    let add = normalize_reviewer_logins(&input.add)?;
+    let remove = normalize_reviewer_logins(&input.remove)?;
+    if add.is_empty() && remove.is_empty() {
+        return Err("Choose at least one reviewer.".to_string());
+    }
+    let context = forge_context::resolve_workspace_forge_context(
+        &state.db_path,
+        root,
+        input.forge_login.as_deref(),
+    )?
+    .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+    let login = context.effective_login.as_deref();
+    match context.provider {
+        ForgeCliProvider::Github => {
+            if !remove.is_empty() {
+                crate::commands::forge::github::update_pull_request_requested_reviewers_json(
+                    root,
+                    &context.host,
+                    &context.namespace,
+                    &context.repo,
+                    input.number,
+                    &remove,
+                    true,
+                    login,
+                )?;
+            }
+            if !add.is_empty() {
+                crate::commands::forge::github::update_pull_request_requested_reviewers_json(
+                    root,
+                    &context.host,
+                    &context.namespace,
+                    &context.repo,
+                    input.number,
+                    &add,
+                    false,
+                    login,
+                )?;
+            }
+        }
+        ForgeCliProvider::Gitlab => {
+            let detail = crate::commands::forge::gitlab::merge_request_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                login,
+            )?;
+            let current = gitlab_reviewer_ids(&detail);
+            let mut added = Vec::new();
+            for username in &add {
+                if current
+                    .iter()
+                    .any(|(_, existing)| existing.eq_ignore_ascii_case(username))
+                {
+                    continue;
+                }
+                let id = crate::commands::forge::gitlab::find_user_id_by_username(
+                    root,
+                    &context.host,
+                    username,
+                    login,
+                )?
+                .ok_or_else(|| format!("GitLab user @{username} was not found."))?;
+                added.push((id, username.clone()));
+            }
+            let reviewer_ids = merge_gitlab_reviewer_ids(&current, &added, &remove);
+            crate::commands::forge::gitlab::set_merge_request_reviewers_json(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                input.number,
+                &reviewer_ids,
+                login,
+            )?;
+        }
+    }
+    Ok(WorkspaceRequestReviewersOutput {
+        requested: add,
+        removed: remove,
+    })
+}
+
+fn is_valid_reviewer_login(login: &str) -> bool {
+    !login.is_empty()
+        && login.len() <= 255
+        && !login.starts_with('-')
+        && login
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+fn normalize_reviewer_logins(logins: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for login in logins {
+        let login = login.trim().trim_start_matches('@');
+        if login.is_empty() {
+            continue;
+        }
+        if !is_valid_reviewer_login(login) {
+            return Err(format!("\"{login}\" is not a valid reviewer login."));
+        }
+        if !out
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(login))
+        {
+            out.push(login.to_string());
+        }
+    }
+    Ok(out)
+}
+
+fn candidate_from_json(value: &Value, suggested: bool) -> Option<WorkspaceReviewerCandidate> {
+    let login = value
+        .get("login")
+        .or_else(|| value.get("username"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|login| !login.is_empty())?;
+    Some(WorkspaceReviewerCandidate {
+        login: login.to_string(),
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToString::to_string),
+        avatar_url: value
+            .get("avatarUrl")
+            .or_else(|| value.get("avatar_url"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        suggested,
+    })
+}
+
+fn push_candidate(
+    out: &mut Vec<WorkspaceReviewerCandidate>,
+    candidate: WorkspaceReviewerCandidate,
+    excluded: Option<&str>,
+) {
+    if excluded.is_some_and(|login| login.eq_ignore_ascii_case(&candidate.login)) {
+        return;
+    }
+    if out
+        .iter()
+        .any(|existing| existing.login.eq_ignore_ascii_case(&candidate.login))
+    {
+        return;
+    }
+    out.push(candidate);
+}
+
+fn candidate_matches_query(candidate: &WorkspaceReviewerCandidate, query: Option<&str>) -> bool {
+    let Some(query) = query.map(str::to_lowercase) else {
+        return true;
+    };
+    candidate.login.to_lowercase().contains(&query)
+        || candidate
+            .name
+            .as_deref()
+            .is_some_and(|name| name.to_lowercase().contains(&query))
+}
+
+/// Suggested reviewers first, then the rest of the assignable users; never the
+/// pull request's author (GitHub refuses to ask the author for a review).
+fn map_github_reviewer_candidates(
+    raw: &Value,
+    query: Option<&str>,
+) -> Vec<WorkspaceReviewerCandidate> {
+    let author = raw
+        .pointer("/data/repository/pullRequest/author/login")
+        .and_then(Value::as_str);
+    let mut out = Vec::new();
+    for suggestion in raw
+        .pointer("/data/repository/pullRequest/suggestedReviewers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(candidate) = suggestion
+            .get("reviewer")
+            .and_then(|reviewer| candidate_from_json(reviewer, true))
+            .filter(|candidate| candidate_matches_query(candidate, query))
+        {
+            push_candidate(&mut out, candidate, author);
+        }
+    }
+    for user in raw
+        .pointer("/data/repository/assignableUsers/nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(candidate) = candidate_from_json(user, false)
+            .filter(|candidate| candidate_matches_query(candidate, query))
+        {
+            push_candidate(&mut out, candidate, author);
+        }
+    }
+    out
+}
+
+/// Active project members, without the merge request's author and bots.
+fn map_gitlab_reviewer_candidates(
+    members: &Value,
+    author: Option<&str>,
+) -> Vec<WorkspaceReviewerCandidate> {
+    let mut out = Vec::new();
+    for member in members.as_array().into_iter().flatten() {
+        let active = member
+            .get("state")
+            .and_then(Value::as_str)
+            .is_none_or(|state| state == "active");
+        let bot = member.get("bot").and_then(Value::as_bool).unwrap_or(false);
+        if !active || bot {
+            continue;
+        }
+        if let Some(candidate) = candidate_from_json(member, false) {
+            push_candidate(&mut out, candidate, author);
+        }
+    }
+    out
+}
+
+fn gitlab_reviewer_ids(detail: &Value) -> Vec<(u64, String)> {
+    detail
+        .get("reviewers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|reviewer| {
+            Some((
+                reviewer.get("id")?.as_u64()?,
+                reviewer.get("username")?.as_str()?.to_string(),
+            ))
+        })
+        .collect()
+}
+
+/// GitLab replaces the whole reviewer list, so keep everyone already there,
+/// drop the ones being removed and append the new ones.
+fn merge_gitlab_reviewer_ids(
+    current: &[(u64, String)],
+    added: &[(u64, String)],
+    remove: &[String],
+) -> Vec<u64> {
+    let mut ids = Vec::new();
+    for (id, username) in current.iter().chain(added.iter()) {
+        if remove
+            .iter()
+            .any(|removed| removed.eq_ignore_ascii_case(username))
+        {
+            continue;
+        }
+        if !ids.contains(id) {
+            ids.push(*id);
+        }
+    }
+    ids
+}
+
 fn empty_workspace_review_state(
     provider: Option<String>,
     host: Option<String>,
@@ -2969,6 +3353,8 @@ fn reviewer_from_json(value: &serde_json::Value, state: &str) -> WorkspaceReview
             .and_then(|value| value.as_str())
             .map(ToString::to_string),
         state: state.to_string(),
+        is_team: author.get("__typename").and_then(|value| value.as_str()) == Some("Team")
+            || (author.get("login").is_none() && author.get("slug").is_some()),
     }
 }
 
@@ -3125,6 +3511,7 @@ fn map_gitlab_review_state(
             avatar_url: reviewer.user.avatar_url.clone(),
             html_url: reviewer.user.web_url.clone(),
             state: state.to_string(),
+            is_team: false,
         };
         reviewers.insert(reviewer_key(&normalized, index), normalized);
     }
@@ -3136,6 +3523,7 @@ fn map_gitlab_review_state(
                 avatar_url: approval.user.avatar_url.clone(),
                 html_url: approval.user.web_url.clone(),
                 state: "approved".to_string(),
+                is_team: false,
             };
             reviewers.insert(
                 reviewer_key(&normalized, reviewers.len() + index),
@@ -4106,6 +4494,10 @@ mod tests {
         is_provisional_task_title, map_github_review_state, map_gitlab_review_comments,
         map_gitlab_review_state, preferred_change_request_title, PullRequestHubMergeMethod,
     };
+    use super::{
+        map_github_reviewer_candidates, map_gitlab_reviewer_candidates, merge_gitlab_reviewer_ids,
+        normalize_reviewer_logins,
+    };
     use crate::commands::forge::gitlab::{
         GitlabApproval, GitlabApprovals, GitlabDiscussion, GitlabDiscussionAuthor,
         GitlabDiscussionLinePosition, GitlabDiscussionLineRange, GitlabDiscussionNote,
@@ -4467,7 +4859,13 @@ mod tests {
         assert!(output
             .reviewers
             .iter()
-            .any(|reviewer| reviewer.login.as_deref() == Some("platform-team")));
+            .any(
+                |reviewer| reviewer.login.as_deref() == Some("platform-team") && reviewer.is_team
+            ));
+        assert!(output
+            .reviewers
+            .iter()
+            .any(|reviewer| reviewer.login.as_deref() == Some("carol") && !reviewer.is_team));
         assert_eq!(output.has_conflicts, Some(true));
         assert_eq!(output.behind_by, Some(3));
     }
@@ -4533,5 +4931,79 @@ mod tests {
         assert!(output.reviewers.iter().any(
             |reviewer| reviewer.login.as_deref() == Some("bob") && reviewer.state == "approved"
         ));
+    }
+
+    #[test]
+    fn github_reviewer_candidates_put_suggestions_first_and_skip_the_author() {
+        let raw = json!({
+            "data": { "repository": {
+                "pullRequest": {
+                    "author": { "login": "Alice" },
+                    "suggestedReviewers": [
+                        { "reviewer": { "login": "carol", "name": "Carol", "avatarUrl": "c.png" } },
+                        { "reviewer": { "login": "alice", "name": "Alice" } }
+                    ]
+                },
+                "assignableUsers": { "nodes": [
+                    { "login": "alice", "name": "Alice" },
+                    { "login": "bob", "name": "" },
+                    { "login": "Carol", "name": "Carol" }
+                ] }
+            } }
+        });
+        let candidates = map_github_reviewer_candidates(&raw, None);
+        let logins = candidates
+            .iter()
+            .map(|candidate| (candidate.login.as_str(), candidate.suggested))
+            .collect::<Vec<_>>();
+        assert_eq!(logins, vec![("carol", true), ("bob", false)]);
+        assert_eq!(candidates[1].name, None);
+        assert_eq!(candidates[0].avatar_url.as_deref(), Some("c.png"));
+
+        let filtered = map_github_reviewer_candidates(&raw, Some("bo"));
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].login, "bob");
+    }
+
+    #[test]
+    fn gitlab_reviewer_candidates_skip_author_bots_and_blocked_members() {
+        let members = json!([
+            { "id": 1, "username": "alice", "name": "Alice", "state": "active" },
+            { "id": 2, "username": "bob", "name": "Bob", "state": "blocked" },
+            { "id": 3, "username": "project_bot", "name": "Bot", "state": "active", "bot": true },
+            { "id": 4, "username": "dana", "name": "Dana", "state": "active", "avatar_url": "d.png" }
+        ]);
+        let candidates = map_gitlab_reviewer_candidates(&members, Some("alice"));
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].login, "dana");
+        assert_eq!(candidates[0].avatar_url.as_deref(), Some("d.png"));
+    }
+
+    #[test]
+    fn gitlab_reviewer_ids_keep_existing_drop_removed_and_append_new() {
+        let current = vec![(1, "alice".to_string()), (2, "bob".to_string())];
+        let added = vec![(3, "carol".to_string()), (1, "alice".to_string())];
+        let ids = merge_gitlab_reviewer_ids(&current, &added, &["BOB".to_string()]);
+        assert_eq!(ids, vec![1, 3]);
+        assert!(
+            merge_gitlab_reviewer_ids(&current, &[], &["alice".into(), "bob".into()]).is_empty()
+        );
+    }
+
+    #[test]
+    fn reviewer_logins_are_trimmed_deduplicated_and_validated() {
+        let logins = normalize_reviewer_logins(&[
+            " @octo-cat ".to_string(),
+            "Octo-Cat".to_string(),
+            "".to_string(),
+            "first.last_2".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(
+            logins,
+            vec!["octo-cat".to_string(), "first.last_2".to_string()]
+        );
+        assert!(normalize_reviewer_logins(&["bad login".to_string()]).is_err());
+        assert!(normalize_reviewer_logins(&["--method".to_string()]).is_err());
     }
 }

@@ -135,6 +135,10 @@ import type {
 	WorkspacePipelineStatusOutput,
 	WorkspaceReviewStateInput,
 	WorkspaceReviewStateOutput,
+	WorkspaceReviewerCandidatesInput,
+	WorkspaceReviewerCandidatesOutput,
+	WorkspaceRequestReviewersInput,
+	WorkspaceRequestReviewersOutput,
 	WorkspaceRunSetupInput,
 	WorkspaceRunSetupOutput,
 	WorkspaceBundleStateOutput,
@@ -764,6 +768,22 @@ export function workspacePipelineJobRetry(input: WorkspacePipelineJobInput) {
 export function workspaceReviewState(input: WorkspaceReviewStateInput) {
 	return invoke<WorkspaceReviewStateOutput>(
 		WORKSPACE_METHODS.workspaceReviewState,
+		{ input },
+	);
+}
+
+export function workspaceReviewerCandidates(
+	input: WorkspaceReviewerCandidatesInput,
+) {
+	return invoke<WorkspaceReviewerCandidatesOutput>(
+		WORKSPACE_METHODS.workspaceReviewerCandidates,
+		{ input },
+	);
+}
+
+export function workspaceRequestReviewers(input: WorkspaceRequestReviewersInput) {
+	return invoke<WorkspaceRequestReviewersOutput>(
+		WORKSPACE_METHODS.workspaceRequestReviewers,
 		{ input },
 	);
 }

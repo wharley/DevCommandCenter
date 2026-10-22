@@ -11,7 +11,9 @@ use dcc_tauri::{
         WorkspaceForgeContextInput, WorkspaceForgeContextOutput, WorkspacePipelineJobInput,
         WorkspacePipelineJobLogOutput, WorkspacePipelineStatusInput, WorkspacePipelineStatusOutput,
         WorkspacePrReviewCommentsInput, WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput,
-        WorkspacePrStatusOutput, WorkspaceReviewStateInput, WorkspaceReviewStateOutput,
+        WorkspacePrStatusOutput, WorkspaceRequestReviewersInput, WorkspaceRequestReviewersOutput,
+        WorkspaceReviewStateInput, WorkspaceReviewStateOutput, WorkspaceReviewerCandidatesInput,
+        WorkspaceReviewerCandidatesOutput,
     },
     commands::workspace_commands::{
         RepositoryIdInput, WorkspaceChangeRequestContextInput, WorkspaceChangeRequestContextOutput,
@@ -242,4 +244,20 @@ pub async fn workspace_review_state(
     input: WorkspaceReviewStateInput,
 ) -> Result<WorkspaceReviewStateOutput, String> {
     dcc_tauri::commands::forge_commands::workspace_review_state(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_reviewer_candidates(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceReviewerCandidatesInput,
+) -> Result<WorkspaceReviewerCandidatesOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_reviewer_candidates(state, input).await
+}
+
+#[tauri::command]
+pub async fn workspace_request_reviewers(
+    state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceRequestReviewersInput,
+) -> Result<WorkspaceRequestReviewersOutput, String> {
+    dcc_tauri::commands::forge_commands::workspace_request_reviewers(state, input).await
 }

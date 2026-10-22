@@ -262,7 +262,9 @@ use dcc_tauri::commands::{
         WorkspacePipelineStatusInput, WorkspacePipelineStatusOutput, WorkspacePrReviewComment,
         WorkspacePrReviewCommentAuthor, WorkspacePrReviewCommentsInput,
         WorkspacePrReviewCommentsOutput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
-        WorkspaceReviewStateInput, WorkspaceReviewStateOutput, WorkspaceReviewer,
+        WorkspaceRequestReviewersInput, WorkspaceRequestReviewersOutput, WorkspaceReviewStateInput,
+        WorkspaceReviewStateOutput, WorkspaceReviewer, WorkspaceReviewerCandidate,
+        WorkspaceReviewerCandidatesInput, WorkspaceReviewerCandidatesOutput,
     },
     mcp_commands::{
         ActivateMcpIntegrationOutput, CreateMcpIntegrationInput, CreateMcpIntegrationOutput,
@@ -540,6 +542,8 @@ struct WorkspaceMethods {
     workspace_git_conflict_state: String,
     workspace_git_discard_file: String,
     workspace_git_file_preview: String,
+    workspace_reviewer_candidates: String,
+    workspace_request_reviewers: String,
     workspace_git_file_preview_content: String,
     workspace_git_push: String,
     workspace_git_stage_all: String,
@@ -876,6 +880,11 @@ fn main() {
         .typ::<WorkspaceGitConflictEntry>()
         .typ::<WorkspaceGitConflictSide>()
         .typ::<WorkspaceGitAcceptConflictInput>()
+        .typ::<WorkspaceReviewerCandidatesInput>()
+        .typ::<WorkspaceReviewerCandidate>()
+        .typ::<WorkspaceReviewerCandidatesOutput>()
+        .typ::<WorkspaceRequestReviewersInput>()
+        .typ::<WorkspaceRequestReviewersOutput>()
         .typ::<WorkspaceGitMarkConflictResolvedInput>()
         .typ::<WorkspaceContinueFromBaseBranchInput>()
         .typ::<WorkspaceContinueFromBaseBranchOutput>()
@@ -1246,6 +1255,8 @@ fn main() {
                     .to_string(),
                 workspace_git_abort_merge: "workspace_git_abort_merge".to_string(),
                 workspace_git_complete_merge: "workspace_git_complete_merge".to_string(),
+                workspace_reviewer_candidates: "workspace_reviewer_candidates".to_string(),
+                workspace_request_reviewers: "workspace_request_reviewers".to_string(),
                 workspace_git_validation_config: "workspace_git_validation_config".to_string(),
                 workspace_project_automation_config: "workspace_project_automation_config"
                     .to_string(),

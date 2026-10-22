@@ -1990,3 +1990,128 @@ self.gitlab.example.com\n  ✓ Logged in to self.gitlab.example.com as team-user
         assert_ne!(retried.id, job_id);
     }
 }
+
+/// Project members who can be asked to review, filtered by `query` when given.
+pub(crate) fn merge_request_reviewer_candidates_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    query: Option<&str>,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let mut endpoint = format!(
+        "projects/{}/members/all?per_page=50",
+        encode_percent(&project_path)
+    );
+    if let Some(query) = query.map(str::trim).filter(|value| !value.is_empty()) {
+        endpoint.push_str("&query=");
+        endpoint.push_str(&encode_percent(query));
+    }
+    run_hub_glab_json(root, host, login, &["api", &endpoint])
+}
+
+/// Looks up a GitLab user id by username (reviewers are set by id).
+pub(crate) fn find_user_id_by_username(
+    root: &str,
+    host: &str,
+    username: &str,
+    login: Option<&str>,
+) -> Result<Option<u64>, String> {
+    let endpoint = format!("users?username={}", encode_percent(username));
+    let users = run_hub_glab_json(root, host, login, &["api", &endpoint])?;
+    Ok(users
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|user| {
+            user.get("username")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.eq_ignore_ascii_case(username))
+        })
+        .and_then(|user| user.get("id"))
+        .and_then(Value::as_u64))
+}
+
+/// Replaces the merge request's reviewer list with `reviewer_ids`.
+pub(crate) fn set_merge_request_reviewers_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    merge_request_iid: u32,
+    reviewer_ids: &[u64],
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests/{merge_request_iid}",
+        encode_percent(&project_path),
+    );
+    let auth = resolve_auth_context(host, login)?;
+    let glab = resolve_cli_binary("glab")?;
+    let mut command = Command::new(glab);
+    command
+        .current_dir(root)
+        .args([
+            "api",
+            "--method",
+            "PUT",
+            "-H",
+            "Content-Type: application/json",
+            &endpoint,
+            "--input",
+            "-",
+            "--hostname",
+            host,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(auth) = auth.as_ref() {
+        command.envs(auth.envs.iter().map(|(key, value)| (key, value)));
+    }
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let body = serde_json::to_vec(&serde_json::json!({ "reviewer_ids": reviewer_ids }))
+        .map_err(|error| format!("Failed to encode GitLab request: {error}"))?;
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| "Failed to open GitLab request input.".to_string())?
+            .write_all(&body)
+            .map_err(|error| error.to_string())?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "GitLab CLI request failed.".to_string()
+        } else {
+            stderr
+        });
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("Failed to decode GitLab response: {error}"))
+}
+
+/// The merge request itself (author and current reviewers, among others).
+pub(crate) fn merge_request_json(
+    root: &str,
+    host: &str,
+    namespace: &str,
+    repo: &str,
+    merge_request_iid: u32,
+    login: Option<&str>,
+) -> Result<Value, String> {
+    let project_path = format!("{namespace}/{repo}");
+    let endpoint = format!(
+        "projects/{}/merge_requests/{merge_request_iid}",
+        encode_percent(&project_path),
+    );
+    run_hub_glab_json(root, host, login, &["api", &endpoint])
+}

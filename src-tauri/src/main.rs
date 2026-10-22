@@ -109,8 +109,9 @@ use forge_commands::{
     workspace_forge_cli_status, workspace_forge_context, workspace_gh_pr_create_fill,
     workspace_gh_pr_merge, workspace_gh_pr_view_web, workspace_github_cli_status,
     workspace_pipeline_job_log, workspace_pipeline_job_retry, workspace_pipeline_status,
-    workspace_pr_review_comments, workspace_pr_status, workspace_retry_repository_forge_binding,
-    workspace_review_state,
+    workspace_pr_review_comments, workspace_pr_status, workspace_request_reviewers,
+    workspace_retry_repository_forge_binding, workspace_review_state,
+    workspace_reviewer_candidates,
 };
 use note_commands::{
     create_project_note, delete_project_notes, list_project_notes, update_project_note,
@@ -7194,6 +7195,8 @@ pub fn run() {
             pull_request_hub_merge,
             pull_request_hub_submit_review,
             pull_request_hub_reply_thread,
+            workspace_reviewer_candidates,
+            workspace_request_reviewers,
             pull_request_hub_resolve_thread,
             workspace_review_state,
             workspace_record_setup_outcome,

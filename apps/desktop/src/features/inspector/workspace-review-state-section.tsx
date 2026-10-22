@@ -8,18 +8,47 @@ import {
 	GitMerge,
 	Loader2,
 	MessageSquareWarning,
+	RotateCw,
 	ShieldCheck,
 	UserRoundCheck,
 	Users,
+	X,
 	XCircle,
 } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { openExternal } from "@/lib/shell-api";
 import { cn } from "@/lib/utils";
-import { useWorkspaceReviewState } from "./use-workspace-review-state";
+import { workspaceRequestReviewers } from "@/lib/workspace-api";
+import {
+	RequestReviewPicker,
+	WORKSPACE_REVIEWER_CANDIDATES_QUERY_KEY,
+} from "./request-review-picker";
+import {
+	useWorkspaceReviewState,
+	WORKSPACE_REVIEW_STATE_QUERY_KEY,
+} from "./use-workspace-review-state";
+
+type ReviewRequestChange = {
+	login: string;
+	action: "request" | "rerequest" | "remove";
+};
+
+/** What each reviewer row may offer: withdraw a pending ask, or ask again. */
+export function reviewerRowAction(
+	reviewer: WorkspaceReviewer,
+	provider: string | null,
+): "remove" | "rerequest" | null {
+	if (!reviewer.login || reviewer.isTeam) return null;
+	if (reviewer.state === "pending") return "remove";
+	// GitLab keeps someone who is already a reviewer as is; there is no re-ask.
+	if (provider === "github") return "rerequest";
+	return null;
+}
 
 function reviewStateClass(state: string | null) {
 	switch (state) {
@@ -71,6 +100,46 @@ export function WorkspaceReviewStateSection({
 		enabled,
 	);
 	const review = query.data ?? null;
+	const queryClient = useQueryClient();
+	const reviewRequest = useMutation({
+		mutationFn: (change: ReviewRequestChange) =>
+			workspaceRequestReviewers({
+				workspaceRoot: workspaceRoot ?? "",
+				number: review?.number ?? 0,
+				add: change.action === "remove" ? [] : [change.login],
+				remove: change.action === "remove" ? [change.login] : [],
+				forgeLogin,
+			}),
+		onSuccess: (_, change) => {
+			toast.success(
+				t(
+					change.action === "remove"
+						? "inspector.reviewState.reviewRequestRemoved"
+						: change.action === "rerequest"
+							? "inspector.reviewState.reviewRerequested"
+							: "inspector.reviewState.reviewRequested",
+					{ login: change.login },
+				),
+			);
+		},
+		onError: (error) => {
+			const detail = error instanceof Error ? error.message : String(error);
+			toast.error(t("inspector.reviewState.reviewRequestFailed"), {
+				description: detail.slice(0, 280),
+			});
+		},
+		onSettled: () => {
+			void queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_REVIEW_STATE_QUERY_KEY],
+			});
+			void queryClient.invalidateQueries({
+				queryKey: [WORKSPACE_REVIEWER_CANDIDATES_QUERY_KEY],
+			});
+		},
+	});
+	const changingLogin = reviewRequest.isPending
+		? reviewRequest.variables?.login.toLowerCase()
+		: null;
 
 	if (!enabled) return null;
 
@@ -251,15 +320,39 @@ export function WorkspaceReviewStateSection({
 
 					{review.reviewersAvailable ? (
 						<div className="mt-2">
-							<p className="mb-1 text-[9px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-								{t("inspector.reviewState.reviewers")}
-							</p>
+							<div className="mb-1 flex items-center justify-between gap-2">
+								<p className="text-[9px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+									{t("inspector.reviewState.reviewers")}
+								</p>
+								{workspaceRoot ? (
+									<RequestReviewPicker
+										workspaceRoot={workspaceRoot}
+										number={review.number}
+										forgeLogin={forgeLogin}
+										excludedLogins={review.reviewers.flatMap((reviewer) =>
+											reviewer.login ? [reviewer.login] : [],
+										)}
+										busy={
+											reviewRequest.isPending &&
+											reviewRequest.variables?.action === "request"
+										}
+										onPick={(login) =>
+											reviewRequest.mutate({ login, action: "request" })
+										}
+									/>
+								) : null}
+							</div>
 							{review.reviewers.length > 0 ? (
 								<div className="space-y-1">
-									{review.reviewers.map((reviewer, index) => (
+									{review.reviewers.map((reviewer, index) => {
+										const action = reviewerRowAction(reviewer, review.provider);
+										const changing =
+											changingLogin != null &&
+											reviewer.login?.toLowerCase() === changingLogin;
+										return (
 										<div
 											key={`${reviewer.login ?? reviewer.name ?? "reviewer"}-${index}`}
-											className="flex items-center gap-2 rounded-md px-1 py-1"
+											className="group flex items-center gap-2 rounded-md px-1 py-1"
 										>
 											<ReviewerAvatar reviewer={reviewer} />
 											<span className="min-w-0 flex-1 truncate text-[10px]">
@@ -274,8 +367,45 @@ export function WorkspaceReviewStateSection({
 													{ defaultValue: reviewer.state },
 												)}
 											</span>
+											{action && reviewer.login ? (
+												<Button
+													type="button"
+													variant="ghost"
+													size="icon-xs"
+													className={cn(
+														"size-5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100",
+														changing && "opacity-100",
+													)}
+													disabled={reviewRequest.isPending}
+													title={t(
+														action === "remove"
+															? "inspector.reviewState.removeReviewRequest"
+															: "inspector.reviewState.rerequestReview",
+													)}
+													aria-label={t(
+														action === "remove"
+															? "inspector.reviewState.removeReviewRequest"
+															: "inspector.reviewState.rerequestReview",
+													)}
+													onClick={() =>
+														reviewRequest.mutate({
+															login: reviewer.login!,
+															action,
+														})
+													}
+												>
+													{changing ? (
+														<Loader2 className="size-3 animate-spin" />
+													) : action === "remove" ? (
+														<X className="size-3" />
+													) : (
+														<RotateCw className="size-3" />
+													)}
+												</Button>
+											) : null}
 										</div>
-									))}
+										);
+									})}
 								</div>
 							) : (
 								<p className="text-[10px] text-muted-foreground">
