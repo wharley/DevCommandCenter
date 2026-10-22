@@ -785,8 +785,8 @@
       "terminalWorktree": "Abrir terminal da worktree",
       "terminalProject": "Abrir terminal do projeto",
       "newTerminal": "Criar aba de terminal",
-      "inspectorChanges": "Abrir mudanças no Inspector",
-      "inspectorFiles": "Abrir arquivos no Inspector",
+      "inspectorChanges": "Abrir Mudanças",
+      "inspectorFiles": "Abrir Arquivos",
       "inspectorActivity": "Abrir atividade da sessão",
       "inspectorDetails": "Abrir detalhes do workspace"
     }
@@ -1024,7 +1024,7 @@
     "linkedFolderBranch": "branch atual do checkout",
     "localPreview_one": "{{count}} projeto vai trabalhar direto no checkout",
     "localPreview_other": "{{count}} projetos vão trabalhar direto no checkout",
-    "localDescription": "Sem worktree: o agente edita seus checkouts atuais. Entregue cada projeto pelo Inspector.",
+    "localDescription": "Sem worktree: o agente edita seus checkouts atuais. Entregue cada projeto pela aba Mudanças.",
     "multiLocalToastDescription_one": "{{count}} projeto pronto para um único chat, direto no checkout.",
     "multiLocalToastDescription_other": "{{count}} projetos prontos para um único chat, direto no checkout.",
     "protectionDescription": "Cada tarefa trabalha isoladamente. Seus checkouts originais permanecem intactos.",
@@ -1047,7 +1047,7 @@
     "projects": "Mostrando",
     "localBadge_one": "{{count}} projeto · local",
     "localBadge_other": "{{count}} projetos · local",
-    "localHint": "Sem worktree: o agente edita os checkouts destes projetos. Entregue cada projeto pelo Inspector; Desfazer ainda não cobre esta tarefa.",
+    "localHint": "Sem worktree: o agente edita os checkouts destes projetos. Entregue cada projeto pela aba Mudanças; Desfazer ainda não cobre esta tarefa.",
     "authorizedCount": "{{count}} autorizados",
     "providerUnsupported": "{{provider}} ainda não oferece isolamento multi-workspace no DCC. Escolha Codex, Claude, Cursor ou Gemini.",
     "delivery": {
@@ -3304,7 +3304,7 @@
     },
     "codeRabbit": {
       "title": "CodeRabbit CLI",
-      "hint": "Conecte o CodeRabbit para rodar code reviews locais pelo Inspector.",
+      "hint": "Conecte o CodeRabbit para rodar code reviews locais em Mudanças.",
       "readyBadge": "Pronto",
       "notReadyBadge": "Não pronto",
       "checking": "Verificando",
@@ -3319,7 +3319,7 @@
       "refresh": "Atualizar",
       "authenticated": "Autenticado",
       "disabledBadge": "Desativado",
-      "inspectorToggle": "Mostrar no Inspector",
+      "inspectorToggle": "Mostrar em Mudanças",
       "inspectorToggleHint": "Desative painéis, sugestões de review, resumos e anotações nos arquivos sem sair da conta no CLI.",
       "command": "Comando: {{command}}",
       "version": "Versão: {{version}}",
@@ -3339,8 +3339,8 @@
     "toggleTerminal": "Alternar terminal",
     "quickOpen": "Abrir arquivo rapidamente",
     "workspaceSearch": "Buscar no workspace",
-    "inspectorChanges": "Abrir mudanças no Inspector",
-    "inspectorFiles": "Abrir arquivos no Inspector",
+    "inspectorChanges": "Abrir Mudanças",
+    "inspectorFiles": "Abrir Arquivos",
     "sendPrompt": "Enviar prompt",
     "steerSession": "Controlar sessão",
     "abortSession": "Abortar sessão",
@@ -3371,7 +3371,7 @@
         "steps": [
           "Clique em [Abrir projeto] na barra lateral e escolha a pasta do repositório.",
           "Clique em [Nova tarefa] ao lado do projeto e descreva o que vai fazer. O DCC cria o worktree e a branch.",
-          "Trabalhe no chat, no terminal e no Inspector. Tudo aponta para a pasta dessa tarefa.",
+          "Trabalhe no chat, no terminal e na coluna de código. Tudo aponta para a pasta dessa tarefa.",
           "Ao terminar, use [Concluir workspace] no menu da tarefa. O worktree vai para [Concluídos] e pode ser limpo depois."
         ],
         "tip": "Bug urgente no meio de uma feature? Abra outra tarefa no mesmo projeto. Nada de git stash.",
@@ -3387,7 +3387,7 @@
           "Escreva @ e comece o nome de um arquivo para anexá-lo como contexto.",
           "Escreva / para ver os comandos. [/spec] e [/clear] são do DCC; /goal e /compact vão para o agente e ficam verdes quando o agente da tarefa aceita.",
           "Use [Anexar arquivo ou imagem] para mandar um print ou um log.",
-          "Envie. Enquanto o agente trabalha, o Inspector mostra o que ele está fazendo."
+          "Envie. Enquanto o agente trabalha, a conversa mostra cada passo e a aba [Sessão] reúne a atividade."
         ],
         "prompt": "Corrija o erro de login em @src/auth/session.ts. Mantenha a assinatura pública, adicione um teste para o caso que falhava e me diga o que mudou antes de mexer em outros arquivos.",
         "tip": "O menu [Execução] ao lado do composer troca modelo, esforço e estilo de resposta sem sair da tarefa.",
@@ -3408,17 +3408,16 @@
         "keywords": "plano planejar plan mode aprovar etapas estratégia spec"
       },
       "inspector": {
-        "label": "Inspector",
-        "summary": "Atividade do agente, mudanças, arquivos e spec da tarefa.",
-        "whatIs": "O Inspector é o painel à direita. Ele mostra o que o agente está fazendo em [Atividade], os dados do workspace em [Detalhes] e a spec da missão em [Spec]. No modo [Mudanças] você vê o diff da tarefa; em [Arquivos], a árvore do projeto.",
+        "label": "Mudanças e Sessão",
+        "summary": "Arquivos e diff da tarefa ao lado da barra lateral; atividade e spec na aba Sessão.",
+        "whatIs": "A coluna de código fica ao lado da barra lateral: [Arquivos] mostra a árvore do projeto e [Mudanças] mostra o diff da tarefa, o estado do PR e a entrega. O que você abre vira aba no centro, ao lado do [Chat]. A aba [Sessão] mostra o que o agente está fazendo em [Atividade], os dados do workspace em [Detalhes] e a spec da missão em [Spec].",
         "whenToUse": "Para acompanhar um agente em execução sem ficar lendo o terminal e para revisar o que mudou antes de commitar.",
         "steps": [
-          "Alterne entre [Atividade], [Detalhes] e [Spec] nas abas do topo.",
-          "Use o dock inferior para trocar entre [Mudanças] e [Arquivos].",
-          "Clique em um arquivo para abrir o diff ou o conteúdo no centro da tela.",
-          "Use [Fixar Inspector] se quiser mantê-lo sempre visível."
+          "Abra a coluna com [Mostrar arquivos do projeto] e alterne entre [Arquivos] e [Mudanças].",
+          "Clique em um arquivo para abrir o diff ou o conteúdo como aba no centro.",
+          "Para acompanhar o agente, abra [Abrir atividade da sessão] pelo ⌘K e alterne entre [Atividade], [Detalhes] e [Spec] na aba [Sessão]."
         ],
-        "keywords": "inspector inspetor atividade detalhes spec mudanças arquivos diff painel direita"
+        "keywords": "inspector inspetor coluna código sessão atividade detalhes spec mudanças arquivos diff"
       },
       "review": {
         "label": "Revisar diff e anotar",
@@ -3426,7 +3425,7 @@
         "whatIs": "Cada arquivo alterado abre como diff. Você seleciona linhas, escreve um comentário e envia ao agente com o trecho já anexado, como um code review que vira instrução.",
         "whenToUse": "Quando o agente entregou algo quase certo e você quer apontar exatamente onde ajustar, sem redigitar contexto.",
         "steps": [
-          "Abra [Mudanças] no Inspector e clique no arquivo.",
+          "Abra [Mudanças] na coluna de código e clique no arquivo.",
           "Selecione as linhas do trecho que quer comentar.",
           "Escreva a anotação e clique em [Enviar ao agente ↗]. O trecho vai junto.",
           "Use [Adicionar como evidência] quando o achado deve ficar registrado na revisão da tarefa."
@@ -3537,7 +3536,7 @@
         "steps": [
           "Peça no chat, em linguagem natural, dizendo o provider e a tarefa: \"delega pro Codex revisar este diff\" ou \"pede pro Claude escrever os testes\". Diga também se é para revisar, explicar ou implementar: revisar e explicar só leem o código.",
           "Acompanhe pelo card [Delegação] na conversa: o robô do agente anda enquanto ele trabalha, e o link da conversa dele mostra o trabalho em andamento.",
-          "Quando a filha termina, o agente recebe o resultado e segue a tarefa. Delegações de implementação ficam isoladas até você usar [Revisar mudanças] (no card, na faixa no fim da conversa ou no Inspector) e aplicar ou descartar.",
+          "Quando a filha termina, o agente recebe o resultado e segue a tarefa. Delegações de implementação ficam isoladas até você usar [Revisar mudanças] (no card ou na faixa no fim da conversa) e aplicar ou descartar.",
           "Para comparar, use [Re-rodar em outro agente]. Num resultado que você mesmo delegou, [Enviar ao agente] coloca o texto no composer."
         ],
         "tip": "Delegar é para outro provider. Se você pedir outro modelo do mesmo provider (por exemplo, Opus estando no Claude), o agente usa os subagentes dele, sem sessão filha. Funciona nos providers que recebem as ferramentas do DCC (Claude, Codex e Cursor), e um agente delegado não delega de novo.",
@@ -3611,7 +3610,7 @@
         "whatIs": "Os controles de entrega ficam no dock do composer. O DCC monta uma mensagem de commit a partir dos arquivos staged, você edita se quiser, e o mesmo botão evolui: commitar, enviar, criar o PR, abrir o PR, corrigir CI.",
         "whenToUse": "Quando o diff está revisado e você quer fechar a tarefa com commit, push e pull request.",
         "steps": [
-          "Revise o diff em [Mudanças] no Inspector.",
+          "Revise o diff em [Mudanças], na coluna de código.",
           "Clique em [Commitar e enviar]. Ajuste o título e o corpo em [Revisar mensagem do commit] e confirme.",
           "Com a branch enviada, o botão vira [Criar PR]. Escolha PR normal ou draft.",
           "Acompanhe revisores, aprovações e CI em [Status da revisão]. Se o CI quebrar, use [Corrigir CI] para o agente investigar."
@@ -3693,7 +3692,7 @@
       "spec": {
         "label": "Spec da missão",
         "summary": "Transforme uma tarefa ambígua em objetivo, escopo e critérios.",
-        "whatIs": "A spec é o documento vivo da tarefa: objetivo, fora de escopo, critérios de aceite e verificação. Ela fica na aba [Spec] do Inspector e vira contexto compilado para o agente.",
+        "whatIs": "A spec é o documento vivo da tarefa: objetivo, fora de escopo, critérios de aceite e verificação. Ela fica em [Spec], na aba [Sessão], e vira contexto compilado para o agente.",
         "whenToUse": "Em tarefas maiores, quando o pedido chega vago e você quer que o agente trabalhe contra uma definição clara, não contra a sua memória.",
         "steps": [
           "Digite [/spec] no composer para criar ou atualizar a spec desta tarefa.",
@@ -3743,7 +3742,7 @@
         "steps": [
           "Para trazer sempre as mesmas pastas, abra [Editar projeto] e adicione-as em [Pastas vinculadas]. Repositórios Git viram projetos da tarefa; pastas sem Git (docs, specs) entram só como contexto, sem diff e sem Undo. Toda [Nova tarefa] nesse projeto já vem com elas; desmarque [Pastas vinculadas] para pular desta vez.",
           "Para uma tarefa avulsa, escolha o projeto na [Nova tarefa] e use [Adicionar projeto] em [Também nesta tarefa]. O projeto escolhido é o principal; clique num projeto da lista para tirá-lo desta tarefa.",
-          "Com outro projeto além do principal, a tarefa vira multi-projeto. Em [Mostrando], troque o projeto que o Inspector, o terminal e a entrega exibem.",
+          "Com outro projeto além do principal, a tarefa vira multi-projeto. Em [Mostrando], troque o projeto que [Mudanças], o terminal e a entrega exibem.",
           "Para desfazer um turno, use o Undo do turno: ele verifica todos os projetos antes e restaura um por vez, mostrando o resultado de cada um."
         ],
         "prompt": "Adicione o campo birthDate ao contrato em api-core e consuma no formulário de perfil em web-app. Mantenha compatibilidade com clientes antigos.",
@@ -3755,7 +3754,7 @@
         "whatIs": "Quando atualizar a worktree com a base ou fazer merge gera conflito, o DCC abre [Resolver conflitos]: cada bloco mostra a sua versão e a versão da base, e você escolhe uma, aceita ambas ou pede ao agente.",
         "whenToUse": "Sempre que aparecer conflito ao usar [Atualizar worktree] ou ao mesclar um PR.",
         "steps": [
-          "Abra [Resolver conflitos] a partir do aviso no Inspector.",
+          "Abra [Resolver conflitos] a partir do aviso em [Mudanças].",
           "Em cada bloco, clique em aceitar a sua branch, aceitar a base ou [Aceitar ambos].",
           "Para blocos difíceis, use [Resolver este bloco com agente]. Para o arquivo inteiro, [Resolver arquivo com agente].",
           "Antes de fechar, [Pedir revisão do arquivo ao agente] confere se a resolução compila e faz sentido."
@@ -3783,11 +3782,11 @@
       "codeRabbit": {
         "label": "Review com CodeRabbit",
         "summary": "Rode a CLI do CodeRabbit no diff e envie os achados ao agente.",
-        "whatIs": "O DCC integra a CLI do CodeRabbit ao Inspector. Ele revisa o diff da tarefa, lista os achados e deixa você escolher quais mandar ao composer para o agente corrigir.",
+        "whatIs": "O DCC integra a CLI do CodeRabbit à aba [Mudanças]. Ele revisa o diff da tarefa, lista os achados e deixa você escolher quais mandar ao composer para o agente corrigir.",
         "whenToUse": "Antes de abrir o PR, como uma segunda revisão automática além da sua.",
         "steps": [
           "Em Configurações, seção [Conta], conecte o [CodeRabbit CLI] com [Conectar]. É preciso ter feito login na CLI.",
-          "No Inspector, em [Mudanças], clique em [Rodar review]. Pode levar alguns minutos.",
+          "Em [Mudanças], clique em [Rodar review]. Pode levar alguns minutos.",
           "Marque os achados relevantes ou use [Selecionar tudo].",
           "Clique em [Enviar ao Composer]. Os achados entram como contexto para a próxima mensagem."
         ],
@@ -3842,7 +3841,7 @@
         "whenToUse": "Trocar uma linha ou conferir contexto, fique no DCC. Refatorar à mão por meia hora, vá para a IDE e volte para revisar e commitar.",
         "steps": [
           "No diff, clique em [Abrir arquivo inteiro] para ver e editar o arquivo completo.",
-          "Faça o ajuste e clique em [Salvar]. O Inspector atualiza o diff.",
+          "Faça o ajuste e clique em [Salvar]. [Mudanças] atualiza o diff.",
           "Para a IDE, use o botão de editor no topo do chat ou o atalho. Em [Escolher editor] você define o preferido.",
           "Volte ao DCC para revisar em [Mudanças], delegar ou commitar."
         ],
@@ -3852,12 +3851,12 @@
         "label": "Contas GitHub e GitLab",
         "summary": "Login nas CLIs para PRs, MRs e status de revisão.",
         "whatIs": "O DCC usa as CLIs oficiais gh e glab já autenticadas na sua máquina. Com elas conectadas, ele mostra contexto de PR ou MR, cria e abre pull requests e acompanha aprovações e pipelines.",
-        "whenToUse": "Na primeira vez que abrir um projeto com remoto GitHub ou GitLab, ou quando o Inspector avisar que a conta não está conectada.",
+        "whenToUse": "Na primeira vez que abrir um projeto com remoto GitHub ou GitLab, ou quando [Mudanças] avisar que a conta não está conectada.",
         "steps": [
           "No terminal, rode gh auth login para GitHub ou glab auth login para GitLab, inclusive instâncias self-managed.",
           "Abra Configurações e a seção [Conta].",
           "Em [Contas de forge], use [Conectar no app] para o DCC reconhecer a sessão da CLI.",
-          "Volte ao projeto. O Inspector passa a mostrar o contexto do PR ou MR da branch."
+          "Volte ao projeto. [Mudanças] passa a mostrar o contexto do PR ou MR da branch."
         ],
         "tip": "Os providers de IA seguem a mesma lógica: Claude, Codex, Gemini e Cursor precisam estar instalados e autenticados no computador.",
         "keywords": "conta github gitlab gh glab login autenticação forge pr mr credenciais"
