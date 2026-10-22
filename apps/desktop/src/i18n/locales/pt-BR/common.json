@@ -3434,6 +3434,21 @@
         "prompt": "Aqui você está engolindo a exceção. Propague o erro com contexto e cubra o caso com um teste.",
         "keywords": "diff revisar review anotar anotação comentar linha evidência mudanças code review"
       },
+      "prComments": {
+        "label": "Comentários do PR",
+        "summary": "Leia, responda e resolva o review do PR sem sair da tarefa.",
+        "whatIs": "Quando a tarefa tem PR aberto, as conversas do review aparecem no próprio arquivo: na linha comentada do diff do PR e numa lista no topo, que também guarda as conversas desatualizadas e as resolvidas. Em [Status da revisão], o bloco [Conversas do PR] junta as conversas de todos os arquivos.",
+        "whenToUse": "Quando um colega revisou o PR e você quer entender o comentário, responder ou pedir ao agente que trate de um ou de vários de uma vez.",
+        "steps": [
+          "Em [Mudanças], clique no contador de comentários do arquivo. O arquivo abre no diff do PR, já na primeira conversa aberta.",
+          "No diff local, clique em [Ver no diff do PR] para ver os comentários nas linhas, ou em [Mudanças locais] para voltar.",
+          "Na conversa, escreva e clique em [Responder], ou use [Resolver] e [Reabrir]. Isso é publicado no GitHub ou GitLab com a sua conta.",
+          "Para uma conversa só, use [Enviar ao agente] ou [Composer]. Para várias, marque-as em [Conversas do PR] e clique em [Pedir ao agente]: o pedido vai para o composer e você edita antes de enviar."
+        ],
+        "tip": "O agente trata o comentário como opinião do revisor e não responde nem resolve no GitHub; isso fica com você.",
+        "prompt": "Trate estas conversas do review. Se discordar de algum comentário, explique por quê em vez de mudar o código.",
+        "keywords": "comentário comentarios review revisão pr pull request conversa thread responder resolver reabrir desatualizada github gitlab colega"
+      },
       "agents": {
         "label": "Agente Revisor",
         "summary": "Confere as mudanças da tarefa e entrega achados prontos para corrigir.",

@@ -3434,6 +3434,21 @@
         "prompt": "You are swallowing the exception here. Propagate the error with context and cover the case with a test.",
         "keywords": "diff review annotate annotation comment line evidence changes code review"
       },
+      "prComments": {
+        "label": "PR comments",
+        "summary": "Read, reply to and resolve the PR review without leaving the task.",
+        "whatIs": "When the task has an open PR, review conversations show up on the file itself: on the commented line of the PR diff and in a list at the top, which also keeps outdated and resolved conversations. Under [Review status], the [PR conversations] block gathers the conversations of every file.",
+        "whenToUse": "When a teammate reviewed the PR and you want to understand a comment, reply, or ask the agent to handle one or several at once.",
+        "steps": [
+          "In [Changes], click the file's comment counter. The file opens in the PR diff, on the first open conversation.",
+          "On the local diff, click [See in PR diff] to see the comments on their lines, or [Local changes] to go back.",
+          "In the conversation, write and click [Reply], or use [Resolve] and [Reopen]. This is posted on GitHub or GitLab as you.",
+          "For one conversation, use [Send to agent] or [Composer]. For several, pick them in [PR conversations] and click [Ask agent]: the request lands in the composer for you to edit before sending."
+        ],
+        "tip": "The agent treats a comment as the reviewer's opinion and never replies or resolves on GitHub; that stays with you.",
+        "prompt": "Address these review conversations. If you disagree with a comment, explain why instead of changing the code.",
+        "keywords": "comment comments review pr pull request conversation thread reply resolve reopen outdated github gitlab teammate"
+      },
       "agents": {
         "label": "Reviewer agent",
         "summary": "Checks the task's changes and hands you findings ready to fix.",
