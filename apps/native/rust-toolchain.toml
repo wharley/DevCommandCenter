@@ -1,0 +1,4 @@
+[toolchain]
+# GPUI 0.3.9 needs std::hint::cold_path (stable since 1.95).
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]

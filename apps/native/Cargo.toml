@@ -1,0 +1,39 @@
+[package]
+name = "dcc-native"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Native GPUI frontend for Dev Command Center"
+
+[lib]
+name = "dcc_native"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dcc-native"
+path = "src/main.rs"
+
+[dependencies]
+# Pinned on purpose: same GPUI snapshot Monocode Native ships on.
+gpui = { package = "gpui-pre", version = "=0.3.9", default-features = false }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", default-features = false, features = ["font-kit", "runtime_shaders", "x11", "wayland"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+anyhow = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Tags the Metal layer as sRGB (see src/app/color_space.rs).
+objc2 = "0.6"
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "objc2", "CGColorSpace"] }
+raw-window-handle = "0.6"
+
+[dev-dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.9", default-features = false, features = ["test-support"] }
+tempfile = "3"
+
+# Own workspace: the native app resolves apart from the Tauri app until the switch.
+[workspace]
+resolver = "2"
+members = ["."]
