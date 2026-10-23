@@ -149,7 +149,7 @@ fn needs_you_drops_results_already_seen() {
         activity(AgentActivityState::Completed, Some("2026-10-23T14:45:00Z")),
     );
     let unread = |id: &str, _: Option<&str>| id != "done-seen";
-    let items = needs_you(&list, &activities, &unread, now());
+    let items = needs_you(&list, &activities, &[], &unread, now());
     let reasons: Vec<(&str, AttentionReason)> = items
         .iter()
         .map(|item| (item.workspace_id.as_str(), item.reason))

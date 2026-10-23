@@ -78,6 +78,15 @@ impl I18n {
         }
     }
 
+    /// Whether `key` exists (with its plural form for `args.count`), for
+    /// i18next's `defaultValue` fallback.
+    pub fn has(&self, key: &str, args: &Args) -> bool {
+        args.count
+            .and_then(|count| self.lookup(&format!("{key}{}", self.locale.plural_suffix(count))))
+            .or_else(|| self.lookup(key))
+            .is_some()
+    }
+
     fn lookup(&self, key: &str) -> Option<&str> {
         find(&self.catalog, key).or_else(|| find(&self.fallback, key))
     }

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use dcc_core::domain::attention::{
-    AgentActivity, AttentionItem, AttentionWorkspace, attention_items,
+    AgentActivity, AttentionItem, AttentionWorkspace, WorkspaceBlocker, attention_items,
 };
 
 use super::activity::TaskActivity;
@@ -216,11 +216,11 @@ pub fn next_running_task_id<'a>(
 }
 
 /// "Needs you": the shared rule, minus finished results the person has
-/// already opened (`is_unread`). Git/PR blockers join once they move out of
-/// the Tauri crate.
+/// already opened (`is_unread`).
 pub fn needs_you(
     tasks: &[TaskSummary],
     activities: &HashMap<String, TaskActivity>,
+    blockers: &[WorkspaceBlocker],
     is_unread: &dyn Fn(&str, Option<&str>) -> bool,
     now_ms: i64,
 ) -> Vec<AttentionItem> {
@@ -238,7 +238,7 @@ pub fn needs_you(
         .iter()
         .map(|(id, activity)| (id.clone(), activity.activity.clone()))
         .collect();
-    attention_items(&workspaces, &agent, &[], now_ms)
+    attention_items(&workspaces, &agent, blockers, now_ms)
         .into_iter()
         .filter(|item| {
             use dcc_core::domain::attention::AttentionReason::{Aborted, Completed};

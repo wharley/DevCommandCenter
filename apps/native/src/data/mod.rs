@@ -2,8 +2,10 @@
 //! desktop's rail shapes it. No GPUI types here; everything is testable.
 
 pub mod activity;
+pub mod git_watch;
 pub mod loader;
 pub mod rail;
+pub mod recap;
 pub mod seen;
 pub mod tasks;
 pub mod time;

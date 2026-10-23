@@ -1,12 +1,16 @@
 //! The rail's model: what it lists and in which order, as `sidebar.tsx`
 //! builds `flatItems`. Pure, so every rule is tested without a window.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use dcc_core::domain::attention::AttentionItem;
+use dcc_core::domain::attention::{
+    AgentActivityState, AttentionItem, BlockerFirstSeen, WorkspaceBlocker,
+};
 
+use crate::data::git_watch::{GitSnapshot, Watched};
 use crate::data::loader::SidebarData;
 use crate::data::rail::{self, FrozenOrder, TaskSectionId};
+use crate::data::recap::{self, RailMeta, Recap, RecapInput};
 use crate::data::seen::SeenResults;
 use crate::data::tasks::TaskSummary;
 
@@ -69,6 +73,19 @@ pub struct SidebarState {
     pub show_all_attention: bool,
     pub last_running_jump: Option<String>,
     pub now_ms: i64,
+    /// Git and PR state of the open tasks (`git_watch`).
+    pub git: HashMap<String, GitSnapshot>,
+    pub blockers: Vec<WorkspaceBlocker>,
+    pub first_seen: BlockerFirstSeen,
+}
+
+/// What a row shows from git: its live branch, the next-action recap and the
+/// PR/diff chips (`useWorkspaceRailRecap`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RowGit {
+    pub current_branch: String,
+    pub recap: Option<Recap>,
+    pub meta: Option<RailMeta>,
 }
 
 impl SidebarState {
@@ -85,9 +102,84 @@ impl SidebarState {
         rail::needs_you(
             &self.data.tasks,
             &self.data.activities,
+            &self.blockers,
             &|id, at| self.seen.is_unread(id, at),
             self.now_ms,
         )
+    }
+
+    /// The open tasks whose checkout the rail follows.
+    pub fn watched(&self) -> Vec<Watched> {
+        self.data
+            .tasks
+            .iter()
+            .filter(|task| task.status.is_selectable())
+            .map(|task| Watched {
+                id: task.id.clone(),
+                root: task
+                    .worktree_path
+                    .clone()
+                    .unwrap_or_else(|| task.root_path.clone()),
+                branch: task.branch.clone(),
+                finished_turn: self
+                    .data
+                    .activities
+                    .get(&task.id)
+                    .is_some_and(|activity| !activity.is_turn_open()),
+            })
+            .collect()
+    }
+
+    /// Delegated edits waiting on the person for a task.
+    pub fn pending_reviews(&self, task_id: &str) -> usize {
+        self.data.review_pending.get(task_id).copied().unwrap_or(0)
+    }
+
+    /// `useWorkspaceRailRecap`: nothing until git and the PR have answered
+    /// (unless a turn is open), and, for a finished clean task without a PR,
+    /// until the branch diff has too.
+    pub fn row_git(&self, task: &TaskSummary) -> RowGit {
+        let fallback = RowGit {
+            current_branch: task.branch.clone(),
+            ..RowGit::default()
+        };
+        if !task.status.is_selectable() {
+            return fallback;
+        }
+        let Some(snapshot) = self.git.get(&task.id) else {
+            return fallback;
+        };
+        let current_branch = snapshot
+            .current_branch()
+            .unwrap_or(&task.branch)
+            .to_string();
+        let meta = recap::build_meta(&current_branch, snapshot.git.as_ref(), snapshot.pr.as_ref());
+        let activity = self.data.activities.get(&task.id);
+        let turn_open = activity.is_some_and(|activity| activity.is_turn_open());
+        let pending = snapshot.git_at.is_none() || snapshot.pr_at.is_none();
+        let needs_diff = activity.is_some()
+            && !turn_open
+            && snapshot.is_clean()
+            && snapshot.pr.as_ref().is_some_and(|pr| pr.number.is_none());
+        let recap = if (!turn_open && pending) || (needs_diff && snapshot.diff_at.is_none()) {
+            None
+        } else {
+            recap::build_recap(&RecapInput {
+                branch: &current_branch,
+                turn_running: activity
+                    .is_some_and(|activity| activity.activity.state == AgentActivityState::Active),
+                has_activity: activity.is_some(),
+                git: snapshot.git.as_ref(),
+                pr: snapshot.pr.as_ref(),
+                committed_vs_base: snapshot.committed_vs_base.unwrap_or(0),
+                pending_delegations: self.pending_reviews(&task.id),
+            })
+        };
+        RowGit {
+            current_branch,
+            recap,
+            meta,
+        }
     }
 
     /// What "Needs you" shows: frozen while hovered, then cut to the preview.

@@ -3,8 +3,8 @@
 
 use gpui::{App, ClickEvent, Context, Hsla, SharedString, Window, div, prelude::*, px};
 
-use super::Sidebar;
 use super::row_status::{RowContext, status};
+use super::{Sidebar, meta_chips};
 use crate::data::tasks::path_leaf;
 use crate::project::{ProjectGlyph, ProviderIcon};
 use crate::theme::ActiveTheme;
@@ -38,16 +38,20 @@ pub fn render(
         .map(|project| project.display_name.clone())
         .or_else(|| path_leaf(&task.root_path));
     let provider = sidebar.state.data.provider_ids.get(task_id).cloned();
+    let git = sidebar.state.row_git(task);
     let state_line = status(
         &RowContext {
             task,
             activity,
+            git: &git,
+            pending_reviews: sidebar.state.pending_reviews(task_id),
             unseen_result: unseen,
             compact,
             now_ms: sidebar.state.now_ms,
         },
         cx,
     );
+    let chips = git.meta.as_ref().map(|meta| meta_chips::render(meta, cx));
     let member_count = task.member_workspace_ids.len();
     let pinned = task.pinned_at.is_some();
 
@@ -146,7 +150,8 @@ pub fn render(
                     line.child(ProviderIcon::new(&provider).size(11.0).opacity(0.75))
                 })
                 .children(state_line),
-        );
+        )
+        .children(chips);
 
     div()
         .pl(px(12.0))

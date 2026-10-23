@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use dcc_core::domain::delegation::DelegationStatus;
 use dcc_core::domain::workspace::WorkspaceId;
 use dcc_core::ports::{DelegationRepo, RepositoryRepo, WorkspaceBundleRepo, WorkspaceRepo};
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
@@ -40,6 +41,8 @@ pub struct SidebarData {
     pub provider_ids: HashMap<String, String>,
     /// Notes still open, across projects (the rail's Notes count).
     pub open_notes: usize,
+    /// Delegated edits waiting for the person to apply or discard, by task.
+    pub review_pending: HashMap<String, usize>,
 }
 
 pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
@@ -77,10 +80,19 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         .filter(|task| !ideas.contains(&task.root_path))
         .collect();
 
-    let delegated: HashSet<String> = block_on(sessions.list_delegations(None, None))?
-        .into_iter()
-        .filter_map(|delegation| delegation.child_session_id.map(|id| id.0))
+    let delegations = block_on(sessions.list_delegations(None, None))?;
+    let delegated: HashSet<String> = delegations
+        .iter()
+        .filter_map(|delegation| delegation.child_session_id.as_ref().map(|id| id.0.clone()))
         .collect();
+    let mut review_pending: HashMap<String, usize> = HashMap::new();
+    for delegation in &delegations {
+        if delegation.status == DelegationStatus::ReviewPending {
+            *review_pending
+                .entry(delegation.workspace_id.0.clone())
+                .or_default() += 1;
+        }
+    }
     let mut activities = HashMap::new();
     let mut provider_ids = HashMap::new();
     for task in &tasks {
@@ -110,5 +122,6 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         activities,
         provider_ids,
         open_notes,
+        review_pending,
     })
 }

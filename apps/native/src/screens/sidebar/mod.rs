@@ -9,6 +9,7 @@ mod footer;
 mod header;
 mod labels;
 mod list;
+mod meta_chips;
 mod navigation;
 mod row;
 mod row_status;
@@ -18,12 +19,13 @@ mod tasks_header;
 
 pub use navigation::NavPage;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use gpui::{Context, EventEmitter, ListAlignment, ListState, Task, Window, div, prelude::*, px};
 
+use crate::data::git_watch;
 use crate::data::loader::{self, SidebarData};
 use crate::data::seen::SeenResults;
 use crate::data::tasks::{Project, TaskSummary};
@@ -38,6 +40,9 @@ use state::{RailItem, SidebarState};
 const REFRESH: Duration = Duration::from_secs(2);
 /// Mascot frame length while an agent runs (`dcc-mascot` 0.9s, two steps).
 const MASCOT_STEP: Duration = Duration::from_millis(450);
+/// How often the git watcher wakes; each task is only re-read when its own
+/// cadence (git 30s, PR 60s) is due.
+const GIT_WAKE: Duration = Duration::from_secs(5);
 
 /// What the sidebar asks the rest of the app to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,6 +76,7 @@ pub struct Sidebar {
     unseen_results: HashSet<String>,
     _refresh: Task<()>,
     _clock: Task<()>,
+    _git: Task<()>,
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
@@ -104,7 +110,65 @@ impl Sidebar {
             unseen_results: HashSet::new(),
             _refresh: Self::refresh_loop(cx),
             _clock: Self::clock_loop(cx),
+            _git: Self::git_loop(cx),
         }
+    }
+
+    /// Git and PR of every open task, off the UI thread (`git_watch`).
+    fn git_loop(cx: &mut Context<Self>) -> Task<()> {
+        let db_path = loader::database_path();
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(GIT_WAKE).await;
+                let Ok((watched, cache)) = this.update(cx, |sidebar, _| {
+                    (sidebar.state.watched(), sidebar.state.git.clone())
+                }) else {
+                    return;
+                };
+                let path = db_path.clone();
+                let now = time::now_ms();
+                let cache = cx
+                    .background_executor()
+                    .spawn(async move { git_watch::refresh(&path, &watched, cache, now) })
+                    .await;
+                if this
+                    .update(cx, |sidebar, cx| sidebar.apply_git(cache, cx))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        })
+    }
+
+    fn apply_git(
+        &mut self,
+        cache: HashMap<String, git_watch::GitSnapshot>,
+        cx: &mut Context<Self>,
+    ) {
+        let open: Vec<String> = self
+            .state
+            .data
+            .tasks
+            .iter()
+            .filter(|task| task.status.is_selectable())
+            .map(|task| task.id.clone())
+            .collect();
+        let state = &mut self.state;
+        let blockers = git_watch::blockers(
+            &open,
+            &cache,
+            &state.data.review_pending,
+            &mut state.first_seen,
+            &chrono::Utc::now().to_rfc3339(),
+        );
+        if cache == state.git && blockers == state.blockers {
+            return;
+        }
+        state.git = cache;
+        state.blockers = blockers;
+        self.sync_items();
+        cx.notify();
     }
 
     fn refresh_loop(cx: &mut Context<Self>) -> Task<()> {

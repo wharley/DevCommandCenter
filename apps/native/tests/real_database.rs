@@ -19,6 +19,7 @@ fn loads_the_sidebar_from_a_database_copy() {
     let needs = rail::needs_you(
         &data.tasks,
         &data.activities,
+        &[],
         &|id, at| seen.is_unread(id, at),
         now,
     );
@@ -50,4 +51,51 @@ fn loads_the_sidebar_from_a_database_copy() {
         needs.len()
     );
     assert!(!data.tasks.is_empty());
+}
+
+#[test]
+#[ignore]
+fn reads_git_and_pull_requests_for_open_tasks() {
+    use dcc_native::data::git_watch;
+    use dcc_native::screens::sidebar::state::SidebarState;
+
+    let path = loader::database_path();
+    let data = loader::load(&path, "Nova tarefa").expect("load");
+    let mut state = SidebarState {
+        data,
+        now_ms: time::now_ms(),
+        ..SidebarState::default()
+    };
+    let started = Instant::now();
+    let cache = git_watch::refresh(&path, &state.watched(), Default::default(), state.now_ms);
+    println!(
+        "git + PR for {} tasks in {:?}",
+        cache.len(),
+        started.elapsed()
+    );
+    let open: Vec<String> = state.watched().into_iter().map(|task| task.id).collect();
+    state.blockers = git_watch::blockers(
+        &open,
+        &cache,
+        &state.data.review_pending,
+        &mut state.first_seen,
+        "2026-10-23T12:00:00Z",
+    );
+    state.git = cache;
+    for task in &state.data.tasks {
+        let git = state.row_git(task);
+        println!(
+            "{} | branch {} | recap {:?} | meta {:?}",
+            task.display_title(),
+            git.current_branch,
+            git.recap.map(|recap| recap.message_key),
+            git.meta.map(|meta| (
+                meta.pr_number,
+                meta.pr_state,
+                meta.additions,
+                meta.deletions
+            )),
+        );
+    }
+    println!("blockers: {:?}", state.blockers);
 }
