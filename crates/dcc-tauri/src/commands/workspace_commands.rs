@@ -50,6 +50,9 @@ pub use dcc_core::domain::workspace_git::{
     WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitStatusOutput,
 };
 pub(crate) use dcc_infra::workspace_git::read_workspace_git_status as workspace_git_status_inner;
+use dcc_infra::workspace_actions::ensure_workspace_is_not_a_bundle_member;
+#[cfg(test)]
+use dcc_infra::workspace_actions::{normalize_snooze_until, normalize_workspace_name};
 use dcc_infra::workspace_git::{
     capture_staged_snapshot, file_name_from_path, git_internal_path_exists, join_workspace_path,
     normalize_git_relative_path, resolve_conflict_count, staged_snapshot_fingerprint,
@@ -12934,16 +12937,7 @@ pub struct RenameWorkspaceInput {
     pub name: String,
 }
 
-fn normalize_workspace_name(name: &str) -> Result<String, String> {
-    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
-    if name.is_empty() {
-        return Err("workspace name cannot be empty".to_string());
-    }
-    if name.chars().count() > 120 {
-        return Err("workspace name cannot exceed 120 characters".to_string());
-    }
-    Ok(name)
-}
+
 
 #[derive(Clone, Debug, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -12968,23 +12962,7 @@ pub struct DeleteWorkspaceBundleInput {
     pub expected_remote_targets: Vec<WorkspaceRemoteBranchDeletionTarget>,
 }
 
-async fn ensure_workspace_is_not_a_bundle_member(
-    repo: &SqliteWorkspaceRepo,
-    workspace_id: &WorkspaceId,
-    operation: &str,
-) -> Result<(), String> {
-    let Some(summary) = repo
-        .get_workspace_bundle_for_workspace(workspace_id)
-        .await
-        .map_err(|error| error.to_string())?
-    else {
-        return Ok(());
-    };
-    Err(format!(
-        "workspace {} belongs to multi-workspace '{}' ({}); {operation} the multi-workspace instead",
-        workspace_id.0, summary.bundle.name, summary.bundle.id.0
-    ))
-}
+
 
 #[tauri::command]
 pub async fn archive_workspace(
@@ -13000,19 +12978,8 @@ pub async fn archive_workspace_with_state(
     input: WorkspaceIdInput,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-    let id = WorkspaceId(input.workspace_id);
-    ensure_workspace_is_not_a_bundle_member(&repo, &id, "archive").await?;
-    let mut workspace = repo
-        .get_workspace(&id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
-    workspace.state = WorkspaceState::Archived;
-    workspace.pinned_at = None;
-    workspace.updated_at = Utc::now().to_rfc3339();
-    repo.save_workspace(&workspace)
-        .await
-        .map_err(|e| e.to_string())
+    dcc_infra::workspace_actions::archive_workspace(&repo, input.workspace_id).await?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -13030,25 +12997,7 @@ pub async fn set_workspace_pinned(
     input: SetWorkspacePinnedInput,
 ) -> Result<Workspace, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let id = WorkspaceId(input.workspace_id);
-    let mut workspace = repo
-        .get_workspace(&id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
-    if input.pinned
-        && matches!(
-            workspace.state,
-            WorkspaceState::Archived | WorkspaceState::Completed
-        )
-    {
-        return Err("only active tasks can be pinned".to_string());
-    }
-    workspace.pinned_at = input.pinned.then(|| Utc::now().to_rfc3339());
-    repo.save_workspace(&workspace)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(workspace)
+    dcc_infra::workspace_actions::set_workspace_pinned(&repo, input.workspace_id, input.pinned).await
 }
 
 /// Snoozes an active task until `until`, or wakes it (`None`).
@@ -13058,76 +13007,16 @@ pub async fn set_workspace_snooze(
     input: SetWorkspaceSnoozeInput,
 ) -> Result<Workspace, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let id = WorkspaceId(input.workspace_id);
-    let mut workspace = repo
-        .get_workspace(&id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
-    workspace.snoozed_until = normalize_snooze_until(input.until.as_deref(), Utc::now(), &workspace.state)?;
-    repo.save_workspace(&workspace)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(workspace)
+    dcc_infra::workspace_actions::set_workspace_snooze(&repo, input.workspace_id, input.until.as_deref()).await
 }
 
-fn normalize_snooze_until(
-    until: Option<&str>,
-    now: chrono::DateTime<Utc>,
-    state: &WorkspaceState,
-) -> Result<Option<String>, String> {
-    let Some(until) = until.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Ok(None);
-    };
-    if matches!(state, WorkspaceState::Archived | WorkspaceState::Completed) {
-        return Err("only active tasks can be snoozed".to_string());
-    }
-    let at = chrono::DateTime::parse_from_rfc3339(until)
-        .map_err(|_| "snooze time must be an RFC 3339 timestamp".to_string())?
-        .with_timezone(&Utc);
-    if at <= now {
-        return Err("snooze time must be in the future".to_string());
-    }
-    if at > now + chrono::Duration::days(60) {
-        return Err("a task can be snoozed for at most 60 days".to_string());
-    }
-    Ok(Some(at.to_rfc3339()))
-}
+
 
 async fn rename_workspace_in_repo(
     repo: &SqliteWorkspaceRepo,
     input: RenameWorkspaceInput,
 ) -> Result<Workspace, String> {
-    let name = normalize_workspace_name(&input.name)?;
-    let id = WorkspaceId(input.workspace_id);
-    let mut workspace = repo
-        .get_workspace(&id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
-    let now = Utc::now().to_rfc3339();
-
-    if let Some(mut summary) = repo
-        .get_workspace_bundle_for_workspace(&id)
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        if summary.bundle.primary_workspace_id != id {
-            return Err("only the primary multi-project workspace can rename the task".to_string());
-        }
-        summary.bundle.name = name.clone();
-        summary.bundle.updated_at = now.clone();
-        repo.save_workspace_bundle(&summary.bundle, &summary.members)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-
-    workspace.name = Some(name);
-    workspace.updated_at = now;
-    repo.save_workspace(&workspace)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(workspace)
+    dcc_infra::workspace_actions::rename_workspace(repo, input.workspace_id, &input.name).await
 }
 
 #[tauri::command]
@@ -13144,19 +13033,7 @@ pub async fn complete_workspace_with_state(
     input: WorkspaceIdInput,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-    let id = WorkspaceId(input.workspace_id);
-    ensure_workspace_is_not_a_bundle_member(&repo, &id, "complete").await?;
-    let mut workspace = repo
-        .get_workspace(&id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
-    workspace.state = WorkspaceState::Completed;
-    workspace.pinned_at = None;
-    workspace.updated_at = Utc::now().to_rfc3339();
-    repo.save_workspace(&workspace)
-        .await
-        .map_err(|e| e.to_string())?;
+    let workspace = dcc_infra::workspace_actions::complete_workspace(&repo, input.workspace_id).await?;
 
     // Completing a task is the normal happy-path checkpoint. Keep the UI
     // responsive and let the durable outbox retry if the sidecar is busy or
@@ -13180,17 +13057,8 @@ pub async fn restore_workspace(
     input: WorkspaceIdInput,
 ) -> Result<(), String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-    let id = WorkspaceId(input.workspace_id);
-    ensure_workspace_is_not_a_bundle_member(&repo, &id, "restore").await?;
-    let mut workspace = repo
-        .get_workspace(&id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
-    workspace.state = WorkspaceState::Ready;
-    repo.save_workspace(&workspace)
-        .await
-        .map_err(|e| e.to_string())
+    dcc_infra::workspace_actions::restore_workspace(&repo, input.workspace_id).await?;
+    Ok(())
 }
 
 #[tauri::command]

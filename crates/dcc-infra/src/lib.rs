@@ -8,6 +8,7 @@ pub mod events;
 pub mod fs;
 pub mod forge;
 pub mod git;
+pub mod workspace_actions;
 pub mod workspace_git;
 mod git_command;
 mod git_parsing;
