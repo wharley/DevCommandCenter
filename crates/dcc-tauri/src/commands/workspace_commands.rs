@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -46,6 +46,15 @@ use dcc_core::{
 };
 #[cfg(test)]
 use dcc_infra::git::read_workspace_validation_config;
+pub use dcc_core::domain::workspace_git::{
+    WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitStatusOutput,
+};
+pub(crate) use dcc_infra::workspace_git::read_workspace_git_status as workspace_git_status_inner;
+use dcc_infra::workspace_git::{
+    capture_staged_snapshot, file_name_from_path, git_internal_path_exists, join_workspace_path,
+    normalize_git_relative_path, resolve_conflict_count, staged_snapshot_fingerprint,
+    StagedSnapshot,
+};
 use dcc_infra::{
     db::{SqliteSessionRepo, SqliteWorkspaceRepo},
     git::{
@@ -73,8 +82,7 @@ use crate::{
     commands::workspace_support::{
         broken_workspace_message, broken_workspace_reason_by_root, cleanup_workspace_files,
         ensure_pushable_branch, find_workspace_by_root,
-        next_available_branch_name, preferred_workspace_branch_name, preflight_workspace_root,
-        resolve_branch_diff_base, resolve_current_branch_name, resolve_current_commit_sha,
+        next_available_branch_name, preferred_workspace_branch_name, preflight_workspace_root, resolve_current_branch_name, resolve_current_commit_sha,
         resolve_default_remote_name, resolve_workspace_active_root,
         resolve_workspace_broken_reason, resolve_workspace_setup_root,
         resolve_workspace_target_branch, run_git_network_output_with_workspace_auth,
@@ -93,8 +101,8 @@ use crate::{
     },
     events::TauriEventBus,
     git::{
-        git_command_succeeds, git_output_err, parse_name_status_z, parse_numstat_z,
-        run_git_network_output, run_git_output, run_git_output_owned, split_null_terminated_fields,
+        git_command_succeeds, git_output_err, parse_name_status_z,
+        run_git_network_output, run_git_output, run_git_output_owned,
     },
     guarded_undo_runtime::WorkspaceMutationRunError,
     state::{
@@ -580,34 +588,9 @@ pub struct WorkspaceGitStatusInput {
     pub workspace_root: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitChangeEntry {
-    /// Repo-relative path (posix separators).
-    pub path: String,
-    pub name: String,
-    pub absolute_path: String,
-    /// Single-letter status (index/worktree combined display).
-    pub status: String,
-    pub insertions: u32,
-    pub deletions: u32,
-}
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitStatusOutput {
-    pub staged: Vec<WorkspaceGitChangeEntry>,
-    pub unstaged: Vec<WorkspaceGitChangeEntry>,
-    pub staged_fingerprint: String,
-    pub current_branch: Option<String>,
-    pub ahead_of_remote_count: u32,
-    pub behind_of_remote_count: u32,
-    pub conflict_count: u32,
-    pub merge_in_progress: bool,
-    /// The repository has at least one remote, so push and pull requests have
-    /// somewhere to go. Without one, delivery stops at a local commit.
-    pub has_remote: bool,
-}
+
+
 
 /// The only input accepted by the commit-message suggestion operation is the
 /// repository's staged Git state. In particular, this contract intentionally
@@ -1008,9 +991,7 @@ pub struct WorkspaceContinueFromBaseBranchOutput {
     pub workspace: Workspace,
 }
 
-fn normalize_git_relative_path(path: &str) -> String {
-    path.trim().replace('\\', "/")
-}
+
 
 fn is_path_inside(path: &Path, root: &Path) -> bool {
     path.starts_with(root)
@@ -1310,52 +1291,11 @@ fn resolve_default_branch_name(root: &str) -> Result<String, String> {
     Ok("main".to_string())
 }
 
-fn resolve_upstream_branch_counts(root: &str) -> Result<(u32, u32), String> {
-    let output = run_git_output(
-        root,
-        &["rev-list", "--left-right", "--count", "@{u}...HEAD"],
-    )?;
-    if !output.status.success() {
-        return Ok((0, 0));
-    }
 
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let mut parts = raw.split_whitespace();
-    let behind = parts
-        .next()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(0);
-    let ahead = parts
-        .next()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(0);
-    Ok((ahead, behind))
-}
 
-/// Unknown counts as present: hiding push on a git hiccup would be worse than
-/// offering it to a repository that turns out to have no remote.
-fn resolve_has_remote(root: &str) -> bool {
-    match run_git_output(root, &["remote"]) {
-        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .any(|line| !line.trim().is_empty()),
-        _ => true,
-    }
-}
 
-fn resolve_conflict_count(root: &str) -> Result<u32, String> {
-    let output = run_git_output(root, &["diff", "--name-only", "--diff-filter=U"])?;
-    if !output.status.success() {
-        return Ok(0);
-    }
 
-    let count = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .count();
-    Ok(count as u32)
-}
+
 
 const MAX_CONFLICT_TEXT_BYTES: usize = 2 * 1024 * 1024;
 
@@ -1527,24 +1467,7 @@ fn read_conflict_result(
     Ok(conflict_content(Some(bytes), None))
 }
 
-fn git_internal_path_exists(root: &str, name: &str) -> bool {
-    let Ok(output) = run_git_output(root, &["rev-parse", "--git-path", name]) else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if raw.is_empty() {
-        return false;
-    }
-    let path = PathBuf::from(raw);
-    if path.is_absolute() {
-        path.exists()
-    } else {
-        PathBuf::from(root).join(path).exists()
-    }
-}
+
 
 fn resolve_conflict_operation(root: &str, has_conflicts: bool) -> WorkspaceGitConflictOperation {
     if git_internal_path_exists(root, "MERGE_HEAD") {
@@ -3522,21 +3445,9 @@ pub async fn workspace_git_discard_file(
     Ok(())
 }
 
-fn parse_git_numstat_maps(root: &str, cached: bool) -> Result<HashMap<String, (u32, u32)>, String> {
-    let output = if cached {
-        run_git_output(root, &["diff", "--cached", "--numstat", "-z"])?
-    } else {
-        run_git_output(root, &["diff", "--numstat", "-z"])?
-    };
-    if !output.status.success() {
-        return Ok(HashMap::new());
-    }
-    Ok(parse_numstat_z(&output.stdout))
-}
 
-fn join_workspace_path(root: &str, rel: &str) -> String {
-    PathBuf::from(root).join(rel).to_string_lossy().to_string()
-}
+
+
 
 /// `git diff --cached --quiet` → `true` if there is at least one staged change.
 fn git_has_staged_changes(root: &str) -> Result<bool, String> {
@@ -3554,39 +3465,11 @@ fn git_has_staged_changes(root: &str) -> Result<bool, String> {
     ))
 }
 
-struct StagedSnapshot {
-    name_status: Vec<u8>,
-    patch: Vec<u8>,
-    fingerprint: String,
-}
 
-fn capture_staged_snapshot(root: &str) -> Result<StagedSnapshot, String> {
-    let name_status = run_git_output(root, &["diff", "--cached", "--name-status", "-z"])?;
-    if !name_status.status.success() {
-        return Err(git_output_err(
-            "git diff --cached --name-status",
-            &name_status.stderr,
-        ));
-    }
-    let patch = run_git_output(root, &["diff", "--cached", "--patch", "--no-ext-diff"])?;
-    if !patch.status.success() {
-        return Err(git_output_err("git diff --cached", &patch.stderr));
-    }
-    let mut hasher = Sha256::new();
-    hasher.update(b"dcc-staged-snapshot-v1\0");
-    hasher.update(&name_status.stdout);
-    hasher.update(b"\0");
-    hasher.update(&patch.stdout);
-    Ok(StagedSnapshot {
-        name_status: name_status.stdout,
-        patch: patch.stdout,
-        fingerprint: format!("{:x}", hasher.finalize()),
-    })
-}
 
-fn staged_snapshot_fingerprint(root: &str) -> Result<String, String> {
-    Ok(capture_staged_snapshot(root)?.fingerprint)
-}
+
+
+
 
 fn staged_snapshot_changes(root: &str, snapshot: &StagedSnapshot) -> Vec<WorkspaceGitChangeEntry> {
     parse_name_status_z(&snapshot.name_status)
@@ -4737,119 +4620,9 @@ pub async fn workspace_delivery_recovery_execute_with_state(
     })
 }
 
-fn file_name_from_path(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string())
-}
 
-/// `git status --porcelain` → staged / unstaged rows.
-pub(crate) fn workspace_git_status_inner(workspace_root: &str) -> Result<WorkspaceGitStatusOutput, String> {
-    let root = workspace_root.trim();
-    if root.is_empty() {
-        return Ok(WorkspaceGitStatusOutput {
-            staged: vec![],
-            unstaged: vec![],
-            staged_fingerprint: String::new(),
-            current_branch: None,
-            ahead_of_remote_count: 0,
-            behind_of_remote_count: 0,
-            conflict_count: 0,
-            merge_in_progress: false,
-            has_remote: false,
-        });
-    }
 
-    let cached_stats = parse_git_numstat_maps(root, true)?;
-    let unstaged_stats = parse_git_numstat_maps(root, false)?;
 
-    let staged_output = run_git_output(root, &["diff", "--cached", "--name-status", "-z"])?;
-    if !staged_output.status.success() {
-        return Err(format!(
-            "git diff --cached --name-status failed: {}",
-            String::from_utf8_lossy(&staged_output.stderr)
-        ));
-    }
-    let unstaged_output = run_git_output(root, &["diff", "--name-status", "-z"])?;
-    if !unstaged_output.status.success() {
-        return Err(format!(
-            "git diff --name-status failed: {}",
-            String::from_utf8_lossy(&unstaged_output.stderr)
-        ));
-    }
-    let untracked_output =
-        run_git_output(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
-    if !untracked_output.status.success() {
-        return Err(format!(
-            "git ls-files --others failed: {}",
-            String::from_utf8_lossy(&untracked_output.stderr)
-        ));
-    }
-
-    let mut staged: Vec<WorkspaceGitChangeEntry> = parse_name_status_z(&staged_output.stdout)
-        .into_iter()
-        .map(|entry| {
-            let (ins, del) = cached_stats.get(&entry.path).copied().unwrap_or((0, 0));
-            WorkspaceGitChangeEntry {
-                path: entry.path.clone(),
-                name: file_name_from_path(&entry.path),
-                absolute_path: join_workspace_path(root, &entry.path),
-                status: entry.status,
-                insertions: ins,
-                deletions: del,
-            }
-        })
-        .collect();
-
-    let mut unstaged: Vec<WorkspaceGitChangeEntry> = parse_name_status_z(&unstaged_output.stdout)
-        .into_iter()
-        .map(|entry| {
-            let (ins, del) = unstaged_stats.get(&entry.path).copied().unwrap_or((0, 0));
-            WorkspaceGitChangeEntry {
-                path: entry.path.clone(),
-                name: file_name_from_path(&entry.path),
-                absolute_path: join_workspace_path(root, &entry.path),
-                status: entry.status,
-                insertions: ins,
-                deletions: del,
-            }
-        })
-        .collect();
-
-    for path in split_null_terminated_fields(&untracked_output.stdout) {
-        unstaged.push(WorkspaceGitChangeEntry {
-            path: path.clone(),
-            name: file_name_from_path(&path),
-            absolute_path: join_workspace_path(root, &path),
-            status: "?".to_string(),
-            insertions: 0,
-            deletions: 0,
-        });
-    }
-
-    staged.sort_by(|a, b| a.path.cmp(&b.path));
-    unstaged.sort_by(|a, b| a.path.cmp(&b.path));
-
-    let current_branch = resolve_current_branch_name(root).ok();
-    let (ahead_of_remote_count, behind_of_remote_count) =
-        resolve_upstream_branch_counts(root).unwrap_or((0, 0));
-    let conflict_count = resolve_conflict_count(root).unwrap_or(0);
-    let merge_in_progress = git_internal_path_exists(root, "MERGE_HEAD");
-    let has_remote = resolve_has_remote(root);
-
-    Ok(WorkspaceGitStatusOutput {
-        staged,
-        unstaged,
-        staged_fingerprint: staged_snapshot_fingerprint(root)?,
-        current_branch,
-        ahead_of_remote_count,
-        behind_of_remote_count,
-        conflict_count,
-        merge_in_progress,
-        has_remote,
-    })
-}
 
 #[tauri::command]
 pub async fn workspace_git_status(
@@ -13098,12 +12871,7 @@ pub struct WorkspaceGitBranchDiffInput {
     pub workspace_root: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitBranchDiffOutput {
-    pub changes: Vec<WorkspaceGitChangeEntry>,
-    pub base_branch: Option<String>,
-}
+
 
 /// Returns files changed on HEAD vs the upstream/base branch (`git diff <base>...HEAD`).
 /// Falls back through: @{upstream} → origin/HEAD → origin/main → origin/master.
@@ -13126,75 +12894,10 @@ pub async fn workspace_git_branch_diff_with_state(
         return Err("workspace_root is empty".to_string());
     }
 
-    let protected_branch = resolve_workspace_target_branch(&state, root).await;
-    let base = resolve_branch_diff_base(root, protected_branch.as_deref());
-
-    let changes = match base {
-        Some(ref b) => compute_branch_diff(root, b)?,
-        None => vec![],
-    };
-
-    Ok(WorkspaceGitBranchDiffOutput {
-        changes,
-        base_branch: base,
-    })
+    dcc_infra::workspace_git::workspace_git_branch_diff(&state.db_path, root).await
 }
 
-fn compute_branch_diff(root: &str, base: &str) -> Result<Vec<WorkspaceGitChangeEntry>, String> {
-    let range = format!("{base}...HEAD");
 
-    // name-status
-    let ns_out = run_git_output_owned(
-        root,
-        vec![
-            OsString::from("diff"),
-            OsString::from("--name-status"),
-            OsString::from("-z"),
-            OsString::from(&range),
-        ],
-    )?;
-    if !ns_out.status.success() {
-        return Err(git_output_err("git diff --name-status", &ns_out.stderr));
-    }
-
-    // numstat
-    let stat_map = {
-        let stat_out = run_git_output_owned(
-            root,
-            vec![
-                OsString::from("diff"),
-                OsString::from("--numstat"),
-                OsString::from("-z"),
-                OsString::from(&range),
-            ],
-        )?;
-        if stat_out.status.success() {
-            parse_numstat_z(&stat_out.stdout)
-        } else {
-            HashMap::new()
-        }
-    };
-
-    let mut entries = Vec::new();
-    for entry in parse_name_status_z(&ns_out.stdout) {
-        let path = entry.path;
-        let status = entry.status;
-        let (insertions, deletions) = stat_map.get(&path).copied().unwrap_or((0, 0));
-        let name = Path::new(&path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.clone());
-        entries.push(WorkspaceGitChangeEntry {
-            path: normalize_git_relative_path(&path),
-            name,
-            absolute_path: join_workspace_path(root, &path),
-            status,
-            insertions,
-            deletions,
-        });
-    }
-    Ok(entries)
-}
 
 /// Immediate child directories of `path` (absolute paths), sorted.
 #[tauri::command]

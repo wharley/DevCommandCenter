@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 use reqwest::blocking::Client;
 use reqwest::header::SERVER;
 
-use crate::commands::forge::remote::{parse_remote, ParsedRemote};
-use crate::commands::forge::resolve_cli_binary;
-use crate::commands::forge_commands::ForgeCliProvider;
-use dcc_infra::process::run_command_with_timeout;
+use crate::forge::remote::{parse_remote, ParsedRemote};
+use crate::forge::resolve_cli_binary;
+use dcc_core::domain::forge::ForgeCliProvider;
+use crate::process::run_command_with_timeout;
 
 const HTTP_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const CLI_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -82,7 +82,7 @@ impl DetectorProbes for LiveDetectorProbes {
     }
 }
 
-pub(crate) fn detect_provider_for_repo(
+pub fn detect_provider_for_repo(
     remote_url: Option<&str>,
     repo_root: Option<&Path>,
 ) -> Option<ForgeCliProvider> {
@@ -95,7 +95,7 @@ pub(crate) fn detect_provider_for_repo(
 }
 
 #[allow(dead_code)]
-pub(crate) fn detect_provider_for_repo_offline(
+pub fn detect_provider_for_repo_offline(
     remote_url: Option<&str>,
     repo_root: Option<&Path>,
 ) -> Option<ForgeCliProvider> {

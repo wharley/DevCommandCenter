@@ -36,39 +36,14 @@ const PR_STATUS_TTL: Duration = Duration::from_secs(120);
 
 pub use dcc_core::domain::attention::{
     attention_items, classify_git_blockers, derive_agent_activity, timestamp_ms, AgentActivity,
+    BlockerFirstSeen,
     AgentActivityState, AttentionItem, AttentionReason, AttentionWorkspace, PrSnapshot,
     SessionActivityInput, WorkspaceAttentionBlockersOutput, WorkspaceBlocker, WorkspaceBlockerKind,
 };
 
-/// When each blocker first showed up, so "Needs you" can order tasks by when
-/// they came back to the person.
-#[derive(Default)]
-struct BlockerFirstSeen {
-    primed: bool,
-    seen: HashMap<(String, WorkspaceBlockerKind), Option<String>>,
-}
 
-impl BlockerFirstSeen {
-    /// Stamps the blockers found in this pass and forgets the ones that went
-    /// away, so a blocker that comes back is stamped again. Blockers present
-    /// on the first pass get no time: stamping them "now" would put blockers
-    /// older than the app above fresh results.
-    fn stamp(&mut self, blockers: &mut [WorkspaceBlocker], now: &str) {
-        let mut next = HashMap::new();
-        for blocker in blockers.iter_mut() {
-            let key = (blocker.workspace_id.clone(), blocker.kind);
-            let since = match self.seen.get(&key) {
-                Some(since) => since.clone(),
-                None if self.primed => Some(now.to_string()),
-                None => None,
-            };
-            blocker.since = since.clone();
-            next.insert(key, since);
-        }
-        self.seen = next;
-        self.primed = true;
-    }
-}
+
+
 
 fn blocker_first_seen() -> &'static Mutex<BlockerFirstSeen> {
     static FIRST_SEEN: OnceLock<Mutex<BlockerFirstSeen>> = OnceLock::new();

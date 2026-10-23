@@ -23,7 +23,7 @@ const ERROR_MARKERS: &[&str] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FailedCheck {
+pub struct FailedCheck {
     pub name: String,
     pub workflow: Option<String>,
     pub link: Option<String>,
@@ -32,7 +32,7 @@ pub(crate) struct FailedCheck {
 }
 
 /// Checks from `gh pr checks --json name,bucket,link,workflow` that failed.
-pub(crate) fn failed_checks(checks: &Value) -> Vec<FailedCheck> {
+pub fn failed_checks(checks: &Value) -> Vec<FailedCheck> {
     checks
         .as_array()
         .into_iter()
@@ -59,7 +59,7 @@ pub(crate) fn failed_checks(checks: &Value) -> Vec<FailedCheck> {
 }
 
 /// Job id from an Actions link: `…/actions/runs/<run>/job/<job>`.
-pub(crate) fn actions_job_id(link: &str) -> Option<u64> {
+pub fn actions_job_id(link: &str) -> Option<u64> {
     let (_, rest) = link.split_once("/actions/runs/")?;
     let (_, job) = rest.split_once("/job/")?;
     job.split(|c: char| !c.is_ascii_digit())
@@ -69,7 +69,7 @@ pub(crate) fn actions_job_id(link: &str) -> Option<u64> {
 }
 
 /// Jobs whose logs this refresh fetches.
-pub(crate) fn jobs_to_fetch(checks: &[FailedCheck]) -> Vec<u64> {
+pub fn jobs_to_fetch(checks: &[FailedCheck]) -> Vec<u64> {
     checks
         .iter()
         .filter_map(|check| check.job_id)
@@ -87,7 +87,7 @@ pub(crate) fn jobs_to_fetch(checks: &[FailedCheck]) -> Vec<u64> {
 /// pile up at the end), plus the last lines for the tool's summary. With no
 /// recognizable error line, it is the end of the step. Skipped lines show
 /// as `…`.
-pub(crate) fn failing_step_excerpt(log: &str) -> String {
+pub fn failing_step_excerpt(log: &str) -> String {
     let lines: Vec<&str> = log.lines().map(log_message).collect();
     if lines.is_empty() {
         return String::new();
@@ -168,7 +168,7 @@ fn log_message(line: &str) -> &str {
 
 /// The text captured as the pipeline delivery failure. "Failed jobs:" is what
 /// classifies it as a pipeline/job failure.
-pub(crate) fn failed_checks_detail(
+pub fn failed_checks_detail(
     pr_number: Option<u64>,
     head_sha: Option<&str>,
     checks: &[FailedCheck],
@@ -208,7 +208,7 @@ pub(crate) fn failed_checks_detail(
 }
 
 /// Same commit and same failed jobs means the same logs.
-pub(crate) fn detail_cache_key(head_sha: Option<&str>, checks: &[FailedCheck]) -> String {
+pub fn detail_cache_key(head_sha: Option<&str>, checks: &[FailedCheck]) -> String {
     let mut jobs: Vec<String> = checks
         .iter()
         .map(|check| check.link.clone().unwrap_or_else(|| check.name.clone()))
@@ -223,7 +223,7 @@ fn detail_cache() -> &'static Mutex<HashMap<String, (String, String)>> {
 }
 
 /// Detail already built for this task root and key, if any.
-pub(crate) fn cached_detail(root: &str, key: &str) -> Option<String> {
+pub fn cached_detail(root: &str, key: &str) -> Option<String> {
     let cache = detail_cache().lock().ok()?;
     cache
         .get(root)
@@ -231,13 +231,13 @@ pub(crate) fn cached_detail(root: &str, key: &str) -> Option<String> {
         .map(|(_, detail)| detail.clone())
 }
 
-pub(crate) fn remember_detail(root: &str, key: String, detail: String) {
+pub fn remember_detail(root: &str, key: String, detail: String) {
     if let Ok(mut cache) = detail_cache().lock() {
         cache.insert(root.to_string(), (key, detail));
     }
 }
 
-pub(crate) fn forget_detail(root: &str) {
+pub fn forget_detail(root: &str) {
     if let Ok(mut cache) = detail_cache().lock() {
         cache.remove(root);
     }

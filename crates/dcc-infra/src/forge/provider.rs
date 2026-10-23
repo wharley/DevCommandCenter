@@ -1,50 +1,50 @@
-use crate::commands::forge::accounts::backend_for;
-use crate::commands::forge::remote::resolve_workspace_forge_target;
-use crate::commands::forge::{github, gitlab};
-use crate::commands::forge_commands::ForgeCliProvider;
+use crate::forge::accounts::backend_for;
+use crate::forge::remote::resolve_workspace_forge_target;
+use crate::forge::{github, gitlab};
+use dcc_core::domain::forge::ForgeCliProvider;
 
 #[derive(Debug, Clone)]
-pub(crate) struct ResolvedCliStatus {
-    pub(crate) provider: ForgeCliProvider,
-    pub(crate) cli_name: String,
-    pub(crate) hostname: String,
-    pub(crate) ready: bool,
-    pub(crate) login: Option<String>,
-    pub(crate) logins: Vec<String>,
-    pub(crate) message: String,
-    pub(crate) login_command: String,
+pub struct ResolvedCliStatus {
+    pub provider: ForgeCliProvider,
+    pub cli_name: String,
+    pub hostname: String,
+    pub ready: bool,
+    pub login: Option<String>,
+    pub logins: Vec<String>,
+    pub message: String,
+    pub login_command: String,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ResolvedChangeRequestStatus {
-    pub(crate) provider: String,
-    pub(crate) host: Option<String>,
-    pub(crate) number: Option<u32>,
-    pub(crate) title: Option<String>,
-    pub(crate) url: Option<String>,
-    pub(crate) head_branch: Option<String>,
-    pub(crate) base_branch: Option<String>,
-    pub(crate) state: Option<String>,
-    pub(crate) is_draft: bool,
-    pub(crate) mergeable: Option<String>,
-    pub(crate) merge_state_status: Option<String>,
+pub struct ResolvedChangeRequestStatus {
+    pub provider: String,
+    pub host: Option<String>,
+    pub number: Option<u32>,
+    pub title: Option<String>,
+    pub url: Option<String>,
+    pub head_branch: Option<String>,
+    pub base_branch: Option<String>,
+    pub state: Option<String>,
+    pub is_draft: bool,
+    pub mergeable: Option<String>,
+    pub merge_state_status: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ResolvedGitAuth {
-    pub(crate) host: String,
-    pub(crate) git_http_authorization: String,
-    pub(crate) envs: Vec<(String, String)>,
+pub struct ResolvedGitAuth {
+    pub host: String,
+    pub git_http_authorization: String,
+    pub envs: Vec<(String, String)>,
 }
 
-pub(crate) fn resolve_forge_cli_status(
+pub fn resolve_forge_cli_status(
     provider: ForgeCliProvider,
     host: &str,
 ) -> Result<ResolvedCliStatus, String> {
     resolve_forge_cli_status_with_options(provider, host, false)
 }
 
-pub(crate) fn resolve_forge_cli_status_with_options(
+pub fn resolve_forge_cli_status_with_options(
     provider: ForgeCliProvider,
     host: &str,
     force_refresh: bool,
@@ -102,7 +102,7 @@ pub(crate) fn resolve_forge_cli_status_with_options(
     }
 }
 
-pub(crate) fn resolve_forge_git_auth(
+pub fn resolve_forge_git_auth(
     provider: ForgeCliProvider,
     host: &str,
     login: Option<&str>,
@@ -123,7 +123,7 @@ pub(crate) fn resolve_forge_git_auth(
     }))
 }
 
-pub(crate) fn resolve_workspace_change_request_status(
+pub fn resolve_workspace_change_request_status(
     root: &str,
     branch: &str,
     branch_hints: &[String],
@@ -240,7 +240,7 @@ pub(crate) fn resolve_workspace_change_request_status(
     }
 }
 
-pub(crate) fn view_workspace_change_request(root: &str, login: Option<&str>) -> Result<(), String> {
+pub fn view_workspace_change_request(root: &str, login: Option<&str>) -> Result<(), String> {
     match resolve_workspace_forge_target(root)? {
         Some(target) if target.provider == ForgeCliProvider::Gitlab => {
             gitlab::view_change_request_web(root, &target.remote.host, login)
@@ -250,7 +250,7 @@ pub(crate) fn view_workspace_change_request(root: &str, login: Option<&str>) -> 
     }
 }
 
-pub(crate) fn view_workspace_change_request_source(
+pub fn view_workspace_change_request_source(
     root: &str,
     url: &str,
     number: Option<u32>,
@@ -267,7 +267,7 @@ pub(crate) fn view_workspace_change_request_source(
     }
 }
 
-pub(crate) fn merge_workspace_change_request(
+pub fn merge_workspace_change_request(
     root: &str,
     branch: &str,
     login: Option<&str>,
@@ -281,7 +281,7 @@ pub(crate) fn merge_workspace_change_request(
     }
 }
 
-pub(crate) fn merge_workspace_change_request_source(
+pub fn merge_workspace_change_request_source(
     root: &str,
     url: &str,
     branch: &str,
@@ -296,7 +296,7 @@ pub(crate) fn merge_workspace_change_request_source(
     }
 }
 
-pub(crate) fn create_workspace_change_request(
+pub fn create_workspace_change_request(
     root: &str,
     base_branch: &str,
     head_branch: &str,

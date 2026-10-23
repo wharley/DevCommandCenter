@@ -1,32 +1,32 @@
 use std::path::Path;
 
-use crate::commands::forge::detect::detect_provider_for_repo;
-use crate::commands::forge_commands::ForgeCliProvider;
+use crate::forge::detect::detect_provider_for_repo;
+use dcc_core::domain::forge::ForgeCliProvider;
 use crate::git::{run_git_output_with_timeout, GIT_LOCAL_TIMEOUT};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ParsedRemote {
-    pub(crate) host: String,
-    pub(crate) namespace: String,
-    pub(crate) repo: String,
-    pub(crate) path: String,
+pub struct ParsedRemote {
+    pub host: String,
+    pub namespace: String,
+    pub repo: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct WorkspaceForgeTarget {
-    pub(crate) provider: ForgeCliProvider,
-    pub(crate) remote_name: String,
-    pub(crate) remote: ParsedRemote,
+pub struct WorkspaceForgeTarget {
+    pub provider: ForgeCliProvider,
+    pub remote_name: String,
+    pub remote: ParsedRemote,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct WorkspaceRemoteInfo {
-    pub(crate) remote_name: String,
-    pub(crate) remote_url: String,
-    pub(crate) provider: ForgeCliProvider,
+pub struct WorkspaceRemoteInfo {
+    pub remote_name: String,
+    pub remote_url: String,
+    pub provider: ForgeCliProvider,
 }
 
-pub(crate) fn parse_remote(remote: &str) -> Option<ParsedRemote> {
+pub fn parse_remote(remote: &str) -> Option<ParsedRemote> {
     let remote = remote.trim();
     if remote.is_empty() {
         return None;
@@ -138,7 +138,7 @@ fn resolve_workspace_remote(root: &str) -> Result<Option<(String, String)>, Stri
     Ok(Some((remote, remote_url)))
 }
 
-pub(crate) fn resolve_workspace_remote_info(
+pub fn resolve_workspace_remote_info(
     root: &str,
 ) -> Result<Option<WorkspaceRemoteInfo>, String> {
     let Some((remote_name, remote_url)) = resolve_workspace_remote(root)? else {
@@ -155,7 +155,7 @@ pub(crate) fn resolve_workspace_remote_info(
     }))
 }
 
-pub(crate) fn resolve_workspace_forge_target(
+pub fn resolve_workspace_forge_target(
     root: &str,
 ) -> Result<Option<WorkspaceForgeTarget>, String> {
     let workspace_remote = resolve_workspace_remote(root)?;

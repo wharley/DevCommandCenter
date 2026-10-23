@@ -36,7 +36,7 @@ pub enum WorkspaceBlockerKind {
     DelegatedEditsReview,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceBlocker {
     pub workspace_id: String,
@@ -52,6 +52,36 @@ pub struct WorkspaceBlocker {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceAttentionBlockersOutput {
     pub blockers: Vec<WorkspaceBlocker>,
+}
+
+/// When each blocker first showed up, so "Needs you" can order tasks by when
+/// they came back to the person.
+#[derive(Clone, Debug, Default)]
+pub struct BlockerFirstSeen {
+    primed: bool,
+    seen: HashMap<(String, WorkspaceBlockerKind), Option<String>>,
+}
+
+impl BlockerFirstSeen {
+    /// Stamps the blockers found in this pass and forgets the ones that went
+    /// away, so a blocker that comes back is stamped again. Blockers present
+    /// on the first pass get no time: stamping them "now" would put blockers
+    /// older than the app above fresh results.
+    pub fn stamp(&mut self, blockers: &mut [WorkspaceBlocker], now: &str) {
+        let mut next = HashMap::new();
+        for blocker in blockers.iter_mut() {
+            let key = (blocker.workspace_id.clone(), blocker.kind);
+            let since = match self.seen.get(&key) {
+                Some(since) => since.clone(),
+                None if self.primed => Some(now.to_string()),
+                None => None,
+            };
+            blocker.since = since.clone();
+            next.insert(key, since);
+        }
+        self.seen = next;
+        self.primed = true;
+    }
 }
 
 /// Classifies one task's git and PR state; pure so the rules are testable.

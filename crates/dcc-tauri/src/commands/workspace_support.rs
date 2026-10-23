@@ -1,8 +1,12 @@
 use std::path::Path;
+pub(crate) use dcc_infra::workspace_git::{
+    find_workspace_by_root, resolve_branch_diff_base,
+    resolve_current_branch_name, resolve_current_commit_sha, resolve_workspace_active_root,
+    resolve_workspace_setup_root, workspace_branch_hints,
+};
 
 
 use dcc_core::domain::workspace::Workspace;
-use dcc_core::ports::WorkspaceRepo;
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
     git::{broken_worktree_reason, is_git_repo, remove_worktree},
@@ -17,16 +21,9 @@ use crate::{
     state::WorkspaceCommandState,
 };
 
-pub(crate) fn resolve_workspace_setup_root(workspace: &Workspace) -> &str {
-    workspace
-        .worktree_path
-        .as_deref()
-        .unwrap_or(workspace.root_path.as_str())
-}
 
-pub(crate) fn resolve_workspace_active_root(workspace: &Workspace) -> &str {
-    resolve_workspace_setup_root(workspace)
-}
+
+
 
 pub(crate) fn resolve_workspace_broken_reason(workspace: &Workspace) -> Option<String> {
     let active_root = Path::new(resolve_workspace_active_root(workspace));
@@ -138,27 +135,7 @@ pub(crate) fn directory_logical_size(root: &Path) -> Result<u64, String> {
     Ok(total)
 }
 
-pub(crate) async fn find_workspace_by_root(
-    repo: &SqliteWorkspaceRepo,
-    workspace_root: &str,
-) -> Result<Option<Workspace>, String> {
-    let workspace_root = workspace_root.trim();
-    let workspaces = repo
-        .list_workspaces()
-        .await
-        .map_err(|error| error.to_string())?;
-    // Local-direct and protected tasks can share a repository root. Prefer
-    // the task executing at this path over another task's parent checkout.
-    Ok(workspaces
-        .iter()
-        .find(|workspace| resolve_workspace_active_root(workspace) == workspace_root)
-        .or_else(|| {
-            workspaces
-                .iter()
-                .find(|workspace| workspace.root_path == workspace_root)
-        })
-        .cloned())
-}
+
 
 /// Checks whether a registered workspace is unavailable without changing its
 /// durable record. Mutation preflight must remain read-only: authorization
@@ -194,9 +171,10 @@ pub(crate) async fn preflight_workspace_root(
 mod tests {
     use super::{
         broken_workspace_reason_by_root, cleanup_workspace_files, directory_logical_size,
-        ensure_pushable_branch, find_workspace_by_root, is_linked_worktree,
-        preferred_workspace_branch_name, resolve_current_branch_name,
+        ensure_pushable_branch, find_workspace_by_root, preferred_workspace_branch_name,
+        resolve_current_branch_name,
     };
+    use dcc_infra::workspace_git::is_linked_worktree;
     use dcc_core::domain::{
         project::ProjectId,
         workspace::{Workspace, WorkspaceId, WorkspaceState},
@@ -458,21 +436,7 @@ mod tests {
     }
 }
 
-pub(crate) fn resolve_current_branch_name(root: &str) -> Result<String, String> {
-    let output = run_git_output(root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    if !output.status.success() {
-        return Err(git_output_err(
-            "git rev-parse --abbrev-ref HEAD",
-            &output.stderr,
-        ));
-    }
 
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch.is_empty() {
-        return Err("current branch is empty".to_string());
-    }
-    Ok(branch)
-}
 
 /// Resolves the base branch a workspace was created from.
 ///
@@ -484,73 +448,14 @@ pub(crate) async fn resolve_workspace_target_branch(
     state: &WorkspaceCommandState,
     workspace_root: &str,
 ) -> Option<String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).ok()?;
-    let workspace = find_workspace_by_root(&repo, workspace_root)
-        .await
-        .ok()
-        .flatten()?;
-    let branch = workspace.base_branch.trim();
-    if branch.is_empty() {
-        None
-    } else {
-        Some(branch.to_string())
-    }
+    dcc_infra::workspace_git::workspace_base_branch(&state.db_path, workspace_root).await
 }
 
-/// Whether `root` is a linked Git worktree rather than the repository's main
-/// checkout. Answers `true` when Git cannot tell, so callers keep their
-/// worktree behavior on failure.
-pub(crate) fn is_linked_worktree(root: &str) -> bool {
-    let resolve = |flag: &str| {
-        run_git_output(root, &["rev-parse", "--path-format=absolute", flag])
-            .ok()
-            .filter(|output| output.status.success())
-            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-            .filter(|path| !path.is_empty())
-    };
-    match (resolve("--git-dir"), resolve("--git-common-dir")) {
-        (Some(git_dir), Some(common_dir)) => git_dir != common_dir,
-        _ => true,
-    }
-}
 
-pub(crate) fn resolve_current_commit_sha(root: &str) -> Result<Option<String>, String> {
-    let output = run_git_output(root, &["rev-parse", "HEAD"])?;
-    if !output.status.success() {
-        return Ok(None);
-    }
 
-    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if sha.is_empty() {
-        return Ok(None);
-    }
 
-    Ok(Some(sha))
-}
 
-pub(crate) fn workspace_branch_hints(root: &str, branch: Option<&str>) -> Vec<String> {
-    let mut hints = Vec::new();
 
-    if let Some(branch) = branch.map(str::trim).filter(|value| !value.is_empty()) {
-        hints.push(branch.to_string());
-    }
-
-    if let Some(name) = Path::new(root)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        hints.push(name.to_string());
-        if !name.starts_with("dcc/") {
-            hints.push(format!("dcc/{name}"));
-        }
-    }
-
-    hints.sort();
-    hints.dedup();
-    hints
-}
 
 pub(crate) fn resolve_default_remote_name(root: &str) -> Result<String, String> {
     let output = run_git_output(root, &["remote"])?;
@@ -775,57 +680,7 @@ pub(crate) fn ensure_pushable_branch(
     materialize_workspace_branch(root, preferred_branch)
 }
 
-pub(crate) fn resolve_branch_diff_base(root: &str, target_branch: Option<&str>) -> Option<String> {
-    let current_branch = resolve_current_branch_name(root).ok();
 
-    if let Some(target_branch) = target_branch
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty())
-    {
-        let remote_target = format!("origin/{target_branch}");
-        if git_command_succeeds(root, &["rev-parse", "--verify", &remote_target]) {
-            return Some(remote_target);
-        }
-        if git_command_succeeds(root, &["rev-parse", "--verify", target_branch]) {
-            return Some(target_branch.to_string());
-        }
-    }
-
-    let upstream = run_git_output(root, &["rev-parse", "--abbrev-ref", "@{upstream}"])
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| {
-            let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if value.is_empty() {
-                None
-            } else {
-                Some(value)
-            }
-        })
-        .filter(|upstream| {
-            let short = upstream.rsplit('/').next().unwrap_or(upstream.as_str());
-            current_branch
-                .as_deref()
-                .map(|branch| branch != short)
-                .unwrap_or(true)
-        });
-    if upstream.is_some() {
-        return upstream;
-    }
-
-    for fallback in [
-        "origin/HEAD",
-        "origin/main",
-        "origin/master",
-        "origin/develop",
-    ] {
-        if git_command_succeeds(root, &["rev-parse", "--verify", fallback]) {
-            return Some(fallback.to_string());
-        }
-    }
-
-    None
-}
 
 pub(crate) fn next_available_branch_name(root: &str, preferred: &str) -> String {
     if !git_command_succeeds(

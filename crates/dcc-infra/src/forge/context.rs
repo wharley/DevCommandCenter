@@ -3,56 +3,56 @@ use std::path::Path;
 use dcc_core::domain::repository::RepositoryId;
 use dcc_core::ports::RepositoryRepo;
 use dcc_core::ports::WorkspaceRepo;
-use dcc_infra::db::SqliteWorkspaceRepo;
+use crate::db::SqliteWorkspaceRepo;
 
-use crate::commands::forge::{
+use crate::forge::{
     accounts::backend_for,
     provider::{self as forge_provider, ResolvedCliStatus, ResolvedGitAuth},
     remote::resolve_workspace_forge_target,
 };
-use crate::commands::forge_commands::ForgeCliProvider;
+use dcc_core::domain::forge::ForgeCliProvider;
 
 #[derive(Debug, Clone)]
-pub(crate) struct ResolvedWorkspaceForgeContext {
-    pub(crate) provider: ForgeCliProvider,
-    pub(crate) host: String,
-    pub(crate) remote_name: String,
-    pub(crate) namespace: String,
-    pub(crate) repo: String,
-    pub(crate) cli_name: String,
-    pub(crate) ready: bool,
-    pub(crate) remote_state: WorkspaceForgeRemoteState,
-    pub(crate) bound_login: Option<String>,
-    pub(crate) login: Option<String>,
-    pub(crate) selected_login: Option<String>,
-    pub(crate) effective_login: Option<String>,
-    pub(crate) known_hosts: Vec<String>,
-    pub(crate) message: String,
-    pub(crate) login_command: String,
+pub struct ResolvedWorkspaceForgeContext {
+    pub provider: ForgeCliProvider,
+    pub host: String,
+    pub remote_name: String,
+    pub namespace: String,
+    pub repo: String,
+    pub cli_name: String,
+    pub ready: bool,
+    pub remote_state: WorkspaceForgeRemoteState,
+    pub bound_login: Option<String>,
+    pub login: Option<String>,
+    pub selected_login: Option<String>,
+    pub effective_login: Option<String>,
+    pub known_hosts: Vec<String>,
+    pub message: String,
+    pub login_command: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WorkspaceForgeRemoteState {
+pub enum WorkspaceForgeRemoteState {
     Ok,
     Unauthenticated,
     Unavailable,
 }
 
-pub(crate) fn forge_provider_key(provider: ForgeCliProvider) -> &'static str {
+pub fn forge_provider_key(provider: ForgeCliProvider) -> &'static str {
     match provider {
         ForgeCliProvider::Github => "github",
         ForgeCliProvider::Gitlab => "gitlab",
     }
 }
 
-pub(crate) fn default_forge_host(provider: ForgeCliProvider) -> &'static str {
+pub fn default_forge_host(provider: ForgeCliProvider) -> &'static str {
     match provider {
         ForgeCliProvider::Github => "github.com",
         ForgeCliProvider::Gitlab => "gitlab.com",
     }
 }
 
-pub(crate) fn normalize_forge_host(
+pub fn normalize_forge_host(
     provider: ForgeCliProvider,
     host: Option<String>,
 ) -> Result<String, String> {
@@ -69,7 +69,7 @@ pub(crate) fn normalize_forge_host(
     Ok(host.to_string())
 }
 
-pub(crate) fn resolve_selected_forge_login(
+pub fn resolve_selected_forge_login(
     db_path: &Path,
     provider: ForgeCliProvider,
     host: &str,
@@ -177,7 +177,7 @@ fn resolve_workspace_remote_state(
     )
 }
 
-pub(crate) fn resolve_workspace_forge_context(
+pub fn resolve_workspace_forge_context(
     db_path: &Path,
     root: &str,
     requested_login: Option<&str>,
@@ -235,7 +235,7 @@ pub(crate) fn resolve_workspace_forge_context(
     }))
 }
 
-pub(crate) fn resolve_workspace_git_auth(
+pub fn resolve_workspace_git_auth(
     db_path: &Path,
     root: &str,
     requested_login: Option<&str>,
@@ -255,7 +255,7 @@ pub(crate) fn resolve_workspace_git_auth(
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::commands::forge::provider::ResolvedCliStatus;
+    use crate::forge::provider::ResolvedCliStatus;
     use dcc_core::domain::{
         project::ProjectId,
         workspace::{Workspace, WorkspaceId, WorkspaceState},

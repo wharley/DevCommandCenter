@@ -4,7 +4,8 @@ pub mod coderabbit;
 pub mod common;
 pub mod delegation_commands;
 pub mod feedback;
-pub mod forge;
+/// Moved to `dcc_infra::forge`; kept at this path for existing callers.
+pub use dcc_infra::forge;
 pub mod forge_commands;
 pub mod mcp_commands;
 pub mod provider_commands;

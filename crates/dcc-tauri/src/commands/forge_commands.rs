@@ -17,7 +17,7 @@ use crate::{
         WorkspaceChangeRequestCreateInput, WorkspaceGitPushInput,
     },
     commands::workspace_support::{
-        ensure_pushable_branch, find_workspace_by_root, is_linked_worktree,
+        ensure_pushable_branch, find_workspace_by_root,
         preferred_workspace_branch_name, preflight_workspace_root, resolve_branch_diff_base,
         resolve_current_branch_name, resolve_current_commit_sha, resolve_workspace_target_branch,
         workspace_branch_hints,
@@ -33,10 +33,7 @@ async fn imported_workspace_source(
     state: &WorkspaceCommandState,
     root: &str,
 ) -> Result<Option<WorkspaceSource>, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    Ok(find_workspace_by_root(&repo, root)
-        .await?
-        .and_then(|workspace| workspace.source))
+    dcc_infra::workspace_git::imported_workspace_source(&state.db_path, root).await
 }
 
 fn is_provisional_task_title(title: &str) -> bool {
@@ -87,12 +84,8 @@ pub(crate) async fn workspace_change_request_title(
 #[serde(rename_all = "camelCase")]
 pub struct GithubCliStatusInput {}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum ForgeCliProvider {
-    Github,
-    Gitlab,
-}
+pub use dcc_core::domain::forge::ForgeCliProvider;
+pub use dcc_core::domain::workspace_git::WorkspacePrStatusOutput;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -279,13 +272,7 @@ pub struct PullRequestHubReviewCapabilities {
     pub resolve_threads: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum PullRequestHubMergeMethod {
-    Merge,
-    Squash,
-    Rebase,
-}
+pub use dcc_core::domain::forge::PullRequestHubMergeMethod;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -491,21 +478,7 @@ pub struct PullRequestHubSubmitReviewOutput {
     pub warning: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacePrStatusOutput {
-    pub provider: Option<String>,
-    pub host: Option<String>,
-    pub number: Option<u32>,
-    pub title: Option<String>,
-    pub url: Option<String>,
-    pub head_branch: Option<String>,
-    pub base_branch: Option<String>,
-    pub state: Option<String>,
-    pub is_draft: bool,
-    pub mergeable: Option<String>,
-    pub merge_state_status: Option<String>,
-}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -2742,111 +2715,13 @@ pub async fn workspace_pr_status_with_state(
     input: WorkspacePrStatusInput,
 ) -> Result<WorkspacePrStatusOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Ok(WorkspacePrStatusOutput {
-            provider: None,
-            host: None,
-            number: None,
-            title: None,
-            url: None,
-            head_branch: None,
-            base_branch: None,
-            state: None,
-            is_draft: false,
-            mergeable: None,
-            merge_state_status: None,
-        });
-    }
-
-    let forge_context = forge_context::resolve_workspace_forge_context(
+    dcc_infra::workspace_git::workspace_pr_status(
         &state.db_path,
-        root,
+        &input.workspace_root,
+        input.branch,
         input.forge_login.as_deref(),
-    )?;
-    let effective_login = forge_context
-        .as_ref()
-        .and_then(|context| context.effective_login.as_deref());
-    let head_sha = resolve_current_commit_sha(root).ok().flatten();
-    let source = imported_workspace_source(&state, root).await?;
-    let branch = match input
-        .branch
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
-        Some(branch) => branch,
-        None if source.is_some() => source
-            .as_ref()
-            .map(|source| source.head_branch.clone())
-            .unwrap_or_default(),
-        None => match resolve_current_branch_name(root) {
-            Ok(branch) => branch,
-            Err(_) => {
-                return Ok(WorkspacePrStatusOutput {
-                    provider: None,
-                    host: None,
-                    number: None,
-                    title: None,
-                    url: None,
-                    head_branch: None,
-                    base_branch: None,
-                    state: None,
-                    is_draft: false,
-                    mergeable: None,
-                    merge_state_status: None,
-                });
-            }
-        },
-    };
-    let branch_hints = workspace_branch_hints(root, Some(&branch));
-
-    let resolved = forge_provider::resolve_workspace_change_request_status(
-        root,
-        &branch,
-        &branch_hints,
-        head_sha.as_deref(),
-        effective_login,
-    )?;
-    // A task without a worktree runs on whatever branch the main checkout is on.
-    // On a long-lived branch such as `develop`, the latest change request is an
-    // old merged release that says nothing about the work in progress.
-    let resolved = resolved
-        .filter(|resolved| resolved.state.as_deref() != Some("merged") || is_linked_worktree(root));
-    let Some(resolved) = resolved else {
-        return Ok(WorkspacePrStatusOutput {
-            provider: forge_context
-                .as_ref()
-                .map(|context| match context.provider {
-                    ForgeCliProvider::Github => "github".to_string(),
-                    ForgeCliProvider::Gitlab => "gitlab".to_string(),
-                }),
-            host: forge_context.as_ref().map(|context| context.host.clone()),
-            number: None,
-            title: None,
-            url: None,
-            head_branch: Some(branch),
-            base_branch: None,
-            state: None,
-            is_draft: false,
-            mergeable: None,
-            merge_state_status: None,
-        });
-    };
-
-    Ok(WorkspacePrStatusOutput {
-        provider: Some(resolved.provider),
-        host: resolved.host,
-        number: resolved.number,
-        title: resolved.title,
-        url: resolved.url,
-        head_branch: resolved.head_branch,
-        base_branch: resolved.base_branch,
-        state: resolved.state,
-        is_draft: resolved.is_draft,
-        mergeable: resolved.mergeable,
-        merge_state_status: resolved.merge_state_status,
-    })
+    )
+    .await
 }
 
 pub async fn workspace_review_state(

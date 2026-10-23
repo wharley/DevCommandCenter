@@ -1,56 +1,56 @@
 use dcc_core::domain::repository::{Repository, RepositoryId};
 use dcc_core::ports::RepositoryRepo;
-use dcc_infra::db::SqliteWorkspaceRepo;
+use crate::db::SqliteWorkspaceRepo;
 
-use crate::commands::forge::{github, gitlab, remote::parse_remote};
-use crate::commands::forge_commands::ForgeCliProvider;
+use crate::forge::{github, gitlab, remote::parse_remote};
+use dcc_core::domain::forge::ForgeCliProvider;
 
 #[derive(Debug, Clone)]
-pub(crate) struct ForgeCliAccountProfile {
-    pub(crate) login: String,
-    pub(crate) name: Option<String>,
-    pub(crate) avatar_url: Option<String>,
-    pub(crate) email: Option<String>,
-    pub(crate) active: bool,
+pub struct ForgeCliAccountProfile {
+    pub login: String,
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub email: Option<String>,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ForgeCliAuthStatus {
-    pub(crate) active_login: Option<String>,
-    pub(crate) logins: Vec<String>,
+pub struct ForgeCliAuthStatus {
+    pub active_login: Option<String>,
+    pub logins: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ForgeCliAuthContext {
-    pub(crate) envs: Vec<(String, String)>,
-    pub(crate) git_http_authorization: String,
+pub struct ForgeCliAuthContext {
+    pub envs: Vec<(String, String)>,
+    pub git_http_authorization: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AuthCheck {
+pub enum AuthCheck {
     LoggedIn,
     LoggedOut,
     Indeterminate,
 }
 
 impl AuthCheck {
-    pub(crate) fn is_definitely_logged_out(self) -> bool {
+    pub fn is_definitely_logged_out(self) -> bool {
         matches!(self, Self::LoggedOut)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RepoAccess {
+pub enum RepoAccess {
     Push,
     Probable,
     None,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct BackfillSummary {
+pub struct BackfillSummary {
     #[allow(dead_code)]
-    pub(crate) examined: usize,
-    pub(crate) bound: usize,
+    pub examined: usize,
+    pub bound: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -61,7 +61,7 @@ struct RepoForgeTarget {
     name: String,
 }
 
-pub(crate) trait ForgeCliBackend: Sync {
+pub trait ForgeCliBackend: Sync {
     fn cli_name(&self) -> &'static str;
     fn provider_label(&self) -> &'static str;
     fn login_command(&self, host: &str) -> String;
@@ -88,7 +88,7 @@ pub(crate) trait ForgeCliBackend: Sync {
     ) -> Result<Option<ForgeCliAuthContext>, String>;
 }
 
-pub(crate) fn backend_for(provider: ForgeCliProvider) -> &'static dyn ForgeCliBackend {
+pub fn backend_for(provider: ForgeCliProvider) -> &'static dyn ForgeCliBackend {
     match provider {
         ForgeCliProvider::Github => &GithubCliBackend,
         ForgeCliProvider::Gitlab => &GitlabCliBackend,
@@ -250,14 +250,14 @@ fn repo_forge_target(repository: &Repository) -> Option<RepoForgeTarget> {
     })
 }
 
-pub(crate) fn auto_bind_repository(
+pub fn auto_bind_repository(
     repo: &SqliteWorkspaceRepo,
     repository_id: &RepositoryId,
 ) -> Result<Option<String>, String> {
     auto_bind_repository_if_current(repo, repository_id, None)
 }
 
-pub(crate) fn auto_bind_repository_if_current(
+pub fn auto_bind_repository_if_current(
     repo: &SqliteWorkspaceRepo,
     repository_id: &RepositoryId,
     expected_snapshot: Option<(&str, &str)>,
@@ -321,7 +321,7 @@ pub(crate) fn auto_bind_repository_if_current(
     Ok(Some(chosen))
 }
 
-pub(crate) fn backfill_repository_bindings(
+pub fn backfill_repository_bindings(
     repo: &SqliteWorkspaceRepo,
 ) -> Result<BackfillSummary, String> {
     let unbound = repo

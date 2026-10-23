@@ -1,21 +1,21 @@
-pub(crate) mod accounts;
-pub(crate) mod context;
-pub(crate) mod detect;
-pub(crate) mod github;
-pub(crate) mod github_checks;
-pub(crate) mod gitlab;
-pub(crate) mod provider;
-pub(crate) mod remote;
+pub mod accounts;
+pub mod context;
+pub mod detect;
+pub mod github;
+pub mod github_checks;
+pub mod gitlab;
+pub mod provider;
+pub mod remote;
 
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use dcc_infra::process::run_command_with_timeout;
+use crate::process::run_command_with_timeout;
 
-pub(crate) const FORGE_CLI_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+pub const FORGE_CLI_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub(crate) fn run_forge_cli_command<F>(
+pub fn run_forge_cli_command<F>(
     program: &std::path::Path,
     configure: F,
 ) -> Result<std::process::Output, String>
@@ -25,7 +25,7 @@ where
     run_command_with_timeout(program, configure, FORGE_CLI_COMMAND_TIMEOUT)
 }
 
-pub(crate) fn resolve_cli_binary(program: &str) -> Result<PathBuf, String> {
+pub fn resolve_cli_binary(program: &str) -> Result<PathBuf, String> {
     let candidates = [
         PathBuf::from(program),
         PathBuf::from(format!("/opt/homebrew/bin/{program}")),

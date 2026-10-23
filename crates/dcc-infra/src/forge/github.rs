@@ -6,14 +6,14 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::commands::forge::accounts::{AuthCheck, ForgeCliAccountProfile, RepoAccess};
-use crate::commands::forge::{resolve_cli_binary, run_forge_cli_command};
-use dcc_infra::git::git_output_err;
+use crate::forge::accounts::{AuthCheck, ForgeCliAccountProfile, RepoAccess};
+use crate::forge::{resolve_cli_binary, run_forge_cli_command};
+use crate::git::git_output_err;
 
 #[derive(Debug, Clone)]
-pub(crate) struct GithubCliAuthStatus {
-    pub(crate) logins: Vec<String>,
-    pub(crate) active_login: Option<String>,
+pub struct GithubCliAuthStatus {
+    pub logins: Vec<String>,
+    pub active_login: Option<String>,
 }
 
 #[derive(Clone)]
@@ -39,9 +39,9 @@ static GITHUB_PROFILE_CACHE: LazyLock<
 > = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 #[derive(Debug, Clone)]
-pub(crate) struct GithubAuthContext {
-    pub(crate) envs: Vec<(String, String)>,
-    pub(crate) git_http_authorization: String,
+pub struct GithubAuthContext {
+    pub envs: Vec<(String, String)>,
+    pub git_http_authorization: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -53,28 +53,28 @@ struct GithubUserProfile {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct GithubReviewCommentUser {
-    pub(crate) login: Option<String>,
-    pub(crate) avatar_url: Option<String>,
-    pub(crate) html_url: Option<String>,
+pub struct GithubReviewCommentUser {
+    pub login: Option<String>,
+    pub avatar_url: Option<String>,
+    pub html_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct GithubReviewComment {
-    pub(crate) id: i64,
-    pub(crate) in_reply_to_id: Option<i64>,
-    pub(crate) path: String,
-    pub(crate) body: Option<String>,
-    pub(crate) diff_hunk: Option<String>,
-    pub(crate) html_url: Option<String>,
-    pub(crate) side: Option<String>,
-    pub(crate) line: Option<i64>,
-    pub(crate) start_line: Option<i64>,
-    pub(crate) original_line: Option<i64>,
-    pub(crate) original_start_line: Option<i64>,
-    pub(crate) user: Option<GithubReviewCommentUser>,
-    pub(crate) created_at: Option<String>,
-    pub(crate) updated_at: Option<String>,
+pub struct GithubReviewComment {
+    pub id: i64,
+    pub in_reply_to_id: Option<i64>,
+    pub path: String,
+    pub body: Option<String>,
+    pub diff_hunk: Option<String>,
+    pub html_url: Option<String>,
+    pub side: Option<String>,
+    pub line: Option<i64>,
+    pub start_line: Option<i64>,
+    pub original_line: Option<i64>,
+    pub original_start_line: Option<i64>,
+    pub user: Option<GithubReviewCommentUser>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -193,7 +193,7 @@ fn github_http_username(login: Option<&str>) -> String {
         .to_string()
 }
 
-pub(crate) fn resolve_auth_context(
+pub fn resolve_auth_context(
     host: &str,
     login: Option<&str>,
 ) -> Result<Option<GithubAuthContext>, String> {
@@ -243,15 +243,15 @@ pub(crate) fn resolve_auth_context(
     }))
 }
 
-pub(crate) fn auth_status(host: &str) -> Result<GithubCliAuthStatus, String> {
+pub fn auth_status(host: &str) -> Result<GithubCliAuthStatus, String> {
     auth_status_with_options(host, false)
 }
 
-pub(crate) fn list_logins(host: &str, force_refresh: bool) -> Result<Vec<String>, String> {
+pub fn list_logins(host: &str, force_refresh: bool) -> Result<Vec<String>, String> {
     Ok(auth_status_with_options(host, force_refresh)?.logins)
 }
 
-pub(crate) fn check_auth(host: &str, login: &str) -> AuthCheck {
+pub fn check_auth(host: &str, login: &str) -> AuthCheck {
     match auth_status(host) {
         Ok(status) if status.logins.iter().any(|candidate| candidate == login) => {
             AuthCheck::LoggedIn
@@ -261,7 +261,7 @@ pub(crate) fn check_auth(host: &str, login: &str) -> AuthCheck {
     }
 }
 
-pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
+pub fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
     let gh = resolve_cli_binary("gh")?;
     let output = run_forge_cli_command(&gh, |command| {
         command.args(["auth", "status", "--json", "hosts"]);
@@ -294,7 +294,7 @@ pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String
     Ok(hosts)
 }
 
-pub(crate) fn auth_status_with_options(
+pub fn auth_status_with_options(
     host: &str,
     force_refresh: bool,
 ) -> Result<GithubCliAuthStatus, String> {
@@ -341,7 +341,7 @@ pub(crate) fn auth_status_with_options(
     Ok(status)
 }
 
-pub(crate) fn list_accounts_for_host(
+pub fn list_accounts_for_host(
     host: &str,
     force_refresh: bool,
 ) -> Result<Vec<ForgeCliAccountProfile>, String> {
@@ -386,7 +386,7 @@ pub(crate) fn list_accounts_for_host(
     Ok(accounts)
 }
 
-pub(crate) fn repo_access(
+pub fn repo_access(
     host: &str,
     login: &str,
     owner: &str,
@@ -435,7 +435,7 @@ pub(crate) fn repo_access(
     parse_repo_push_permission(&output.stdout)
 }
 
-pub(crate) fn list_pull_review_comments(
+pub fn list_pull_review_comments(
     host: &str,
     owner: &str,
     repo: &str,
@@ -481,7 +481,7 @@ pub(crate) fn list_pull_review_comments(
     Ok(pages.into_iter().flatten().collect())
 }
 
-pub(crate) fn pull_request_review_threads_json(
+pub fn pull_request_review_threads_json(
     root: &str,
     host: &str,
     owner: &str,
@@ -515,7 +515,7 @@ pub(crate) fn pull_request_review_threads_json(
     )
 }
 
-pub(crate) fn reply_to_pull_review_comment_json(
+pub fn reply_to_pull_review_comment_json(
     root: &str,
     host: &str,
     owner: &str,
@@ -544,7 +544,7 @@ pub(crate) fn reply_to_pull_review_comment_json(
     )
 }
 
-pub(crate) fn set_pull_review_thread_resolved_json(
+pub fn set_pull_review_thread_resolved_json(
     root: &str,
     host: &str,
     thread_id: &str,
@@ -573,7 +573,7 @@ pub(crate) fn set_pull_review_thread_resolved_json(
     )
 }
 
-pub(crate) fn resolve_pull_review_state_json(
+pub fn resolve_pull_review_state_json(
     root: &str,
     host: &str,
     owner: &str,
@@ -617,7 +617,7 @@ pub(crate) fn resolve_pull_review_state_json(
         .map_err(|error| format!("Failed to decode GitHub pull request review state: {error}"))
 }
 
-pub(crate) fn compare_commits_json(
+pub fn compare_commits_json(
     host: &str,
     owner: &str,
     repo: &str,
@@ -782,7 +782,7 @@ mod profile_cache {
     }
 }
 
-pub(crate) fn resolve_change_request_json(
+pub fn resolve_change_request_json(
     root: &str,
     host: &str,
     branch_hints: &[String],
@@ -870,7 +870,7 @@ pub(crate) fn resolve_change_request_json(
     Ok(pr.cloned())
 }
 
-pub(crate) fn resolve_change_request_url_json(
+pub fn resolve_change_request_url_json(
     root: &str,
     host: &str,
     url: &str,
@@ -895,7 +895,7 @@ pub(crate) fn resolve_change_request_url_json(
         .map_err(|error| format!("Failed to decode GitHub pull request: {error}"))
 }
 
-pub(crate) fn view_change_request_web(
+pub fn view_change_request_web(
     root: &str,
     host: &str,
     login: Option<&str>,
@@ -920,7 +920,7 @@ pub(crate) fn view_change_request_web(
     ))
 }
 
-pub(crate) fn view_change_request_url_web(
+pub fn view_change_request_url_web(
     root: &str,
     host: &str,
     url: &str,
@@ -943,7 +943,7 @@ pub(crate) fn view_change_request_url_web(
     Err(git_output_err("gh pr view --web", &output.stderr))
 }
 
-pub(crate) fn merge_change_request(
+pub fn merge_change_request(
     root: &str,
     host: &str,
     login: Option<&str>,
@@ -968,7 +968,7 @@ pub(crate) fn merge_change_request(
     ))
 }
 
-pub(crate) fn merge_change_request_url(
+pub fn merge_change_request_url(
     root: &str,
     host: &str,
     url: &str,
@@ -991,7 +991,7 @@ pub(crate) fn merge_change_request_url(
     Err(git_output_err("gh pr merge", &output.stderr))
 }
 
-pub(crate) fn create_change_request(
+pub fn create_change_request(
     root: &str,
     base_branch: &str,
     head_branch: &str,
@@ -1064,7 +1064,7 @@ fn run_hub_gh_json(
         .map_err(|error| format!("Failed to decode GitHub response: {error}"))
 }
 
-pub(crate) fn list_pull_requests_json(
+pub fn list_pull_requests_json(
     root: &str,
     host: &str,
     login: Option<&str>,
@@ -1086,7 +1086,7 @@ pub(crate) fn list_pull_requests_json(
     )
 }
 
-pub(crate) fn pull_request_detail_json(
+pub fn pull_request_detail_json(
     root: &str,
     host: &str,
     number: u32,
@@ -1108,7 +1108,7 @@ pub(crate) fn pull_request_detail_json(
 
 /// Checks of a PR, with the bucket (`pass`/`fail`/`pending`/…) used to find
 /// failures. `--json` exits 0 even when checks fail.
-pub(crate) fn pull_request_checks_json(
+pub fn pull_request_checks_json(
     root: &str,
     host: &str,
     number: u32,
@@ -1129,7 +1129,7 @@ pub(crate) fn pull_request_checks_json(
 }
 
 /// Output of the failed steps of one Actions job.
-pub(crate) fn failed_job_log(
+pub fn failed_job_log(
     root: &str,
     host: &str,
     job_id: u64,
@@ -1137,7 +1137,7 @@ pub(crate) fn failed_job_log(
 ) -> Result<String, String> {
     let auth = resolve_auth_context(host, login)?;
     let gh = resolve_cli_binary("gh")?;
-    let output = dcc_infra::process::run_command_with_timeout(
+    let output = crate::process::run_command_with_timeout(
         &gh,
         |command| {
             command
@@ -1156,7 +1156,7 @@ pub(crate) fn failed_job_log(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-pub(crate) fn repository_merge_capabilities_json(
+pub fn repository_merge_capabilities_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1167,7 +1167,7 @@ pub(crate) fn repository_merge_capabilities_json(
     run_hub_gh_json(root, host, login, &["api", "--hostname", host, &endpoint])
 }
 
-pub(crate) fn pull_request_merge_state_json(
+pub fn pull_request_merge_state_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1192,13 +1192,13 @@ pub(crate) fn pull_request_merge_state_json(
     )
 }
 
-pub(crate) fn merge_pull_request(
+pub fn merge_pull_request(
     root: &str,
     host: &str,
     namespace: &str,
     repo: &str,
     number: u32,
-    method: crate::commands::forge_commands::PullRequestHubMergeMethod,
+    method: dcc_core::domain::forge::PullRequestHubMergeMethod,
     expected_head_sha: &str,
     login: Option<&str>,
 ) -> Result<(), String> {
@@ -1207,9 +1207,9 @@ pub(crate) fn merge_pull_request(
     let repository = format!("{host}/{namespace}/{repo}");
     let number = number.to_string();
     let method_flag = match method {
-        crate::commands::forge_commands::PullRequestHubMergeMethod::Merge => "--merge",
-        crate::commands::forge_commands::PullRequestHubMergeMethod::Squash => "--squash",
-        crate::commands::forge_commands::PullRequestHubMergeMethod::Rebase => "--rebase",
+        dcc_core::domain::forge::PullRequestHubMergeMethod::Merge => "--merge",
+        dcc_core::domain::forge::PullRequestHubMergeMethod::Squash => "--squash",
+        dcc_core::domain::forge::PullRequestHubMergeMethod::Rebase => "--rebase",
     };
     let mut command = Command::new(gh);
     command
@@ -1246,7 +1246,7 @@ pub(crate) fn merge_pull_request(
     })
 }
 
-pub(crate) fn pull_request_files_json(
+pub fn pull_request_files_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1277,7 +1277,7 @@ pub(crate) fn pull_request_files_json(
     Ok(Value::Array(files))
 }
 
-pub(crate) fn submit_pull_request_review_json(
+pub fn submit_pull_request_review_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1332,7 +1332,7 @@ pub(crate) fn submit_pull_request_review_json(
         .map_err(|error| format!("Failed to decode GitHub review response: {error}"))
 }
 
-pub(crate) fn create_pull_request_comment_json(
+pub fn create_pull_request_comment_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1366,7 +1366,7 @@ mod tests {
         parse_github_logins_for_host, parse_repo_push_permission, resolve_change_request_url_json,
     };
 
-    use crate::commands::forge::accounts::RepoAccess;
+    use crate::forge::accounts::RepoAccess;
     use std::env;
 
     fn required_smoke_env(name: &str) -> String {
@@ -1564,7 +1564,7 @@ fn run_hub_gh_json_input(
 
 /// People who can be asked to review a pull request: GitHub's suggestions plus
 /// the users assignable in the repository, filtered by `query` when given.
-pub(crate) fn pull_request_reviewer_candidates_json(
+pub fn pull_request_reviewer_candidates_json(
     root: &str,
     host: &str,
     owner: &str,
@@ -1606,7 +1606,7 @@ pub(crate) fn pull_request_reviewer_candidates_json(
 
 /// Asks (`add`) or stops asking (`remove`) people to review a pull request.
 /// Asking someone who already reviewed sends them a new request.
-pub(crate) fn update_pull_request_requested_reviewers_json(
+pub fn update_pull_request_requested_reviewers_json(
     root: &str,
     host: &str,
     owner: &str,

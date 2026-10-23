@@ -5,15 +5,15 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::commands::forge::accounts::{AuthCheck, ForgeCliAccountProfile, RepoAccess};
-use crate::commands::forge::remote::WorkspaceForgeTarget;
-use crate::commands::forge::{resolve_cli_binary, run_forge_cli_command};
+use crate::forge::accounts::{AuthCheck, ForgeCliAccountProfile, RepoAccess};
+use crate::forge::remote::WorkspaceForgeTarget;
+use crate::forge::{resolve_cli_binary, run_forge_cli_command};
 use crate::git::{git_output_err, run_git_output};
 
 #[derive(Debug, Clone)]
-pub(crate) struct GitlabCliAuthStatus {
-    pub(crate) logins: Vec<String>,
-    pub(crate) active_login: Option<String>,
+pub struct GitlabCliAuthStatus {
+    pub logins: Vec<String>,
+    pub active_login: Option<String>,
 }
 
 #[derive(Clone)]
@@ -39,151 +39,151 @@ static GITLAB_PROFILE_CACHE: LazyLock<
 > = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 #[derive(Debug, Clone)]
-pub(crate) struct GitlabAuthContext {
-    pub(crate) envs: Vec<(String, String)>,
-    pub(crate) git_http_authorization: String,
+pub struct GitlabAuthContext {
+    pub envs: Vec<(String, String)>,
+    pub git_http_authorization: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabDiscussionAuthor {
-    pub(crate) username: Option<String>,
-    pub(crate) avatar_url: Option<String>,
-    pub(crate) web_url: Option<String>,
+pub struct GitlabDiscussionAuthor {
+    pub username: Option<String>,
+    pub avatar_url: Option<String>,
+    pub web_url: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabDiscussionLinePosition {
-    pub(crate) old_line: Option<i64>,
-    pub(crate) new_line: Option<i64>,
+pub struct GitlabDiscussionLinePosition {
+    pub old_line: Option<i64>,
+    pub new_line: Option<i64>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabDiscussionLineRange {
-    pub(crate) start: GitlabDiscussionLinePosition,
-    pub(crate) end: GitlabDiscussionLinePosition,
+pub struct GitlabDiscussionLineRange {
+    pub start: GitlabDiscussionLinePosition,
+    pub end: GitlabDiscussionLinePosition,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabDiscussionPosition {
-    pub(crate) old_path: Option<String>,
-    pub(crate) new_path: Option<String>,
-    pub(crate) old_line: Option<i64>,
-    pub(crate) new_line: Option<i64>,
-    pub(crate) head_sha: Option<String>,
-    pub(crate) line_range: Option<GitlabDiscussionLineRange>,
+pub struct GitlabDiscussionPosition {
+    pub old_path: Option<String>,
+    pub new_path: Option<String>,
+    pub old_line: Option<i64>,
+    pub new_line: Option<i64>,
+    pub head_sha: Option<String>,
+    pub line_range: Option<GitlabDiscussionLineRange>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabDiscussionNote {
-    pub(crate) id: i64,
-    pub(crate) body: Option<String>,
-    pub(crate) author: Option<GitlabDiscussionAuthor>,
-    pub(crate) created_at: Option<String>,
-    pub(crate) updated_at: Option<String>,
-    pub(crate) system: Option<bool>,
-    pub(crate) resolvable: Option<bool>,
-    pub(crate) resolved: Option<bool>,
-    pub(crate) position: Option<GitlabDiscussionPosition>,
+pub struct GitlabDiscussionNote {
+    pub id: i64,
+    pub body: Option<String>,
+    pub author: Option<GitlabDiscussionAuthor>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub system: Option<bool>,
+    pub resolvable: Option<bool>,
+    pub resolved: Option<bool>,
+    pub position: Option<GitlabDiscussionPosition>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabDiscussion {
-    pub(crate) id: String,
-    pub(crate) notes: Vec<GitlabDiscussionNote>,
+pub struct GitlabDiscussion {
+    pub id: String,
+    pub notes: Vec<GitlabDiscussionNote>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabPipeline {
-    pub(crate) id: u64,
-    pub(crate) sha: String,
+pub struct GitlabPipeline {
+    pub id: u64,
+    pub sha: String,
     #[serde(rename = "ref")]
-    pub(crate) ref_name: Option<String>,
-    pub(crate) status: String,
-    pub(crate) source: Option<String>,
-    pub(crate) web_url: Option<String>,
-    pub(crate) created_at: Option<String>,
-    pub(crate) updated_at: Option<String>,
-    pub(crate) started_at: Option<String>,
-    pub(crate) finished_at: Option<String>,
-    pub(crate) duration: Option<f64>,
-    pub(crate) queued_duration: Option<f64>,
+    pub ref_name: Option<String>,
+    pub status: String,
+    pub source: Option<String>,
+    pub web_url: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub duration: Option<f64>,
+    pub queued_duration: Option<f64>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabJobArtifact {
-    pub(crate) file_type: Option<String>,
-    pub(crate) size: Option<u64>,
+pub struct GitlabJobArtifact {
+    pub file_type: Option<String>,
+    pub size: Option<u64>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabPipelineJob {
-    pub(crate) id: u64,
-    pub(crate) name: String,
-    pub(crate) stage: String,
-    pub(crate) status: String,
-    pub(crate) duration: Option<f64>,
-    pub(crate) queued_duration: Option<f64>,
-    pub(crate) web_url: Option<String>,
-    pub(crate) allow_failure: Option<bool>,
-    pub(crate) archived: Option<bool>,
+pub struct GitlabPipelineJob {
+    pub id: u64,
+    pub name: String,
+    pub stage: String,
+    pub status: String,
+    pub duration: Option<f64>,
+    pub queued_duration: Option<f64>,
+    pub web_url: Option<String>,
+    pub allow_failure: Option<bool>,
+    pub archived: Option<bool>,
     #[serde(default)]
-    pub(crate) artifacts: Vec<GitlabJobArtifact>,
+    pub artifacts: Vec<GitlabJobArtifact>,
 }
 
 impl GitlabPipelineJob {
-    pub(crate) fn trace_size(&self) -> Option<u64> {
+    pub fn trace_size(&self) -> Option<u64> {
         self.artifacts
             .iter()
             .find(|artifact| artifact.file_type.as_deref() == Some("trace"))
             .and_then(|artifact| artifact.size)
     }
 
-    pub(crate) fn is_retryable(&self) -> bool {
+    pub fn is_retryable(&self) -> bool {
         !self.archived.unwrap_or(false)
             && matches!(self.status.as_str(), "failed" | "canceled" | "success")
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct GitlabJobTrace {
-    pub(crate) content: String,
-    pub(crate) truncated: bool,
-    pub(crate) loaded_bytes: u64,
+pub struct GitlabJobTrace {
+    pub content: String,
+    pub truncated: bool,
+    pub loaded_bytes: u64,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabReviewUser {
-    pub(crate) username: Option<String>,
-    pub(crate) name: Option<String>,
-    pub(crate) avatar_url: Option<String>,
-    pub(crate) web_url: Option<String>,
+pub struct GitlabReviewUser {
+    pub username: Option<String>,
+    pub name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub web_url: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabReviewer {
-    pub(crate) user: GitlabReviewUser,
-    pub(crate) state: Option<String>,
+pub struct GitlabReviewer {
+    pub user: GitlabReviewUser,
+    pub state: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabApproval {
-    pub(crate) user: GitlabReviewUser,
+pub struct GitlabApproval {
+    pub user: GitlabReviewUser,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub(crate) struct GitlabApprovals {
-    pub(crate) approvals_required: Option<u32>,
-    pub(crate) approvals_left: Option<u32>,
-    pub(crate) approved: Option<bool>,
+pub struct GitlabApprovals {
+    pub approvals_required: Option<u32>,
+    pub approvals_left: Option<u32>,
+    pub approved: Option<bool>,
     #[serde(default)]
-    pub(crate) approved_by: Vec<GitlabApproval>,
+    pub approved_by: Vec<GitlabApproval>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct GitlabMergeRequestReview {
-    pub(crate) detail: Value,
-    pub(crate) reviewers: Option<Vec<GitlabReviewer>>,
-    pub(crate) approvals: Option<GitlabApprovals>,
+pub struct GitlabMergeRequestReview {
+    pub detail: Value,
+    pub reviewers: Option<Vec<GitlabReviewer>>,
+    pub approvals: Option<GitlabApprovals>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -311,15 +311,15 @@ fn last_commit_title(root: &str) -> Result<String, String> {
     Ok(title)
 }
 
-pub(crate) fn auth_status(host: &str) -> Result<GitlabCliAuthStatus, String> {
+pub fn auth_status(host: &str) -> Result<GitlabCliAuthStatus, String> {
     auth_status_with_options(host, false)
 }
 
-pub(crate) fn list_logins(host: &str, force_refresh: bool) -> Result<Vec<String>, String> {
+pub fn list_logins(host: &str, force_refresh: bool) -> Result<Vec<String>, String> {
     Ok(auth_status_with_options(host, force_refresh)?.logins)
 }
 
-pub(crate) fn check_auth(host: &str, login: &str) -> AuthCheck {
+pub fn check_auth(host: &str, login: &str) -> AuthCheck {
     match auth_status(host) {
         Ok(status) if status.logins.iter().any(|candidate| candidate == login) => {
             AuthCheck::LoggedIn
@@ -329,7 +329,7 @@ pub(crate) fn check_auth(host: &str, login: &str) -> AuthCheck {
     }
 }
 
-pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
+pub fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
     let glab = resolve_cli_binary("glab")?;
     let output = run_forge_cli_command(&glab, |command| {
         command.args(["auth", "status"]);
@@ -362,7 +362,7 @@ pub(crate) fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String
     Ok(hosts)
 }
 
-pub(crate) fn auth_status_with_options(
+pub fn auth_status_with_options(
     host: &str,
     force_refresh: bool,
 ) -> Result<GitlabCliAuthStatus, String> {
@@ -418,7 +418,7 @@ pub(crate) fn auth_status_with_options(
     Ok(status)
 }
 
-pub(crate) fn list_accounts_for_host(
+pub fn list_accounts_for_host(
     host: &str,
     force_refresh: bool,
 ) -> Result<Vec<ForgeCliAccountProfile>, String> {
@@ -447,7 +447,7 @@ pub(crate) fn list_accounts_for_host(
 
 const GITLAB_DEVELOPER_ACCESS_LEVEL: i32 = 30;
 
-pub(crate) fn repo_access(
+pub fn repo_access(
     host: &str,
     login: &str,
     owner: &str,
@@ -631,7 +631,7 @@ mod profile_cache {
     }
 }
 
-pub(crate) fn resolve_auth_context(
+pub fn resolve_auth_context(
     host: &str,
     login: Option<&str>,
 ) -> Result<Option<GitlabAuthContext>, String> {
@@ -686,7 +686,7 @@ pub(crate) fn resolve_auth_context(
     }))
 }
 
-pub(crate) fn resolve_change_request_json(
+pub fn resolve_change_request_json(
     root: &str,
     branch: &str,
     target: &WorkspaceForgeTarget,
@@ -753,7 +753,7 @@ pub(crate) fn resolve_change_request_json(
     Ok(Some(detail))
 }
 
-pub(crate) fn resolve_change_request_url_json(
+pub fn resolve_change_request_url_json(
     root: &str,
     target: &WorkspaceForgeTarget,
     iid: u32,
@@ -781,7 +781,7 @@ pub(crate) fn resolve_change_request_url_json(
         .map_err(|error| format!("Failed to decode GitLab merge request: {error}"))
 }
 
-pub(crate) fn resolve_project_json(
+pub fn resolve_project_json(
     root: &str,
     host: &str,
     project_id: u64,
@@ -805,7 +805,7 @@ pub(crate) fn resolve_project_json(
         .map_err(|error| format!("Failed to decode GitLab project: {error}"))
 }
 
-pub(crate) fn list_merge_request_discussions(
+pub fn list_merge_request_discussions(
     root: &str,
     host: &str,
     namespace: &str,
@@ -839,7 +839,7 @@ pub(crate) fn list_merge_request_discussions(
         .map_err(|error| format!("Failed to decode GitLab merge request discussions: {error}"))
 }
 
-pub(crate) fn reply_to_merge_request_discussion_json(
+pub fn reply_to_merge_request_discussion_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -869,7 +869,7 @@ pub(crate) fn reply_to_merge_request_discussion_json(
     )
 }
 
-pub(crate) fn set_merge_request_discussion_resolved_json(
+pub fn set_merge_request_discussion_resolved_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -925,7 +925,7 @@ fn run_api_json<T: serde::de::DeserializeOwned>(
         .map_err(|error| format!("Failed to decode {label}: {error}"))
 }
 
-pub(crate) fn load_merge_request_review(
+pub fn load_merge_request_review(
     root: &str,
     host: &str,
     namespace: &str,
@@ -978,7 +978,7 @@ pub(crate) fn load_merge_request_review(
     })
 }
 
-pub(crate) fn find_pipeline_for_sha(
+pub fn find_pipeline_for_sha(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1046,7 +1046,7 @@ fn pipeline_by_id_with_auth(
     run_api_json(root, host, auth, &endpoint, false, "GitLab pipeline")
 }
 
-pub(crate) fn pipeline_by_id(
+pub fn pipeline_by_id(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1059,7 +1059,7 @@ pub(crate) fn pipeline_by_id(
     pipeline_by_id_with_auth(root, host, &encoded_project, pipeline_id, auth.as_ref())
 }
 
-pub(crate) fn list_pipeline_jobs(
+pub fn list_pipeline_jobs(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1084,7 +1084,7 @@ pub(crate) fn list_pipeline_jobs(
 
 const JOB_TRACE_LIMIT_BYTES: usize = 256 * 1024;
 
-pub(crate) fn read_job_trace(
+pub fn read_job_trace(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1146,7 +1146,7 @@ pub(crate) fn read_job_trace(
     })
 }
 
-pub(crate) fn retry_job(
+pub fn retry_job(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1237,7 +1237,7 @@ fn sanitize_job_trace(raw: &str) -> String {
         .join("\n")
 }
 
-pub(crate) fn map_state(state: Option<&str>) -> Option<String> {
+pub fn map_state(state: Option<&str>) -> Option<String> {
     match state {
         Some("opened") | Some("open") => Some("open".to_string()),
         Some("closed") => Some("closed".to_string()),
@@ -1246,7 +1246,7 @@ pub(crate) fn map_state(state: Option<&str>) -> Option<String> {
     }
 }
 
-pub(crate) fn map_mergeable(raw_mr: &Value) -> Option<String> {
+pub fn map_mergeable(raw_mr: &Value) -> Option<String> {
     if raw_mr
         .get("has_conflicts")
         .and_then(|value| value.as_bool())
@@ -1267,7 +1267,7 @@ pub(crate) fn map_mergeable(raw_mr: &Value) -> Option<String> {
     }
 }
 
-pub(crate) fn view_change_request_web(
+pub fn view_change_request_web(
     root: &str,
     host: &str,
     login: Option<&str>,
@@ -1292,7 +1292,7 @@ pub(crate) fn view_change_request_web(
     ))
 }
 
-pub(crate) fn view_change_request_number_web(
+pub fn view_change_request_number_web(
     root: &str,
     host: &str,
     number: u32,
@@ -1316,7 +1316,7 @@ pub(crate) fn view_change_request_number_web(
     Err(git_output_err("glab mr view --web", &output.stderr))
 }
 
-pub(crate) fn merge_change_request(
+pub fn merge_change_request(
     root: &str,
     branch: &str,
     target: &WorkspaceForgeTarget,
@@ -1360,7 +1360,7 @@ pub(crate) fn merge_change_request(
     ))
 }
 
-pub(crate) fn create_change_request(
+pub fn create_change_request(
     root: &str,
     base_branch: &str,
     head_branch: &str,
@@ -1480,7 +1480,7 @@ fn run_hub_glab_json(
         .map_err(|error| format!("Failed to decode GitLab response: {error}"))
 }
 
-pub(crate) fn list_merge_requests_json(
+pub fn list_merge_requests_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1495,7 +1495,7 @@ pub(crate) fn list_merge_requests_json(
     run_hub_glab_json(root, host, login, &["api", &endpoint])
 }
 
-pub(crate) fn merge_request_detail_json(
+pub fn merge_request_detail_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1521,7 +1521,7 @@ pub(crate) fn merge_request_detail_json(
     }))
 }
 
-pub(crate) fn merge_request_changes_json(
+pub fn merge_request_changes_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1538,7 +1538,7 @@ pub(crate) fn merge_request_changes_json(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn create_merge_request_discussion_json(
+pub fn create_merge_request_discussion_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1593,7 +1593,7 @@ pub(crate) fn create_merge_request_discussion_json(
     )
 }
 
-pub(crate) fn approve_merge_request_json(
+pub fn approve_merge_request_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1609,7 +1609,7 @@ pub(crate) fn approve_merge_request_json(
     run_hub_glab_json(root, host, login, &["api", "--method", "POST", &endpoint])
 }
 
-pub(crate) fn create_merge_request_comment_json(
+pub fn create_merge_request_comment_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -1647,7 +1647,7 @@ mod tests {
         GitlabJobArtifact, GitlabPipelineJob, JOB_TRACE_LIMIT_BYTES,
     };
 
-    use crate::commands::forge::accounts::RepoAccess;
+    use crate::forge::accounts::RepoAccess;
     use std::env;
 
     struct GitlabSmokeFixture {
@@ -1992,7 +1992,7 @@ self.gitlab.example.com\n  ✓ Logged in to self.gitlab.example.com as team-user
 }
 
 /// Project members who can be asked to review, filtered by `query` when given.
-pub(crate) fn merge_request_reviewer_candidates_json(
+pub fn merge_request_reviewer_candidates_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -2013,7 +2013,7 @@ pub(crate) fn merge_request_reviewer_candidates_json(
 }
 
 /// Looks up a GitLab user id by username (reviewers are set by id).
-pub(crate) fn find_user_id_by_username(
+pub fn find_user_id_by_username(
     root: &str,
     host: &str,
     username: &str,
@@ -2035,7 +2035,7 @@ pub(crate) fn find_user_id_by_username(
 }
 
 /// Replaces the merge request's reviewer list with `reviewer_ids`.
-pub(crate) fn set_merge_request_reviewers_json(
+pub fn set_merge_request_reviewers_json(
     root: &str,
     host: &str,
     namespace: &str,
@@ -2100,7 +2100,7 @@ pub(crate) fn set_merge_request_reviewers_json(
 }
 
 /// The merge request itself (author and current reviewers, among others).
-pub(crate) fn merge_request_json(
+pub fn merge_request_json(
     root: &str,
     host: &str,
     namespace: &str,
