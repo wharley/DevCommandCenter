@@ -3,7 +3,7 @@ pub mod antigravity_installation;
 pub mod commands;
 pub mod connector_gateway;
 pub mod conversation_rewind;
-pub(crate) mod delegation_apply;
+pub(crate) use dcc_infra::delegation_apply;
 pub mod delegation_runtime;
 pub mod delivery_failure;
 pub mod events;

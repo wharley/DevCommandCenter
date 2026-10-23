@@ -9,7 +9,7 @@ pub(crate) use dcc_infra::workspace_git::{
 use dcc_core::domain::workspace::Workspace;
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
-    git::{broken_worktree_reason, is_git_repo, remove_worktree},
+    git::{broken_worktree_reason, is_git_repo},
 };
 
 use crate::{
@@ -43,97 +43,7 @@ pub(crate) fn resolve_workspace_broken_reason(workspace: &Workspace) -> Option<S
     broken_worktree_reason(active_root)
 }
 
-pub(crate) fn cleanup_workspace_files(workspace: &Workspace) -> Result<(), String> {
-    let Some(worktree_root) = workspace.worktree_path.as_deref().map(str::trim) else {
-        return Ok(());
-    };
-    if worktree_root.is_empty() {
-        return Ok(());
-    }
 
-    let root_path = workspace.root_path.trim();
-    if !root_path.is_empty() && Path::new(root_path) == Path::new(worktree_root) {
-        return Ok(());
-    }
-
-    let worktree_path = Path::new(worktree_root);
-    if !worktree_path.exists() {
-        return Ok(());
-    }
-
-    let repo_root = Path::new(root_path);
-    let should_use_git_worktree_removal =
-        !root_path.is_empty() && is_git_repo(repo_root) && worktree_path.join(".git").exists();
-
-    if should_use_git_worktree_removal {
-        match remove_worktree(repo_root, worktree_path) {
-            Ok(()) => return Ok(()),
-            Err(error) if broken_worktree_reason(worktree_path).is_none() => {
-                return Err(error.to_string());
-            }
-            Err(_) => {
-                // Fall back to the exact broken directory only. Repository-wide
-                // metadata cleanup is never an implicit side effect of deletion.
-            }
-        }
-    }
-
-    std::fs::remove_dir_all(worktree_path).map_err(|error| {
-        format!(
-            "failed to remove workspace path {}: {}",
-            worktree_path.display(),
-            error
-        )
-    })?;
-
-    Ok(())
-}
-
-/// Returns the logical size of a directory without following symbolic links.
-///
-/// Worktrees may contain symlinks into large dependency caches. Following them
-/// would both overstate the space reclaimed by deletion and risk walking a
-/// cycle, so only regular files are counted.
-pub(crate) fn directory_logical_size(root: &Path) -> Result<u64, String> {
-    if !root.exists() {
-        return Ok(0);
-    }
-
-    let mut total = 0_u64;
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        let entries = std::fs::read_dir(&directory).map_err(|error| {
-            format!(
-                "failed to inspect workspace path {}: {}",
-                directory.display(),
-                error
-            )
-        })?;
-        for entry in entries {
-            let entry = entry.map_err(|error| {
-                format!(
-                    "failed to inspect workspace path {}: {}",
-                    directory.display(),
-                    error
-                )
-            })?;
-            let metadata = std::fs::symlink_metadata(entry.path()).map_err(|error| {
-                format!(
-                    "failed to inspect workspace entry {}: {}",
-                    entry.path().display(),
-                    error
-                )
-            })?;
-            let file_type = metadata.file_type();
-            if file_type.is_dir() {
-                pending.push(entry.path());
-            } else if file_type.is_file() {
-                total = total.saturating_add(metadata.len());
-            }
-        }
-    }
-    Ok(total)
-}
 
 
 
@@ -170,10 +80,12 @@ pub(crate) async fn preflight_workspace_root(
 #[cfg(test)]
 mod tests {
     use super::{
-        broken_workspace_reason_by_root, cleanup_workspace_files, directory_logical_size,
+        broken_workspace_reason_by_root,
         ensure_pushable_branch, find_workspace_by_root, preferred_workspace_branch_name,
         resolve_current_branch_name,
     };
+    use dcc_infra::workspace_cleanup::directory_logical_size;
+    use dcc_infra::workspace_deletion::cleanup_workspace_files;
     use dcc_infra::workspace_git::is_linked_worktree;
     use dcc_core::domain::{
         project::ProjectId,

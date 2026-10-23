@@ -50,9 +50,29 @@ pub use dcc_core::domain::workspace_git::{
     WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitStatusOutput,
 };
 pub(crate) use dcc_infra::workspace_git::read_workspace_git_status as workspace_git_status_inner;
-use dcc_infra::workspace_actions::ensure_workspace_is_not_a_bundle_member;
 #[cfg(test)]
 use dcc_infra::workspace_actions::{normalize_snooze_until, normalize_workspace_name};
+#[cfg(test)]
+use dcc_infra::git::remove_worktree;
+use dcc_infra::project_actions::normalize_linked_folders;
+#[cfg(test)]
+use dcc_infra::project_actions::{
+    normalize_repository_display_name, normalize_repository_logo, normalize_repository_visual,
+    MAX_LINKED_FOLDERS, MAX_PROJECT_LOGO_CHARS, PROJECT_COLORS, PROJECT_ICONS,
+};
+#[cfg(test)]
+use dcc_infra::workspace_deletion::delegation::{
+    delete_delegation_branch_ref, release_delegation_branch,
+    remove_journaled_delegation_worktree_inner, UNAPPLIED_DELEGATION_EDITS,
+};
+#[cfg(test)]
+use dcc_infra::workspace_deletion::remote_branch::{
+    cleanup_unused_workspace_push_target_at_root, delete_workspace_remote_branch,
+    delete_workspace_remote_branch_after_worktree_loss, observed_workspace_push_url,
+    push_url_contains_credentials, unused_workspace_push_target,
+    workspace_remote_branch_target_at_root,
+};
+
 use dcc_infra::workspace_git::{
     capture_staged_snapshot, file_name_from_path, git_internal_path_exists, join_workspace_path,
     normalize_git_relative_path, resolve_conflict_count, staged_snapshot_fingerprint,
@@ -62,7 +82,7 @@ use dcc_infra::{
     db::{SqliteSessionRepo, SqliteWorkspaceRepo},
     git::{
         create_worktree_branch_from_ref, detect_workspace_setup_suggestions,
-        list_local_branch_names, read_workspace_automation_config, remove_worktree,
+        list_local_branch_names, read_workspace_automation_config,
         validate_workspace_automation_config, CommandGitOps, RepoAutomationConfig,
         RepoAutomationTask, RepoDeliveryPolicy, RepoTaskKind,
     },
@@ -83,7 +103,7 @@ use crate::{
         },
     },
     commands::workspace_support::{
-        broken_workspace_message, broken_workspace_reason_by_root, cleanup_workspace_files,
+        broken_workspace_message, broken_workspace_reason_by_root,
         ensure_pushable_branch, find_workspace_by_root,
         next_available_branch_name, preferred_workspace_branch_name, preflight_workspace_root, resolve_current_branch_name, resolve_current_commit_sha,
         resolve_default_remote_name, resolve_workspace_active_root,
@@ -121,6 +141,20 @@ use crate::{
 const DCC_SPEC_CONTEXT_START: &str = "<!-- dcc:spec:start -->";
 const DCC_SPEC_CONTEXT_END: &str = "<!-- dcc:spec:end -->";
 const DCC_SPEC_CONTEXT_MANIFEST_PATH: &str = ".devcommandcenter/context.json";
+
+pub(crate) use dcc_core::domain::workspace_git::WorkspaceRemoteBranchDeletionTarget;
+pub(crate) use dcc_infra::workspace_deletion::delegation::{
+    delegation_worktrees_root, remove_journaled_delegation_worktree, validate_branch_for_fetch,
+    validate_delegation_operation_workspace_scope, validate_delegation_worktree_path,
+};
+pub(crate) use dcc_infra::workspace_deletion::remote_branch::{
+    cleanup_unused_workspace_push_target,
+    redact_push_route_credentials, resolve_commitish_sha, workspace_remote_branch_deletion_target,
+};
+pub(crate) use dcc_infra::workspace_deletion::{
+    cleanup_workspace_files,
+    delete_repository_with_workspaces,
+};
 
 pub(crate) fn workspace_mutation_error(error: WorkspaceMutationRequestError<String>) -> String {
     match error {
@@ -258,21 +292,6 @@ pub struct WorkspaceSetupHint {
     pub source_path: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceRemoteBranchDeletionTarget {
-    pub remote: String,
-    pub branch: String,
-    /// The local worktree HEAD observed when the destructive action was offered.
-    /// Older clients do not send this field, which intentionally makes deletion
-    /// fail closed until the confirmation dialog is reopened.
-    #[serde(default)]
-    pub expected_oid: String,
-    /// The effective push URL observed when the destructive action was offered.
-    /// This is always redacted before it can leave the backend.
-    #[serde(default)]
-    pub push_url: String,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -544,11 +563,7 @@ pub struct RepositoryLinkedFolders {
 
 impl RepositoryLinkedFolders {
     fn new(repository_id: String, paths: Vec<String>) -> Self {
-        let context_paths = paths
-            .iter()
-            .filter(|path| !dcc_infra::git::is_git_repo(Path::new(path)))
-            .cloned()
-            .collect();
+        let context_paths = dcc_infra::project_actions::linked_context_paths(&paths);
         Self {
             repository_id,
             paths,
@@ -2830,27 +2845,6 @@ struct PushRoute {
     url: Option<String>,
 }
 
-fn redact_push_route_credentials(raw: &str) -> String {
-    let mut redacted = raw.to_string();
-    let mut cursor = 0usize;
-    while let Some(relative_scheme) = redacted[cursor..].find("://") {
-        let authority_start = cursor + relative_scheme + 3;
-        let authority_end = redacted[authority_start..]
-            .find(|character: char| {
-                character.is_whitespace() || matches!(character, '/' | '?' | '#')
-            })
-            .map(|relative| authority_start + relative)
-            .unwrap_or(redacted.len());
-        let Some(relative_at) = redacted[authority_start..authority_end].rfind('@') else {
-            cursor = authority_end;
-            continue;
-        };
-        let at = authority_start + relative_at;
-        redacted.replace_range(authority_start..at, "[redacted]");
-        cursor = authority_start + "[redacted]@".len();
-    }
-    redacted
-}
 
 fn observed_push_route_url(root: &str, remote: &str, configured: Option<String>) -> Option<String> {
     configured
@@ -4047,16 +4041,6 @@ fn normalize_base_branch_for_sync(value: &str, remote: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn validate_branch_for_fetch(root: &str, branch: &str) -> Result<(), String> {
-    let output = run_git_output(root, &["check-ref-format", "--branch", branch])?;
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(git_output_err(
-        "git check-ref-format --branch",
-        &output.stderr,
-    ))
-}
 
 fn remote_tracking_ref(remote: &str, branch: &str) -> String {
     format!("refs/remotes/{remote}/{branch}")
@@ -4644,16 +4628,6 @@ pub async fn workspace_git_status_with_state(
     workspace_git_status_inner(&input.workspace_root)
 }
 
-fn delegation_worktrees_root(active_root: &Path) -> PathBuf {
-    let parent = active_root.parent().unwrap_or(active_root);
-    let worktrees_root =
-        if parent.file_name().and_then(|name| name.to_str()) == Some(".dcc-worktrees") {
-            parent.to_path_buf()
-        } else {
-            parent.join(".dcc-worktrees")
-        };
-    worktrees_root.join(".dcc-delegations")
-}
 
 fn delegation_key_suffix(key: Option<&str>) -> String {
     let suffix: String = key
@@ -4669,21 +4643,6 @@ fn delegation_key_suffix(key: Option<&str>) -> String {
     }
 }
 
-fn validate_delegation_worktree_path(root: &str, value: &str) -> Result<PathBuf, String> {
-    let worktree_path = PathBuf::from(value.trim());
-    if !worktree_path.is_absolute() {
-        return Err("delegation worktree path must be absolute".to_string());
-    }
-    let allowed_root = delegation_worktrees_root(Path::new(root));
-    let canonical_allowed_root =
-        fs::canonicalize(&allowed_root).unwrap_or_else(|_| allowed_root.clone());
-    let canonical_worktree_path =
-        fs::canonicalize(&worktree_path).unwrap_or_else(|_| worktree_path.clone());
-    if !canonical_worktree_path.starts_with(&canonical_allowed_root) {
-        return Err("refusing to use a path outside the DCC delegation worktree root".to_string());
-    }
-    Ok(worktree_path)
-}
 
 #[tauri::command]
 pub async fn workspace_prepare_delegation_worktree(
@@ -4887,7 +4846,7 @@ pub async fn workspace_remove_delegation_worktree_with_state(
     }
     .ok_or_else(|| "delegation worktree journal entry was not found".to_string())?;
     remove_journaled_delegation_worktree(
-        &state,
+        state,
         &journal_repo,
         &requested_root,
         operation,
@@ -4896,416 +4855,14 @@ pub async fn workspace_remove_delegation_worktree_with_state(
     .await
 }
 
-async fn remove_journaled_delegation_worktree(
-    state: &WorkspaceCommandState,
-    journal_repo: &SqliteSessionRepo,
-    requested_root: &str,
-    mut operation: DelegationWorktreeOperation,
-    discard_changes: bool,
-) -> Result<(), String> {
-    validate_delegation_operation_workspace_scope(state, requested_root, &operation).await?;
-    if matches!(operation.state, DelegationWorktreeOperationState::Removed) {
-        return Ok(());
-    }
-    let artifact_root = state
-        .app_data_dir
-        .join("delegation-apply")
-        .join("transactions");
-    let _operation_lock = try_lock_apply_operation(&artifact_root, &operation.operation_id.0)?
-        .ok_or_else(|| "delegation operation is owned by another live process".to_string())?;
-    // Edits already applied to the parent are not lost when the worktree goes.
-    let mut edits_reached_parent = false;
-    if let Some(apply) = journal_repo
-        .get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        edits_reached_parent = apply.state == DelegationApplyTransactionState::Applied;
-        match apply.state {
-            DelegationApplyTransactionState::Preparing
-            | DelegationApplyTransactionState::Prepared
-            | DelegationApplyTransactionState::Applying => {
-                return Err("delegation apply is still active; retry cleanup after recovery".to_string())
-            }
-            DelegationApplyTransactionState::RecoveryRequired => {
-                return Err(
-                    "delegation apply changed the destination ambiguously; recover it before removing the worktree"
-                        .to_string(),
-                )
-            }
-            DelegationApplyTransactionState::Applied
-            | DelegationApplyTransactionState::RolledBack => {}
-        }
-    }
-    // Validate immutable ownership before recording destructive intent. A bad
-    // journal row must not get stuck in Removing without touching the worktree.
-    let worktree_path =
-        validate_delegation_worktree_path(requested_root, &operation.worktree_path)?;
-    let expected_branch = operation.branch.clone();
-    let expected_oid = operation
-        .expected_branch_oid
-        .clone()
-        .ok_or_else(|| "delegation worktree journal has no expected branch OID".to_string())?;
-    let keep_unapplied_edits = !discard_changes
-        && !edits_reached_parent
-        && !matches!(operation.state, DelegationWorktreeOperationState::Preparing);
-    // Checked before the journal records destructive intent: a refusal must
-    // leave an open task exactly as it was, still reviewable and applicable.
-    if keep_unapplied_edits && worktree_path.exists() {
-        let probe = worktree_path.clone();
-        let files =
-            tauri::async_runtime::spawn_blocking(move || delegation_uncommitted_files(&probe))
-                .await
-                .map_err(|error| error.to_string())??;
-        if files > 0 {
-            return Err(unapplied_delegation_edits_error(files));
-        }
-    }
-    if matches!(operation.state, DelegationWorktreeOperationState::Preparing) {
-        operation.state = DelegationWorktreeOperationState::CleanupRequired;
-        operation.last_error = Some("delegation worktree preparation was interrupted".to_string());
-        operation.updated_at = Utc::now().to_rfc3339();
-        if !journal_repo
-            .compare_and_swap_delegation_worktree_operation(
-                DelegationWorktreeOperationState::Preparing,
-                &operation,
-            )
-            .await
-            .map_err(|error| error.to_string())?
-        {
-            return Err("delegation worktree journal changed; retry cleanup".to_string());
-        }
-    }
-    if !matches!(
-        operation.state,
-        DelegationWorktreeOperationState::Prepared
-            | DelegationWorktreeOperationState::Bound
-            | DelegationWorktreeOperationState::ReviewPending
-            | DelegationWorktreeOperationState::Applied
-            | DelegationWorktreeOperationState::Removing
-            | DelegationWorktreeOperationState::CleanupRequired
-    ) {
-        return Err(format!(
-            "delegation worktree cannot be removed while it is {:?}",
-            operation.state
-        ));
-    }
 
-    let recovery_owner = Uuid::new_v4().to_string();
-    let claimed_at = Utc::now();
-    let lease_until = claimed_at + Duration::minutes(2);
-    operation = match journal_repo
-        .claim_delegation_worktree_removal(
-            &operation.operation_id,
-            &recovery_owner,
-            &claimed_at.to_rfc3339(),
-            &lease_until.to_rfc3339(),
-        )
-        .await
-        .map_err(|error| error.to_string())?
-    {
-        Some(operation) => operation,
-        None => {
-            let current = journal_repo
-                .get_delegation_worktree_operation(&operation.operation_id)
-                .await
-                .map_err(|error| error.to_string())?;
-            if current
-                .as_ref()
-                .is_some_and(|current| current.state == DelegationWorktreeOperationState::Removed)
-            {
-                return Ok(());
-            }
-            if current
-                .as_ref()
-                .is_some_and(|current| current.state == DelegationWorktreeOperationState::Removing)
-            {
-                return Err(
-                    "delegation worktree cleanup is already running in another process".to_string(),
-                );
-            }
-            return Err("delegation worktree journal changed; retry cleanup".to_string());
-        }
-    };
 
-    let removal = if worktree_path.exists() {
-        state
-            .run_git_workspace_pair_mutation_blocking(
-                requested_root,
-                worktree_path,
-                move |trusted_root, trusted_worktree| {
-                    remove_journaled_delegation_worktree_inner(
-                        trusted_root,
-                        trusted_worktree,
-                        &expected_branch,
-                        &expected_oid,
-                        keep_unapplied_edits,
-                    )
-                },
-            )
-            .await
-            .map_err(workspace_mutation_error)
-    } else {
-        state
-            .run_git_workspace_mutation_blocking(requested_root, move |trusted_root| {
-                release_delegation_branch(
-                    trusted_root,
-                    &expected_branch,
-                    &expected_oid,
-                    keep_unapplied_edits,
-                )
-            })
-            .await
-            .map_err(workspace_mutation_error)
-    };
 
-    if let Err(error) = removal {
-        let _ = journal_repo
-            .finalize_delegation_worktree_removal(
-                &operation.operation_id,
-                &recovery_owner,
-                DelegationWorktreeOperationState::CleanupRequired,
-                Some(error.clone()),
-                &Utc::now().to_rfc3339(),
-            )
-            .await;
-        return Err(error);
-    }
-    if journal_repo
-        .finalize_delegation_worktree_removal(
-            &operation.operation_id,
-            &recovery_owner,
-            DelegationWorktreeOperationState::Removed,
-            None,
-            &Utc::now().to_rfc3339(),
-        )
-        .await
-        .map_err(|error| error.to_string())?
-        .is_none()
-    {
-        if journal_repo
-            .get_delegation_worktree_operation(&operation.operation_id)
-            .await
-            .map_err(|error| error.to_string())?
-            .is_some_and(|current| current.state == DelegationWorktreeOperationState::Removed)
-        {
-            return Ok(());
-        }
-        return Err("delegation worktree was removed but its journal needs recovery".to_string());
-    }
-    Ok(())
-}
 
-async fn validate_delegation_operation_workspace_scope(
-    state: &WorkspaceCommandState,
-    requested_root: &str,
-    operation: &DelegationWorktreeOperation,
-) -> Result<(), String> {
-    if operation.source_root.trim() != requested_root.trim() {
-        return Err("delegation worktree journal does not belong to workspace_root".to_string());
-    }
-    let workspace_repo =
-        SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let workspace = workspace_repo
-        .get_workspace(&operation.workspace_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| {
-            format!(
-                "delegation worktree workspace no longer exists: {}",
-                operation.workspace_id.0
-            )
-        })?;
-    if resolve_workspace_active_root(&workspace).trim() != requested_root.trim() {
-        return Err("delegation worktree workspace mapping changed; refusing cleanup".to_string());
-    }
-    Ok(())
-}
 
-fn delete_delegation_branch_ref(
-    root: &Path,
-    branch: &str,
-    expected_oid: &str,
-) -> Result<(), String> {
-    if !branch.starts_with("dcc/delegation/") {
-        return Err("refusing to remove a non-DCC delegation branch".to_string());
-    }
-    let root = root
-        .to_str()
-        .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
-    validate_branch_for_fetch(root, branch)?;
-    let reference = format!("refs/heads/{branch}");
-    let observed = run_git_output(root, &["rev-parse", "--verify", "--quiet", &reference])?;
-    if !observed.status.success() {
-        if observed.status.code() == Some(1) {
-            return Ok(());
-        }
-        return Err(git_output_err("git rev-parse --verify", &observed.stderr));
-    }
-    let observed_oid = String::from_utf8_lossy(&observed.stdout)
-        .trim()
-        .to_ascii_lowercase();
-    if observed_oid != expected_oid.trim().to_ascii_lowercase() {
-        return Err(
-            "delegation branch advanced after its journal identity was captured".to_string(),
-        );
-    }
-    let output = run_git_output(root, &["update-ref", "-d", &reference, expected_oid])?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        // Another process may have completed the same compare-delete between
-        // rev-parse and update-ref. Absence is success; a successor remains
-        // protected and must never be deleted.
-        let after = run_git_output(root, &["rev-parse", "--verify", "--quiet", &reference])?;
-        if !after.status.success() && after.status.code() == Some(1) {
-            return Ok(());
-        }
-        if after.status.success()
-            && String::from_utf8_lossy(&after.stdout)
-                .trim()
-                .eq_ignore_ascii_case(expected_oid.trim())
-        {
-            return Err(git_output_err("git update-ref -d", &output.stderr));
-        }
-        Err("delegation branch advanced while its journaled ref was being removed".to_string())
-    }
-}
 
-/// Prefix of the error a cleanup returns instead of deleting edits that never
-/// reached the parent. The frontend reads it to offer "discard" explicitly.
-pub(crate) const UNAPPLIED_DELEGATION_EDITS: &str = "unapplied_delegation_edits:";
 
-fn unapplied_delegation_edits_error(files: u32) -> String {
-    format!(
-        "{UNAPPLIED_DELEGATION_EDITS}{files} uncommitted file(s) in a child task's worktree were never applied to the parent"
-    )
-}
 
-/// Uncommitted files, untracked included: what `worktree remove --force` loses.
-fn delegation_uncommitted_files(worktree_path: &Path) -> Result<u32, String> {
-    let worktree = worktree_path
-        .to_str()
-        .ok_or_else(|| "delegation worktree path is not valid UTF-8".to_string())?;
-    let output = run_git_output(
-        worktree,
-        &[
-            "status",
-            "--porcelain=v1",
-            "--no-renames",
-            "--untracked-files=normal",
-        ],
-    )?;
-    if !output.status.success() {
-        return Err(git_output_err("git status", &output.stderr));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .count() as u32)
-}
-
-/// Whether `oid` is in the history of any branch or remote-tracking ref other
-/// than the delegation's own: then deleting that branch loses nothing.
-fn delegation_tip_reachable_elsewhere(root: &str, branch: &str, oid: &str) -> Result<bool, String> {
-    let output = run_git_output(
-        root,
-        &[
-            "for-each-ref",
-            "--format=%(refname)",
-            "--contains",
-            oid,
-            "refs/heads",
-            "refs/remotes",
-        ],
-    )?;
-    if !output.status.success() {
-        return Err(git_output_err(
-            "git for-each-ref --contains",
-            &output.stderr,
-        ));
-    }
-    let own = format!("refs/heads/{branch}");
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .any(|reference| !reference.is_empty() && reference != own))
-}
-
-/// Drops the delegation branch once its worktree is gone. A branch that moved
-/// past its journaled OID holds the child's own commits: it is deleted when
-/// they live on elsewhere or the person discarded them, and kept otherwise,
-/// so freeing the disk never costs a commit.
-fn release_delegation_branch(
-    root: &Path,
-    branch: &str,
-    expected_oid: &str,
-    keep_unapplied_edits: bool,
-) -> Result<(), String> {
-    if !branch.starts_with("dcc/delegation/") {
-        return Err("refusing to remove a non-DCC delegation branch".to_string());
-    }
-    let root_str = root
-        .to_str()
-        .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
-    validate_branch_for_fetch(root_str, branch)?;
-    let reference = format!("refs/heads/{branch}");
-    let observed = run_git_output(root_str, &["rev-parse", "--verify", "--quiet", &reference])?;
-    if !observed.status.success() {
-        if observed.status.code() == Some(1) {
-            return Ok(());
-        }
-        return Err(git_output_err("git rev-parse --verify", &observed.stderr));
-    }
-    let observed_oid = String::from_utf8_lossy(&observed.stdout)
-        .trim()
-        .to_ascii_lowercase();
-    if observed_oid == expected_oid.trim().to_ascii_lowercase() {
-        return delete_delegation_branch_ref(root, branch, expected_oid);
-    }
-    if keep_unapplied_edits && !delegation_tip_reachable_elsewhere(root_str, branch, &observed_oid)?
-    {
-        return Ok(());
-    }
-    delete_delegation_branch_ref(root, branch, &observed_oid)
-}
-
-fn remove_journaled_delegation_worktree_inner(
-    root: &Path,
-    worktree_path: &Path,
-    expected_branch: &str,
-    expected_oid: &str,
-    keep_unapplied_edits: bool,
-) -> Result<(), String> {
-    let worktree = worktree_path
-        .to_str()
-        .ok_or_else(|| "delegation worktree path is not valid UTF-8".to_string())?;
-    // A different branch checked out means the folder is no longer the
-    // child's; commits on the child's own branch are handled below.
-    if resolve_current_branch_name(worktree)? != expected_branch {
-        return Err(
-            "delegation worktree branch identity changed after it was journaled".to_string(),
-        );
-    }
-    let expected_name = expected_branch.replace('/', "-");
-    if worktree_path.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str()) {
-        return Err("delegation worktree path does not match its journaled branch".to_string());
-    }
-    if keep_unapplied_edits {
-        let files = delegation_uncommitted_files(worktree_path)?;
-        if files > 0 {
-            return Err(unapplied_delegation_edits_error(files));
-        }
-    }
-    remove_worktree(root, worktree_path).map_err(|error| error.to_string())?;
-    if worktree_path.exists() {
-        return Err(format!(
-            "git removed delegation metadata but the worktree path still exists: {}",
-            worktree_path.display()
-        ));
-    }
-    release_delegation_branch(root, expected_branch, expected_oid, keep_unapplied_edits)
-}
 
 #[cfg(test)]
 fn remove_delegation_worktree_inner(
@@ -5375,7 +4932,7 @@ pub async fn workspace_apply_delegation_worktree(
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "delegation worktree journal entry was not found".to_string())?;
-    validate_delegation_operation_workspace_scope(&state, &requested_root, &operation).await?;
+    validate_delegation_operation_workspace_scope(state.inner(), &requested_root, &operation).await?;
     if !matches!(
         operation.state,
         DelegationWorktreeOperationState::ReviewPending
@@ -5981,18 +5538,6 @@ fn resolve_continue_start_point(root: &str, target_branch: &str) -> Result<Strin
     ))
 }
 
-fn resolve_commitish_sha(root: &str, commitish: &str) -> Result<String, String> {
-    let revision = format!("{commitish}^{{commit}}");
-    let output = run_git_output(root, &["rev-parse", "--verify", &revision])?;
-    if !output.status.success() {
-        return Err("could not resolve the requested branch commit".to_string());
-    }
-    let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if commit.is_empty() {
-        return Err("resolved branch commit is empty".to_string());
-    }
-    Ok(commit)
-}
 
 fn sanitize_branch_name(name: &str) -> String {
     let slug: String = name
@@ -6551,193 +6096,10 @@ async fn inherit_workspace_push_target_ownership(
     Ok(())
 }
 
-fn git_branch_config_uses_remote(root: &str, remote_name: &str) -> bool {
-    let Ok(output) = run_git_output(
-        root,
-        &[
-            "config",
-            "--get-regexp",
-            r"^branch\..*\.(remote|pushRemote)$",
-        ],
-    ) else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| line.split_whitespace().nth(1))
-        .any(|value| value == remote_name)
-}
 
-async fn unused_workspace_push_target(
-    repo: &SqliteWorkspaceRepo,
-    removed: &Workspace,
-    retiring_workspace_ids: &BTreeSet<String>,
-) -> Result<Option<WorkspacePushTarget>, String> {
-    let Some(target) = removed
-        .source
-        .as_ref()
-        .and_then(|source| source.push_target.as_ref())
-    else {
-        return Ok(None);
-    };
-    if !target.remote_created
-        || target.remote_url.is_none()
-        || matches!(target.remote_name.as_str(), "origin" | "upstream")
-    {
-        return Ok(None);
-    }
-    let used_by_another_workspace = repo
-        .list_workspaces()
-        .await
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .filter(|workspace| {
-            workspace.id != removed.id
-                && !retiring_workspace_ids.contains(&workspace.id.0)
-                && workspace.root_path == removed.root_path
-        })
-        .filter_map(|workspace| workspace.source?.push_target)
-        .any(|known| {
-            known.remote_name == target.remote_name
-                || known.remote_url.as_deref() == target.remote_url.as_deref()
-        });
-    if used_by_another_workspace {
-        return Ok(None);
-    }
-    Ok(Some(target.clone()))
-}
 
-fn cleanup_unused_workspace_push_target_at_root(
-    root: &str,
-    target: &WorkspacePushTarget,
-) -> Result<(), String> {
-    if git_branch_config_uses_remote(root, &target.remote_name) {
-        return Ok(());
-    }
-    let output = run_git_output(root, &["remote", "get-url", &target.remote_name])?;
-    if !output.status.success() {
-        return Ok(());
-    }
-    let configured_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if target.remote_url.as_deref() != Some(configured_url.as_str()) {
-        return Ok(());
-    }
-    let output = run_git_output(root, &["remote", "remove", &target.remote_name])?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(git_output_err("git remote remove", &output.stderr))
-    }
-}
 
-async fn cleanup_unused_workspace_push_target(
-    state: &WorkspaceCommandState,
-    repo: &SqliteWorkspaceRepo,
-    removed: &Workspace,
-    retiring_workspace_ids: &BTreeSet<String>,
-) -> Result<(), String> {
-    let Some(target) = unused_workspace_push_target(repo, removed, retiring_workspace_ids).await?
-    else {
-        return Ok(());
-    };
-    let active_root = resolve_workspace_active_root(removed).to_string();
-    if !Path::new(&active_root).exists() {
-        // This is optional shared-repository configuration cleanup. A prior
-        // partial deletion may already have removed the worktree; retaining a
-        // now-unused DCC remote is safer than blocking permanent workspace
-        // cleanup on a physical root that no longer exists.
-        return Ok(());
-    }
-    state
-        .run_git_workspace_mutation_blocking(&active_root, move |trusted_root| {
-            let root = trusted_root
-                .to_str()
-                .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
-            cleanup_unused_workspace_push_target_at_root(root, &target)
-        })
-        .await
-        .map_err(workspace_mutation_error)
-}
 
-fn workspace_remote_branch_target_at_root(
-    workspace: &Workspace,
-    active_root: &str,
-) -> Result<Option<(String, String)>, String> {
-    let source = workspace.source.as_ref();
-    let source_branch = source
-        .and_then(|source| {
-            source
-                .push_target
-                .as_ref()
-                .map(|target| target.branch_name.as_str())
-        })
-        .or_else(|| source.map(|source| source.head_branch.as_str()))
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty());
-    let current_branch = resolve_current_branch_name(active_root)
-        .ok()
-        .filter(|branch| branch != "HEAD");
-    let branch = current_branch
-        .as_deref()
-        .or(source_branch)
-        .unwrap_or_default()
-        .trim();
-    if branch.is_empty() {
-        return Ok(None);
-    }
-    if workspace.base_branch.trim() == branch
-        || source.is_some_and(|source| source.base_branch.trim() == branch)
-    {
-        return Err(format!(
-            "Refusing to delete `{branch}` because it is the workspace base branch."
-        ));
-    }
-    if matches!(branch, "main" | "master" | "trunk") {
-        return Err(format!("Refusing to delete protected branch `{branch}`."));
-    }
-
-    let configured_remote = |key: &str| -> Option<String> {
-        let output = run_git_output(active_root, &["config", "--get", key]).ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        (!value.is_empty() && value != ".").then_some(value)
-    };
-    let source_remote = source
-        .filter(|_| source_branch == Some(branch))
-        .and_then(|source| {
-            source
-                .push_target
-                .as_ref()
-                .map(|target| target.remote_name.trim())
-                .filter(|remote| !remote.is_empty())
-                .or_else(|| {
-                    let remote = source.remote_name.trim();
-                    (!remote.is_empty()).then_some(remote)
-                })
-        })
-        .map(str::to_string);
-    // Imported branch/PR workspaces have an explicit push target recorded by DCC.
-    // For regular worktree branches, follow Git's push-remote precedence so the
-    // branch is removed from the same remote it would normally be pushed to.
-    let remote = source_remote
-        .or_else(|| configured_remote(&format!("branch.{branch}.pushRemote")))
-        .or_else(|| configured_remote("remote.pushDefault"))
-        .or_else(|| configured_remote(&format!("branch.{branch}.remote")));
-
-    let Some(remote) = remote else {
-        // Having an `origin` remote alone does not prove that this local branch
-        // was published there. Without an explicit push/tracking destination,
-        // do not offer remote deletion.
-        return Ok(None);
-    };
-
-    Ok(Some((remote, branch.to_string())))
-}
 
 #[cfg(test)]
 fn workspace_remote_branch_target(
@@ -6746,245 +6108,15 @@ fn workspace_remote_branch_target(
     workspace_remote_branch_target_at_root(workspace, resolve_workspace_active_root(workspace))
 }
 
-fn validate_remote_branch_deletion_oid(oid: &str) -> Result<String, String> {
-    let oid = oid.trim();
-    let valid_length = matches!(oid.len(), 40 | 64);
-    if !valid_length || !oid.as_bytes().iter().all(u8::is_ascii_hexdigit) {
-        return Err(
-            "The remote branch confirmation is incomplete. Reopen the deletion dialog and try again."
-                .to_string(),
-        );
-    }
-    Ok(oid.to_ascii_lowercase())
-}
 
-fn observed_workspace_push_url(root: &str, remote: &str) -> Result<(String, String), String> {
-    let output = run_git_output(root, &["remote", "get-url", "--push", "--all", remote])?;
-    if !output.status.success() {
-        return Err(git_output_err(
-            "git remote get-url --push --all",
-            &output.stderr,
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let push_urls = stdout
-        .lines()
-        .map(str::trim)
-        .filter(|url| !url.is_empty())
-        .collect::<Vec<_>>();
-    if push_urls.len() != 1 {
-        return Err(
-            "Remote branch deletion requires exactly one push URL. Review the remote configuration and try again."
-                .to_string()
-        );
-    }
-    let raw = push_urls[0].to_string();
-    Ok((raw.clone(), redact_push_route_credentials(&raw)))
-}
 
-fn push_url_contains_credentials(raw: &str) -> bool {
-    Url::parse(raw).is_ok_and(|url| {
-        url.password().is_some()
-            || (matches!(url.scheme(), "http" | "https") && !url.username().is_empty())
-    })
-}
 
-fn remote_branch_oid(root: &str, remote: &str, branch: &str) -> Result<Option<String>, String> {
-    let remote_ref = format!("refs/heads/{branch}");
-    let output = run_git_output(root, &["ls-remote", "--heads", remote, &remote_ref])?;
-    if !output.status.success() {
-        return Err(git_output_err("git ls-remote --heads", &output.stderr));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let Some(line) = stdout.lines().map(str::trim).find(|line| !line.is_empty()) else {
-        return Ok(None);
-    };
-    let Some((oid, reference)) = line.split_once(char::is_whitespace) else {
-        return Err("Git returned an invalid remote branch identity.".to_string());
-    };
-    if reference.trim() != remote_ref {
-        return Err("Git returned an unexpected remote branch identity.".to_string());
-    }
-    validate_remote_branch_deletion_oid(oid).map(Some)
-}
 
-fn workspace_remote_branch_deletion_target(
-    workspace: &Workspace,
-) -> Result<Option<WorkspaceRemoteBranchDeletionTarget>, String> {
-    let active_root = resolve_workspace_active_root(workspace);
-    let Some((remote, branch)) = workspace_remote_branch_target_at_root(workspace, active_root)?
-    else {
-        return Ok(None);
-    };
-    validate_branch_for_fetch(active_root, &branch)?;
-    let expected_oid = resolve_current_commit_sha(active_root)?.ok_or_else(|| {
-        "The worktree HEAD is unavailable. Reopen the deletion dialog and try again.".to_string()
-    })?;
-    let expected_oid = validate_remote_branch_deletion_oid(&expected_oid)?;
-    let (_, push_url) = observed_workspace_push_url(active_root, &remote)?;
-    Ok(Some(WorkspaceRemoteBranchDeletionTarget {
-        remote,
-        branch,
-        expected_oid,
-        push_url,
-    }))
-}
 
-fn remote_default_branch(root: &str, remote: &str) -> Result<Option<String>, String> {
-    let output = run_git_output(root, &["ls-remote", "--symref", remote, "HEAD"])?;
-    if !output.status.success() {
-        return Err(git_output_err("git ls-remote --symref", &output.stderr));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("ref: refs/heads/")
-                .and_then(|rest| rest.split_whitespace().next())
-                .map(str::to_string)
-        }))
-}
 
-fn delete_workspace_remote_branch_target(
-    active_root: &str,
-    remote: &str,
-    branch: &str,
-    expected_oid: &str,
-    expected_push_url: &str,
-) -> Result<(), String> {
-    validate_branch_for_fetch(active_root, branch)?;
-    let expected_oid = validate_remote_branch_deletion_oid(expected_oid)?;
-    if expected_push_url.trim().is_empty() {
-        return Err(
-            "The remote branch confirmation is incomplete. Reopen the deletion dialog and try again."
-                .to_string(),
-        );
-    }
-    let local_oid = resolve_current_commit_sha(active_root)?.ok_or_else(|| {
-        "The worktree HEAD is unavailable. Reopen the deletion dialog and try again.".to_string()
-    })?;
-    if !local_oid.eq_ignore_ascii_case(&expected_oid) {
-        return Err(
-            "The worktree HEAD changed after the deletion dialog opened. Reopen the deletion dialog and try again."
-                .to_string(),
-        );
-    }
-    delete_confirmed_remote_branch_at_root(
-        active_root,
-        remote,
-        branch,
-        &expected_oid,
-        expected_push_url,
-    )
-}
 
-fn delete_confirmed_remote_branch_at_root(
-    root: &str,
-    remote: &str,
-    branch: &str,
-    expected_oid: &str,
-    expected_push_url: &str,
-) -> Result<(), String> {
-    let (raw_push_url, observed_push_url) = observed_workspace_push_url(root, remote)?;
-    if push_url_contains_credentials(&raw_push_url) {
-        return Err(
-            "The remote push URL contains embedded credentials. Remove them and use your credential manager before deleting a branch."
-                .to_string(),
-        );
-    }
-    if observed_push_url != expected_push_url.trim() {
-        return Err(
-            "The remote push URL changed after the deletion dialog opened. Reopen the deletion dialog and try again."
-                .to_string(),
-        );
-    }
-    if remote_default_branch(root, &raw_push_url)?.as_deref() == Some(branch) {
-        return Err(format!(
-            "Refusing to delete `{branch}` because it is the default branch on `{remote}`."
-        ));
-    }
 
-    let Some(observed_remote_oid) = remote_branch_oid(root, &raw_push_url, branch)? else {
-        return Ok(());
-    };
-    if observed_remote_oid != expected_oid {
-        return Err(
-            "The remote branch does not match the confirmed worktree commit. Fetch and review the branch before trying again."
-                .to_string(),
-        );
-    }
 
-    let remote_ref = format!("refs/heads/{branch}");
-    let lease = format!("--force-with-lease={remote_ref}:{expected_oid}");
-    let delete_refspec = format!(":{remote_ref}");
-    let output = run_git_output(root, &["push", &lease, remote, &delete_refspec])?;
-    if !output.status.success() {
-        return Err(git_output_err(
-            "git push --force-with-lease",
-            &output.stderr,
-        ));
-    }
-    Ok(())
-}
-
-fn delete_workspace_remote_branch_after_worktree_loss(
-    repository_root: &str,
-    workspace: &Workspace,
-    expected: &WorkspaceRemoteBranchDeletionTarget,
-) -> Result<(), String> {
-    let remote = expected.remote.trim();
-    let branch = expected.branch.trim();
-    if remote.is_empty() || branch.is_empty() {
-        return Err(
-            "The remote branch confirmation is incomplete. Reopen the deletion dialog and try again."
-                .to_string(),
-        );
-    }
-    validate_branch_for_fetch(repository_root, branch)?;
-    if workspace.base_branch.trim() == branch || matches!(branch, "main" | "master" | "trunk") {
-        return Err(format!("Refusing to delete protected branch `{branch}`."));
-    }
-    let expected_oid = validate_remote_branch_deletion_oid(&expected.expected_oid)?;
-    let local_ref = format!("refs/heads/{branch}");
-    let local_oid = resolve_commitish_sha(repository_root, &local_ref)?;
-    if !local_oid.eq_ignore_ascii_case(&expected_oid) {
-        return Err(
-            "The saved local branch no longer matches the confirmed worktree commit. Review the branch before trying again."
-                .to_string(),
-        );
-    }
-    delete_confirmed_remote_branch_at_root(
-        repository_root,
-        remote,
-        branch,
-        &expected_oid,
-        &expected.push_url,
-    )
-}
-
-fn delete_workspace_remote_branch(
-    workspace: &Workspace,
-    active_root: &str,
-    expected: &WorkspaceRemoteBranchDeletionTarget,
-) -> Result<(), String> {
-    let Some((remote, branch)) = workspace_remote_branch_target_at_root(workspace, active_root)?
-    else {
-        return Err("The worktree no longer has a remote branch to delete. Review the deletion confirmation and try again.".to_string());
-    };
-    if branch != expected.branch.trim() || remote != expected.remote.trim() {
-        return Err(format!(
-            "The remote branch changed from `{}/{}` to `{remote}/{branch}`. Review the deletion confirmation and try again.",
-            expected.remote.trim(),
-            expected.branch.trim()
-        ));
-    }
-    delete_workspace_remote_branch_target(
-        active_root,
-        &remote,
-        &branch,
-        &expected.expected_oid,
-        &expected.push_url,
-    )
-}
 
 async fn resolve_workspace_source_url_inner(
     db_path: &Path,
@@ -7954,67 +7086,10 @@ pub async fn list_repositories(
     Ok(ListRepositoriesOutput { repositories })
 }
 
-fn normalize_repository_display_name(
-    display_name: Option<&str>,
-    technical_name: &str,
-) -> Option<String> {
-    display_name
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .filter(|value| !value.eq_ignore_ascii_case(technical_name.trim()))
-        .map(ToString::to_string)
-}
 
-// Empty means "auto": the desktop picks a Brazilian-fauna mascot from a hash of
-// the project path. Every listed value, `folder`/`slate` included, is an explicit pick.
-const PROJECT_ICONS: [&str; 23] = [
-    "logo",
-    "capivara", "tucano", "arara", "mico", "tatu", "onca", "jabuti", "boto", "sapo", "polvo",
-    "folder", "terminal", "code", "layers", "package", "database", "globe", "rocket", "branch",
-    "cpu", "shield", "wrench",
-];
-const PROJECT_COLORS: [&str; 12] = [
-    "slate", "sky", "cyan", "emerald", "amber", "orange", "rose", "violet", "indigo", "fuchsia",
-    "lime", "pink",
-];
 
-/// The desktop downsizes uploads to a 64px PNG, which is a few KB; the cap
-/// keeps a hostile or broken client from bloating every project listing.
-const MAX_PROJECT_LOGO_CHARS: usize = 96 * 1024;
 
-fn normalize_repository_logo(value: Option<&str>) -> Result<Option<String>, String> {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Ok(None);
-    };
-    let Some(payload) = value.strip_prefix("data:image/png;base64,") else {
-        return Err("project logo must be a PNG data URI".to_string());
-    };
-    if value.len() > MAX_PROJECT_LOGO_CHARS {
-        return Err("project logo is too large".to_string());
-    }
-    if payload.is_empty()
-        || !payload
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
-    {
-        return Err("project logo is not valid base64".to_string());
-    }
-    Ok(Some(value.to_string()))
-}
 
-fn normalize_repository_visual(
-    value: Option<&str>,
-    allowed: &[&str],
-    field: &str,
-) -> Result<Option<String>, String> {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Ok(None);
-    };
-    if allowed.contains(&value) {
-        return Ok(Some(value.to_string()));
-    }
-    Err(format!("unsupported project {field}"))
-}
 
 #[tauri::command]
 pub async fn update_repository_identity(
@@ -8022,38 +7097,17 @@ pub async fn update_repository_identity(
     input: UpdateRepositoryIdentityInput,
 ) -> Result<Repository, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let repository_id = RepositoryId(input.repository_id.trim().to_string());
-    let existing = repo
-        .get_repository(&repository_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "project not found".to_string())?;
-    let display_name =
-        normalize_repository_display_name(input.display_name.as_deref(), &existing.name);
-    let icon =
-        normalize_repository_visual(input.icon.as_deref(), &PROJECT_ICONS, "icon")?;
-    let color =
-        normalize_repository_visual(input.color.as_deref(), &PROJECT_COLORS, "color")?;
-    let logo = normalize_repository_logo(input.logo.as_deref())?;
-    if icon.as_deref() == Some("logo") && logo.is_none() {
-        return Err("choose a logo image before selecting it as the project icon".to_string());
-    }
-    let updated = repo
-        .update_repository_identity(
-            &repository_id,
-            display_name.as_deref(),
-            icon.as_deref(),
-            color.as_deref(),
-            logo.as_deref(),
-        )
-        .map_err(|error| error.to_string())?;
-    if !updated {
-        return Err("project not found".to_string());
-    }
-    repo.get_repository(&repository_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "project not found".to_string())
+    dcc_infra::project_actions::update_repository_identity(
+        &repo,
+        &input.repository_id,
+        &dcc_infra::project_actions::ProjectIdentity {
+            display_name: input.display_name,
+            icon: input.icon,
+            color: input.color,
+            logo: input.logo,
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -8076,44 +7130,7 @@ pub async fn set_repository_pinned(
         .ok_or_else(|| "project not found".to_string())
 }
 
-/// The most folders one project brings into a task.
-const MAX_LINKED_FOLDERS: usize = 8;
 
-/// Checks the folders a project links: absolute folders that exist, distinct,
-/// and neither the project itself nor nested in or around it. A Git checkout
-/// joins a task as another project; any other folder joins as context.
-fn normalize_linked_folders(project_root: &str, paths: &[String]) -> Result<Vec<String>, String> {
-    if paths.len() > MAX_LINKED_FOLDERS {
-        return Err(format!(
-            "a project links at most {MAX_LINKED_FOLDERS} folders"
-        ));
-    }
-    let project_root = Path::new(project_root.trim().trim_end_matches('/'));
-    let mut normalized: Vec<String> = Vec::with_capacity(paths.len());
-    for path in paths {
-        let path = path.trim().trim_end_matches('/');
-        let folder = Path::new(path);
-        if !folder.is_absolute() {
-            return Err(format!("linked folder must be an absolute path: {path}"));
-        }
-        if !folder.is_dir() {
-            return Err(format!("linked folder does not exist: {path}"));
-        }
-        if folder.starts_with(project_root) || project_root.starts_with(folder) {
-            return Err(format!(
-                "linked folder cannot be the project, inside it or around it: {path}"
-            ));
-        }
-        if normalized
-            .iter()
-            .any(|other| Path::new(other).starts_with(folder) || folder.starts_with(other))
-        {
-            return Err(format!("linked folders cannot repeat or nest: {path}"));
-        }
-        normalized.push(path.to_string());
-    }
-    Ok(normalized)
-}
 
 #[tauri::command]
 pub async fn list_repository_linked_folders(
@@ -8135,16 +7152,10 @@ pub async fn set_repository_linked_folders(
     input: SetRepositoryLinkedFoldersInput,
 ) -> Result<RepositoryLinkedFolders, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let repository_id = RepositoryId(input.repository_id.trim().to_string());
-    let repository = repo
-        .get_repository(&repository_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "project not found".to_string())?;
-    let paths = normalize_linked_folders(&repository.root_path, &input.paths)?;
-    repo.set_repository_linked_folders(&repository_id, &paths)
-        .map_err(|error| error.to_string())?;
-    Ok(RepositoryLinkedFolders::new(repository_id.0, paths))
+    let paths =
+        dcc_infra::project_actions::set_repository_linked_folders(&repo, &input.repository_id, &input.paths)
+            .await?;
+    Ok(RepositoryLinkedFolders::new(input.repository_id.trim().to_string(), paths))
 }
 
 #[tauri::command]
@@ -8217,156 +7228,6 @@ pub async fn restore_workspace_bundle(
     set_workspace_bundle_state(state, input, WorkspaceBundleState::Ready).await
 }
 
-#[tauri::command]
-pub async fn delete_workspace_bundle(
-    state: State<'_, WorkspaceCommandState>,
-    input: DeleteWorkspaceBundleInput,
-) -> Result<(), String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let session_repo =
-        SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let summary = repo
-        .get_workspace_bundle(&input.bundle_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("workspace bundle not found: {}", input.bundle_id.0))?;
-    let mut created_workspaces = Vec::new();
-    for member in &summary.members {
-        if !member.created_for_bundle {
-            continue;
-        }
-        let workspace = repo
-            .get_workspace(&member.workspace_id)
-            .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("workspace not found: {}", member.workspace_id.0))?;
-        created_workspaces.push(workspace);
-    }
-
-    let workspace_ids = created_workspaces
-        .iter()
-        .map(|workspace| workspace.id.clone())
-        .collect::<Vec<_>>();
-    state
-        .checkpoint_ai_memory_for_workspaces(&workspace_ids, true)
-        .await
-        .map_err(|error| format!("memory export must finish before deleting this task: {error}"))?;
-
-    ensure_workspace_history_deletable(&session_repo, &created_workspaces)?;
-
-    let mut delegation_cleanup_errors = Vec::new();
-    for workspace in created_workspaces.iter().rev() {
-        if let Err(error) =
-            cleanup_delegation_worktrees(&state, &session_repo, workspace, false).await
-        {
-            delegation_cleanup_errors.push(format!("{} delegations: {error}", workspace.id.0));
-        }
-    }
-    if !delegation_cleanup_errors.is_empty() {
-        return Err(format!(
-            "multi-workspace delegation cleanup was incomplete: {}",
-            delegation_cleanup_errors.join("; ")
-        ));
-    }
-
-    if input.delete_remote_branches {
-        let mut targets = Vec::new();
-        // Local members work on the person's own branch, which DCC never
-        // created, so deleting the task must never reach their remote branch.
-        for workspace in created_workspaces
-            .iter()
-            .filter(|workspace| workspace.worktree_path.is_some())
-        {
-            if let Some(target) = workspace_remote_branch_deletion_target(workspace)? {
-                targets.push((workspace, target));
-            }
-        }
-        let mut actual_targets = targets
-            .iter()
-            .map(|(_, target)| {
-                (
-                    target.remote.clone(),
-                    target.branch.clone(),
-                    target.expected_oid.clone(),
-                    target.push_url.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let mut expected_targets = input
-            .expected_remote_targets
-            .iter()
-            .map(|target| {
-                (
-                    target.remote.trim().to_string(),
-                    target.branch.trim().to_string(),
-                    target.expected_oid.trim().to_ascii_lowercase(),
-                    target.push_url.trim().to_string(),
-                )
-            })
-            .filter(|(remote, branch, expected_oid, push_url)| {
-                !remote.is_empty()
-                    && !branch.is_empty()
-                    && !expected_oid.is_empty()
-                    && !push_url.is_empty()
-            })
-            .collect::<Vec<_>>();
-        actual_targets.sort();
-        expected_targets.sort();
-        if actual_targets != expected_targets {
-            return Err(
-                "The worktree branches changed after the deletion dialog opened. Review the deletion confirmation and try again."
-                    .to_string(),
-            );
-        }
-        for (workspace, target) in targets {
-            let active_root = resolve_workspace_active_root(workspace).to_string();
-            let workspace = workspace.clone();
-            state
-                .run_git_workspace_mutation_blocking(&active_root, move |trusted_root| {
-                    let trusted_root = trusted_root
-                        .to_str()
-                        .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
-                    delete_workspace_remote_branch(&workspace, trusted_root, &target)
-                })
-                .await
-                .map_err(workspace_mutation_error)?;
-        }
-    }
-
-    let retiring_workspace_ids = created_workspaces
-        .iter()
-        .map(|workspace| workspace.id.0.clone())
-        .collect::<BTreeSet<_>>();
-    for workspace in &created_workspaces {
-        cleanup_unused_workspace_push_target(&state, &repo, workspace, &retiring_workspace_ids)
-            .await?;
-    }
-
-    let mut cleanup_errors = Vec::new();
-    for workspace in created_workspaces.iter().rev() {
-        if let Err(error) = cleanup_workspace_files(workspace) {
-            cleanup_errors.push(format!("{}: {error}", workspace.id.0));
-        }
-    }
-    if !cleanup_errors.is_empty() {
-        return Err(format!(
-            "multi-workspace cleanup was incomplete: {}",
-            cleanup_errors.join("; ")
-        ));
-    }
-
-    cleanup_workspace_session_records(&session_repo, &created_workspaces, &state.db_path).await?;
-
-    repo.delete_workspace_bundle(&input.bundle_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    for workspace in created_workspaces {
-        repo.delete_workspace(&workspace.id)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
 
 #[tauri::command]
 pub async fn list_local_branches(
@@ -13061,195 +11922,9 @@ pub async fn restore_workspace(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn delete_workspace(
-    state: State<'_, WorkspaceCommandState>,
-    input: DeleteWorkspaceInput,
-) -> Result<(), String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-    let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-    let id = WorkspaceId(input.workspace_id);
-    ensure_workspace_is_not_a_bundle_member(&repo, &id, "delete").await?;
-    let workspace = repo
-        .get_workspace(&id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("workspace not found: {}", id.0))?;
-    // A destructive delete must not erase a session before its final memory
-    // checkpoint has reached ai-memory. If the sidecar is unavailable, leave
-    // the task intact and let the user retry after it recovers.
-    state
-        .checkpoint_ai_memory_for_workspaces(std::slice::from_ref(&id), true)
-        .await
-        .map_err(|error| format!("memory export must finish before deleting this task: {error}"))?;
-    ensure_workspace_history_deletable(&session_repo, std::slice::from_ref(&workspace))?;
-    if !input.discard_delegation_changes {
-        // Before anything is removed, so a refusal leaves the task whole.
-        let pending = unapplied_delegation_edits(&session_repo, &workspace).await?;
-        if !pending.is_empty() {
-            return Err(format!(
-                "{UNAPPLIED_DELEGATION_EDITS}{}",
-                serde_json::to_string(&pending).map_err(|error| error.to_string())?
-            ));
-        }
-    }
-    cleanup_delegation_worktrees(
-        &state,
-        &session_repo,
-        &workspace,
-        input.discard_delegation_changes,
-    )
-    .await?;
-    if input.delete_remote_branch {
-        let expected_target = input.expected_remote_target.ok_or_else(|| {
-            "The remote branch was not confirmed. Reopen the deletion dialog and try again."
-                .to_string()
-        })?;
-        let active_root = resolve_workspace_active_root(&workspace).to_string();
-        let remote_workspace = workspace.clone();
-        if Path::new(&active_root).exists() {
-            state
-                .run_git_workspace_mutation_blocking(&active_root, move |trusted_root| {
-                    let trusted_root = trusted_root
-                        .to_str()
-                        .ok_or_else(|| "workspace root is not valid UTF-8".to_string())?;
-                    delete_workspace_remote_branch(
-                        &remote_workspace,
-                        trusted_root,
-                        &expected_target,
-                    )
-                })
-                .await
-                .map_err(workspace_mutation_error)?;
-        } else {
-            let repository_root = workspace.root_path.clone();
-            let authorized_root = repository_root.clone();
-            let workspace_id = workspace.id.clone();
-            state
-                .run_git_workspace_mutation_for_workspace_blocking(
-                    &workspace_id,
-                    &authorized_root,
-                    move |trusted_root| {
-                        let trusted_root = trusted_root
-                            .to_str()
-                            .ok_or_else(|| "repository root is not valid UTF-8".to_string())?;
-                        delete_workspace_remote_branch_after_worktree_loss(
-                            trusted_root,
-                            &remote_workspace,
-                            &expected_target,
-                        )
-                    },
-                )
-                .await
-                .map_err(workspace_mutation_error)?;
-        }
-    }
-    cleanup_unused_workspace_push_target(&state, &repo, &workspace, &BTreeSet::new()).await?;
-    cleanup_workspace_files(&workspace)?;
-    cleanup_workspace_session_records(
-        &session_repo,
-        std::slice::from_ref(&workspace),
-        &state.db_path,
-    )
-    .await?;
-    repo.delete_workspace(&id)
-        .await
-        .map_err(|e| e.to_string())?;
-    state.clear_delivery_failures(&workspace.root_path);
-    if let Some(worktree_path) = workspace.worktree_path.as_deref() {
-        state.clear_delivery_failures(worktree_path);
-    }
-    Ok(())
-}
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UnappliedDelegationEdits {
-    title: String,
-    files: u32,
-}
 
-/// Child tasks whose uncommitted edits never reached this task: what deleting
-/// it would throw away. Read-only, so it runs before anything is removed.
-async fn unapplied_delegation_edits(
-    session_repo: &SqliteSessionRepo,
-    workspace: &Workspace,
-) -> Result<Vec<UnappliedDelegationEdits>, String> {
-    let active_root = resolve_workspace_active_root(workspace).to_string();
-    let operations = session_repo
-        .list_delegation_worktree_operations_by_workspace(&workspace.id)
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut pending = Vec::new();
-    for operation in operations {
-        if matches!(
-            operation.state,
-            DelegationWorktreeOperationState::Removed | DelegationWorktreeOperationState::Preparing
-        ) {
-            continue;
-        }
-        let applied = session_repo
-            .get_delegation_apply_transaction_by_operation_id(&operation.operation_id)
-            .await
-            .map_err(|e| e.to_string())?
-            .is_some_and(|apply| apply.state == DelegationApplyTransactionState::Applied);
-        if applied {
-            continue;
-        }
-        let Ok(worktree_path) =
-            validate_delegation_worktree_path(&active_root, &operation.worktree_path)
-        else {
-            continue;
-        };
-        if !worktree_path.exists() {
-            continue;
-        }
-        let files = tauri::async_runtime::spawn_blocking(move || {
-            delegation_uncommitted_files(&worktree_path)
-        })
-        .await
-        .map_err(|error| error.to_string())??;
-        if files == 0 {
-            continue;
-        }
-        let title = match operation.delegation_id.as_ref() {
-            Some(delegation_id) => DelegationRepo::get_delegation(session_repo, delegation_id)
-                .await
-                .map_err(|e| e.to_string())?
-                .and_then(|delegation| delegation.title)
-                .filter(|title| !title.trim().is_empty()),
-            None => None,
-        }
-        .unwrap_or_else(|| operation.branch.clone());
-        pending.push(UnappliedDelegationEdits { title, files });
-    }
-    Ok(pending)
-}
 
-async fn cleanup_delegation_worktrees(
-    state: &WorkspaceCommandState,
-    session_repo: &SqliteSessionRepo,
-    workspace: &Workspace,
-    discard_changes: bool,
-) -> Result<(), String> {
-    let operations = session_repo
-        .list_delegation_worktree_operations_by_workspace(&workspace.id)
-        .await
-        .map_err(|e| e.to_string())?;
-    let active_root = resolve_workspace_active_root(workspace);
-    for operation in operations {
-        remove_journaled_delegation_worktree(
-            state,
-            session_repo,
-            active_root,
-            operation,
-            discard_changes,
-        )
-        .await?;
-    }
-
-    Ok(())
-}
 
 async fn reconcile_delegation_apply_transactions(
     state: &WorkspaceCommandState,
@@ -13635,7 +12310,7 @@ pub async fn delete_repository(
     let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     let id = RepositoryId(input.repository_id);
     let removed_workspaces =
-        delete_repository_with_workspaces(&state, &repo, &session_repo, &id, &state.db_path)
+        delete_repository_with_workspaces(state.inner(), &repo, &session_repo, &id, &state.db_path)
             .await?;
     for workspace in removed_workspaces {
         state.clear_delivery_failures(&workspace.root_path);
@@ -13646,103 +12321,38 @@ pub async fn delete_repository(
     Ok(())
 }
 
-pub(crate) async fn delete_repository_with_workspaces(
-    state: &WorkspaceCommandState,
-    repo: &SqliteWorkspaceRepo,
-    session_repo: &SqliteSessionRepo,
-    id: &RepositoryId,
-    coderabbit_db_path: &Path,
-) -> Result<Vec<Workspace>, String> {
-    let repository = repo
-        .get_repository(id)
-        .await
-        .map_err(|error| error.to_string())?;
-    let repository_root = repository
-        .as_ref()
-        .map(|repository| repository.root_path.trim())
-        .filter(|root| !root.is_empty())
-        .unwrap_or(id.0.trim());
-    let mut workspaces = repo
-        .list_workspaces()
-        .await
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .filter(|workspace| workspace.root_path.trim() == repository_root)
-        .collect::<Vec<_>>();
-    workspaces.sort_unstable_by(|left, right| {
-        let left_depth = left
-            .worktree_path
-            .as_deref()
-            .map(|path| Path::new(path).components().count())
-            .unwrap_or_default();
-        let right_depth = right
-            .worktree_path
-            .as_deref()
-            .map(|path| Path::new(path).components().count())
-            .unwrap_or_default();
-        right_depth.cmp(&left_depth)
-    });
 
-    ensure_workspace_history_deletable(session_repo, &workspaces)?;
 
-    for workspace in &workspaces {
-        cleanup_delegation_worktrees(state, session_repo, workspace, false).await?;
-        cleanup_workspace_files(workspace)?;
-    }
 
-    cleanup_workspace_session_records(session_repo, &workspaces, coderabbit_db_path).await?;
-
-    repo.delete_repository(id)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(workspaces)
+#[tauri::command]
+pub async fn delete_workspace(
+    state: State<'_, WorkspaceCommandState>,
+    input: DeleteWorkspaceInput,
+) -> Result<(), String> {
+    dcc_infra::workspace_deletion::delete_workspace(
+        state.inner(),
+        dcc_infra::workspace_deletion::DeleteTaskRequest {
+            workspace_id: input.workspace_id,
+            delete_remote_branch: input.delete_remote_branch,
+            expected_remote_target: input.expected_remote_target,
+            discard_delegation_changes: input.discard_delegation_changes,
+        },
+    )
+    .await
 }
 
-async fn cleanup_workspace_session_records(
-    session_repo: &SqliteSessionRepo,
-    workspaces: &[Workspace],
-    coderabbit_db_path: &Path,
+#[tauri::command]
+pub async fn delete_workspace_bundle(
+    state: State<'_, WorkspaceCommandState>,
+    input: DeleteWorkspaceBundleInput,
 ) -> Result<(), String> {
-    if workspaces.is_empty() {
-        return Ok(());
-    }
-
-    let workspace_ids = workspaces
-        .iter()
-        .map(|workspace| workspace.id.clone())
-        .collect::<Vec<_>>();
-    session_repo
-        .delete_workspace_history(&workspace_ids)
-        .map_err(|error| error.to_string())?;
-
-    let mut coderabbit_roots = BTreeSet::new();
-    for workspace in workspaces {
-        coderabbit_roots.insert(workspace.root_path.trim().to_string());
-        if let Some(worktree_path) = workspace.worktree_path.as_deref() {
-            coderabbit_roots.insert(worktree_path.trim().to_string());
-        }
-    }
-    for root in coderabbit_roots {
-        if root.is_empty() {
-            continue;
-        }
-        crate::commands::coderabbit::clear_workspace_coderabbit_artifacts(
-            coderabbit_db_path,
-            &root,
-        )?;
-    }
-    Ok(())
-}
-
-fn ensure_workspace_history_deletable(
-    session_repo: &SqliteSessionRepo,
-    workspaces: &[Workspace],
-) -> Result<(), String> {
-    let workspace_ids = workspaces
-        .iter()
-        .map(|workspace| workspace.id.clone())
-        .collect::<Vec<_>>();
-    session_repo
-        .ensure_workspace_history_deletable(&workspace_ids)
-        .map_err(|error| error.to_string())
+    dcc_infra::workspace_deletion::delete_workspace_bundle(
+        state.inner(),
+        dcc_infra::workspace_deletion::DeleteBundleRequest {
+            bundle_id: input.bundle_id.0,
+            delete_remote_branches: input.delete_remote_branches,
+            expected_remote_targets: input.expected_remote_targets,
+        },
+    )
+    .await
 }

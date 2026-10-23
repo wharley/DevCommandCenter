@@ -18,19 +18,19 @@ use uuid::Uuid;
 
 use crate::git::{run_git_output_with_timeout, GIT_LOCAL_TIMEOUT};
 
-pub(crate) const MAX_ARTIFACT_FILES: usize = 10_000;
-pub(crate) const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_ARTIFACT_FILES: usize = 10_000;
+pub const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ApplyIdentity {
+pub struct ApplyIdentity {
     pub head: String,
     pub branch: Option<String>,
     pub index_tree: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PreparedApply {
+pub struct PreparedApply {
     pub transaction_id: String,
     pub manifest_digest: String,
     pub file_count: usize,
@@ -41,7 +41,7 @@ pub(crate) struct PreparedApply {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ApplyClassification {
+pub enum ApplyClassification {
     AllPre,
     AllPost,
     MixedKnown,
@@ -49,7 +49,7 @@ pub(crate) enum ApplyClassification {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ApplyOutput {
+pub struct ApplyOutput {
     pub changed_files: Vec<String>,
     pub artifact_bytes: u64,
 }
@@ -57,7 +57,7 @@ pub(crate) struct ApplyOutput {
 /// A process-held advisory lock for a delegation operation.  The lock file is
 /// intentionally retained after release; only the OS lock state is
 /// authoritative, so a crash cannot leave a stale lock blocking recovery.
-pub(crate) struct ApplyOperationLock {
+pub struct ApplyOperationLock {
     _file: File,
 }
 
@@ -70,7 +70,7 @@ impl Drop for ApplyOperationLock {
 /// Attempts to acquire the cross-process operation lock.  `Ok(None)` means a
 /// live process currently owns the operation; callers should treat that as a
 /// conflict rather than waiting or taking over its artifacts.
-pub(crate) fn try_lock_apply_operation(
+pub fn try_lock_apply_operation(
     artifact_root: &Path,
     operation_id: &str,
 ) -> Result<Option<ApplyOperationLock>, String> {
@@ -152,7 +152,7 @@ enum GitSide {
 /// Captures every changed path, including preimages, before any destination
 /// write.  `artifact_root/transaction_id` is the only directory this module
 /// creates; transaction IDs must be UUIDs so cleanup cannot escape the root.
-pub(crate) fn prepare_apply_artifacts(
+pub fn prepare_apply_artifacts(
     transaction_id: &str,
     destination_root: &Path,
     source_root: &Path,
@@ -281,7 +281,7 @@ pub(crate) fn prepare_apply_artifacts(
 /// Applies frozen payloads only after revalidating both Git identities.  The
 /// index is never written: destination changes are installed with same-parent
 /// temp-file rename and executable bits are set on the temp file first.
-pub(crate) fn apply_prepared_artifacts(
+pub fn apply_prepared_artifacts(
     transaction_id: &str,
     destination_root: &Path,
     source_root: &Path,
@@ -356,7 +356,7 @@ pub(crate) fn apply_prepared_artifacts(
     })
 }
 
-pub(crate) fn classify_apply_artifacts(
+pub fn classify_apply_artifacts(
     transaction_id: &str,
     destination_root: &Path,
     artifact_root: &Path,
@@ -382,7 +382,7 @@ pub(crate) fn classify_apply_artifacts(
 /// Restores only paths whose current state is a known pre/post/missing state.
 /// Classification happens for every file before the first write, so a
 /// divergent external edit prevents all rollback writes.
-pub(crate) fn rollback_apply_artifacts(
+pub fn rollback_apply_artifacts(
     transaction_id: &str,
     destination_root: &Path,
     artifact_root: &Path,
@@ -443,7 +443,7 @@ pub(crate) fn rollback_apply_artifacts(
     Ok(())
 }
 
-pub(crate) fn cleanup_apply_artifacts(
+pub fn cleanup_apply_artifacts(
     transaction_id: &str,
     artifact_root: &Path,
 ) -> Result<(), String> {

@@ -2,6 +2,7 @@ pub mod agent_commands;
 pub mod local_branches;
 pub mod coderabbit;
 pub mod common;
+mod deletion_runtime;
 pub mod delegation_commands;
 pub mod feedback;
 /// Moved to `dcc_infra::forge`; kept at this path for existing callers.

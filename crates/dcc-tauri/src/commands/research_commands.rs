@@ -480,7 +480,7 @@ pub async fn research_discard_idea(
     let root = registered_idea_root(&repo, &input.root_path)?;
     let id = RepositoryId(input.root_path.clone());
     let removed =
-        delete_repository_with_workspaces(&state, &repo, &session_repo, &id, &state.db_path)
+        delete_repository_with_workspaces(state.inner(), &repo, &session_repo, &id, &state.db_path)
             .await?;
     for workspace in removed {
         state.clear_delivery_failures(&workspace.root_path);

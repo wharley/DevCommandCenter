@@ -2137,6 +2137,55 @@ impl SqliteSessionRepo {
             .collect()
     }
 
+    /// Sessions of these tasks whose conversation is not in ai-memory yet: an
+    /// export still queued, or more events than the last completed export
+    /// carried. A process without the memory server uses this to refuse a
+    /// deletion the desktop would checkpoint first.
+    pub fn sessions_missing_memory_export(
+        &self,
+        workspace_ids: &[WorkspaceId],
+    ) -> Result<Vec<SessionId>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut stmt = conn
+            .prepare(
+                r#"
+                SELECT s.id,
+                       EXISTS(SELECT 1 FROM dcc_ai_memory_outbox o WHERE o.session_id = s.id),
+                       (SELECT COUNT(*) FROM dcc_session_events e WHERE e.session_id = s.id),
+                       (SELECT MAX(h.event_count) FROM dcc_ai_memory_export_history h
+                         WHERE h.session_id = s.id AND h.status = 'completed')
+                  FROM dcc_sessions s
+                 WHERE s.workspace_id = ?1
+                "#,
+            )
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        let mut missing = Vec::new();
+        for workspace_id in workspace_ids {
+            let rows = stmt
+                .query_map(params![workspace_id.0.clone()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                })
+                .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+            for row in rows {
+                let (session_id, queued, events, exported) =
+                    row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+                let behind = events > 0 && exported.is_none_or(|exported| exported < events);
+                if queued || behind {
+                    missing.push(SessionId(session_id));
+                }
+            }
+        }
+        Ok(missing)
+    }
+
     pub fn get_ai_memory_export(
         &self,
         session_id: &SessionId,

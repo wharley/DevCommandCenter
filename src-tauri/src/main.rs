@@ -7312,6 +7312,19 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from("."));
             let _ = std::fs::create_dir_all(&app_data_dir);
+            // This process owns the agents, terminals and git coordinator of
+            // this data directory: the native app deletes tasks only while it
+            // holds this lock itself (`dcc_infra::runtime_owner`). A deletion
+            // it has in flight gets a few seconds to finish.
+            match dcc_infra::runtime_owner::RuntimeOwner::acquire_within(
+                &app_data_dir,
+                std::time::Duration::from_secs(10),
+            ) {
+                // Held until the process exits.
+                Ok(Some(owner)) => std::mem::forget(owner),
+                Ok(None) => eprintln!("[DCC] another process holds the runtime owner lock"),
+                Err(error) => eprintln!("[DCC] runtime owner lock unavailable: {error}"),
+            }
             if let Err(error) = tauri::async_runtime::block_on(
                 AiMemorySidecar::load_persisted_settings(&app_data_dir),
             ) {

@@ -3888,6 +3888,10 @@ export type WorkspaceRecordSetupOutcomeInput = {
 	success: boolean,
 };
 
+/**
+ *  A remote branch a deletion may also remove, as it was when the dialog
+ *  offered it.
+ */
 export type WorkspaceRemoteBranchDeletionTarget = {
 	remote: string,
 	branch: string,

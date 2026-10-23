@@ -54,3 +54,21 @@ pub struct WorkspacePrStatusOutput {
     pub mergeable: Option<String>,
     pub merge_state_status: Option<String>,
 }
+
+/// A remote branch a deletion may also remove, as it was when the dialog
+/// offered it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRemoteBranchDeletionTarget {
+    pub remote: String,
+    pub branch: String,
+    /// The local worktree HEAD observed when the destructive action was offered.
+    /// Older clients do not send this field, which intentionally makes deletion
+    /// fail closed until the confirmation dialog is reopened.
+    #[serde(default)]
+    pub expected_oid: String,
+    /// The effective push URL observed when the destructive action was offered.
+    /// This is always redacted before it can leave the backend.
+    #[serde(default)]
+    pub push_url: String,
+}
