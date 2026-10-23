@@ -13,6 +13,7 @@ use gpui::{
 };
 
 use crate::prefs::{self, Prefs};
+use crate::screens::conversation::ConversationView;
 use crate::screens::sidebar::{Sidebar, SidebarEvent};
 use crate::theme::{ActiveTheme, Theme};
 use crate::ui::{ResizeHandle, Toaster};
@@ -28,6 +29,7 @@ pub struct Shell {
     prefs: Prefs,
     prefs_path: PathBuf,
     sidebar: Entity<Sidebar>,
+    conversation: Entity<ConversationView>,
     _appearance: Subscription,
     _sidebar_events: Subscription,
 }
@@ -54,11 +56,13 @@ impl Shell {
             )
         });
         let sidebar_events = cx.subscribe(&sidebar, Self::on_sidebar_event);
+        let conversation = cx.new(ConversationView::new);
         Self {
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
             prefs,
             prefs_path,
             sidebar,
+            conversation,
             _appearance: appearance,
             _sidebar_events: sidebar_events,
         }
@@ -78,6 +82,22 @@ impl Shell {
                 let collapsed = self.layout.sidebar_collapsed;
                 sidebar.update(cx, |sidebar, cx| sidebar.set_collapsed(collapsed, cx));
                 self.save_layout(cx);
+                cx.notify();
+            }
+            SidebarEvent::OpenTask(task_id) => {
+                let task_id = task_id.clone();
+                self.conversation
+                    .update(cx, |conversation, cx| conversation.open(&task_id, None, cx));
+                cx.notify();
+            }
+            SidebarEvent::OpenSession {
+                task_id,
+                session_id,
+            } => {
+                let (task_id, session_id) = (task_id.clone(), session_id.clone());
+                self.conversation.update(cx, |conversation, cx| {
+                    conversation.open(&task_id, Some(session_id), cx)
+                });
                 cx.notify();
             }
             _ => self.save_layout(cx),
@@ -160,7 +180,7 @@ impl Render for Shell {
                             .ok();
                     }),
             )
-            .child(MainRegion)
+            .child(MainRegion::default().child(self.conversation.clone()))
             .children(Toaster::handle(cx))
     }
 }

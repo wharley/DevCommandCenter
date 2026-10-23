@@ -111,3 +111,66 @@ impl RenderOnce for Spinner {
         )
     }
 }
+
+/// `DccThinkingIndicator`: a ring with three dots pulsing one after another
+/// (`pulse 1.2s`, 180ms apart).
+pub fn thinking_indicator(id: impl Into<ElementId>, size: f32) -> ThinkingIndicator {
+    ThinkingIndicator {
+        id: id.into(),
+        size,
+    }
+}
+
+#[derive(IntoElement)]
+pub struct ThinkingIndicator {
+    id: ElementId,
+    size: f32,
+}
+
+impl RenderOnce for ThinkingIndicator {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = &cx.theme().colors;
+        let foreground = colors.foreground;
+        let dots = [(0.8, 0.0, 0u64), (0.55, -5.0, 180), (0.4, 5.0, 360)];
+        div()
+            .relative()
+            .flex_shrink_0()
+            .size(px(self.size))
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .rounded_full()
+                    .border_1()
+                    .border_color(colors.border.opacity(0.7)),
+            )
+            .children(
+                dots.into_iter()
+                    .enumerate()
+                    .map(move |(index, (alpha, offset, delay))| {
+                        let dot = 6.0;
+                        let center = (self.size - dot) / 2.0;
+                        div()
+                            .absolute()
+                            .left(px(center))
+                            .top(px(center + offset))
+                            .size(px(dot))
+                            .rounded_full()
+                            .bg(foreground.opacity(alpha))
+                            .with_animation(
+                                ElementId::NamedInteger(
+                                    format!("{:?}-dot", self.id).into(),
+                                    index as u64,
+                                ),
+                                Animation::new(Duration::from_millis(1200)).repeat(),
+                                move |dot, delta| {
+                                    // Tailwind `pulse`: opacity 1 → .5 → 1, shifted by the delay.
+                                    let phase = (delta + delay as f32 / 1200.0).fract();
+                                    let fade = 1.0 - 0.5 * (1.0 - (2.0 * phase - 1.0).abs());
+                                    dot.opacity(fade)
+                                },
+                            )
+                    }),
+            )
+    }
+}

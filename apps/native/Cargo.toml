@@ -31,6 +31,8 @@ unicode-segmentation = "1"
 # already in the tree through GPUI).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 resvg = "0.46"
+# Assistant and user messages are GitHub-flavoured markdown (Streamdown on the desktop).
+pulldown-cmark = { version = "0.13", default-features = false }
 dcc-core = { path = "../../crates/dcc-core" }
 dcc-infra = { path = "../../crates/dcc-infra" }
 

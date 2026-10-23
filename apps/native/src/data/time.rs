@@ -123,3 +123,105 @@ mod tests {
         assert!(today - yesterday >= 23 * 3_600_000 && today - yesterday <= 25 * 3_600_000);
     }
 }
+
+/// date-fns `formatDistanceToNow(date, { addSuffix: true })` in the two
+/// locales the desktop ships: "há 5 minutos", "about 2 hours ago".
+pub fn distance_to_now(at_ms: i64, now_ms: i64, english: bool) -> String {
+    let seconds = (now_ms - at_ms) as f64 / 1000.0;
+    let future = seconds < 0.0;
+    let seconds = seconds.abs();
+    let minutes = (seconds / 60.0).round() as i64;
+    let words = |pt_one: &str, pt_other: &str, en_one: &str, en_other: &str, count: i64| {
+        let template = match (english, count == 1) {
+            (false, true) => pt_one,
+            (false, false) => pt_other,
+            (true, true) => en_one,
+            (true, false) => en_other,
+        };
+        template.replace("{}", &count.to_string())
+    };
+    let text = if minutes < 1 {
+        words("menos de um minuto", "", "less than a minute", "", 1)
+    } else if minutes < 45 {
+        words("1 minuto", "{} minutos", "1 minute", "{} minutes", minutes)
+    } else if minutes < 1440 {
+        let hours = ((minutes as f64) / 60.0).round().max(1.0) as i64;
+        words(
+            "cerca de 1 hora",
+            "cerca de {} horas",
+            "about 1 hour",
+            "about {} hours",
+            hours,
+        )
+    } else if minutes < 2520 {
+        words("1 dia", "", "1 day", "", 1)
+    } else if minutes < 43_200 {
+        let days = ((minutes as f64) / 1440.0).round() as i64;
+        words("1 dia", "{} dias", "1 day", "{} days", days)
+    } else if minutes < 86_400 {
+        let months = ((minutes as f64) / 43_200.0).round() as i64;
+        words(
+            "cerca de 1 mês",
+            "cerca de {} meses",
+            "about 1 month",
+            "about {} months",
+            months,
+        )
+    } else {
+        let months = minutes / 43_200;
+        if months < 12 {
+            let nearest = ((minutes as f64) / 43_200.0).round().max(1.0) as i64;
+            words("1 mês", "{} meses", "1 month", "{} months", nearest)
+        } else {
+            let years = months / 12;
+            match months % 12 {
+                0..=2 => words(
+                    "cerca de 1 ano",
+                    "cerca de {} anos",
+                    "about 1 year",
+                    "about {} years",
+                    years,
+                ),
+                3..=8 => words(
+                    "mais de 1 ano",
+                    "mais de {} anos",
+                    "over 1 year",
+                    "over {} years",
+                    years,
+                ),
+                _ => words(
+                    "quase 1 ano",
+                    "quase {} anos",
+                    "almost 1 year",
+                    "almost {} years",
+                    years + 1,
+                ),
+            }
+        }
+    };
+    match (english, future) {
+        (false, false) => format!("há {text}"),
+        (false, true) => format!("em {text}"),
+        (true, false) => format!("{text} ago"),
+        (true, true) => format!("in {text}"),
+    }
+}
+
+#[cfg(test)]
+mod distance_tests {
+    use super::distance_to_now;
+
+    #[test]
+    fn reads_like_date_fns() {
+        let now = 1_000_000_000_000;
+        let ago = |seconds: i64| distance_to_now(now - seconds * 1000, now, false);
+        assert_eq!(ago(10), "há menos de um minuto");
+        assert_eq!(ago(60), "há 1 minuto");
+        assert_eq!(ago(5 * 60), "há 5 minutos");
+        assert_eq!(ago(50 * 60), "há cerca de 1 hora");
+        assert_eq!(ago(3 * 3600), "há cerca de 3 horas");
+        assert_eq!(ago(30 * 3600), "há 1 dia");
+        assert_eq!(ago(4 * 86_400), "há 4 dias");
+        assert_eq!(distance_to_now(now - 120_000, now, true), "2 minutes ago");
+    }
+}

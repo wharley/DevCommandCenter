@@ -10,6 +10,7 @@ mod app;
 pub mod assets;
 pub mod data;
 pub mod i18n;
+pub mod markdown;
 pub mod prefs;
 pub mod project;
 pub mod screens;

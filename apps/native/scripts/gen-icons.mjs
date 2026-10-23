@@ -8,14 +8,16 @@ import { fileURLToPath } from "node:url";
 
 const ICONS = [
 	"alarm-clock", "alarm-clock-off", "orbit", "x", "check", "bot", "brush-cleaning", "chart-column",
-	"chevron-right", "circle-check", "circle-check-big", "circle-pause",
+	"chevron-down", "chevron-right", "chevron-up", "circle-check", "circle-check-big", "circle-pause",
 	"circle-question-mark", "clock-3", "code-xml", "cpu", "database", "earth",
 	"ellipsis", "folder", "folder-open", "folder-plus", "folder-tree",
 	"git-branch", "git-pull-request", "layers", "loader-circle",
 	"message-square-more", "package", "panel-left", "panel-right", "pencil",
 	"pin", "pin-off", "plus", "rocket", "rotate-ccw", "search", "settings-2",
 	"shield-check", "sparkles", "square-terminal", "sticky-note", "trash-2",
-	"wrench",
+	"wrench", "terminal", "file-pen-line", "file-text", "globe", "list-todo", "plug", "brain",
+	"circle-alert", "circle-dashed", "circle", "corner-down-right", "hourglass", "copy", "file-code-corner",
+	"triangle-alert", "file", "file-image", "file-headphone", "ban",
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));

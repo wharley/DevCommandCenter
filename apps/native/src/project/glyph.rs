@@ -123,7 +123,12 @@ fn accent_color(body: Hsla, appearance: Appearance) -> Hsla {
     }
 }
 
-fn sprite(rows: MascotRows, body: Hsla, appearance: Appearance, side: f32) -> impl IntoElement {
+pub(crate) fn sprite(
+    rows: MascotRows,
+    body: Hsla,
+    appearance: Appearance,
+    side: f32,
+) -> impl IntoElement {
     let accent = accent_color(body, appearance);
     canvas(
         |_, _, _| {},

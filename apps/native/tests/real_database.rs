@@ -212,11 +212,90 @@ fn reads_agents_and_child_tasks_on_a_database_copy() {
     let data = loader::load(&loader::database_path(), "Nova tarefa").expect("load");
     for agent in &data.agents {
         let states: Vec<_> = agent.sessions.iter().map(|session| session.state).collect();
-        println!("agent {} ({:?}) {:?} sessions {:?}", agent.name, agent.preset, agent.avatar, states);
+        println!(
+            "agent {} ({:?}) {:?} sessions {:?}",
+            agent.name, agent.preset, agent.avatar, states
+        );
     }
     for (task, children) in &data.child_tasks {
         for child in children {
             println!("  child of {task}: {} · {:?}", child.title, child.state);
         }
+    }
+}
+
+/// Every conversation of the open tasks folded into rows (read only).
+#[test]
+#[ignore]
+fn projects_conversations_on_a_database_copy() {
+    use dcc_core::domain::timeline::{Annotation, Role, project_session};
+    use dcc_core::domain::workspace::WorkspaceId;
+    use dcc_core::ports::SessionEventRepo;
+    let path = loader::database_path();
+    let data = loader::load(&path, "Nova tarefa").expect("load");
+    let sessions = dcc_infra::db::SqliteSessionRepo::open_read_only(&path).expect("open");
+    for task in data.tasks.iter().take(4) {
+        for summary in sessions
+            .list_workspace_sessions(&WorkspaceId(task.id.clone()))
+            .expect("sessions")
+            .iter()
+            .take(1)
+        {
+            let started = Instant::now();
+            let events =
+                futures::executor::block_on(sessions.list_events_by_session(&summary.session.id))
+                    .expect("events");
+            let rows = project_session(&events, &summary.session.id.0);
+            let tools: usize = rows
+                .iter()
+                .flat_map(|row| &row.annotations)
+                .filter(|annotation| matches!(annotation, Annotation::ToolCall(_)))
+                .count();
+            println!(
+                "{} · {} events → {} rows ({} user, {} assistant, {} system), {tools} tools, {:?}",
+                task.display_title(),
+                events.len(),
+                rows.len(),
+                rows.iter().filter(|row| row.role == Role::User).count(),
+                rows.iter()
+                    .filter(|row| row.role == Role::Assistant)
+                    .count(),
+                rows.iter().filter(|row| row.role == Role::System).count(),
+                started.elapsed()
+            );
+            if let Some(last) = rows.iter().rev().find(|row| row.role == Role::Assistant) {
+                let preview: String = last.content.chars().take(100).collect();
+                println!(
+                    "    last answer: {preview:?} settled={} model={:?}",
+                    last.turn_settled, last.model
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "reads the desktop's database; point DCC_APP_DATA_DIR at a copy"]
+fn loads_task_conversations_on_a_database_copy() {
+    use dcc_native::data::conversation::{self, EventCache};
+    let path = loader::database_path();
+    let data = loader::load(&path, "Nova tarefa").expect("load");
+    for task in data.tasks.iter().take(6) {
+        let mut cache = EventCache::default();
+        let started = Instant::now();
+        let first = conversation::load(&path, &task.id, None, &mut cache).expect("conversation");
+        let cold = started.elapsed();
+        let started = Instant::now();
+        let again = conversation::load(&path, &task.id, None, &mut cache).expect("again");
+        println!(
+            "{} · session {:?} · {} rows · {} delegations · cold {cold:?}, warm {:?} · running={}",
+            task.display_title(),
+            first.session_id,
+            first.rows.len(),
+            first.delegations.len(),
+            started.elapsed(),
+            first.running,
+        );
+        assert!(first.same_as(&again) || first.running);
     }
 }

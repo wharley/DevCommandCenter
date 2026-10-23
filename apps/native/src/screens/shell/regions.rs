@@ -41,9 +41,19 @@ impl RenderOnce for SidebarRegion {
     }
 }
 
-/// Main workspace panel (`<section>`), `bg-background`.
+/// Main workspace panel (`<section>`), `bg-background`. The code column
+/// (Arquivos · Mudanças, screen 5) will sit between it and the sidebar.
 #[derive(IntoElement, Default)]
-pub struct MainRegion;
+pub struct MainRegion {
+    content: Option<AnyElement>,
+}
+
+impl MainRegion {
+    pub fn child(mut self, content: impl IntoElement) -> Self {
+        self.content = Some(content.into_any_element());
+        self
+    }
+}
 
 impl RenderOnce for MainRegion {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -57,5 +67,6 @@ impl RenderOnce for MainRegion {
             .h_full()
             .overflow_hidden()
             .bg(cx.theme().colors.background)
+            .children(self.content)
     }
 }

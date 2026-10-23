@@ -6,6 +6,7 @@ mod provider;
 
 use gpui::Hsla;
 
+pub(crate) use glyph::sprite;
 pub use glyph::{GlyphSize, ProjectGlyph};
 pub use provider::ProviderIcon;
 

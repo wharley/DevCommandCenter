@@ -1,0 +1,134 @@
+//! Draws the conversation headlessly from a projected history: settled and
+//! live turns, tool details, a delegation card and the folds opened.
+
+use std::rc::Rc;
+use std::sync::Arc;
+
+use dcc_core::domain::session::SessionEventRecord;
+use dcc_core::domain::timeline::project_session;
+use gpui::{TestAppContext, WindowAppearance};
+use serde_json::{Value, json};
+
+use super::{ConversationView, changed_span};
+use crate::data::conversation::Conversation;
+use crate::theme::{Theme, ThemePreference};
+
+fn records(kinds: Vec<Value>) -> Vec<SessionEventRecord> {
+    kinds
+        .into_iter()
+        .enumerate()
+        .map(|(index, kind)| {
+            serde_json::from_value(json!({
+                "eventId": format!("evt-{index}"),
+                "sessionId": "s1",
+                "sequence": index + 1,
+                "occurredAt": format!("2026-05-01T12:00:{:02}Z", index),
+                "kind": kind,
+            }))
+            .expect("record")
+        })
+        .collect()
+}
+
+fn history(live: bool) -> Conversation {
+    let mut kinds = vec![
+        json!({ "type": "turn_started", "turnId": "t1", "prompt": "Veja @/Users/me/tela.png e @src/app.rs" }),
+        json!({ "type": "turn_reasoning_started", "turnId": "t1", "reasoningId": "r1", "label": null }),
+        json!({ "type": "turn_reasoning_delta", "turnId": "t1", "reasoningId": "r1", "content": "Lendo." }),
+        json!({ "type": "turn_reasoning_completed", "turnId": "t1", "reasoningId": "r1" }),
+        json!({ "type": "turn_tool_call_started", "turnId": "t1", "toolCallId": "c1", "action": "Bash", "command": "cargo test", "file": null }),
+        json!({ "type": "turn_tool_call_completed", "turnId": "t1", "toolCallId": "c1", "detail": { "output": "ok", "exitCode": 0 } }),
+        json!({ "type": "turn_tool_call_started", "turnId": "t1", "toolCallId": "c2", "action": "Edit", "command": null, "file": "src/app.rs" }),
+        json!({ "type": "turn_tool_call_completed", "turnId": "t1", "toolCallId": "c2", "detail": { "diff": "@@ -1 +1 @@\n-a\n+b\n" } }),
+        json!({ "type": "turn_tool_call_started", "turnId": "t1", "toolCallId": "c3", "action": "TodoWrite", "command": null, "file": null }),
+        json!({ "type": "turn_tool_call_completed", "turnId": "t1", "toolCallId": "c3", "detail": { "input": "{\"todos\":[{\"content\":\"A\",\"status\":\"completed\"},{\"content\":\"B\",\"status\":\"pending\"}]}" } }),
+        json!({ "type": "turn_assistant_message_started", "turnId": "t1", "messageId": "m1", "phase": "final_answer" }),
+        json!({ "type": "turn_assistant_message_delta", "turnId": "t1", "messageId": "m1", "content": "# Feito\n\n- um\n- dois\n\n```rust\nfn main() {}\n```" }),
+        json!({ "type": "turn_assistant_message_completed", "turnId": "t1", "messageId": "m1", "phase": "final_answer", "content": null }),
+        json!({ "type": "turn_completed", "turnId": "t1" }),
+        json!({ "type": "delegation_requested", "delegationId": "d1" }),
+        json!({ "type": "delegation_started", "delegationId": "d1", "childSessionId": "child" }),
+        json!({ "type": "turn_started", "turnId": "t2", "prompt": "Agora rode" }),
+        json!({ "type": "turn_tool_call_started", "turnId": "t2", "toolCallId": "c4", "action": "Bash", "command": "yarn test", "file": null }),
+    ];
+    if !live {
+        kinds.push(json!({ "type": "turn_aborted", "turnId": "t2", "reason": "parou" }));
+    }
+    let events = records(kinds);
+    Conversation {
+        task_id: "task".into(),
+        session_id: Some("s1".into()),
+        provider_id: Some("codex".into()),
+        model: Some("gpt-5.1-codex".into()),
+        running: live,
+        rows: Arc::new(project_session(&events, "s1")),
+        last_sequence: events.len() as u64,
+        ..Conversation::default()
+    }
+}
+
+fn open_view(
+    cx: &mut TestAppContext,
+) -> (gpui::Entity<ConversationView>, &mut gpui::VisualTestContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+    });
+    cx.add_window_view(|_, cx| ConversationView::new(cx))
+}
+
+#[gpui::test]
+fn draws_settled_and_live_turns_with_their_details_open(cx: &mut TestAppContext) {
+    let (view, cx) = open_view(cx);
+    for live in [false, true] {
+        view.update(cx, |view, cx| {
+            view.task_id = Some("task".into());
+            view.loading = false;
+            view.apply(Rc::new(history(live)), cx);
+        });
+        cx.run_until_parked();
+        let keys: Vec<String> = view.read_with(cx, |view, _| {
+            view.data
+                .as_ref()
+                .expect("data")
+                .rows
+                .iter()
+                .flat_map(|row| {
+                    let id = row.id.clone();
+                    [
+                        format!("{id}-fold"),
+                        format!("{id}-s0-run"),
+                        format!("{id}-s0-tool-c1"),
+                        format!("{id}-s0-tool-c2"),
+                        format!("{id}-s0-tool-c3"),
+                        format!("{id}-s0-thought-r1"),
+                        format!("report-{id}"),
+                    ]
+                })
+                .collect()
+        });
+        view.update(cx, |view, cx| {
+            for key in keys {
+                view.toggle(key.into(), cx);
+            }
+        });
+        cx.run_until_parked();
+    }
+    view.read_with(cx, |view, _| {
+        let data = view.data.as_ref().expect("data");
+        assert!(data.rows.len() >= 4, "{} rows", data.rows.len());
+        assert!(view.list.item_count() == data.rows.len() + 2);
+        // The rows were drawn: their markdown went through the cache.
+        assert!(view.markdown.borrow().len() >= 2);
+    });
+}
+
+#[test]
+fn a_new_reply_replaces_only_the_rows_that_changed() {
+    let settled = history(false).rows;
+    let live = history(true).rows;
+    let (span, count) = changed_span(&live, &settled);
+    assert!(span.start >= 1, "the first prompt stays measured");
+    assert_eq!(span.end, live.len());
+    assert_eq!(count, settled.len() - span.start);
+}
