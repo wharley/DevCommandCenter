@@ -217,15 +217,27 @@ pub fn render(sidebar: &Sidebar, task: &TaskSummary, cx: &mut Context<Sidebar>) 
     });
 
     let buttons: Vec<AnyElement> = match task.status {
-        TaskStatus::Archived | TaskStatus::Completed => {
-            // Deleting a completed task arrives with its dialog (slice 1c-b).
-            vec![action_button(
-                &task.id,
-                pending,
-                PendingAction::Restore,
-                foreground,
-                cx,
-            )]
+        TaskStatus::Archived => vec![action_button(
+            &task.id,
+            pending,
+            PendingAction::Restore,
+            foreground,
+            cx,
+        )],
+        TaskStatus::Completed => {
+            let id = task.id.clone();
+            let destructive = cx.theme().colors.destructive;
+            vec![
+                action_button(&task.id, pending, PendingAction::Restore, foreground, cx),
+                icon_button(
+                    SharedString::from(format!("delete-task-{}", task.id)),
+                    "trash-2",
+                    destructive,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.open_delete_task(&id, cx)))
+                .into_any_element(),
+            ]
         }
         status => {
             let mut buttons = Vec::new();

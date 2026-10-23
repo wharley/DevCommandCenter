@@ -3,8 +3,11 @@
 
 pub mod actions;
 pub mod activity;
+pub mod deletion;
+pub mod disk;
 pub mod git_watch;
 pub mod loader;
+pub mod project_logo;
 pub mod rail;
 pub mod recap;
 pub mod seen;

@@ -82,7 +82,7 @@ writeFileSync(
 );
 console.log("wrote provider marks");
 
-// The error mark sonner draws in its toasts (filled, so no stroke).
+// The marks sonner draws in its toasts (filled, so no stroke).
 const sonnerSource = readFileSync(join(here, "../../../node_modules/sonner/dist/index.mjs"), "utf8");
 const sonnerIcon = (name) => {
 	const chunk = sonnerSource.slice(sonnerSource.indexOf(`const ${name} =`));
@@ -91,4 +91,6 @@ const sonnerIcon = (name) => {
 	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" fill="#000"><path fill-rule="evenodd" clip-rule="evenodd" d="${d}"/></svg>\n`;
 };
 writeFileSync(join(out, "sonner-error.svg"), sonnerIcon("ErrorIcon"));
+writeFileSync(join(out, "sonner-success.svg"), sonnerIcon("SuccessIcon"));
+writeFileSync(join(out, "sonner-info.svg"), sonnerIcon("InfoIcon"));
 console.log(`wrote ${ICONS.length} icons`);

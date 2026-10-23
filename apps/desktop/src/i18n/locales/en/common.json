@@ -5642,5 +5642,9 @@
     "runtimeMissing": "The Antigravity runtime is not installed. Install it or point to its executable in settings.",
     "notInstalled": "{{binary}} is not installed on this machine.",
     "openSetup": "Set up provider"
+  },
+  "native": {
+    "desktopOpen": "DCC is open: delete from there, or close it to delete from here.",
+    "memoryPending": "This task's memory isn't saved yet. Open DCC to save it before deleting."
   }
 }

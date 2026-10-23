@@ -80,17 +80,34 @@ impl RenderOnce for Checkbox {
     }
 }
 
-/// `Loader2` turning once a second.
-pub fn spinner(id: impl Into<ElementId>, size: f32) -> impl IntoElement {
-    let id: ElementId = id.into();
-    div().flex_shrink_0().child(
-        gpui::svg()
-            .path(crate::assets::icon_path("loader-circle", 2.0))
-            .size(px(size))
-            .with_animation(
-                id,
-                Animation::new(Duration::from_secs(1)).repeat(),
-                |svg, delta| svg.with_transformation(Transformation::rotate(percentage(delta))),
-            ),
-    )
+/// `Loader2` turning once a second, in the text color around it.
+pub fn spinner(id: impl Into<ElementId>, size: f32) -> Spinner {
+    Spinner {
+        id: id.into(),
+        size,
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Spinner {
+    id: ElementId,
+    size: f32,
+}
+
+impl RenderOnce for Spinner {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        // An svg is drawn in its own text color, not inherited (see `Icon`).
+        let color = window.text_style().color;
+        div().flex_shrink_0().child(
+            gpui::svg()
+                .path(crate::assets::icon_path("loader-circle", 2.0))
+                .size(px(self.size))
+                .text_color(color)
+                .with_animation(
+                    self.id,
+                    Animation::new(Duration::from_secs(1)).repeat(),
+                    |svg, delta| svg.with_transformation(Transformation::rotate(percentage(delta))),
+                ),
+        )
+    }
 }

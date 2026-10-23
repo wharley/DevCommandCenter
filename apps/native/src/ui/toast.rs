@@ -23,6 +23,7 @@ const GAP: f32 = 14.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToastKind {
     Error,
+    Success,
     Info,
 }
 
@@ -30,6 +31,8 @@ struct Toast {
     id: u64,
     kind: ToastKind,
     message: SharedString,
+    /// A second, quieter line (sonner's `description`).
+    description: Option<SharedString>,
     /// Its time ran out while the pointer was over the stack.
     expired: bool,
     _timer: Task<()>,
@@ -62,21 +65,51 @@ impl Toaster {
     }
 
     pub fn error(message: impl Into<SharedString>, cx: &mut App) {
-        Self::show(ToastKind::Error, message.into(), cx);
+        Self::show(ToastKind::Error, message.into(), None, cx);
+    }
+
+    pub fn error_with(
+        message: impl Into<SharedString>,
+        description: impl Into<SharedString>,
+        cx: &mut App,
+    ) {
+        Self::show(
+            ToastKind::Error,
+            message.into(),
+            Some(description.into()),
+            cx,
+        );
+    }
+
+    pub fn success(message: impl Into<SharedString>, cx: &mut App) {
+        Self::show(ToastKind::Success, message.into(), None, cx);
     }
 
     pub fn info(message: impl Into<SharedString>, cx: &mut App) {
-        Self::show(ToastKind::Info, message.into(), cx);
+        Self::show(ToastKind::Info, message.into(), None, cx);
     }
 
-    fn show(kind: ToastKind, message: SharedString, cx: &mut App) {
+    fn show(
+        kind: ToastKind,
+        message: SharedString,
+        description: Option<SharedString>,
+        cx: &mut App,
+    ) {
         match Self::handle(cx) {
-            Some(toaster) => toaster.update(cx, |toaster, cx| toaster.push(kind, message, cx)),
+            Some(toaster) => toaster.update(cx, |toaster, cx| {
+                toaster.push(kind, message, description, cx)
+            }),
             None => eprintln!("[dcc-native] {message}"),
         }
     }
 
-    fn push(&mut self, kind: ToastKind, message: SharedString, cx: &mut Context<Self>) {
+    fn push(
+        &mut self,
+        kind: ToastKind,
+        message: SharedString,
+        description: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
         let id = self.next_id;
         self.next_id += 1;
         let timer = cx.spawn(async move |this, cx| {
@@ -87,6 +120,7 @@ impl Toaster {
             id,
             kind,
             message,
+            description,
             expired: false,
             _timer: timer,
         });
@@ -122,6 +156,7 @@ struct Palette {
     background: Hsla,
     border: Hsla,
     text: Hsla,
+    description: Hsla,
     close_border: Hsla,
 }
 
@@ -132,6 +167,7 @@ fn palette(dark: bool) -> Palette {
             background: rgb(0x000000).into(),
             border: gray(0.20),
             text: gray(0.99),
+            description: gray(0.91),
             close_border: gray(0.20),
         }
     } else {
@@ -139,6 +175,7 @@ fn palette(dark: bool) -> Palette {
             background: rgb(0xffffff).into(),
             border: gray(0.93),
             text: gray(0.09),
+            description: rgb(0x3f3f3f).into(),
             close_border: gray(0.93),
         }
     }
@@ -191,7 +228,8 @@ impl Toaster {
         let id = toast.id;
         let icon = match toast.kind {
             ToastKind::Error => Some("sonner-error"),
-            ToastKind::Info => None,
+            ToastKind::Success => Some("sonner-success"),
+            ToastKind::Info => Some("sonner-info"),
         };
         div()
             .id(("toast", id as usize))
@@ -225,11 +263,25 @@ impl Toaster {
             })
             .child(
                 div()
+                    .flex()
                     .flex_1()
                     .min_w_0()
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .line_height(gpui::relative(1.5))
-                    .child(toast.message.clone()),
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .line_height(gpui::relative(1.5))
+                            .child(toast.message.clone()),
+                    )
+                    .when_some(toast.description.clone(), |content, description| {
+                        content.child(
+                            div()
+                                .line_height(gpui::relative(1.4))
+                                .text_color(colors.description)
+                                .child(description),
+                        )
+                    }),
             )
             .child(
                 // `translate(-35%, -35%)` of a 20px button at the top-left corner.

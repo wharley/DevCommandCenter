@@ -19,6 +19,8 @@ pub type OnSelect = Rc<dyn Fn(&mut Window, &mut App)>;
 pub enum MenuEntry {
     Item(MenuItem),
     Separator,
+    /// A quiet heading over the items (the project name on a row's menu).
+    Label(SharedString),
     Submenu {
         label: SharedString,
         icon: Option<Icon>,
@@ -30,6 +32,8 @@ pub struct MenuItem {
     label: SharedString,
     icon: Option<Icon>,
     disabled: bool,
+    /// `text-destructive focus:text-destructive`
+    destructive: bool,
     on_select: OnSelect,
 }
 
@@ -42,6 +46,7 @@ impl MenuItem {
             label: label.into(),
             icon: None,
             disabled: false,
+            destructive: false,
             on_select: Rc::new(on_select),
         }
     }
@@ -53,6 +58,11 @@ impl MenuItem {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    pub fn destructive(mut self) -> Self {
+        self.destructive = true;
         self
     }
 }
@@ -310,7 +320,7 @@ fn selectable(entries: &[MenuEntry]) -> Vec<usize> {
         .filter(|(_, entry)| match entry {
             MenuEntry::Item(item) => !item.disabled,
             MenuEntry::Submenu { .. } => true,
-            MenuEntry::Separator => false,
+            MenuEntry::Separator | MenuEntry::Label(_) => false,
         })
         .map(|(index, _)| index)
         .collect()
@@ -353,6 +363,16 @@ fn panel(
                 .h(px(1.0))
                 .bg(colors.border)
                 .into_any_element(),
+            MenuEntry::Label(label) => div()
+                .truncate()
+                .px(px(6.0))
+                .pt(px(2.0))
+                .pb(px(4.0))
+                .text_size(px(11.0))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(colors.muted_foreground)
+                .child(label)
+                .into_any_element(),
             MenuEntry::Item(item) => row(
                 root,
                 state,
@@ -362,6 +382,7 @@ fn panel(
                 item.label,
                 false,
                 item.disabled,
+                item.destructive,
                 style,
                 Some(item.on_select),
                 cx,
@@ -380,6 +401,7 @@ fn panel(
                     icon,
                     label,
                     true,
+                    false,
                     false,
                     style,
                     None,
@@ -483,6 +505,7 @@ fn row(
     label: SharedString,
     submenu: bool,
     disabled: bool,
+    destructive: bool,
     style: ItemStyle,
     on_select: Option<OnSelect>,
     cx: &App,
@@ -505,6 +528,7 @@ fn row(
         .when(highlighted, |row| {
             row.bg(colors.accent).text_color(colors.accent_foreground)
         })
+        .when(destructive, |row| row.text_color(colors.destructive))
         .when(disabled, |row| row.opacity(0.5))
         .when(!disabled, |row| {
             row.cursor_pointer()

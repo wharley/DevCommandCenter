@@ -5,6 +5,8 @@
 mod actions;
 mod attention;
 mod collapsed;
+mod dialogs;
+mod disk_usage;
 mod empty;
 mod footer;
 mod header;
@@ -13,6 +15,7 @@ mod labels;
 mod list;
 mod meta_chips;
 mod navigation;
+mod project_menu;
 mod repo_picker;
 mod row;
 mod row_actions;
@@ -60,6 +63,13 @@ pub enum SidebarEvent {
         base_branch: String,
         label: String,
     },
+    /// "Abrir branch" on a project's menu (`onOpenBranchFromProject`).
+    OpenBranchInProject {
+        project_id: String,
+        root_path: String,
+        base_branch: String,
+        label: String,
+    },
     OpenPullRequests,
     OpenNotes,
     OpenUsage,
@@ -91,6 +101,8 @@ pub struct Sidebar {
     row_menu_open: Option<String>,
     renaming: Option<actions::Rename>,
     repo_picker: Option<repo_picker::RepoPicker>,
+    completed_scan: disk_usage::CompletedScan,
+    dialog: Option<dialogs::SidebarDialog>,
     _refresh: Task<()>,
     _clock: Task<()>,
     _git: Task<()>,
@@ -129,6 +141,8 @@ impl Sidebar {
             row_menu_open: None,
             renaming: None,
             repo_picker: None,
+            completed_scan: disk_usage::CompletedScan::default(),
+            dialog: None,
             _refresh: Self::refresh_loop(cx),
             _clock: Self::clock_loop(cx),
             _git: Self::git_loop(cx),
@@ -253,6 +267,7 @@ impl Sidebar {
         self.state.data = data;
         self.state.now_ms = time::now_ms();
         self.sync_items();
+        self.refresh_completed_scan(cx);
         cx.notify();
     }
 
@@ -346,7 +361,7 @@ impl Sidebar {
 }
 
 impl Render for Sidebar {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         // `.dcc-project-sidebar`: the sidebar warmed 3% toward the idea accent.
         let background = mix_oklab(theme.colors.sidebar, 0.97, theme.colors.accent_idea);
@@ -357,6 +372,8 @@ impl Render for Sidebar {
             .flex_col()
             .overflow_hidden()
             .bg(background);
+        let dialog = dialogs::render(self, window, cx);
+        let root = root.children(dialog);
         if self.collapsed {
             return root.child(collapsed::render(self, cx));
         }

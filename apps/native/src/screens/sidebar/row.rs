@@ -195,7 +195,7 @@ pub fn render(
     .fill()
     .enabled(!renaming_now);
 
-    div()
+    let element = div()
         .pl(px(12.0))
         .pr(px(4.0))
         .child(
@@ -236,7 +236,8 @@ pub fn render(
                 )
                 .child(actions),
         )
-        .into_any_element()
+        .into_any_element();
+    super::project_menu::wrap(task_id, project.as_ref(), element, cx)
 }
 
 /// The hover card (`WorkspaceIdentityCard`), built when it opens.

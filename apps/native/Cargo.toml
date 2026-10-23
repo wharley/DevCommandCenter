@@ -27,6 +27,10 @@ futures = "0.3"
 base64 = "0.22"
 smallvec = "1"
 unicode-segmentation = "1"
+# Project logos: decode an upload and write the 64px PNG DCC stores (both
+# already in the tree through GPUI).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+resvg = "0.46"
 dcc-core = { path = "../../crates/dcc-core" }
 dcc-infra = { path = "../../crates/dcc-infra" }
 

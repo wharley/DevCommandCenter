@@ -175,3 +175,32 @@ fn row_actions_write_through_the_shared_backend() {
         );
     }
 }
+
+/// What the completed tasks take on disk, read only (git status and a walk).
+#[test]
+#[ignore]
+fn measures_completed_tasks_on_a_database_copy() {
+    use dcc_native::data::{deletion, disk};
+    let path = loader::database_path();
+    let data = loader::load(&path, "Nova tarefa").expect("load");
+    let completed = rail::split(&data.tasks, time::now_ms()).completed;
+    let ids = disk::disk_usage_ids(&completed.iter().collect::<Vec<_>>());
+    let started = Instant::now();
+    let scan = deletion::cleanup_scan(&path, ids).expect("scan");
+    let rows = disk::cleanup_rows(&completed.iter().collect::<Vec<_>>(), &scan.workspaces);
+    println!(
+        "{} completed, {} in {:?}",
+        rows.len(),
+        disk::format_disk_bytes(scan.total_bytes, dcc_native::i18n::Locale::PtBr),
+        started.elapsed()
+    );
+    for row in rows.iter().take(8) {
+        println!(
+            "  {} · {} · {:?} · preselected {}",
+            row.task_id,
+            disk::format_disk_bytes(row.bytes, dcc_native::i18n::Locale::PtBr),
+            row.safety,
+            disk::preselected(row)
+        );
+    }
+}

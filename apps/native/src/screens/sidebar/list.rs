@@ -59,7 +59,7 @@ fn item_element(sidebar: &Sidebar, item: &RailItem, cx: &mut Context<Sidebar>) -
             section,
             count,
             open,
-        } => sections::hold_header(*section, *count, *open, cx),
+        } => sections::hold_header(sidebar, *section, *count, *open, cx),
         RailItem::Gap(_) | RailItem::BottomPadding => div().into_any_element(),
     }
 }

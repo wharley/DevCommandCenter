@@ -16,6 +16,8 @@ pub enum Variant {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Size {
+    /// `h-8 px-3`, shadcn's default.
+    Default,
     /// `h-7 px-2.5`
     Sm,
     /// `size-8`
@@ -161,6 +163,7 @@ impl RenderOnce for Button {
         };
         let hover_foreground = self.hover_text.unwrap_or(colors.foreground);
         let (width, height, padding) = match self.size {
+            Size::Default => (None, 32.0, 12.0),
             Size::Sm => (None, 28.0, 10.0),
             Size::Icon => (Some(32.0), 32.0, 0.0),
             Size::IconXs => (Some(24.0), 24.0, 0.0),

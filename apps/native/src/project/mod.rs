@@ -58,6 +58,16 @@ fn mascot(name: &str) -> Option<ProjectIcon> {
         .map(|(_, rest, moving)| ProjectIcon::Mascot { rest, moving })
 }
 
+/// The fauna a project can pick, in `@dcc/mascots` order.
+pub fn mascot_ids() -> impl Iterator<Item = &'static str> {
+    generated::MASCOT_FRAMES.iter().map(|(id, _, _)| *id)
+}
+
+/// `isKnownProjectIcon`
+pub fn is_known_icon(value: &str) -> bool {
+    value == "logo" || SYMBOL_IDS.contains(&value) || mascot_ids().any(|id| id == value)
+}
+
 /// `projectIconValue`: the uploaded logo when the pick is `logo`.
 pub fn icon_value<'a>(icon: Option<&'a str>, logo: Option<&'a str>) -> Option<&'a str> {
     match (icon, logo) {

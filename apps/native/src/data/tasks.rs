@@ -67,6 +67,30 @@ pub struct TaskSummary {
 }
 
 impl TaskSummary {
+    /// A ready single-project task named after its id, for tests.
+    #[cfg(test)]
+    pub fn test(id: &str) -> Self {
+        Self {
+            id: id.into(),
+            name: id.into(),
+            branch: "main".into(),
+            base_branch: "main".into(),
+            status: TaskStatus::Ready,
+            project_id: "p".into(),
+            root_path: "/repo".into(),
+            worktree_path: None,
+            pinned_at: None,
+            snoozed_until: None,
+            created_at: "2026-10-23T15:00:00Z".into(),
+            updated_at: "2026-10-23T15:00:00Z".into(),
+            bundle_id: None,
+            member_workspace_ids: vec![],
+            member_names: vec![],
+            member_project_names: vec![],
+            context_folders: vec![],
+        }
+    }
+
     /// `untitled` is the localized "New task" used when nothing names the task.
     pub fn from_workspace(
         workspace: &Workspace,

@@ -15,8 +15,8 @@ mod toast;
 pub mod tooltip;
 
 pub use button::{Button, Size as ButtonSize, Variant as ButtonVariant};
-pub use dialog::{Dialog, dialog_footer, dialog_header};
-pub use feedback::{Checkbox, spinner};
+pub use dialog::{Dialog, dialog_footer, dialog_footer_split, dialog_header};
+pub use feedback::{Checkbox, Spinner, spinner};
 pub use icon::Icon;
 pub use kbd::{command_key, shortcut_keys};
 pub use menu::{ItemStyle, Menu, MenuAlign, MenuEntry, MenuItem};

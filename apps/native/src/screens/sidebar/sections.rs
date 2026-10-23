@@ -5,10 +5,13 @@ use gpui::{AnyElement, ClickEvent, Context, SharedString, Window, div, prelude::
 
 use super::Sidebar;
 use super::state::HoldSection;
+use crate::data::disk::format_disk_bytes;
 use crate::data::rail::TaskSectionId;
+use crate::i18n::I18n;
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
-use crate::ui::{Icon, Tracked, tabular_nums};
+use crate::ui::tooltip::Side;
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip, Tracked, tabular_nums};
 
 pub fn day_label(section: TaskSectionId, cx: &mut Context<Sidebar>) -> AnyElement {
     let color = cx.theme().colors.muted_foreground.opacity(0.7);
@@ -34,6 +37,7 @@ pub fn day_label(section: TaskSectionId, cx: &mut Context<Sidebar>) -> AnyElemen
 }
 
 pub fn hold_header(
+    sidebar: &Sidebar,
     section: HoldSection,
     count: usize,
     open: bool,
@@ -48,6 +52,31 @@ pub fn hold_header(
     let hover_background = colors.accent.opacity(0.5);
     let hover_text = colors.foreground;
     let label: SharedString = cx.t(label_key);
+    let completed = section == HoldSection::Completed;
+    // `· 1,2 GB` once the completed worktrees were measured.
+    let size = completed
+        .then(|| sidebar.completed_bytes())
+        .flatten()
+        .map(|bytes| {
+            format!(
+                "· {}",
+                format_disk_bytes(bytes, cx.global::<I18n>().locale())
+            )
+        });
+    let muted = colors.muted_foreground;
+    let cleanup = (completed && count > 0).then(|| {
+        Tooltip::text(
+            "tip-cleanup",
+            Button::new("cleanup-completed")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::IconXs)
+                .muted()
+                .child(Icon::new("brush-cleaning").size(14.0))
+                .on_click(cx.listener(|this, _, _, cx| this.open_cleanup(cx))),
+            cx.t("sidebar.cleanup.action"),
+        )
+        .side(Side::Top)
+    });
     div()
         .id(id)
         .group(id)
@@ -101,7 +130,18 @@ pub fn hold_header(
                                 .line_height(px(20.0))
                                 .font_weight(gpui::FontWeight::MEDIUM)
                                 .child(label),
-                        ),
+                        )
+                        .when_some(size, |row, size| {
+                            row.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_size(px(10.0))
+                                    .font_weight(gpui::FontWeight::NORMAL)
+                                    .font_features(tabular_nums())
+                                    .text_color(muted.opacity(0.7))
+                                    .child(SharedString::from(size)),
+                            )
+                        }),
                 )
                 .child(
                     div()
@@ -122,5 +162,14 @@ pub fn hold_header(
                         .child(count.to_string()),
                 ),
         )
+        .when_some(cleanup, |header, cleanup| {
+            header.child(
+                div()
+                    .flex_shrink_0()
+                    .opacity(0.0)
+                    .group_hover(id, |style| style.opacity(1.0))
+                    .child(cleanup),
+            )
+        })
         .into_any_element()
 }

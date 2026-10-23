@@ -5642,5 +5642,9 @@
     "runtimeMissing": "O runtime do Antigravity não está instalado. Instale ou indique o caminho do executável nas configurações.",
     "notInstalled": "{{binary}} não está instalado nesta máquina.",
     "openSetup": "Configurar provedor"
+  },
+  "native": {
+    "desktopOpen": "O DCC está aberto: exclua por lá, ou feche-o para excluir por aqui.",
+    "memoryPending": "A memória desta tarefa ainda não foi salva. Abra o DCC para salvá-la antes de excluir."
   }
 }

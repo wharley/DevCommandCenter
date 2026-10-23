@@ -19,6 +19,9 @@ type OnClose = Rc<dyn Fn(&mut Window, &mut App)>;
 pub struct Dialog {
     id: ElementId,
     max_width: f32,
+    max_height: Option<f32>,
+    padding: f32,
+    gap: f32,
     close_button: bool,
     on_close: OnClose,
     children: SmallVec<[AnyElement; 4]>,
@@ -32,6 +35,9 @@ impl Dialog {
         Self {
             id: id.into(),
             max_width: 384.0,
+            max_height: None,
+            padding: 16.0,
+            gap: 16.0,
             close_button: true,
             on_close: Rc::new(on_close),
             children: SmallVec::new(),
@@ -41,6 +47,24 @@ impl Dialog {
     /// `sm:max-w-sm` is 384 (the default), `sm:max-w-md` 448.
     pub fn max_width(mut self, width: f32) -> Self {
         self.max_width = width;
+        self
+    }
+
+    /// A tall dialog keeps its footer in reach; its body scrolls.
+    pub fn max_height(mut self, height: f32) -> Self {
+        self.max_height = Some(height);
+        self
+    }
+
+    /// `p-4` by default.
+    pub fn padding(mut self, padding: f32) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    /// `gap-4` by default.
+    pub fn gap(mut self, gap: f32) -> Self {
+        self.gap = gap;
         self
     }
 
@@ -103,9 +127,12 @@ impl RenderOnce for Dialog {
             .relative()
             .flex()
             .flex_col()
-            .gap(px(16.0))
+            .gap(px(self.gap))
             .w(px(self.max_width.min(f32::from(viewport.width) - 32.0)))
-            .p(px(16.0))
+            .when_some(self.max_height, |card, height| {
+                card.max_h(px(height)).overflow_hidden()
+            })
+            .p(px(self.padding))
             .rounded(theme.radius.dialog)
             .bg(colors.popover)
             .text_color(colors.popover_foreground)
@@ -197,5 +224,30 @@ pub fn dialog_footer(children: impl IntoIterator<Item = AnyElement>, cx: &App) -
         .border_color(theme.colors.border)
         .bg(theme.colors.muted.opacity(0.5))
         .children(children)
+        .into_any_element()
+}
+
+/// `DialogFooter` with a note on the left and the actions on the right
+/// (`sm:justify-between`).
+pub fn dialog_footer_split(
+    note: AnyElement,
+    actions: impl IntoIterator<Item = AnyElement>,
+    cx: &App,
+) -> AnyElement {
+    let theme = cx.theme();
+    div()
+        .mx(px(-16.0))
+        .mb(px(-16.0))
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(8.0))
+        .p(px(16.0))
+        .rounded_b(theme.radius.dialog)
+        .border_t_1()
+        .border_color(theme.colors.border)
+        .bg(theme.colors.muted.opacity(0.5))
+        .child(note)
+        .child(div().flex().gap(px(8.0)).children(actions))
         .into_any_element()
 }
