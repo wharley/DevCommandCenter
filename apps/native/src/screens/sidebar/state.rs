@@ -17,6 +17,7 @@ use crate::data::tasks::TaskSummary;
 pub const DAY_LABEL_HEIGHT: f32 = 26.0;
 pub const ROW_HEIGHT: f32 = 54.0;
 pub const HEADER_HEIGHT: f32 = 42.0;
+pub const CHILD_TASK_HEIGHT: f32 = 26.0;
 const GROUP_GAP: f32 = 10.0;
 const EMPTY_GROUP_GAP: f32 = 8.0;
 const BOTTOM_PADDING: f32 = 8.0;
@@ -43,6 +44,13 @@ pub enum RailItem {
         count: usize,
         open: bool,
     },
+    /// A task an agent proposed or started, under the task it came from.
+    ChildTask {
+        task_id: String,
+        child_id: String,
+        /// The guide line stops at the last one.
+        last: bool,
+    },
     Gap(f32),
     BottomPadding,
 }
@@ -53,6 +61,7 @@ impl RailItem {
             RailItem::DayLabel(_) => DAY_LABEL_HEIGHT,
             RailItem::Row { .. } => ROW_HEIGHT,
             RailItem::Header { .. } => HEADER_HEIGHT,
+            RailItem::ChildTask { .. } => CHILD_TASK_HEIGHT,
             RailItem::Gap(size) => *size,
             RailItem::BottomPadding => BOTTOM_PADDING,
         }
@@ -245,10 +254,13 @@ impl SidebarState {
                 items.push(RailItem::Gap(GROUP_GAP));
             }
             items.push(RailItem::DayLabel(section.id));
-            items.extend(section.tasks.iter().map(|task| RailItem::Row {
-                task_id: task.id.clone(),
-                compact: false,
-            }));
+            for task in &section.tasks {
+                items.push(RailItem::Row {
+                    task_id: task.id.clone(),
+                    compact: false,
+                });
+                self.push_child_tasks(&mut items, &task.id);
+            }
         }
         let mut previous_has_rows = !sections.is_empty();
         for (section, rows, open) in [
@@ -273,15 +285,34 @@ impl SidebarState {
                 open,
             });
             if open {
-                items.extend(rows.iter().map(|task| RailItem::Row {
-                    task_id: task.id.clone(),
-                    compact: true,
-                }));
+                for task in rows {
+                    items.push(RailItem::Row {
+                        task_id: task.id.clone(),
+                        compact: true,
+                    });
+                    // A finished task's phases are over; only live work nests.
+                    if section != HoldSection::Completed {
+                        self.push_child_tasks(&mut items, &task.id);
+                    }
+                }
             }
             previous_has_rows = true;
         }
         items.push(RailItem::BottomPadding);
         items
+    }
+
+    fn push_child_tasks(&self, items: &mut Vec<RailItem>, task_id: &str) {
+        let Some(children) = self.data.child_tasks.get(task_id) else {
+            return;
+        };
+        for (index, child) in children.iter().enumerate() {
+            items.push(RailItem::ChildTask {
+                task_id: task_id.to_string(),
+                child_id: child.id.clone(),
+                last: index + 1 == children.len(),
+            });
+        }
     }
 
     pub fn toggle_section(&mut self, section: HoldSection) {

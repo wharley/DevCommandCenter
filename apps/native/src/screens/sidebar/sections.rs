@@ -77,7 +77,7 @@ pub fn hold_header(
         )
         .side(Side::Top)
     });
-    div()
+    let header = div()
         .id(id)
         .group(id)
         .flex()
@@ -170,6 +170,19 @@ pub fn hold_header(
                     .group_hover(id, |style| style.opacity(1.0))
                     .child(cleanup),
             )
-        })
-        .into_any_element()
+        });
+    // A task just moved in: the header glows once.
+    match sidebar
+        .section_flash
+        .as_ref()
+        .filter(|flash| flash.target == section)
+    {
+        Some(flash) => super::arrival::mark(
+            header,
+            format!("section-flash-{id}"),
+            flash.turn,
+            colors.foreground,
+        ),
+        None => header.into_any_element(),
+    }
 }

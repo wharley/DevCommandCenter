@@ -5,6 +5,7 @@
 //! - `screens`: one folder per screen
 //! - `prefs`: the native app's own UI preferences
 
+pub mod agent;
 mod app;
 pub mod assets;
 pub mod data;

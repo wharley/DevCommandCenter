@@ -53,7 +53,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         } else {
             ButtonSize::IconXs
         };
-        tools.push(tool_button(id, icon, event, size, Side::Right, cx));
+        tools.push(tool_button(id, icon, event, size, Side::Right, sidebar, cx));
     }
     let code_column =
         has_selection.then(|| code_column_toggle("rail-code-column", Side::Right, cx));
@@ -142,6 +142,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         .child(new_task)
         .child(pull_requests)
         .child(notes)
+        .children(super::agents::rail_buttons(sidebar, cx))
         .children(project_buttons.into_iter().flatten())
         .child(
             div()

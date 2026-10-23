@@ -41,13 +41,38 @@ pub fn tool_button(
     event: SidebarEvent,
     size: ButtonSize,
     side: Side,
+    sidebar: &Sidebar,
     cx: &mut Context<Sidebar>,
 ) -> AnyElement {
+    // The skills found for the open task, on the Skills tool.
+    let badge = (id == "tool-skills" && sidebar.skill_count > 0).then(|| {
+        let ring = cx.theme().colors.sidebar;
+        div()
+            .absolute()
+            .right(px(-4.0))
+            .top(px(-4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(16.0))
+            .min_w(px(16.0))
+            .px(px(4.0))
+            .rounded_full()
+            .border_1()
+            .border_color(ring)
+            .bg(crate::theme::tailwind::EMERALD_500.hsla())
+            .text_size(px(9.0))
+            .line_height(px(9.0))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(gpui::white())
+            .child(sidebar.skill_count.to_string())
+    });
     let button = Button::new(ElementId::from(id))
         .variant(ButtonVariant::Ghost)
         .size(size)
         .muted()
         .child(Icon::new(icon).stroke(1.85))
+        .children(badge)
         .on_click(cx.listener(move |_, _, _, cx| cx.emit(event.clone())));
     Tooltip::text(
         SharedString::from(format!("tip-{id}")),
@@ -58,7 +83,7 @@ pub fn tool_button(
     .into_any_element()
 }
 
-pub fn render(_sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
+pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
     let mut tools = Vec::new();
     for (id, icon, event) in TOOLS {
         tools.push(tool_button(
@@ -67,6 +92,7 @@ pub fn render(_sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement
             event,
             ButtonSize::Icon,
             Side::Top,
+            sidebar,
             cx,
         ));
     }

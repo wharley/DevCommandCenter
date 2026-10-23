@@ -6,7 +6,8 @@ use std::ops::Range;
 use gpui::{AnyElement, Context, div, list, prelude::*, px};
 
 use super::state::RailItem;
-use super::{Sidebar, row, sections};
+use super::{Sidebar, child_task_row, row, sections};
+use crate::ui::ListScrollbar;
 
 /// The span to replace so `old` becomes `new`: unchanged items at both ends
 /// keep their measured layout and the scroll position stays put.
@@ -28,6 +29,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
     let items = sidebar.items.clone();
     div()
         .id("task-list")
+        .relative()
         .flex_1()
         .min_h_0()
         .overflow_hidden()
@@ -49,6 +51,11 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
             })
             .size_full(),
         )
+        .child(ListScrollbar::new(
+            "task-list-scrollbar",
+            sidebar.list.clone(),
+            sidebar.scrolled_at,
+        ))
 }
 
 fn item_element(sidebar: &Sidebar, item: &RailItem, cx: &mut Context<Sidebar>) -> AnyElement {
@@ -60,6 +67,11 @@ fn item_element(sidebar: &Sidebar, item: &RailItem, cx: &mut Context<Sidebar>) -
             count,
             open,
         } => sections::hold_header(sidebar, *section, *count, *open, cx),
+        RailItem::ChildTask {
+            task_id,
+            child_id,
+            last,
+        } => child_task_row::render(sidebar, task_id, child_id, *last, cx),
         RailItem::Gap(_) | RailItem::BottomPadding => div().into_any_element(),
     }
 }

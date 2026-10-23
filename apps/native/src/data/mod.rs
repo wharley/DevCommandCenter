@@ -3,6 +3,9 @@
 
 pub mod actions;
 pub mod activity;
+pub mod agents;
+pub mod child_tasks;
+pub mod daily_recap;
 pub mod deletion;
 pub mod disk;
 pub mod git_watch;

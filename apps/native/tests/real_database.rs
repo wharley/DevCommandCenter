@@ -204,3 +204,19 @@ fn measures_completed_tasks_on_a_database_copy() {
         );
     }
 }
+
+/// Resident agents and child tasks as the sidebar reads them (read only).
+#[test]
+#[ignore]
+fn reads_agents_and_child_tasks_on_a_database_copy() {
+    let data = loader::load(&loader::database_path(), "Nova tarefa").expect("load");
+    for agent in &data.agents {
+        let states: Vec<_> = agent.sessions.iter().map(|session| session.state).collect();
+        println!("agent {} ({:?}) {:?} sessions {:?}", agent.name, agent.preset, agent.avatar, states);
+    }
+    for (task, children) in &data.child_tasks {
+        for child in children {
+            println!("  child of {task}: {} · {:?}", child.title, child.state);
+        }
+    }
+}

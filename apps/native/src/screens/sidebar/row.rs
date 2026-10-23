@@ -195,47 +195,59 @@ pub fn render(
     .fill()
     .enabled(!renaming_now);
 
+    let card = div()
+        .id(SharedString::from(format!("task-{task_id}")))
+        .relative()
+        .px(px(10.0))
+        .py(px(6.0))
+        .rounded(theme.radius.control)
+        .cursor_pointer()
+        .text_size(px(13.0))
+        .text_color(if selected {
+            colors.sidebar_foreground
+        } else {
+            colors.foreground.opacity(0.8)
+        })
+        .when(selected, |card| card.bg(active_background))
+        .when(!selected, |card| card.hover(move |style| style.bg(hover)))
+        .group(ROW_GROUP)
+        // `cn` keeps the last of the two: pending wins.
+        .when(pending, |card| card.opacity(0.6))
+        .when(!pending && !selectable && !selected, |card| {
+            card.opacity(0.5)
+        })
+        .on_click(
+            cx.listener(move |this, _: &ClickEvent, _: &mut Window, cx| this.open_task(&id, cx)),
+        )
+        .child(
+            div()
+                .flex()
+                .min_w_0()
+                .items_start()
+                .gap(px(8.0))
+                .child(div().mt(px(2.0)).flex_shrink_0().child(glyph))
+                .child(identity),
+        )
+        .child(actions);
+    // "N rodando" landed here: the card glows once.
+    let flash = sidebar
+        .task_flash
+        .as_ref()
+        .filter(|flash| flash.target == task_id)
+        .map(|flash| flash.turn);
+    let card = match flash {
+        Some(turn) => super::arrival::mark(
+            card,
+            format!("task-flash-{task_id}"),
+            turn,
+            colors.foreground,
+        ),
+        None => card.into_any_element(),
+    };
     let element = div()
         .pl(px(12.0))
         .pr(px(4.0))
-        .child(
-            div()
-                .id(SharedString::from(format!("task-{task_id}")))
-                .relative()
-                .px(px(10.0))
-                .py(px(6.0))
-                .rounded(theme.radius.control)
-                .cursor_pointer()
-                .text_size(px(13.0))
-                .text_color(if selected {
-                    colors.sidebar_foreground
-                } else {
-                    colors.foreground.opacity(0.8)
-                })
-                .when(selected, |card| card.bg(active_background))
-                .when(!selected, |card| card.hover(move |style| style.bg(hover)))
-                .group(ROW_GROUP)
-                // `cn` keeps the last of the two: pending wins.
-                .when(pending, |card| card.opacity(0.6))
-                .when(!pending && !selectable && !selected, |card| {
-                    card.opacity(0.5)
-                })
-                .on_click(
-                    cx.listener(move |this, _: &ClickEvent, _: &mut Window, cx| {
-                        this.open_task(&id, cx)
-                    }),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .min_w_0()
-                        .items_start()
-                        .gap(px(8.0))
-                        .child(div().mt(px(2.0)).flex_shrink_0().child(glyph))
-                        .child(identity),
-                )
-                .child(actions),
-        )
+        .child(card)
         .into_any_element();
     super::project_menu::wrap(task_id, project.as_ref(), element, cx)
 }

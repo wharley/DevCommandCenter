@@ -3,7 +3,10 @@
 //! sidebar renders from its own file.
 
 mod actions;
+mod agents;
+mod arrival;
 mod attention;
+mod child_task_row;
 mod collapsed;
 mod dialogs;
 mod disk_usage;
@@ -21,6 +24,7 @@ mod row;
 mod row_actions;
 mod row_status;
 mod sections;
+mod skills_count;
 pub mod state;
 mod tasks_header;
 
@@ -72,6 +76,13 @@ pub enum SidebarEvent {
     },
     OpenPullRequests,
     OpenNotes,
+    /// A resident agent's page.
+    OpenAgent(String),
+    /// One conversation of a task (a child task's, or its parent's proposal).
+    OpenSession {
+        task_id: String,
+        session_id: String,
+    },
     OpenUsage,
     OpenSkills,
     OpenFeedback,
@@ -103,6 +114,19 @@ pub struct Sidebar {
     repo_picker: Option<repo_picker::RepoPicker>,
     completed_scan: disk_usage::CompletedScan,
     dialog: Option<dialogs::SidebarDialog>,
+    agent_markers: agents::AgentMarkers,
+    /// The agent whose page is on screen.
+    active_agent_id: Option<String>,
+    /// The conversation on screen, when the task has several.
+    selected_session_id: Option<String>,
+    /// Skills and instruction files the open task's agents get (footer badge).
+    skill_count: usize,
+    task_flash: Option<arrival::Flash<String>>,
+    section_flash: Option<arrival::Flash<state::HoldSection>>,
+    membership: Option<arrival::Membership>,
+    /// When the task list last moved: its scrollbar shows a moment after.
+    scrolled_at: Option<std::time::Instant>,
+    _scrollbar_fade: Option<Task<()>>,
     _refresh: Task<()>,
     _clock: Task<()>,
     _git: Task<()>,
@@ -129,6 +153,10 @@ impl Sidebar {
         };
         let items = state.items();
         let list = ListState::new(items.len(), ListAlignment::Top, px(400.0));
+        let weak = cx.weak_entity();
+        list.set_scroll_handler(move |_, _, cx| {
+            let _ = weak.update(cx, |sidebar: &mut Sidebar, cx| sidebar.list_scrolled(cx));
+        });
         Self {
             state,
             collapsed,
@@ -143,6 +171,17 @@ impl Sidebar {
             repo_picker: None,
             completed_scan: disk_usage::CompletedScan::default(),
             dialog: None,
+            agent_markers: agents::AgentMarkers::load(
+                seen_path.parent().unwrap_or(std::path::Path::new(".")),
+            ),
+            active_agent_id: None,
+            selected_session_id: None,
+            skill_count: 0,
+            task_flash: None,
+            section_flash: None,
+            membership: None,
+            scrolled_at: None,
+            _scrollbar_fade: None,
             _refresh: Self::refresh_loop(cx),
             _clock: Self::clock_loop(cx),
             _git: Self::git_loop(cx),
@@ -249,6 +288,11 @@ impl Sidebar {
                         return;
                     }
                     sidebar.state.now_ms = now;
+                    // The Reporter's next recap opens at the first look after 4am.
+                    if stale {
+                        sidebar.agent_markers.recap.refresh(chrono::Local::now());
+                        sidebar.refresh_skill_count(cx);
+                    }
                     sidebar.mascot_frame = animating && !sidebar.mascot_frame;
                     sidebar.sync_items();
                     cx.notify();
@@ -268,6 +312,7 @@ impl Sidebar {
         self.state.now_ms = time::now_ms();
         self.sync_items();
         self.refresh_completed_scan(cx);
+        self.notice_section_moves(cx);
         cx.notify();
     }
 
@@ -319,6 +364,7 @@ impl Sidebar {
         }
         self.wake_quietly(task_id, cx);
         self.state.select(task_id);
+        self.refresh_skill_count(cx);
         self.sync_items();
         cx.emit(SidebarEvent::OpenTask(task_id.to_string()));
         cx.notify();
@@ -328,6 +374,20 @@ impl Sidebar {
         self.state.toggle_section(section);
         self.sync_items();
         cx.emit(SidebarEvent::SectionsChanged);
+        cx.notify();
+    }
+
+    /// Shows the scrollbar and hides it once the list rests.
+    fn list_scrolled(&mut self, cx: &mut Context<Self>) {
+        self.scrolled_at = Some(std::time::Instant::now());
+        self._scrollbar_fade = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(
+                    crate::ui::scrollbar::SCROLLBAR_LINGER + std::time::Duration::from_millis(50),
+                )
+                .await;
+            let _ = this.update(cx, |_, cx| cx.notify());
+        }));
         cx.notify();
     }
 
@@ -342,6 +402,7 @@ impl Sidebar {
         {
             self.list.scroll_to_reveal_item(index);
         }
+        self.flash_task(task_id, cx);
         cx.notify();
     }
 
@@ -386,6 +447,7 @@ impl Render for Sidebar {
         root.on_hover(cx.listener(|this, hovered: &bool, _, cx| this.hold_attention(*hovered, cx)))
             .child(header::render(self, cx))
             .child(navigation::render(self, cx))
+            .children(agents::render(self, cx))
             .children(attention::render(self, cx))
             .child(tasks_header::render(self, cx))
             .child(body)

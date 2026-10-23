@@ -43,6 +43,10 @@ pub struct SidebarData {
     pub open_notes: usize,
     /// Delegated edits waiting for the person to apply or discard, by task.
     pub review_pending: HashMap<String, usize>,
+    /// Resident agents with their sessions' state.
+    pub agents: Vec<super::agents::AgentRecord>,
+    /// Tasks an agent proposed or started, by the task they hang under.
+    pub child_tasks: HashMap<String, Vec<super::child_tasks::ChildTask>>,
 }
 
 pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
@@ -85,6 +89,7 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         .iter()
         .filter_map(|delegation| delegation.child_session_id.as_ref().map(|id| id.0.clone()))
         .collect();
+    let child_tasks = super::child_tasks::by_workspace(&delegations);
     let mut review_pending: HashMap<String, usize> = HashMap::new();
     for delegation in &delegations {
         if delegation.status == DelegationStatus::ReviewPending {
@@ -116,6 +121,8 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         .filter(|note| note.status == "open")
         .count();
 
+    let agents = super::agents::load(&sessions)?;
+
     Ok(SidebarData {
         tasks,
         projects,
@@ -123,5 +130,7 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         provider_ids,
         open_notes,
         review_pending,
+        agents,
+        child_tasks,
     })
 }
