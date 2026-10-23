@@ -1,7 +1,7 @@
 //! The shell's regions. Each screen takes one over as it is migrated:
 //! the sidebar is screen 1, the main area hosts screens 2–4 and 6–8.
 
-use gpui::{App, Window, div, prelude::*, px};
+use gpui::{AnyElement, App, Window, div, prelude::*, px};
 
 use crate::theme::ActiveTheme;
 
@@ -9,11 +9,20 @@ use crate::theme::ActiveTheme;
 #[derive(IntoElement)]
 pub struct SidebarRegion {
     width: f32,
+    content: Option<AnyElement>,
 }
 
 impl SidebarRegion {
     pub fn new(width: f32) -> Self {
-        Self { width }
+        Self {
+            width,
+            content: None,
+        }
+    }
+
+    pub fn child(mut self, content: impl IntoElement) -> Self {
+        self.content = Some(content.into_any_element());
+        self
     }
 }
 
@@ -28,6 +37,7 @@ impl RenderOnce for SidebarRegion {
             .w(px(self.width))
             .overflow_hidden()
             .bg(cx.theme().colors.sidebar)
+            .children(self.content)
     }
 }
 

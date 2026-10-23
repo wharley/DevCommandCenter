@@ -1,0 +1,114 @@
+//! Reads everything the sidebar shows from the database the desktop app
+//! writes, through the same `dcc-infra` repositories. Blocking: call it off
+//! the UI thread.
+
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
+use dcc_core::domain::workspace::WorkspaceId;
+use dcc_core::ports::{DelegationRepo, RepositoryRepo, WorkspaceBundleRepo, WorkspaceRepo};
+use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
+use futures::executor::block_on;
+
+use super::activity::{TaskActivity, provider_id, task_activity};
+use super::tasks::{Project, TaskSummary, fold_bundles};
+
+/// Same folder as the desktop: `DCC_APP_DATA_DIR`, else the app's data dir
+/// (`com.devcommandcenter.app`, `.dev` in debug builds like `yarn dev`).
+pub fn database_path() -> PathBuf {
+    if let Some(dir) = std::env::var_os("DCC_APP_DATA_DIR") {
+        return PathBuf::from(dir).join("database.sqlite");
+    }
+    let identifier = if cfg!(debug_assertions) {
+        "com.devcommandcenter.app.dev"
+    } else {
+        "com.devcommandcenter.app"
+    };
+    dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(identifier)
+        .join("database.sqlite")
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SidebarData {
+    /// Tasks as the rail lists them, newest update first; idea tasks excluded.
+    pub tasks: Vec<TaskSummary>,
+    /// Projects, idea folders excluded.
+    pub projects: Vec<Project>,
+    pub activities: HashMap<String, TaskActivity>,
+    pub provider_ids: HashMap<String, String>,
+    /// Notes still open, across projects (the rail's Notes count).
+    pub open_notes: usize,
+}
+
+pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
+    if !db_path.exists() {
+        return Ok(SidebarData::default());
+    }
+    let workspaces = SqliteWorkspaceRepo::open(db_path)?;
+    let sessions = SqliteSessionRepo::open_read_only(db_path)?;
+
+    let ideas: HashSet<String> = workspaces
+        .list_ideas()?
+        .into_iter()
+        .map(|idea| idea.root_path)
+        .collect();
+    let projects: Vec<Project> = block_on(workspaces.list_repositories())?
+        .iter()
+        .filter(|repository| !ideas.contains(&repository.root_path))
+        .map(Project::from_repository)
+        .collect();
+    let mut context_folders: HashMap<String, Vec<String>> = workspaces
+        .list_workspace_context_folders()?
+        .into_iter()
+        .map(|(id, folders)| (id.0, folders))
+        .collect();
+    let tasks: Vec<TaskSummary> = block_on(workspaces.list_workspaces())?
+        .iter()
+        .map(|workspace| {
+            let folders = context_folders.remove(&workspace.id.0).unwrap_or_default();
+            TaskSummary::from_workspace(workspace, folders, untitled)
+        })
+        .collect();
+    let bundles = block_on(workspaces.list_workspace_bundles())?;
+    let tasks: Vec<TaskSummary> = fold_bundles(tasks, &bundles, &projects)
+        .into_iter()
+        .filter(|task| !ideas.contains(&task.root_path))
+        .collect();
+
+    let delegated: HashSet<String> = block_on(sessions.list_delegations(None, None))?
+        .into_iter()
+        .filter_map(|delegation| delegation.child_session_id.map(|id| id.0))
+        .collect();
+    let mut activities = HashMap::new();
+    let mut provider_ids = HashMap::new();
+    for task in &tasks {
+        let summaries = sessions.list_workspace_sessions(&WorkspaceId(task.id.clone()))?;
+        if let Some(provider) = provider_id(&summaries, &delegated) {
+            provider_ids.insert(task.id.clone(), provider);
+        }
+        // Like the desktop, only open tasks are followed live.
+        if !task.status.is_selectable() {
+            continue;
+        }
+        if let Some(activity) = task_activity(&summaries) {
+            activities.insert(task.id.clone(), activity);
+        }
+    }
+
+    let open_notes = sessions
+        .list_project_notes()
+        .map_err(anyhow::Error::msg)?
+        .iter()
+        .filter(|note| note.status == "open")
+        .count();
+
+    Ok(SidebarData {
+        tasks,
+        projects,
+        activities,
+        provider_ids,
+        open_notes,
+    })
+}

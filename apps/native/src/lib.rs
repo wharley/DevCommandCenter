@@ -6,7 +6,11 @@
 //! - `prefs`: the native app's own UI preferences
 
 mod app;
+pub mod assets;
+pub mod data;
+pub mod i18n;
 pub mod prefs;
+pub mod project;
 pub mod screens;
 pub mod theme;
 pub mod ui;

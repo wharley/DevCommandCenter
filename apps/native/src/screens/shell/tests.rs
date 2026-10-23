@@ -18,6 +18,7 @@ fn open_shell(
     let path = dir.path().join("native-ui.json");
     cx.update(|cx| {
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
     });
     let (shell, cx) = cx.add_window_view(|window, cx| Shell::new(prefs, path, window, cx));
     (shell, cx, dir)

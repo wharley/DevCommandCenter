@@ -5,6 +5,7 @@ pub mod color;
 pub mod fonts;
 pub mod metrics;
 pub mod palette;
+pub mod tailwind;
 
 use gpui::{App, Global, Window, WindowAppearance};
 use serde::{Deserialize, Serialize};

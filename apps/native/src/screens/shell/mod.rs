@@ -9,10 +9,11 @@ mod tests;
 use std::path::PathBuf;
 
 use gpui::{
-    Context, DragMoveEvent, MouseUpEvent, Pixels, Subscription, Window, div, prelude::*, px,
+    Context, DragMoveEvent, Entity, MouseUpEvent, Pixels, Subscription, Window, div, prelude::*, px,
 };
 
-use crate::prefs::Prefs;
+use crate::prefs::{self, Prefs};
+use crate::screens::sidebar::{Sidebar, SidebarEvent};
 use crate::theme::{ActiveTheme, Theme};
 use crate::ui::ResizeHandle;
 use layout::ShellLayout;
@@ -26,7 +27,9 @@ pub struct Shell {
     layout: ShellLayout,
     prefs: Prefs,
     prefs_path: PathBuf,
+    sidebar: Entity<Sidebar>,
     _appearance: Subscription,
+    _sidebar_events: Subscription,
 }
 
 impl Shell {
@@ -41,11 +44,43 @@ impl Shell {
                 cx.notify();
             }
         });
+        let sidebar = cx.new(|cx| {
+            Sidebar::new(
+                prefs.sidebar_collapsed,
+                prefs.waiting_open,
+                prefs.completed_open,
+                prefs::native_file("seen-results.json"),
+                cx,
+            )
+        });
+        let sidebar_events = cx.subscribe(&sidebar, Self::on_sidebar_event);
         Self {
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
             prefs,
             prefs_path,
+            sidebar,
             _appearance: appearance,
+            _sidebar_events: sidebar_events,
+        }
+    }
+
+    /// Screens the sidebar opens arrive one by one; until then their events
+    /// only matter here when they change the frame.
+    fn on_sidebar_event(
+        &mut self,
+        sidebar: Entity<Sidebar>,
+        event: &SidebarEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            SidebarEvent::ToggleCollapsed => {
+                self.layout.toggle_sidebar();
+                let collapsed = self.layout.sidebar_collapsed;
+                sidebar.update(cx, |sidebar, cx| sidebar.set_collapsed(collapsed, cx));
+                self.save_layout(cx);
+                cx.notify();
+            }
+            _ => self.save_layout(cx),
         }
     }
 
@@ -65,14 +100,24 @@ impl Shell {
     fn finish_sidebar_resize(&mut self, pointer_x: Pixels, cx: &mut Context<Self>) {
         self.layout.resize_to(f32::from(pointer_x));
         if self.layout.finish_resize() {
-            self.save_layout();
+            self.save_layout(cx);
             cx.notify();
         }
     }
 
-    fn save_layout(&mut self) {
-        self.prefs.sidebar_width = self.layout.sidebar_width;
-        self.prefs.sidebar_collapsed = self.layout.sidebar_collapsed;
+    fn save_layout(&mut self, cx: &mut Context<Self>) {
+        let (waiting_open, completed_open) = self.sidebar.read(cx).section_state();
+        let next = Prefs {
+            sidebar_width: self.layout.sidebar_width,
+            sidebar_collapsed: self.layout.sidebar_collapsed,
+            waiting_open,
+            completed_open,
+            ..self.prefs.clone()
+        };
+        if next == self.prefs {
+            return;
+        }
+        self.prefs = next;
         if let Err(error) = self.prefs.save(&self.prefs_path) {
             eprintln!("[dcc-native] could not save the layout: {error}");
         }
@@ -93,6 +138,9 @@ impl Render for Shell {
             .bg(theme.colors.background)
             .text_color(theme.colors.foreground)
             .font_family(theme.fonts.sans.clone())
+            // The desktop's base text: 16px with Tailwind preflight's 1.5 line height.
+            .text_size(px(16.0))
+            .line_height(gpui::relative(1.5))
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<SidebarResize>, _, cx| {
                     this.resize_sidebar(event.event.position.x, cx)
@@ -101,7 +149,7 @@ impl Render for Shell {
             .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _, cx| {
                 this.finish_sidebar_resize(event.position.x, cx)
             }))
-            .child(SidebarRegion::new(self.layout.sidebar_rail_width()))
+            .child(SidebarRegion::new(self.layout.sidebar_rail_width()).child(self.sidebar.clone()))
             .child(
                 ResizeHandle::new("sidebar-resize", SidebarResize)
                     .left(px(self.layout.separator_left()))

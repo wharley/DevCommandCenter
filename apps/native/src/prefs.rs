@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::Locale;
 use crate::screens::shell::layout::{DEFAULT_SIDEBAR_WIDTH, clamp_sidebar_width};
 use crate::theme::ThemePreference;
 
@@ -18,16 +19,23 @@ const DATA_DIR_ENV: &str = "DCC_NATIVE_DATA_DIR";
 #[serde(default, rename_all = "camelCase")]
 pub struct Prefs {
     pub theme: ThemePreference,
+    pub locale: Locale,
     pub sidebar_width: f32,
     pub sidebar_collapsed: bool,
+    /// "Em espera" and "Concluídos" open in the rail.
+    pub waiting_open: bool,
+    pub completed_open: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
         Self {
             theme: ThemePreference::System,
+            locale: Locale::PtBr,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_collapsed: false,
+            waiting_open: false,
+            completed_open: false,
         }
     }
 }
@@ -57,6 +65,11 @@ impl Prefs {
 /// Same folder as the desktop app's data (`com.devcommandcenter.app`, or `.dev` in debug builds).
 pub fn default_path() -> PathBuf {
     data_dir().join(FILE_NAME)
+}
+
+/// Another file of this app's own, next to its preferences.
+pub fn native_file(name: &str) -> PathBuf {
+    data_dir().join(name)
 }
 
 fn data_dir() -> PathBuf {
@@ -93,6 +106,7 @@ mod tests {
             theme: ThemePreference::Dark,
             sidebar_width: 900.0,
             sidebar_collapsed: true,
+            ..Prefs::default()
         };
         prefs.save(&path).unwrap();
         let loaded = Prefs::load(&path);

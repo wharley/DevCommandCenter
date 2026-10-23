@@ -22,6 +22,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6"
 anyhow = "1"
+chrono = "0.4"
+futures = "0.3"
+base64 = "0.22"
+smallvec = "1"
+dcc-core = { path = "../../crates/dcc-core" }
+dcc-infra = { path = "../../crates/dcc-infra" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Tags the Metal layer as sRGB (see src/app/color_space.rs).
