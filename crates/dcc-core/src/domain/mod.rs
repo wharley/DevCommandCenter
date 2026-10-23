@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod attention;
 pub mod computer_use_conformance;
 pub mod decision;
 pub mod delegation;
