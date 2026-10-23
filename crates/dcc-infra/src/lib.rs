@@ -26,6 +26,7 @@ pub mod notes;
 pub mod process;
 pub mod project_actions;
 pub mod runtime_owner;
+pub mod skills_context;
 mod repo_config;
 mod workspace_setup_plan;
 

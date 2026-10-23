@@ -7908,6 +7908,26 @@ impl SqliteSessionRepo {
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         }
+        Self::select_resident_agents(&conn, reviewer)
+    }
+
+    /// The live agents as they are stored, without seeding the built-in ones:
+    /// for a reader beside the app that owns them (the native sidebar).
+    pub fn list_stored_resident_agents(
+        &self,
+        reviewer: &ReviewerPresetText,
+    ) -> Result<Vec<ResidentAgent>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Self::select_resident_agents(&conn, reviewer)
+    }
+
+    fn select_resident_agents(
+        conn: &rusqlite::Connection,
+        reviewer: &ReviewerPresetText,
+    ) -> Result<Vec<ResidentAgent>> {
         let mut statement = conn
             .prepare(&format!(
                 "SELECT {} FROM dcc_agents a WHERE a.deleted_at IS NULL ORDER BY a.created_at, CASE a.preset WHEN 'reviewer' THEN 0 WHEN 'researcher' THEN 1 WHEN 'chronicler' THEN 2 ELSE 3 END, a.id",
