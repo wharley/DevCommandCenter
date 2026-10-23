@@ -2,11 +2,26 @@
 //! projects: components take props and read only the theme.
 
 mod button;
+pub mod dialog;
+mod feedback;
 mod icon;
+mod kbd;
+pub mod menu;
+pub mod popover;
 mod resize_handle;
 mod text;
+pub mod text_input;
+mod toast;
+pub mod tooltip;
 
 pub use button::{Button, Size as ButtonSize, Variant as ButtonVariant};
+pub use dialog::{Dialog, dialog_footer, dialog_header};
+pub use feedback::{Checkbox, spinner};
 pub use icon::Icon;
+pub use kbd::{command_key, shortcut_keys};
+pub use menu::{ItemStyle, Menu, MenuAlign, MenuEntry, MenuItem};
 pub use resize_handle::ResizeHandle;
 pub use text::{Tracked, tabular_nums};
+pub use text_input::{TextInput, TextInputEvent};
+pub use toast::Toaster;
+pub use tooltip::Tooltip;

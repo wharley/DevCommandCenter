@@ -25,6 +25,11 @@ fn units(cx: &App) -> ElapsedUnits {
     }
 }
 
+/// "5min" since `at` (no "há"), for the identity card's fallback.
+pub fn elapsed_since(at: &str, now_ms: i64, cx: &App) -> Option<SharedString> {
+    Some(compact_elapsed(now_ms - parse_ms(at)?, &units(cx)).into())
+}
+
 /// "5min" while the turn is open or `bare`, else "há 5min".
 pub fn activity_time(
     activity: &TaskActivity,

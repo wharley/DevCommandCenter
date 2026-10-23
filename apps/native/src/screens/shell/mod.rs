@@ -15,7 +15,7 @@ use gpui::{
 use crate::prefs::{self, Prefs};
 use crate::screens::sidebar::{Sidebar, SidebarEvent};
 use crate::theme::{ActiveTheme, Theme};
-use crate::ui::ResizeHandle;
+use crate::ui::{ResizeHandle, Toaster};
 use layout::ShellLayout;
 use regions::{MainRegion, SidebarRegion};
 
@@ -161,5 +161,6 @@ impl Render for Shell {
                     }),
             )
             .child(MainRegion)
+            .children(Toaster::handle(cx))
     }
 }

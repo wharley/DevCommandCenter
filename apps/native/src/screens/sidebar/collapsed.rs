@@ -4,24 +4,32 @@
 use gpui::{ClickEvent, Context, SharedString, Window, div, prelude::*, px};
 
 use super::footer::{TOOLS, tool_button};
+use super::header::code_column_toggle;
 use super::row::{initials, selected_background};
 use super::{Sidebar, SidebarEvent};
+use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon};
+use crate::ui::tooltip::Side;
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip};
 
+/// A rail button with its label beside it (`TooltipContent side="right"`).
 fn icon_button(
     id: &'static str,
     icon: &'static str,
     stroke: f32,
     event: SidebarEvent,
+    label: &str,
     cx: &mut Context<Sidebar>,
-) -> Button {
-    Button::new(id)
+) -> gpui::AnyElement {
+    let button = Button::new(id)
         .variant(ButtonVariant::Ghost)
         .size(ButtonSize::IconXs)
         .muted()
         .child(Icon::new(icon).stroke(stroke))
-        .on_click(cx.listener(move |_, _, _, cx| cx.emit(event.clone())))
+        .on_click(cx.listener(move |_, _, _, cx| cx.emit(event.clone())));
+    Tooltip::text(SharedString::from(format!("tip-{id}")), button, cx.t(label))
+        .side(Side::Right)
+        .into_any_element()
 }
 
 pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
@@ -45,17 +53,10 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         } else {
             ButtonSize::IconXs
         };
-        tools.push(tool_button(id, icon, event, size, cx));
+        tools.push(tool_button(id, icon, event, size, Side::Right, cx));
     }
-    let code_column = has_selection.then(|| {
-        icon_button(
-            "rail-code-column",
-            "folder-tree",
-            1.8,
-            SidebarEvent::ToggleCodeColumn,
-            cx,
-        )
-    });
+    let code_column =
+        has_selection.then(|| code_column_toggle("rail-code-column", Side::Right, cx));
     let project_buttons = has_tasks.then(|| {
         [
             icon_button(
@@ -63,24 +64,61 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
                 "folder-plus",
                 1.9,
                 SidebarEvent::OpenProject,
+                "sidebar.openProject",
                 cx,
             ),
-            icon_button("rail-repo-picker", "plus", 2.2, SidebarEvent::NewTask, cx),
+            super::repo_picker::render(sidebar, super::repo_picker::Place::Rail, cx),
         ]
+    });
+    // Without tasks the middle offers to open or clone a project.
+    let empty_buttons = (!has_tasks).then(|| {
+        div()
+            .flex()
+            .h_full()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .px(px(4.0))
+            .child(icon_button(
+                "rail-empty-open-project",
+                "folder-plus",
+                1.9,
+                SidebarEvent::OpenProject,
+                "sidebar.openProject",
+                cx,
+            ))
+            .child(icon_button(
+                "rail-empty-clone",
+                "plus",
+                2.1,
+                SidebarEvent::CloneProject,
+                "sidebar.cloneFromUrl",
+                cx,
+            ))
     });
     let expand = icon_button(
         "expand-sidebar",
         "panel-right",
         1.8,
         SidebarEvent::ToggleCollapsed,
+        "sidebar.expandSidebar",
         cx,
     );
-    let new_task = icon_button("rail-new-task", "plus", 1.9, SidebarEvent::NewTask, cx);
+    let new_task = icon_button(
+        "rail-new-task",
+        "plus",
+        1.9,
+        SidebarEvent::NewTask,
+        "sidebar.newWorkspace",
+        cx,
+    );
     let pull_requests = icon_button(
         "rail-pull-requests",
         "git-pull-request",
         1.9,
         SidebarEvent::OpenPullRequests,
+        "sidebar.pullRequests",
         cx,
     );
     let notes = icon_button(
@@ -88,6 +126,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         "sticky-note",
         2.0,
         SidebarEvent::OpenNotes,
+        "notes.headingShort",
         cx,
     );
     div()
@@ -119,7 +158,8 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
                         .items_center()
                         .gap(px(4.0))
                         .children(tiles),
-                ),
+                )
+                .children(empty_buttons),
         )
         .child(
             div()
@@ -146,7 +186,7 @@ fn task_tile(
     let hover_background = colors.accent.opacity(0.6);
     let hover_text = colors.foreground;
     let id = task_id.to_string();
-    div()
+    let tile = div()
         .id(SharedString::from(format!("rail-task-{task_id}")))
         .flex()
         .flex_shrink_0()
@@ -176,6 +216,12 @@ fn task_tile(
             title
         } else {
             name
-        })))
-        .into_any_element()
+        })));
+    Tooltip::text(
+        SharedString::from(format!("tip-rail-task-{task_id}")),
+        tile,
+        title.to_string(),
+    )
+    .side(Side::Right)
+    .into_any_element()
 }

@@ -6,8 +6,38 @@ use std::sync::{Arc, OnceLock};
 use gpui::{Context, Image, ImageFormat, div, img, prelude::*, px};
 
 use super::{Sidebar, SidebarEvent};
+use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tracked};
+use crate::ui::tooltip::Side;
+use crate::ui::{
+    Button, ButtonSize, ButtonVariant, Icon, Tooltip, Tracked, command_key, shortcut_keys,
+};
+
+/// `CodeColumnToggle`: the label with its shortcut (⌘⇧E). The column itself
+/// comes with the code screen, so it always reads "show".
+pub fn code_column_toggle(
+    id: &'static str,
+    side: Side,
+    cx: &mut Context<Sidebar>,
+) -> gpui::AnyElement {
+    let button = Button::new(id)
+        .variant(ButtonVariant::Ghost)
+        .size(ButtonSize::IconXs)
+        .muted()
+        .child(Icon::new("folder-tree").stroke(1.8))
+        .on_click(cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::ToggleCodeColumn)));
+    Tooltip::new(format!("tip-{id}"), button, |_, cx| {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(cx.t("codeColumn.open"))
+            .child(shortcut_keys(&[command_key(), "Shift", "E"], cx))
+            .into_any_element()
+    })
+    .side(side)
+    .into_any_element()
+}
 
 /// The desktop's own `public/dcc-glyph.svg` (gradients, so drawn as an image).
 fn glyph() -> Arc<Image> {
@@ -44,22 +74,18 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
                         .child(Tracked::new("DCC", 11.0, 0.14)),
                 ),
         )
-        .when(has_selection, |bar| {
-            bar.child(
-                Button::new("code-column-toggle")
+        .children(has_selection.then(|| code_column_toggle("code-column-toggle", Side::Bottom, cx)))
+        .child(
+            Tooltip::text(
+                "tip-collapse-sidebar",
+                Button::new("collapse-sidebar")
                     .variant(ButtonVariant::Ghost)
                     .size(ButtonSize::IconXs)
                     .muted()
-                    .child(Icon::new("folder-tree").stroke(1.8))
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::ToggleCodeColumn))),
+                    .child(Icon::new("panel-left").stroke(1.8))
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::ToggleCollapsed))),
+                cx.t("sidebar.collapseSidebar"),
             )
-        })
-        .child(
-            Button::new("collapse-sidebar")
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::IconXs)
-                .muted()
-                .child(Icon::new("panel-left").stroke(1.8))
-                .on_click(cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::ToggleCollapsed))),
+            .side(Side::Bottom),
         )
 }

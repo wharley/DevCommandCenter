@@ -3,13 +3,18 @@
 
 use gpui::{App, ClickEvent, Context, Hsla, SharedString, Window, div, prelude::*, px};
 
+use std::time::Duration;
+
+use super::identity_card::{self, CardInput};
+use super::row_actions::{self, ROW_GROUP};
 use super::row_status::{RowContext, status};
 use super::{Sidebar, meta_chips};
 use crate::data::tasks::path_leaf;
 use crate::project::{ProjectGlyph, ProviderIcon};
 use crate::theme::ActiveTheme;
 use crate::theme::color::mix_oklab;
-use crate::ui::{Icon, tabular_nums};
+use crate::ui::tooltip::{Align, Side, Surface};
+use crate::ui::{Icon, Tooltip, tabular_nums};
 
 /// `.workspace-row-selected` (`--workspace-sidebar-selected-bg`).
 pub fn selected_background(cx: &App) -> Hsla {
@@ -55,6 +60,8 @@ pub fn render(
     let member_count = task.member_workspace_ids.len();
     let pinned = task.pinned_at.is_some();
 
+    let pending = sidebar.pending.contains_key(task_id);
+    let actions = row_actions::render(sidebar, task, cx);
     let theme = cx.theme();
     let colors = &theme.colors;
     let hover = colors.foreground.opacity(0.05);
@@ -74,20 +81,31 @@ pub fn render(
         None => avatar(&title, &task.name, provider.as_deref(), cx).into_any_element(),
     };
 
+    let renaming = sidebar
+        .renaming
+        .as_ref()
+        .filter(|rename| rename.task_id == task_id);
+    let title_element = match renaming {
+        Some(rename) => rename_field(rename, cx),
+        None => div()
+            .min_w_0()
+            .truncate()
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .line_height(px(20.0))
+            .text_color(colors.foreground)
+            .child(title.clone())
+            .into_any_element(),
+    };
+    let inset = row_actions::title_inset(task);
+    let renaming_now = renaming.is_some();
     let title_line = div()
         .flex()
         .min_w_0()
         .items_center()
         .gap(px(6.0))
-        .child(
-            div()
-                .min_w_0()
-                .truncate()
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .line_height(px(20.0))
-                .text_color(colors.foreground)
-                .child(title),
-        )
+        .group_hover(ROW_GROUP, move |style| style.pr(px(inset)))
+        .when(renaming.is_some(), |line| line.pr(px(inset)))
+        .child(title_element)
         .when(member_count > 1, |line| {
             line.child(
                 div()
@@ -153,6 +171,30 @@ pub fn render(
         )
         .children(chips);
 
+    let body = div()
+        .flex_1()
+        .min_w_0()
+        .child(title_line)
+        .child(detail_line);
+    let entity = cx.entity().downgrade();
+    let card_task = task_id.to_string();
+    let identity = Tooltip::new(
+        SharedString::from(format!("identity-{task_id}")),
+        body,
+        move |_, cx| {
+            entity
+                .update(cx, |sidebar, cx| identity_card_for(sidebar, &card_task, cx))
+                .unwrap_or_else(|_| div().into_any_element())
+        },
+    )
+    .side(Side::Right)
+    .align(Align::Start)
+    .offset(10.0)
+    .delay(Duration::from_millis(450))
+    .surface(Surface::Card)
+    .fill()
+    .enabled(!renaming_now);
+
     div()
         .pl(px(12.0))
         .pr(px(4.0))
@@ -172,7 +214,12 @@ pub fn render(
                 })
                 .when(selected, |card| card.bg(active_background))
                 .when(!selected, |card| card.hover(move |style| style.bg(hover)))
-                .when(!selectable && !selected, |card| card.opacity(0.5))
+                .group(ROW_GROUP)
+                // `cn` keeps the last of the two: pending wins.
+                .when(pending, |card| card.opacity(0.6))
+                .when(!pending && !selectable && !selected, |card| {
+                    card.opacity(0.5)
+                })
                 .on_click(
                     cx.listener(move |this, _: &ClickEvent, _: &mut Window, cx| {
                         this.open_task(&id, cx)
@@ -185,15 +232,63 @@ pub fn render(
                         .items_start()
                         .gap(px(8.0))
                         .child(div().mt(px(2.0)).flex_shrink_0().child(glyph))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(title_line)
-                                .child(detail_line),
-                        ),
-                ),
+                        .child(identity),
+                )
+                .child(actions),
         )
+        .into_any_element()
+}
+
+/// The hover card (`WorkspaceIdentityCard`), built when it opens.
+fn identity_card_for(
+    sidebar: &Sidebar,
+    task_id: &str,
+    cx: &mut Context<Sidebar>,
+) -> gpui::AnyElement {
+    let Some(task) = sidebar.state.task(task_id) else {
+        return div().into_any_element();
+    };
+    let git = sidebar.state.row_git(task);
+    identity_card::render(
+        CardInput {
+            task,
+            project: sidebar.project_for(task),
+            activity: sidebar.state.data.activities.get(task_id),
+            current_branch: &git.current_branch,
+            now_ms: sidebar.state.now_ms,
+        },
+        cx,
+    )
+}
+
+/// The inline rename field (`h-6 rounded border-ring/60 ring-2 ring-ring/15`).
+fn rename_field(rename: &super::actions::Rename, cx: &App) -> gpui::AnyElement {
+    let colors = &cx.theme().colors;
+    div()
+        .flex()
+        .flex_1()
+        .min_w_0()
+        .items_center()
+        .h(px(24.0))
+        .px(px(6.0))
+        .rounded(px(4.0))
+        .border_1()
+        .border_color(colors.ring.opacity(0.6))
+        .bg(colors.background)
+        .shadow(vec![gpui::BoxShadow {
+            color: colors.ring.opacity(0.15),
+            offset: gpui::point(px(0.0), px(0.0)),
+            blur_radius: px(0.0),
+            spread_radius: px(2.0),
+            inset: false,
+        }])
+        .text_size(px(12.0))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(colors.foreground)
+        .when(rename.busy, |field| field.opacity(0.6))
+        // Typing and clicking in the field never open the task.
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(rename.input.clone())
         .into_any_element()
 }
 

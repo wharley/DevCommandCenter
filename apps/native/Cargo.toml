@@ -26,6 +26,7 @@ chrono = "0.4"
 futures = "0.3"
 base64 = "0.22"
 smallvec = "1"
+unicode-segmentation = "1"
 dcc-core = { path = "../../crates/dcc-core" }
 dcc-infra = { path = "../../crates/dcc-infra" }
 

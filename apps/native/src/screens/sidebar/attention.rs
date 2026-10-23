@@ -11,7 +11,9 @@ use crate::i18n::{Args, Translate};
 use crate::project::ProjectGlyph;
 use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
-use crate::ui::{Tracked, tabular_nums};
+use crate::ui::tooltip::Side;
+use crate::ui::{Tooltip, Tracked, tabular_nums};
+use std::time::Duration;
 
 pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> Option<AnyElement> {
     let (visible, hidden) = sidebar.state.shown_attention();
@@ -147,7 +149,16 @@ fn attention_row(
     let hover = colors.accent.opacity(0.6);
     let hover_text = colors.foreground;
     let selected_background = super::row::selected_background(cx);
-    div()
+    // `{{title}} · {{project}} — {{reason}}`, after the desktop's 450ms.
+    let tip = cx.t_with(
+        "sidebar.attention.tooltip",
+        &Args::default()
+            .with("title", title.as_str())
+            .with("project", label.as_str())
+            .with("reason", reason.as_ref()),
+    );
+    let tip_id = gpui::SharedString::from(format!("tip-attention-{task_id}"));
+    let row = div()
         .id(gpui::SharedString::from(format!("attention-{task_id}")))
         .flex()
         .items_center()
@@ -240,7 +251,10 @@ fn attention_row(
                     .text_color(colors.muted_foreground)
                     .child(time),
             )
-        })
+        });
+    Tooltip::text(tip_id, row, tip)
+        .side(Side::Right)
+        .delay(Duration::from_millis(450))
 }
 
 fn more_button(label: gpui::SharedString, show_all: bool, cx: &mut Context<Sidebar>) -> AnyElement {

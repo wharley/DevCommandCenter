@@ -99,3 +99,79 @@ fn reads_git_and_pull_requests_for_open_tasks() {
     }
     println!("blockers: {:?}", state.blockers);
 }
+
+/// Every row action against a copy: each write shows up when the sidebar
+/// reads again, and the task ends as it started.
+#[test]
+#[ignore]
+fn row_actions_write_through_the_shared_backend() {
+    use dcc_native::data::actions::{self, TaskAction};
+    use dcc_native::data::tasks::TaskStatus;
+
+    let path = loader::database_path();
+    let read = |id: &str| {
+        loader::load(&path, "Nova tarefa")
+            .expect("load")
+            .tasks
+            .into_iter()
+            .find(|task| task.id == id)
+            .expect("task")
+    };
+    let data = loader::load(&path, "Nova tarefa").expect("load");
+    let task = data
+        .tasks
+        .iter()
+        .find(|task| {
+            task.status == TaskStatus::Ready && task.bundle_id.is_none() && task.pinned_at.is_none()
+        })
+        .expect("a ready single-project task")
+        .clone();
+    let id = task.id.as_str();
+    let run = |action: TaskAction| actions::run(&path, id, None, &action).expect("action");
+    println!("task {id} «{}»", task.display_title());
+
+    run(TaskAction::SetPinned(true));
+    assert!(read(id).pinned_at.is_some());
+    run(TaskAction::SetPinned(false));
+    assert!(read(id).pinned_at.is_none());
+
+    let until = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    run(TaskAction::Snooze(Some(until)));
+    assert!(read(id).snoozed_until.is_some());
+    run(TaskAction::Snooze(None));
+    assert!(read(id).snoozed_until.is_none());
+
+    run(TaskAction::Rename("  Renomeada   pelo nativo ".into()));
+    assert_eq!(read(id).name, "Renomeada pelo nativo");
+    let empty = actions::run(&path, id, None, &TaskAction::Rename("   ".into()));
+    assert!(empty.is_err());
+    run(TaskAction::Rename(task.name.clone()));
+
+    run(TaskAction::Archive);
+    assert_eq!(read(id).status, TaskStatus::Archived);
+    run(TaskAction::Restore);
+    assert_eq!(read(id).status, TaskStatus::Ready);
+    run(TaskAction::Complete);
+    assert_eq!(read(id).status, TaskStatus::Completed);
+    run(TaskAction::Restore);
+    let after = read(id);
+    assert_eq!(after.status, TaskStatus::Ready);
+    assert_eq!(after.name, task.name);
+
+    if let Some(bundle) = data
+        .tasks
+        .iter()
+        .find(|task| task.bundle_id.is_some() && task.status == TaskStatus::Ready)
+    {
+        let bundle_id = bundle.bundle_id.as_deref();
+        actions::run(&path, &bundle.id, bundle_id, &TaskAction::Archive).expect("archive bundle");
+        assert_eq!(read(&bundle.id).status, TaskStatus::Archived);
+        actions::run(&path, &bundle.id, bundle_id, &TaskAction::Restore).expect("restore bundle");
+        assert_eq!(read(&bundle.id).status, TaskStatus::Ready);
+        println!(
+            "bundle {} «{}» archived and restored",
+            bundle.id,
+            bundle.display_title()
+        );
+    }
+}

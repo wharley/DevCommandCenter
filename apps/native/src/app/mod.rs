@@ -22,6 +22,8 @@ pub fn run() {
             Theme::init(prefs.theme, cx);
             I18n::init(prefs.locale, cx);
             menus::install(cx);
+            crate::ui::text_input::bind_keys(cx);
+            crate::ui::Toaster::init(cx);
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
                     cx.quit();

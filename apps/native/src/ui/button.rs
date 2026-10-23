@@ -1,7 +1,7 @@
 //! shadcn's `Button` (`components/ui/button.tsx`): the variants and sizes the
 //! app uses. Content goes in as children, like the React component.
 
-use gpui::{AnyElement, App, ClickEvent, ElementId, Window, div, prelude::*, px};
+use gpui::{AnyElement, App, ClickEvent, ElementId, Hsla, Window, div, prelude::*, px};
 use smallvec::SmallVec;
 
 use crate::theme::{ActiveTheme, Appearance};
@@ -11,6 +11,7 @@ pub enum Variant {
     Default,
     Ghost,
     Outline,
+    Destructive,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +22,8 @@ pub enum Size {
     Icon,
     /// `size-6`
     IconXs,
+    /// `size-7`
+    IconSm,
 }
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -35,6 +38,9 @@ pub struct Button {
     muted: bool,
     /// `aria-current="page"`: `bg-accent text-foreground`.
     current: bool,
+    /// A text color of its own, at rest and on hover (`text-muted-foreground/60 hover:text-emerald-600`).
+    text: Option<Hsla>,
+    hover_text: Option<Hsla>,
     children: SmallVec<[AnyElement; 2]>,
     on_click: Option<ClickHandler>,
 }
@@ -48,6 +54,8 @@ impl Button {
             disabled: false,
             muted: false,
             current: false,
+            text: None,
+            hover_text: None,
             children: SmallVec::new(),
             on_click: None,
         }
@@ -70,6 +78,16 @@ impl Button {
 
     pub fn muted(mut self) -> Self {
         self.muted = true;
+        self
+    }
+
+    pub fn text_color(mut self, color: Hsla) -> Self {
+        self.text = Some(color);
+        self
+    }
+
+    pub fn hover_text_color(mut self, color: Hsla) -> Self {
+        self.hover_text = Some(color);
         self
     }
 
@@ -115,6 +133,12 @@ impl RenderOnce for Button {
                     colors.muted
                 }),
             ),
+            Variant::Destructive => (
+                Some(colors.destructive.opacity(if dark { 0.2 } else { 0.1 })),
+                colors.destructive,
+                None,
+                Some(colors.destructive.opacity(if dark { 0.3 } else { 0.2 })),
+            ),
             Variant::Outline => (
                 Some(if dark {
                     colors.input.opacity(0.3)
@@ -130,16 +154,17 @@ impl RenderOnce for Button {
                 }),
             ),
         };
-        let foreground = if self.muted {
-            colors.muted_foreground
-        } else {
-            foreground
+        let foreground = match self.text {
+            Some(color) => color,
+            None if self.muted => colors.muted_foreground,
+            None => foreground,
         };
-        let hover_foreground = colors.foreground;
+        let hover_foreground = self.hover_text.unwrap_or(colors.foreground);
         let (width, height, padding) = match self.size {
             Size::Sm => (None, 28.0, 10.0),
             Size::Icon => (Some(32.0), 32.0, 0.0),
             Size::IconXs => (Some(24.0), 24.0, 0.0),
+            Size::IconSm => (Some(28.0), 28.0, 0.0),
         };
         let on_click = self.on_click;
         let disabled = self.disabled;

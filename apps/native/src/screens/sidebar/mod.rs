@@ -2,16 +2,20 @@
 //! owns the state, the live loading and the events; each region of the
 //! sidebar renders from its own file.
 
+mod actions;
 mod attention;
 mod collapsed;
 mod empty;
 mod footer;
 mod header;
+mod identity_card;
 mod labels;
 mod list;
 mod meta_chips;
 mod navigation;
+mod repo_picker;
 mod row;
+mod row_actions;
 mod row_status;
 mod sections;
 pub mod state;
@@ -49,6 +53,13 @@ const GIT_WAKE: Duration = Duration::from_secs(5);
 pub enum SidebarEvent {
     OpenTask(String),
     NewTask,
+    /// A project picked in the + menu (`onCreateWorkspaceFromProject`).
+    NewTaskInProject {
+        project_id: String,
+        root_path: String,
+        base_branch: String,
+        label: String,
+    },
     OpenPullRequests,
     OpenNotes,
     OpenUsage,
@@ -74,6 +85,12 @@ pub struct Sidebar {
     current_page: Option<NavPage>,
     /// Tasks whose latest result has not been opened ("New result").
     unseen_results: HashSet<String>,
+    /// Rows whose restore, complete or hold is in flight.
+    pending: HashMap<String, actions::PendingAction>,
+    /// The row whose ⋯ menu is open keeps its actions shown.
+    row_menu_open: Option<String>,
+    renaming: Option<actions::Rename>,
+    repo_picker: Option<repo_picker::RepoPicker>,
     _refresh: Task<()>,
     _clock: Task<()>,
     _git: Task<()>,
@@ -108,6 +125,10 @@ impl Sidebar {
             mascot_frame: false,
             current_page: None,
             unseen_results: HashSet::new(),
+            pending: HashMap::new(),
+            row_menu_open: None,
+            renaming: None,
+            repo_picker: None,
             _refresh: Self::refresh_loop(cx),
             _clock: Self::clock_loop(cx),
             _git: Self::git_loop(cx),
@@ -281,6 +302,7 @@ impl Sidebar {
         if !task.status.is_selectable() {
             return;
         }
+        self.wake_quietly(task_id, cx);
         self.state.select(task_id);
         self.sync_items();
         cx.emit(SidebarEvent::OpenTask(task_id.to_string()));

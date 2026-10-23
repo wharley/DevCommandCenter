@@ -10,7 +10,45 @@ use super::{Sidebar, SidebarEvent};
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, tabular_nums};
+use crate::ui::{
+    Button, ButtonSize, ButtonVariant, Icon, ItemStyle, Menu, MenuAlign, MenuItem, tabular_nums,
+};
+
+/// The folder-plus menu: open a local project or clone one.
+fn open_project_menu(cx: &mut Context<Sidebar>) -> Menu {
+    let entity = cx.entity().downgrade();
+    Menu::dropdown(
+        "open-project-menu",
+        |_| {
+            Button::new("open-project-menu-trigger")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::IconXs)
+                .muted()
+                .child(Icon::new("folder-plus").stroke(1.9))
+                .into_any_element()
+        },
+        move |_, cx| {
+            let (open, clone) = (entity.clone(), entity.clone());
+            vec![
+                MenuItem::new(cx.t("sidebar.openProject"), move |_, cx| {
+                    let _ = open.update(cx, |_, cx| cx.emit(SidebarEvent::OpenProject));
+                })
+                .into(),
+                MenuItem::new(cx.t("sidebar.cloneFromUrl"), move |_, cx| {
+                    let _ = clone.update(cx, |_, cx| cx.emit(SidebarEvent::CloneProject));
+                })
+                .into(),
+            ]
+        },
+    )
+    .align(MenuAlign::End)
+    .side_offset(6.0)
+    .min_width(176.0)
+    .item_style(ItemStyle {
+        text_size: 13.0,
+        gap: 8.0,
+    })
+}
 
 pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
     let running = sidebar.state.running_ids().len();
@@ -86,21 +124,11 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
                 .flex()
                 .items_center()
                 .gap(px(4.0))
-                .child(
-                    Button::new("open-project-menu")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconXs)
-                        .muted()
-                        .child(Icon::new("folder-plus").stroke(1.9))
-                        .on_click(cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::OpenProject))),
-                )
-                .child(
-                    Button::new("open-repo-picker")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconXs)
-                        .muted()
-                        .child(Icon::new("plus").stroke(2.2))
-                        .on_click(cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::NewTask))),
-                ),
+                .child(open_project_menu(cx))
+                .child(super::repo_picker::render(
+                    sidebar,
+                    super::repo_picker::Place::Header,
+                    cx,
+                )),
         )
 }

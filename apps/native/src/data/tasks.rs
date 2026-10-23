@@ -172,6 +172,10 @@ pub struct Project {
     pub icon: Option<String>,
     pub color: Option<String>,
     pub pinned_at: Option<String>,
+    /// For starting a task from the picker (`repository.projectId`, `name`, `baseBranch`).
+    pub project_id: String,
+    pub name: String,
+    pub base_branch: String,
 }
 
 impl Project {
@@ -187,6 +191,9 @@ impl Project {
             .map(str::to_string),
             color: repository.color.clone(),
             pinned_at: repository.pinned_at.clone(),
+            project_id: repository.project_id.0.clone(),
+            name: repository.name.clone(),
+            base_branch: repository.base_branch.clone(),
         }
     }
 }

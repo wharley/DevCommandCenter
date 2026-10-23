@@ -7,13 +7,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ICONS = [
-	"alarm-clock", "alarm-clock-off", "orbit", "bot", "brush-cleaning", "chart-column",
+	"alarm-clock", "alarm-clock-off", "orbit", "x", "check", "bot", "brush-cleaning", "chart-column",
 	"chevron-right", "circle-check", "circle-check-big", "circle-pause",
 	"circle-question-mark", "clock-3", "code-xml", "cpu", "database", "earth",
 	"ellipsis", "folder", "folder-open", "folder-plus", "folder-tree",
 	"git-branch", "git-pull-request", "layers", "loader-circle",
 	"message-square-more", "package", "panel-left", "panel-right", "pencil",
-	"pin", "pin-off", "plus", "rocket", "rotate-ccw", "settings-2",
+	"pin", "pin-off", "plus", "rocket", "rotate-ccw", "search", "settings-2",
 	"shield-check", "sparkles", "square-terminal", "sticky-note", "trash-2",
 	"wrench",
 ];
@@ -81,4 +81,14 @@ writeFileSync(
 	`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${gemini.viewBox}" fill="none"><defs><linearGradient id="g" x1="32" y1="32" x2="264" y2="266" gradientUnits="userSpaceOnUse">${stops}</linearGradient></defs>${gemini.paths.map((d) => `<path fill="url(#g)" d="${d}"/>`).join("")}</svg>\n`,
 );
 console.log("wrote provider marks");
+
+// The error mark sonner draws in its toasts (filled, so no stroke).
+const sonnerSource = readFileSync(join(here, "../../../node_modules/sonner/dist/index.mjs"), "utf8");
+const sonnerIcon = (name) => {
+	const chunk = sonnerSource.slice(sonnerSource.indexOf(`const ${name} =`));
+	const viewBox = chunk.match(/viewBox: "([^"]+)"/)[1];
+	const d = chunk.match(/d: "([^"]+)"/)[1];
+	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" fill="#000"><path fill-rule="evenodd" clip-rule="evenodd" d="${d}"/></svg>\n`;
+};
+writeFileSync(join(out, "sonner-error.svg"), sonnerIcon("ErrorIcon"));
 console.log(`wrote ${ICONS.length} icons`);
