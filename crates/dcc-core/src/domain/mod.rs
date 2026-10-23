@@ -18,6 +18,7 @@ pub mod provider;
 pub mod repository;
 pub mod session;
 pub mod thread;
+pub mod timeline;
 pub mod usage;
 pub mod usage_limit;
 pub mod workspace;
