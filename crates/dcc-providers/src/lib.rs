@@ -322,15 +322,7 @@ fn project_catalog_capabilities(registration: &ProviderRegistration) -> Capabili
 
 pub async fn provider_catalog() -> ProviderCatalog {
     let health = provider_health_statuses().await;
-    let mut providers = Vec::with_capacity(PROVIDER_IDS.len());
-    providers.push(claude_code::descriptor(health[0].clone()));
-    providers.push(codex::descriptor(health[1].clone()));
     let cursor_models = cursor::discover_models().await;
-    providers.push(cursor::descriptor(health[2].clone(), cursor_models));
-    providers.push(grok_acp::descriptor(
-        health[3].clone(),
-        grok_acp::stable_grok_capabilities(),
-    ));
     let antigravity_models = match provider_runtime("antigravity") {
         Some(runtime) => runtime
             .discover_models()
@@ -340,6 +332,30 @@ pub async fn provider_catalog() -> ProviderCatalog {
             .unwrap_or_default(),
         None => Vec::new(),
     };
+    assemble_catalog(&health, cursor_models, antigravity_models)
+}
+
+/// The catalog without probing anything: every provider reported healthy and
+/// the discovery-backed ones with their built-in models. For a client that
+/// shows the choices before (or without) the desktop's live catalog.
+pub fn offline_catalog() -> ProviderCatalog {
+    let health: Vec<HealthStatus> = PROVIDER_IDS.iter().map(|_| HealthStatus::Healthy).collect();
+    assemble_catalog(&health, Vec::new(), Vec::new())
+}
+
+fn assemble_catalog(
+    health: &[HealthStatus],
+    cursor_models: Vec<dcc_core::domain::provider::ProviderModelDescriptor>,
+    antigravity_models: Vec<dcc_core::domain::provider::ProviderModelDescriptor>,
+) -> ProviderCatalog {
+    let mut providers = Vec::with_capacity(PROVIDER_IDS.len());
+    providers.push(claude_code::descriptor(health[0].clone()));
+    providers.push(codex::descriptor(health[1].clone()));
+    providers.push(cursor::descriptor(health[2].clone(), cursor_models));
+    providers.push(grok_acp::descriptor(
+        health[3].clone(),
+        grok_acp::stable_grok_capabilities(),
+    ));
     providers.push(antigravity_acp::descriptor(
         health[4].clone(),
         antigravity_models,
@@ -815,5 +831,28 @@ mod tests {
             }
         );
         assert!(capabilities.mcp_support.verified_evidence().is_none());
+    }
+}
+
+#[cfg(test)]
+mod offline_catalog_tests {
+    use super::*;
+
+    #[test]
+    fn the_offline_catalog_lists_every_provider_with_its_models() {
+        let catalog = offline_catalog();
+        let ids: Vec<&str> = catalog
+            .providers
+            .iter()
+            .map(|provider| provider.id.0.as_str())
+            .collect();
+        assert_eq!(ids, PROVIDER_IDS.to_vec());
+        let claude = &catalog.providers[0];
+        assert!(!claude.models.is_empty());
+        assert!(!claude.capabilities.approval_policies.is_empty());
+        assert!(catalog
+            .providers
+            .iter()
+            .all(|provider| matches!(provider.health, HealthStatus::Healthy)));
     }
 }
