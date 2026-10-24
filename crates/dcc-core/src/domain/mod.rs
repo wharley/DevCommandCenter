@@ -4,6 +4,7 @@ pub mod commit_mode;
 pub mod computer_use_conformance;
 pub mod decision;
 pub mod delegation;
+pub mod delivery_failure_prompt;
 pub mod delegation_apply;
 pub mod delegation_worktree;
 pub mod forge;

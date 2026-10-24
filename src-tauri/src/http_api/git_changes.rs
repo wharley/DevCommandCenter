@@ -6,7 +6,7 @@ use super::*;
 use dcc_tauri::commands::workspace_commands::{self, WorkspaceGitPathInput};
 
 /// The folder must be where a task runs (its worktree or its repository).
-async fn task_checkout(backend: &HttpBackend, root: &str) -> Result<(), HttpApiError> {
+pub(super) async fn task_checkout(backend: &HttpBackend, root: &str) -> Result<(), HttpApiError> {
     let repo = dcc_infra::db::SqliteWorkspaceRepo::open(&backend.workspace.db_path)
         .map_err(|error| HttpApiError::internal(error.to_string()))?;
     dcc_infra::workspace_git::find_workspace_by_root(&repo, root)

@@ -788,9 +788,17 @@ pub async fn workspace_forge_cli_accounts(
     state: State<'_, WorkspaceCommandState>,
     input: ForgeCliAccountsInput,
 ) -> Result<ForgeCliAccountsOutput, String> {
+    workspace_forge_cli_accounts_with_state(&state, input).await
+}
+
+/// `workspace_forge_cli_accounts` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_forge_cli_accounts_with_state(
+    state: &WorkspaceCommandState,
+    input: ForgeCliAccountsInput,
+) -> Result<ForgeCliAccountsOutput, String> {
     let host = forge_context::normalize_forge_host(input.provider, input.host)?;
     let snapshot = resolve_forge_cli_snapshot(
-        &state,
+        state,
         input.provider,
         &host,
         input.force_refresh.unwrap_or(false),
@@ -898,7 +906,15 @@ pub async fn workspace_forge_context(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceForgeContextInput,
 ) -> Result<WorkspaceForgeContextOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_forge_context_with_state(&state, input).await
+}
+
+/// `workspace_forge_context` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_forge_context_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceForgeContextInput,
+) -> Result<WorkspaceForgeContextOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
 
     let root = input.workspace_root.trim();
     if root.is_empty() {
@@ -992,7 +1008,7 @@ pub async fn workspace_change_request_merge_with_state(
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
     }
-    let source = imported_workspace_source(&state, root).await?;
+    let source = imported_workspace_source(state, root).await?;
     let branch = match source.as_ref() {
         Some(source) => source.head_branch.clone(),
         None => resolve_current_branch_name(root)?,
@@ -2722,7 +2738,7 @@ pub async fn workspace_pr_status_with_state(
     state: &WorkspaceCommandState,
     input: WorkspacePrStatusInput,
 ) -> Result<WorkspacePrStatusOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    preflight_workspace_root(state, &input.workspace_root).await?;
     dcc_infra::workspace_git::workspace_pr_status(
         &state.db_path,
         &input.workspace_root,
@@ -2736,7 +2752,15 @@ pub async fn workspace_review_state(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceReviewStateInput,
 ) -> Result<WorkspaceReviewStateOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_review_state_with_state(&state, input).await
+}
+
+/// `workspace_review_state` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_review_state_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceReviewStateInput,
+) -> Result<WorkspaceReviewStateOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Ok(empty_workspace_review_state(None, None));
@@ -2750,7 +2774,7 @@ pub async fn workspace_review_state(
         return Ok(empty_workspace_review_state(None, None));
     };
     let provider_key = forge_context::forge_provider_key(forge_context.provider).to_string();
-    let source = imported_workspace_source(&state, root).await?;
+    let source = imported_workspace_source(state, root).await?;
     let branch = input
         .branch
         .as_deref()
@@ -2855,7 +2879,15 @@ pub async fn workspace_reviewer_candidates(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceReviewerCandidatesInput,
 ) -> Result<WorkspaceReviewerCandidatesOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_reviewer_candidates_with_state(&state, input).await
+}
+
+/// `workspace_reviewer_candidates` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_reviewer_candidates_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceReviewerCandidatesInput,
+) -> Result<WorkspaceReviewerCandidatesOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     let context = forge_context::resolve_workspace_forge_context(
         &state.db_path,
@@ -2920,7 +2952,15 @@ pub async fn workspace_request_reviewers(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceRequestReviewersInput,
 ) -> Result<WorkspaceRequestReviewersOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_request_reviewers_with_state(&state, input).await
+}
+
+/// `workspace_request_reviewers` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_request_reviewers_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceRequestReviewersInput,
+) -> Result<WorkspaceRequestReviewersOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     let add = normalize_reviewer_logins(&input.add)?;
     let remove = normalize_reviewer_logins(&input.remove)?;

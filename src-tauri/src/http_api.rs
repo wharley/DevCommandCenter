@@ -58,6 +58,7 @@ use uuid::Uuid;
 
 mod attention;
 mod delivery;
+mod forge;
 mod git_changes;
 mod mobile;
 
@@ -673,6 +674,16 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/git/unstage-file", post(git_changes::unstage_file))
         .route("/api/v1/git/discard-file", post(git_changes::discard_file))
         .route("/api/v1/git/stage-all", post(git_changes::stage_all))
+        .route("/api/v1/git/delivery-failure", post(forge::delivery_failure))
+        .route("/api/v1/git/delivery-recovery", post(forge::delivery_recovery))
+        .route("/api/v1/forge/context", post(forge::context))
+        .route("/api/v1/forge/accounts", post(forge::accounts))
+        .route("/api/v1/forge/review-state", post(forge::review_state))
+        .route(
+            "/api/v1/forge/reviewer-candidates",
+            post(forge::reviewer_candidates),
+        )
+        .route("/api/v1/forge/request-reviewers", post(forge::request_reviewers))
         .route(
             "/api/v1/sessions/:session_id/task-title",
             post(apply_task_title_handler),
@@ -1456,6 +1467,13 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/git/unstage-file",
             "POST /api/v1/git/discard-file",
             "POST /api/v1/git/stage-all",
+            "POST /api/v1/git/delivery-failure",
+            "POST /api/v1/git/delivery-recovery",
+            "POST /api/v1/forge/context",
+            "POST /api/v1/forge/accounts",
+            "POST /api/v1/forge/review-state",
+            "POST /api/v1/forge/reviewer-candidates",
+            "POST /api/v1/forge/request-reviewers",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
             "POST /api/v1/sessions/:session_id/queue",
@@ -4967,6 +4985,62 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         let (status, _) = post_json(&fixture.app, "/api/v1/git/discard-file", file("../x")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_review_reads_its_forge_and_delivery_failure_for_a_task_only() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        let fixture = embedded_fixture().await;
+        let base = tempfile::tempdir().expect("git dir");
+        let repo = std::fs::canonicalize(base.path()).unwrap().to_path_buf();
+        git(&repo, &["init", "-b", "main"]);
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        dcc_core::ports::WorkspaceRepo::save_workspace(
+            &workspaces,
+            &Workspace {
+                id: WorkspaceId("w-forge".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: None,
+                root_path: repo.to_string_lossy().to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-24T00:00:00Z".to_string(),
+                updated_at: "2026-10-24T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let root = repo.to_string_lossy().to_string();
+        // No remote: no forge, and no failure captured.
+        let (status, context) =
+            post_json(&fixture.app, "/api/v1/forge/context", json!({ "workspaceRoot": root })).await;
+        assert_eq!(status, StatusCode::OK, "{context}");
+        assert_eq!(context["provider"], Value::Null);
+        let (status, failure) = post_json(
+            &fixture.app,
+            "/api/v1/git/delivery-failure",
+            json!({ "workspaceRoot": root }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{failure}");
+        assert_eq!(failure["snapshot"], Value::Null);
+        // A folder that is no task's checkout is refused.
+        let other = tempfile::tempdir().unwrap();
+        for uri in [
+            "/api/v1/forge/context",
+            "/api/v1/forge/review-state",
+            "/api/v1/git/delivery-failure",
+        ] {
+            let (status, _) =
+                post_json(&fixture.app, uri, json!({ "workspaceRoot": other.path() })).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
