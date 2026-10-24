@@ -3,6 +3,7 @@
 pub mod code_column;
 pub mod composer;
 pub mod conversation;
+pub mod diff_view;
 pub mod new_task;
 pub mod open_project;
 pub mod shell;

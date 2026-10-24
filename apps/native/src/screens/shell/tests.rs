@@ -4,6 +4,7 @@ use gpui::{Modifiers, MouseButton, TestAppContext, WindowAppearance, point, px};
 
 use super::Shell;
 use crate::prefs::Prefs;
+use crate::screens::code_column::CodeColumnTab;
 use crate::theme::{Theme, ThemePreference};
 
 fn open_shell(
@@ -166,7 +167,7 @@ fn the_sidebar_opens_clone_and_open_branch(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn cmd_shift_e_opens_and_closes_the_code_column(cx: &mut TestAppContext) {
+fn cmd_shift_e_and_g_open_and_close_the_code_column(cx: &mut TestAppContext) {
     let (shell, cx, dir) = open_shell(cx, Prefs::default());
     cx.update(|_, cx| crate::screens::shell::bind_keys(cx));
     // Keys reach the views painted in the last frame.
@@ -179,6 +180,15 @@ fn cmd_shift_e_opens_and_closes_the_code_column(cx: &mut TestAppContext) {
         "saved with the layout"
     );
     cx.simulate_keystrokes("cmd-shift-e");
+    shell.read_with(cx, |shell, _| assert!(!shell.prefs.code_column_open));
+    // ⌘⇧G opens it on "Mudanças"; again on the same list closes it.
+    cx.simulate_keystrokes("cmd-shift-g");
+    shell.read_with(cx, |shell, cx| {
+        assert!(shell.prefs.code_column_open);
+        assert_eq!(shell.prefs.code_column_tab, CodeColumnTab::Changes);
+        assert_eq!(shell.code_column.read(cx).tab, CodeColumnTab::Changes);
+    });
+    cx.simulate_keystrokes("cmd-shift-g");
     shell.read_with(cx, |shell, _| assert!(!shell.prefs.code_column_open));
     // The sidebar's button toggles it too.
     let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());

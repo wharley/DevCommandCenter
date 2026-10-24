@@ -3,7 +3,7 @@
 
 use gpui::{Context, FontWeight, Render, SharedString, Window, div, prelude::*, px};
 
-use super::{CodeColumn, CodeColumnEvent, CodeColumnTab, tree};
+use super::{CodeColumn, CodeColumnEvent, CodeColumnTab, changes_view, tree};
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
@@ -61,8 +61,9 @@ fn tab(
 }
 
 impl Render for CodeColumn {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
+        let changes = self.change_count();
         let close_label = cx.t("codeColumn.close");
         let header = div()
             .flex()
@@ -88,8 +89,15 @@ impl Render for CodeColumn {
                         cx.t("codeColumn.files"),
                         0,
                         cx,
+                    ))
+                    .child(tab(
+                        self,
+                        "code-column-changes",
+                        CodeColumnTab::Changes,
+                        cx.t("codeColumn.changes"),
+                        changes,
+                        cx,
                     )),
-                // "Mudanças" (with the change count) arrives in screen 5b.
             )
             .child(
                 Tooltip::new(
@@ -112,7 +120,10 @@ impl Render for CodeColumn {
                 )
                 .side(crate::ui::tooltip::Side::Bottom),
             );
-        let body = tree::files_tree(self, cx);
+        let body = match self.tab {
+            CodeColumnTab::Files => tree::files_tree(self, cx).into_any_element(),
+            CodeColumnTab::Changes => changes_view::changes(self, window, cx),
+        };
         div()
             .id("code-column")
             .debug_selector(|| "code-column".into())

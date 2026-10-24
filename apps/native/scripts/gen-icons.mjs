@@ -17,7 +17,7 @@ const ICONS = [
 	"shield-check", "sparkles", "square-terminal", "sticky-note", "trash-2",
 	"wrench", "terminal", "file-pen-line", "file-text", "globe", "list-todo", "plug", "brain",
 	"circle-alert", "circle-dashed", "circle", "corner-down-right", "hourglass", "copy", "file-code-corner",
-	"triangle-alert", "file", "file-image", "file-headphone", "ban", "shield-alert", "arrow-up", "square", "image", "braces", "paperclip", "shield", "shield-check", "clipboard-list", "zap", "star", "play", "target", "folder-git-2", "pause", "list-plus", "corner-up-right", "arrow-down", "arrow-up-right", "boxes", "git-fork", "box", "link-2", "at-sign", "panel-left-close",
+	"triangle-alert", "file", "file-image", "file-headphone", "ban", "shield-alert", "arrow-up", "square", "image", "braces", "paperclip", "shield", "shield-check", "clipboard-list", "zap", "star", "play", "target", "folder-git-2", "pause", "list-plus", "corner-up-right", "arrow-down", "arrow-up-right", "boxes", "git-fork", "box", "link-2", "at-sign", "panel-left-close", "git-compare-arrows", "chevrons-down-up", "chevrons-up-down", "laptop",
 ];
 
 /** Icons the app also draws filled. */
@@ -104,3 +104,11 @@ writeFileSync(join(out, "sonner-success.svg"), sonnerIcon("SuccessIcon"));
 writeFileSync(join(out, "sonner-info.svg"), sonnerIcon("InfoIcon"));
 writeFileSync(join(out, "sonner-warning.svg"), sonnerIcon("WarningIcon"));
 console.log(`wrote ${ICONS.length} icons`);
+
+// The diff's own expand marks (@pierre/diffs' sprite), filled.
+const sprite = readFileSync(join(here, "../../../node_modules/@pierre/diffs/dist/sprite.js"), "utf8");
+for (const [symbol, file] of [["diffs-icon-expand", "diffs-expand"], ["diffs-icon-expand-all", "diffs-expand-all"]]) {
+	const start = sprite.indexOf(`<symbol id="${symbol}"`);
+	const body = sprite.slice(sprite.indexOf(">", start) + 1, sprite.indexOf("</symbol>", start)).trim();
+	writeFileSync(join(out, `${file}.svg`), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="#000">${body}</svg>`);
+}

@@ -6,8 +6,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const FAMILIES = [
-	"slate", "neutral", "red", "orange", "amber", "lime", "green", "emerald",
-	"cyan", "sky", "indigo", "violet", "fuchsia", "pink", "rose",
+	"slate", "neutral", "red", "orange", "amber", "yellow", "lime", "green", "emerald",
+	"cyan", "sky", "blue", "indigo", "violet", "fuchsia", "pink", "rose",
 ];
 const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(here, "../../../node_modules/tailwindcss/theme.css"), "utf8");

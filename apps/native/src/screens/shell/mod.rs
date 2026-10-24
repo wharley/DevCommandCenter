@@ -43,7 +43,10 @@ gpui::actions!(
 
 /// The shell's own shortcuts (`isCodeColumnShortcut`, `isInspectorGitModeShortcut`).
 pub fn bind_keys(cx: &mut gpui::App) {
-    cx.bind_keys([gpui::KeyBinding::new("cmd-shift-e", ToggleCodeFiles, None)]);
+    cx.bind_keys([
+        gpui::KeyBinding::new("cmd-shift-e", ToggleCodeFiles, None),
+        gpui::KeyBinding::new("cmd-shift-g", ToggleCodeChanges, None),
+    ]);
 }
 
 /// Drag payload of the sidebar separator.

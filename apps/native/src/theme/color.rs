@@ -94,6 +94,89 @@ fn rgba_to_oklab(color: Rgba) -> Oklab {
     }
 }
 
+/// CSS `color-mix(in lab, a weight_a%, b)`: CIE Lab under D50, as CSS
+/// Color 4 defines `lab` (the desktop's diff colors mix this way).
+pub fn mix_lab(a: Hsla, weight_a: f32, b: Hsla) -> Hsla {
+    let (a, b) = (a.to_rgb(), b.to_rgb());
+    let t = weight_a.clamp(0.0, 1.0);
+    let la = rgba_to_lab(a);
+    let lb = rgba_to_lab(b);
+    let mixed = [
+        la[0] * t + lb[0] * (1.0 - t),
+        la[1] * t + lb[1] * (1.0 - t),
+        la[2] * t + lb[2] * (1.0 - t),
+    ];
+    let mut rgba = lab_to_rgba(mixed);
+    rgba.a = a.a * t + b.a * (1.0 - t);
+    rgba.into()
+}
+
+/// D50 white (CSS Color 4).
+const D50: [f32; 3] = [0.964_22, 1.0, 0.825_21];
+
+fn rgba_to_lab(color: Rgba) -> [f32; 3] {
+    let (r, g, b) = (
+        srgb_to_linear(color.r),
+        srgb_to_linear(color.g),
+        srgb_to_linear(color.b),
+    );
+    // linear sRGB → XYZ (D65) → XYZ (D50, Bradford), the CSS Color 4 matrices.
+    let x65 = 0.412_390_8 * r + 0.357_584_33 * g + 0.180_480_8 * b;
+    let y65 = 0.212_639 * r + 0.715_168_7 * g + 0.072_192_32 * b;
+    let z65 = 0.019_330_82 * r + 0.119_194_78 * g + 0.950_532_14 * b;
+    let x = 1.047_929_8 * x65 + 0.022_946_793 * y65 - 0.050_192_23 * z65;
+    let y = 0.029_627_815 * x65 + 0.990_434_5 * y65 - 0.017_073_825 * z65;
+    let z = -0.009_243_058 * x65 + 0.015_055_144 * y65 + 0.751_874_3 * z65;
+    let f = |value: f32| {
+        const E: f32 = 216.0 / 24389.0;
+        const K: f32 = 24389.0 / 27.0;
+        if value > E {
+            value.cbrt()
+        } else {
+            (K * value + 16.0) / 116.0
+        }
+    };
+    let (fx, fy, fz) = (f(x / D50[0]), f(y / D50[1]), f(z / D50[2]));
+    [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+}
+
+fn lab_to_rgba(lab: [f32; 3]) -> Rgba {
+    const E: f32 = 216.0 / 24389.0;
+    const K: f32 = 24389.0 / 27.0;
+    let fy = (lab[0] + 16.0) / 116.0;
+    let fx = lab[1] / 500.0 + fy;
+    let fz = fy - lab[2] / 200.0;
+    let x = if fx.powi(3) > E {
+        fx.powi(3)
+    } else {
+        (116.0 * fx - 16.0) / K
+    };
+    let y = if lab[0] > K * E {
+        fy.powi(3)
+    } else {
+        lab[0] / K
+    };
+    let z = if fz.powi(3) > E {
+        fz.powi(3)
+    } else {
+        (116.0 * fz - 16.0) / K
+    };
+    let (x, y, z) = (x * D50[0], y * D50[1], z * D50[2]);
+    // XYZ (D50) → XYZ (D65) → linear sRGB.
+    let x65 = 0.955_473_4 * x - 0.023_098_538 * y + 0.063_259_31 * z;
+    let y65 = -0.028_369_706 * x + 1.009_995_4 * y + 0.021_041_399 * z;
+    let z65 = 0.012_314_002 * x - 0.020_507_696 * y + 1.330_365_9 * z;
+    let r = 3.240_97 * x65 - 1.537_383_2 * y65 - 0.498_610_76 * z65;
+    let g = -0.969_243_6 * x65 + 1.875_967_5 * y65 + 0.041_555_06 * z65;
+    let b = 0.055_630_08 * x65 - 0.203_976_96 * y65 + 1.056_971_5 * z65;
+    Rgba {
+        r: linear_to_srgb(r),
+        g: linear_to_srgb(g),
+        b: linear_to_srgb(b),
+        a: 1.0,
+    }
+}
+
 fn linear_to_srgb(channel: f32) -> f32 {
     let channel = channel.clamp(0.0, 1.0);
     if channel <= 0.003_130_8 {
@@ -108,6 +191,32 @@ fn srgb_to_linear(channel: f32) -> f32 {
         channel / 12.92
     } else {
         ((channel + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+#[cfg(test)]
+mod lab_tests {
+    use super::*;
+
+    #[test]
+    fn lab_mixing_matches_css() {
+        // What Chromium answers for `color-mix(in lab, …)` with the same colors.
+        let channel = |value: f32| (value * 255.0).round() as i32;
+        for (a, weight, b, expected) in [
+            (0xffffff, 0.88, 0x0dbe4e, [233, 248, 233]),
+            (0x0a0a0a, 0.80, 0x5ecc71, [30, 46, 31]),
+            (0x0a0a0a, 0.65, 0xfafafa, [85, 85, 85]),
+            (0xffffff, 0.91, 0xff2e3f, [255, 239, 236]),
+        ] {
+            let mixed = mix_lab(hex(a), weight, hex(b)).to_rgb();
+            let got = [channel(mixed.r), channel(mixed.g), channel(mixed.b)];
+            assert!(
+                got.iter()
+                    .zip(expected)
+                    .all(|(got, expected)| (got - expected).abs() <= 1),
+                "{a:06x} {weight} {b:06x}: {got:?} vs {expected:?}"
+            );
+        }
     }
 }
 

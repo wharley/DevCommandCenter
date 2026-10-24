@@ -2,10 +2,14 @@
 //! "Mudanças" over the task's checkout. Lists only: a file picked here opens
 //! in the center of the workbench.
 
+mod changes;
+mod changes_view;
 mod tree;
 mod view;
 
 pub use tree::DraggedFile;
+#[cfg(test)]
+mod changes_tests;
 #[cfg(test)]
 mod tests;
 
@@ -73,6 +77,9 @@ pub struct CodeColumn {
     pub(crate) files: Loaded<Files>,
     tree: Arc<CodeTreeNode>,
     pub(crate) status: Option<WorkspaceGitStatusOutput>,
+    /// The last status read failed (shown until one succeeds).
+    pub(crate) status_error: Option<String>,
+    pub(crate) changes: changes::Changes,
     pub(crate) by_path: HashMap<String, TreeStatus>,
     pub(crate) changed_folders: HashSet<String>,
     file_set: Option<String>,
@@ -93,14 +100,14 @@ impl EventEmitter<CodeColumnEvent> for CodeColumn {}
 
 impl CodeColumn {
     pub fn new(tab: CodeColumnTab, cx: &mut Context<Self>) -> Self {
-        // "Mudanças" arrives with its list (screen 5b): until then, files.
-        let _ = tab;
         Self {
             root: None,
-            tab: CodeColumnTab::Files,
+            tab,
             files: Loaded::Pending,
             tree: Arc::default(),
             status: None,
+            status_error: None,
+            changes: changes::Changes::new(),
             by_path: HashMap::new(),
             changed_folders: HashSet::new(),
             file_set: None,
@@ -127,6 +134,8 @@ impl CodeColumn {
         self.files = Loaded::Pending;
         self.tree = Arc::default();
         self.status = None;
+        self.status_error = None;
+        self.changes.reset();
         self.by_path.clear();
         self.changed_folders.clear();
         self.file_set = None;
@@ -297,8 +306,12 @@ impl CodeColumn {
                     if column.root.as_deref() != Some(root.as_str()) {
                         return;
                     }
-                    if let Ok(status) = status {
-                        column.apply_status(status, cx);
+                    match status {
+                        Ok(status) => column.apply_status(status, cx),
+                        Err(error) => {
+                            column.status_error = Some(error);
+                            cx.notify();
+                        }
                     }
                 });
                 if alive.is_err() {
@@ -341,6 +354,8 @@ impl CodeColumn {
         self.file_set = Some(signature);
         self.by_path = by_path;
         self.changed_folders = changed;
+        self.changes.sync(&status);
+        self.status_error = None;
         self.status = Some(status);
         cx.notify();
     }
