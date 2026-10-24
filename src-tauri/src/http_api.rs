@@ -649,6 +649,11 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(steer_turn_handler),
         )
         .route("/api/v1/workspaces/create", post(create_task_handler))
+        .route("/api/v1/workspaces", post(create_workspace_handler))
+        .route(
+            "/api/v1/workspace-bundles",
+            post(create_workspace_bundle_handler),
+        )
         .route(
             "/api/v1/sessions/:session_id/task-title",
             post(apply_task_title_handler),
@@ -1423,6 +1428,8 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/sessions/:session_id/objective/transition",
             "POST /api/v1/sessions/:session_id/steer",
             "POST /api/v1/workspaces/create",
+            "POST /api/v1/workspaces",
+            "POST /api/v1/workspace-bundles",
             "POST /api/v1/sessions/:session_id/task-title",
             "POST /api/v1/sessions/:session_id/queue",
             "PUT /api/v1/sessions/:session_id/queue/order",
@@ -2603,9 +2610,7 @@ async fn create_task_handler(
         create_workspace_bundle_with_state, create_workspace_for_repo_with_repo,
         CreateWorkspaceBundleForReposInput,
     };
-    let app = backend.app.get().cloned().ok_or_else(|| {
-        HttpApiError::service_unavailable("creating a task needs the desktop app")
-    })?;
+    let app = desktop_app(&backend)?;
     let repo = dcc_infra::db::SqliteWorkspaceRepo::open(&backend.workspace.db_path)
         .map_err(|error| HttpApiError::internal(error.to_string()))?;
     let repositories = dcc_core::ports::RepositoryRepo::list_repositories(&repo)
@@ -2671,6 +2676,53 @@ async fn create_task_handler(
         "workspaceId": output.workspace.id,
         "setupReport": output.setup_report,
         "setupHints": output.setup_hints,
+    })))
+}
+
+/// The desktop app the creation runs in.
+fn desktop_app(backend: &HttpBackend) -> Result<tauri::AppHandle, HttpApiError> {
+    backend.app.get().cloned().ok_or_else(|| {
+        HttpApiError::service_unavailable("creating a task needs the desktop app")
+    })
+}
+
+/// The open-project dialog's single task, exactly as chosen there (base
+/// branch, name, context folders): `createWorkspace`.
+async fn create_workspace_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_core::application::CreateWorkspaceForRepoInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let app = desktop_app(&backend)?;
+    let repo = dcc_infra::db::SqliteWorkspaceRepo::open(&backend.workspace.db_path)
+        .map_err(|error| HttpApiError::internal(error.to_string()))?;
+    let output =
+        dcc_tauri::commands::workspace_commands::create_workspace_for_repo_with_repo(&repo, &app, input)
+            .await
+            .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!({
+        "workspaceId": output.workspace.id,
+        "setupReport": output.setup_report,
+        "setupHints": output.setup_hints,
+    })))
+}
+
+/// The dialog's multi-project task: `createWorkspaceBundle`, with the
+/// desktop's rollback when one project fails.
+async fn create_workspace_bundle_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::workspace_commands::CreateWorkspaceBundleForReposInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let app = desktop_app(&backend)?;
+    let created = dcc_tauri::commands::workspace_commands::create_workspace_bundle_with_state(
+        &backend.workspace,
+        &app,
+        input,
+    )
+    .await
+    .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!({
+        "workspaceId": created.workspaces.first().map(|output| output.workspace.id.clone()),
+        "count": created.workspaces.len(),
     })))
 }
 
@@ -3419,6 +3471,19 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        for (uri, body) in [
+            (
+                "/api/v1/workspaces",
+                json!({ "projectId": "p", "workspaceRoot": "/tmp/p", "baseBranch": "main", "name": null, "isolationMode": null }),
+            ),
+            (
+                "/api/v1/workspace-bundles",
+                json!({ "name": "Nova tarefa", "projects": [] }),
+            ),
+        ] {
+            let (status, answer) = post_json(&fixture.app, uri, body).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{uri}: {answer}");
+        }
     }
 
     #[test]
