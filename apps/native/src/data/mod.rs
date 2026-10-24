@@ -8,6 +8,7 @@ pub mod child_tasks;
 pub mod conversation;
 pub mod daily_recap;
 pub mod deletion;
+pub mod desktop_api;
 pub mod disk;
 pub mod git_watch;
 pub mod loader;

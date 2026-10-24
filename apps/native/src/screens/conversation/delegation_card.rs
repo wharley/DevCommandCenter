@@ -17,7 +17,7 @@ use crate::markdown::{MarkdownStyle, render_markdown};
 use crate::project::{model_label, provider_label};
 use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
-use crate::ui::Icon;
+use crate::ui::{Button, ButtonVariant, Icon};
 
 /// Reports longer than this open collapsed, showing their first lines.
 const COLLAPSED_REPORT_CHARS: usize = 320;
@@ -433,7 +433,40 @@ pub(super) fn delegation_card(
                     .child(text)
             }))
             .children(report)
-            .children(files),
+            .children(files)
+            .children(child_session.clone().map(|session| {
+                let label = if waiting {
+                    cx.t("delegation.card.openToAnswer")
+                } else {
+                    cx.t_with(
+                        "delegation.card.openChild",
+                        &Args::default().with("agent", agent.clone()),
+                    )
+                };
+                // Review, close, rerun and "send to the agent" change the
+                // delegation: they wait on the runtime decision of screen 2c.
+                div()
+                    .mt(px(12.0))
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        Button::new(SharedString::from(format!("{}-open-child", message.id)))
+                            .variant(if waiting {
+                                ButtonVariant::Default
+                            } else {
+                                ButtonVariant::Ghost
+                            })
+                            .when(!waiting, |button| {
+                                button.text_color(colors.muted_foreground)
+                            })
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.open_session(session.clone(), cx)
+                            }))
+                            .child(div().text_size(px(11.5)).child(label)),
+                    )
+            })),
     )
     .into_any_element()
 }

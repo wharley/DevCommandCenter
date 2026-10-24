@@ -5,6 +5,7 @@
 use dcc_core::domain::timeline::TimelineMessage;
 use gpui::{AnyElement, Context, SharedString, Window, div, prelude::*, px, relative};
 
+use super::hover_actions::{MESSAGE_GROUP, copy_action};
 use super::{ConversationView, time_ago};
 use crate::data::prompt::{PromptPart, basename, is_audio_path, is_image_path, prompt_parts};
 use crate::i18n::Translate;
@@ -133,8 +134,10 @@ pub(super) fn user_row(
         .flex()
         .min_w_0()
         .justify_end()
+        .group(MESSAGE_GROUP)
         .child(
             div()
+                .relative()
                 .flex()
                 .flex_col()
                 .items_end()
@@ -166,7 +169,12 @@ pub(super) fn user_row(
                         .text_color(colors.muted_foreground)
                         .children(retry)
                         .children(stamp),
-                ),
+                )
+                .child(copy_action(
+                    SharedString::from(format!("{}-copy", message.id)),
+                    message.content.clone(),
+                    cx,
+                )),
         )
         .into_any_element()
 }

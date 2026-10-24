@@ -12,7 +12,7 @@ use dcc_core::domain::session::{SessionEventRecord, SessionId, WorkspaceSessionS
 use dcc_core::domain::timeline::activity::{TurnTokenTotals, total_turn_tokens};
 use dcc_core::domain::timeline::{TimelineMessage, project_session};
 use dcc_core::domain::workspace::WorkspaceId;
-use dcc_core::ports::{DelegationRepo, UsageRepo};
+use dcc_core::ports::{DelegationRepo, SessionRepo, UsageRepo};
 use dcc_infra::db::SqliteSessionRepo;
 use futures::executor::block_on;
 
@@ -168,8 +168,18 @@ pub fn load(
         return Ok(conversation);
     }
     let sessions = SqliteSessionRepo::open_read_only(db_path)?;
-    let workspace = WorkspaceId(task_id.to_string());
-    let summaries = sessions.list_workspace_sessions(&workspace)?;
+    let mut workspace = WorkspaceId(task_id.to_string());
+    let mut summaries = sessions.list_workspace_sessions(&workspace)?;
+    // A child's conversation can live in its own worktree's workspace.
+    if let Some(wanted) = wanted_session
+        && !summaries
+            .iter()
+            .any(|summary| summary.session.id.0 == wanted)
+        && let Some(session) = block_on(sessions.get_session(&SessionId(wanted.to_string())))?
+    {
+        workspace = session.workspace_id;
+        summaries = sessions.list_workspace_sessions(&workspace)?;
+    }
     let delegations = block_on(sessions.list_delegations(Some(&workspace), None))?;
     let delegated: HashSet<String> = delegations
         .iter()

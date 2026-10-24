@@ -17,7 +17,7 @@ const ICONS = [
 	"shield-check", "sparkles", "square-terminal", "sticky-note", "trash-2",
 	"wrench", "terminal", "file-pen-line", "file-text", "globe", "list-todo", "plug", "brain",
 	"circle-alert", "circle-dashed", "circle", "corner-down-right", "hourglass", "copy", "file-code-corner",
-	"triangle-alert", "file", "file-image", "file-headphone", "ban",
+	"triangle-alert", "file", "file-image", "file-headphone", "ban", "shield-alert",
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));

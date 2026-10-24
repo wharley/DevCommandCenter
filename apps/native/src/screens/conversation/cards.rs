@@ -1,18 +1,21 @@
 //! The cards a turn carries besides its activity: the agent's questions
 //! (`UserInputCard`), permission requests (`ApprovalCard`) and native
-//! subagents (`NativeSubagentCard`). Read-only here: answering and approving
-//! still happen in the desktop app.
+//! subagents (`NativeSubagentCard`). Answers go to the desktop, which holds
+//! the agent (`requests`).
 
 use dcc_core::domain::provider::NativeSubagentStatus;
 use dcc_core::domain::timeline::{Annotation, NativeSubagent};
 use dcc_core::ports::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
-use gpui::{AnyElement, App, FontWeight, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, App, Context, FontWeight, SharedString, Window, div, prelude::*, px};
+
+use super::ConversationView;
+use super::requests::Sending;
 
 use crate::agent::{AgentMascot, RobotState};
 use crate::i18n::Translate;
 use crate::project::model_label;
 use crate::theme::ActiveTheme;
-use crate::ui::{Icon, Tracked};
+use crate::ui::{Button, ButtonVariant, Icon, Tracked, spinner};
 
 /// `rounded-2xl border-border/70 bg-card/70 p-4`.
 fn card(cx: &App) -> gpui::Div {
@@ -81,10 +84,13 @@ fn field_label(text: SharedString, cx: &App) -> AnyElement {
 }
 
 pub(super) fn user_input_card(
+    view: &ConversationView,
+    request_id: &str,
     questions: &[ProviderUserInputQuestion],
     answers: &[ProviderUserInputAnswer],
     live: bool,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut Context<ConversationView>,
 ) -> Option<AnyElement> {
     let questions: Vec<&ProviderUserInputQuestion> = questions
         .iter()
@@ -96,6 +102,8 @@ pub(super) fn user_input_card(
     let colors = cx.theme().colors.clone();
     let radius = cx.theme().radius;
     let resolved = !live && !answers.is_empty();
+    let sending = view.sending(request_id).is_some();
+    let editable = live && !sending;
     let badge = resolved.then(|| {
         div()
             .flex()
@@ -112,44 +120,57 @@ pub(super) fn user_input_card(
     } else {
         cx.t("conversation.userInput.waiting")
     };
-    let rows = questions.into_iter().map(|question| {
-        let answer = answers
+    let mut rows: Vec<AnyElement> = Vec::with_capacity(questions.len());
+    let mut complete = true;
+    for (index, question) in questions.iter().enumerate() {
+        let stored = answers
             .iter()
             .find(|answer| answer.question == question.question)
             .map(|answer| answer.answer.clone())
             .unwrap_or_default();
+        let input =
+            live.then(|| view.answer_input(request_id, &question.question, &stored, window, cx));
+        let selected = if live {
+            view.answer_text(request_id, &question.question, cx)
+        } else {
+            stored.clone()
+        };
+        complete &= !selected.is_empty();
         let header = if question.header.trim().is_empty() {
             cx.t("conversation.userInput.question")
         } else {
             SharedString::from(question.header.clone())
         };
-        let options = question.options.iter().map(|option| {
-            let active = option.label == answer;
-            div()
-                .px(px(12.0))
-                .py(px(8.0))
-                .rounded(radius.control)
-                .border_1()
-                .border_color(if active {
-                    colors.primary
+        let options: Vec<AnyElement> = question
+            .options
+            .iter()
+            .enumerate()
+            .map(|(option_index, option)| {
+                let active = option.label == selected;
+                let label = option.label.clone();
+                let request = request_id.to_string();
+                let asked = question.question.clone();
+                Button::new(SharedString::from(format!(
+                    "{request_id}-q{index}-o{option_index}"
+                )))
+                .variant(if active {
+                    ButtonVariant::Default
                 } else {
-                    colors.border
+                    ButtonVariant::Outline
                 })
-                .bg(if active {
-                    colors.primary
-                } else {
-                    colors.background.opacity(0.6)
-                })
-                .text_color(if active {
-                    colors.primary_foreground
-                } else {
-                    colors.foreground
-                })
-                .text_size(px(14.0))
-                .opacity(if live { 1.0 } else { 0.5 })
-                .child(SharedString::from(option.label.clone()))
-        });
-        let answer_box = div()
+                .disabled(!editable)
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    view.pick_option(&request, &asked, label.clone(), cx)
+                }))
+                .child(
+                    div()
+                        .text_size(px(14.0))
+                        .child(SharedString::from(option.label.clone())),
+                )
+                .into_any_element()
+            })
+            .collect();
+        let field = div()
             .h(px(36.0))
             .flex()
             .items_center()
@@ -158,38 +179,73 @@ pub(super) fn user_input_card(
             .border_1()
             .border_color(colors.input)
             .text_size(px(14.0))
-            .opacity(0.5)
-            .text_color(if answer.is_empty() {
-                colors.muted_foreground
-            } else {
-                colors.foreground
-            })
-            .child(if answer.is_empty() {
-                cx.t("conversation.userInput.placeholder")
-            } else {
-                SharedString::from(answer.clone())
-            });
+            .when(!editable, |field| field.opacity(0.5));
+        let field = match input {
+            Some(input) if editable => field.child(div().flex_1().min_w_0().child(input)),
+            _ => field
+                .text_color(if selected.is_empty() {
+                    colors.muted_foreground
+                } else {
+                    colors.foreground
+                })
+                .child(if selected.is_empty() {
+                    cx.t("conversation.userInput.placeholder")
+                } else {
+                    SharedString::from(selected.clone())
+                }),
+        };
+        rows.push(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(field_label(header, cx))
+                        .child(
+                            div()
+                                .mt(px(4.0))
+                                .text_size(px(14.0))
+                                .text_color(colors.foreground)
+                                .child(SharedString::from(question.question.clone())),
+                        ),
+                )
+                .when(!options.is_empty(), |row| {
+                    row.child(div().flex().flex_wrap().gap(px(8.0)).children(options))
+                })
+                .child(field)
+                .into_any_element(),
+        );
+    }
+    let submit = live.then(|| {
+        let request = request_id.to_string();
+        let asked: Vec<String> = questions
+            .iter()
+            .map(|question| question.question.clone())
+            .collect();
         div()
+            .mt(px(16.0))
             .flex()
-            .flex_col()
+            .items_center()
+            .justify_end()
             .gap(px(8.0))
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(field_label(header, cx))
-                    .child(
-                        div()
-                            .mt(px(4.0))
-                            .text_size(px(14.0))
-                            .text_color(colors.foreground)
-                            .child(SharedString::from(question.question.clone())),
-                    ),
+                Button::new(SharedString::from(format!("{request_id}-send")))
+                    .disabled(!complete || sending)
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.send_answers(request.clone(), asked.clone(), cx)
+                    }))
+                    .children(sending.then(|| {
+                        spinner(SharedString::from(format!("{request_id}-sending")), 16.0)
+                    }))
+                    .child(if sending {
+                        cx.t("conversation.userInput.sending")
+                    } else {
+                        cx.t("conversation.userInput.send")
+                    }),
             )
-            .when(!question.options.is_empty(), |row| {
-                row.child(div().flex().flex_wrap().gap(px(8.0)).children(options))
-            })
-            .child(answer_box)
     });
     Some(
         card(cx)
@@ -200,11 +256,13 @@ pub(super) fn user_input_card(
                 cx,
             ))
             .child(div().flex().flex_col().gap(px(16.0)).children(rows))
+            .children(submit)
             .into_any_element(),
     )
 }
 
 pub(super) struct ApprovalView<'a> {
+    pub request_id: &'a str,
     pub tool_name: &'a str,
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
@@ -214,7 +272,11 @@ pub(super) struct ApprovalView<'a> {
     pub live: bool,
 }
 
-pub(super) fn approval_card(approval: ApprovalView<'_>, cx: &App) -> AnyElement {
+pub(super) fn approval_card(
+    view: &ConversationView,
+    approval: ApprovalView<'_>,
+    cx: &mut Context<ConversationView>,
+) -> AnyElement {
     let theme = cx.theme();
     let colors = theme.colors.clone();
     let mono = theme.fonts.mono.clone();
@@ -308,6 +370,41 @@ pub(super) fn approval_card(approval: ApprovalView<'_>, cx: &App) -> AnyElement 
                         )
                 })),
         )
+        .children(approval.live.then(|| {
+            let sending = view.sending(approval.request_id);
+            let request = approval.request_id.to_string();
+            let deny_request = request.clone();
+            let busy = |kind: Sending| {
+                (sending == Some(kind))
+                    .then(|| spinner(SharedString::from(format!("{request}-{kind:?}")), 16.0))
+            };
+            div()
+                .mt(px(16.0))
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap(px(8.0))
+                .child(
+                    Button::new(SharedString::from(format!("{request}-deny")))
+                        .variant(ButtonVariant::Outline)
+                        .disabled(sending.is_some())
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            view.respond_permission(deny_request.clone(), false, cx)
+                        }))
+                        .children(busy(Sending::Deny))
+                        .child(cx.t("conversation.permission.deny")),
+                )
+                .child({
+                    let allow_request = request.clone();
+                    Button::new(SharedString::from(format!("{request}-allow")))
+                        .disabled(sending.is_some())
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            view.respond_permission(allow_request.clone(), true, cx)
+                        }))
+                        .children(busy(Sending::Allow))
+                        .child(cx.t("conversation.permission.allow"))
+                })
+        }))
         .into_any_element()
 }
 

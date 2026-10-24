@@ -8,7 +8,10 @@ mod activity;
 mod assistant_row;
 mod cards;
 mod delegation_card;
+mod hover_actions;
 mod paced;
+mod permission_panel;
+mod requests;
 mod system_rows;
 #[cfg(test)]
 mod tests;
@@ -66,6 +69,9 @@ pub struct ConversationView {
     scrolled_at: Option<Instant>,
     _scrollbar_fade: Option<Task<()>>,
     _refresh: Option<Task<()>>,
+    /// Wakes the refresh loop early (after an answer is sent).
+    refresh_wake: Option<futures::channel::mpsc::UnboundedSender<()>>,
+    pub(crate) requests: requests::Requests,
     _clock: Task<()>,
 }
 
@@ -92,12 +98,21 @@ impl ConversationView {
             scrolled_at: None,
             _scrollbar_fade: None,
             _refresh: None,
+            refresh_wake: None,
+            requests: requests::Requests::default(),
             _clock: Self::clock_loop(cx),
         }
     }
 
     pub fn task_id(&self) -> Option<&str> {
         self.task_id.as_deref()
+    }
+
+    /// Another conversation of the open task (a child's, from its card).
+    pub(crate) fn open_session(&mut self, session_id: String, cx: &mut Context<Self>) {
+        if let Some(task_id) = self.task_id.clone() {
+            self.open(&task_id, Some(session_id), cx);
+        }
     }
 
     /// Shows `task_id`'s conversation: `session_id` when given, else the one
@@ -118,11 +133,27 @@ impl ConversationView {
         self.data = None;
         self.loading = true;
         self.list.reset(0);
-        self._refresh = Some(self.refresh_loop(cx));
+        if !same_task {
+            self.requests.clear();
+        }
+        let (wake, woken) = futures::channel::mpsc::unbounded();
+        self.refresh_wake = Some(wake);
+        self._refresh = Some(self.refresh_loop(woken, cx));
         cx.notify();
     }
 
-    fn refresh_loop(&self, cx: &mut Context<Self>) -> Task<()> {
+    /// Reads again now instead of at the next beat.
+    pub(crate) fn refresh_now(&self, _cx: &mut Context<Self>) {
+        if let Some(wake) = &self.refresh_wake {
+            let _ = wake.unbounded_send(());
+        }
+    }
+
+    fn refresh_loop(
+        &self,
+        mut woken: futures::channel::mpsc::UnboundedReceiver<()>,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
         let db_path = loader::database_path();
         let task_id = self.task_id.clone().unwrap_or_default();
         let wanted = self.wanted_session.clone();
@@ -151,9 +182,12 @@ impl ConversationView {
                 if this.update(cx, |view, cx| view.apply(next, cx)).is_err() {
                     return;
                 }
-                cx.background_executor()
-                    .timer(if running { REFRESH_LIVE } else { REFRESH_IDLE })
-                    .await;
+                let beat = cx.background_executor().timer(if running {
+                    REFRESH_LIVE
+                } else {
+                    REFRESH_IDLE
+                });
+                futures::future::select(Box::pin(beat), futures::StreamExt::next(&mut woken)).await;
             }
         })
     }
@@ -397,13 +431,22 @@ impl Render for ConversationView {
             .min_h_0()
             .min_w_0()
             .size_full()
-            .child(body)
-            .when(!self.loading && !empty, |area| {
-                area.child(ListScrollbar::new(
-                    "conversation-scrollbar",
-                    self.list.clone(),
-                    self.scrolled_at,
-                ))
-            })
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .child(body)
+                    .when(!self.loading && !empty, |area| {
+                        area.child(ListScrollbar::new(
+                            "conversation-scrollbar",
+                            self.list.clone(),
+                            self.scrolled_at,
+                        ))
+                    }),
+            )
+            .children(permission_panel::permission_panel(self, cx))
     }
 }

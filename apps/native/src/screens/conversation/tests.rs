@@ -54,6 +54,8 @@ fn history(live: bool) -> Conversation {
     if live {
         kinds.push(json!({ "type": "turn_assistant_message_started", "turnId": "t2", "messageId": "m2", "phase": "commentary" }));
         kinds.push(json!({ "type": "turn_assistant_message_delta", "turnId": "t2", "messageId": "m2", "content": "Rodando os testes agora, já volto com o resultado" }));
+        kinds.push(json!({ "type": "turn_permission_requested", "turnId": "t2", "requestId": "p1", "toolName": "Bash", "title": null, "description": null, "command": "rm -rf dist", "file": null }));
+        kinds.push(json!({ "type": "turn_user_input_requested", "turnId": "t2", "requestId": "q1", "questions": [{ "id": "a", "header": "Destino", "question": "Qual ambiente?", "options": [{ "label": "staging", "description": "" }, { "label": "prod", "description": "" }] }] }));
     } else {
         kinds.push(json!({ "type": "turn_aborted", "turnId": "t2", "reason": "parou" }));
     }
@@ -136,4 +138,33 @@ fn a_new_reply_replaces_only_the_rows_that_changed() {
     assert!(span.start >= 1, "the first prompt stays measured");
     assert_eq!(span.end, live.len());
     assert_eq!(count, settled.len() - span.start);
+}
+
+#[gpui::test]
+fn answers_wait_for_the_desktop_and_options_fill_the_field(cx: &mut TestAppContext) {
+    let (view, cx) = open_view(cx);
+    // A local port nobody listens on, never the real desktop.
+    let free = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    view.update(cx, |view, cx| {
+        view.task_id = Some("task".into());
+        view.loading = false;
+        view.requests.endpoint = Some(crate::data::desktop_api::DesktopApi::new(free, "k"));
+        view.apply(Rc::new(history(true)), cx);
+    });
+    cx.run_until_parked();
+    view.update(cx, |view, cx| {
+        assert_eq!(view.answer_text("q1", "Qual ambiente?", cx), "");
+        view.pick_option("q1", "Qual ambiente?", "staging".into(), cx);
+        assert_eq!(view.answer_text("q1", "Qual ambiente?", cx), "staging");
+        // While the answer travels the buttons hold still.
+        view.respond_permission("p1".into(), true, cx);
+        assert_eq!(view.sending("p1"), Some(super::requests::Sending::Allow));
+    });
+    cx.run_until_parked();
+    // The desktop isn't there in tests: the request comes back to waiting.
+    view.read_with(cx, |view, _| assert_eq!(view.sending("p1"), None));
 }

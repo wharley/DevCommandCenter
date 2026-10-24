@@ -8,7 +8,7 @@ use gpui::{AnyElement, Context, SharedString, div, prelude::*, px};
 use super::{ConversationView, time_ago};
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
-use crate::ui::Icon;
+use crate::ui::{Button, ButtonVariant, Icon};
 
 /// `flex justify-center px-4` with the `max-w-[42rem]` column inside.
 pub(super) fn centered(content: impl IntoElement) -> gpui::Div {
@@ -30,7 +30,15 @@ pub(super) fn system_row(
     let mono = theme.fonts.mono.clone();
     let radius = theme.radius;
     let stamp = time_ago(view, message.created_at.as_deref(), cx);
-    // The session action (opening another conversation) arrives with screen 2c.
+    let action = message.action.clone().map(|action| {
+        let session = action.session_id.clone();
+        div().flex_shrink_0().mt(px(2.0)).child(
+            Button::new(SharedString::from(format!("{}-action", message.id)))
+                .variant(ButtonVariant::Outline)
+                .on_click(cx.listener(move |view, _, _, cx| view.open_session(session.clone(), cx)))
+                .child(div().text_size(px(11.0)).child(action.label)),
+        )
+    });
     centered(
         div()
             .flex()
@@ -76,7 +84,8 @@ pub(super) fn system_row(
                     .text_size(px(11.0))
                     .text_color(colors.muted_foreground.opacity(0.6))
                     .child(stamp)
-            })),
+            }))
+            .children(action),
     )
     .into_any_element()
 }

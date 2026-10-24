@@ -13,6 +13,7 @@ use super::activity::{TurnActivity, turn_activity};
 use super::cards::{
     ApprovalView, approval_card, native_subagent_card, user_input_card, waits_on_person,
 };
+use super::hover_actions::{MESSAGE_GROUP, copy_action};
 use super::{ConversationView, time_ago};
 use crate::agent::{AgentMascot, RobotState};
 use crate::data::conversation::Conversation;
@@ -340,40 +341,47 @@ pub(super) fn assistant_row(
         })
         .collect();
     column.extend(subagents);
-    let requests: Vec<AnyElement> = message
-        .annotations
-        .iter()
-        .filter_map(|annotation| match annotation {
+    // A permission still waiting shows in the panel above the composer
+    // (`hidePendingApprovals`); answered ones stay in the thread.
+    let mut requests: Vec<AnyElement> = Vec::new();
+    for annotation in &message.annotations {
+        match annotation {
             Annotation::UserInput {
+                id,
                 questions,
                 answers,
                 streaming,
                 ..
-            } => user_input_card(questions, answers, *streaming, cx),
+            } => requests.extend(user_input_card(
+                view, id, questions, answers, *streaming, window, cx,
+            )),
             Annotation::Approval {
+                id,
                 tool_name,
                 title,
                 description,
                 command,
                 file,
                 behavior,
-                streaming,
+                streaming: false,
                 ..
-            } => Some(approval_card(
+            } => requests.push(approval_card(
+                view,
                 ApprovalView {
+                    request_id: id,
                     tool_name,
                     title: title.as_deref(),
                     description: description.as_deref(),
                     command: command.as_deref(),
                     file: file.as_deref(),
                     behavior: behavior.as_deref(),
-                    live: *streaming,
+                    live: false,
                 },
                 cx,
             )),
-            _ => None,
-        })
-        .collect();
+            _ => {}
+        }
+    }
     if !requests.is_empty() {
         column.push(
             div()
@@ -408,6 +416,7 @@ pub(super) fn assistant_row(
         column.push(notice);
     }
     div()
+        .group(MESSAGE_GROUP)
         .flex()
         .min_w_0()
         .justify_start()
@@ -420,7 +429,12 @@ pub(super) fn assistant_row(
                 .max_w(px(832.0))
                 .min_w_0()
                 .pb(px(20.0))
-                .children(column),
+                .children(column)
+                .child(copy_action(
+                    SharedString::from(format!("{}-copy", message.id)),
+                    message.content.clone(),
+                    cx,
+                )),
         )
         .into_any_element()
 }

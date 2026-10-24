@@ -5645,6 +5645,8 @@
   },
   "native": {
     "desktopOpen": "O DCC está aberto: exclua por lá, ou feche-o para excluir por aqui.",
-    "memoryPending": "A memória desta tarefa ainda não foi salva. Abra o DCC para salvá-la antes de excluir."
+    "memoryPending": "A memória desta tarefa ainda não foi salva. Abra o DCC para salvá-la antes de excluir.",
+    "desktopClosed": "O agente roda no DCC: abra o DCC para responder.",
+    "alreadyAnswered": "Isso já foi respondido."
   }
 }
