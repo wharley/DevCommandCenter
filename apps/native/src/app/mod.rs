@@ -10,6 +10,7 @@ use crate::prefs::{self, Prefs};
 use crate::theme::{self, Theme};
 
 pub fn run() {
+    crate::data::provider_catalog::locate_claude_helper();
     let prefs_path = prefs::default_path();
     let prefs = Prefs::load(&prefs_path);
 

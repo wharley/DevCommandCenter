@@ -261,24 +261,57 @@ impl Composer {
         self.catalog_loading = true;
         let endpoint = self.endpoint.clone();
         cx.spawn(async move |this, cx| {
-            let providers = cx
+            let db_path = crate::data::loader::database_path();
+            let offline_path = db_path.clone();
+            let live = cx
                 .background_executor()
                 .spawn(async move {
-                    endpoint
+                    match endpoint
                         .or_else(DesktopApi::load)
                         .map(|api| api.providers())
+                    {
+                        Some(Ok(providers)) => Ok(providers),
+                        // A closed desktop: the built-in list with the
+                        // person's on/off switches, at once.
+                        _ => Err(crate::data::provider_catalog::offline(&offline_path)),
+                    }
                 })
                 .await;
-            let _ = this.update(cx, |this, cx| {
-                this.catalog_loading = false;
-                match providers {
-                    Some(Ok(providers)) => {
+            let offline = match live {
+                Ok(providers) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.catalog_loading = false;
                         this.catalog = Some(Arc::new(providers));
                         this.catalog_at = Some(Instant::now());
-                    }
-                    // A closed desktop: the built-in list stays and the next
-                    // look tries again.
-                    _ => this.catalog_at = None,
+                        cx.notify();
+                    });
+                    return;
+                }
+                Err(offline) => offline,
+            };
+            if this
+                .update(cx, |this, cx| {
+                    this.catalog = Some(Arc::new(offline));
+                    cx.notify();
+                })
+                .is_err()
+            {
+                return;
+            }
+            // Then the same list with each provider's health checked here, so
+            // those not installed or signed in move to "precisam de configuração".
+            let checked = if cfg!(test) {
+                None
+            } else {
+                cx.background_executor()
+                    .spawn(async move { crate::data::provider_catalog::checked(&db_path) })
+                    .await
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.catalog_loading = false;
+                if let Some(providers) = checked {
+                    this.catalog = Some(Arc::new(providers));
+                    this.catalog_at = Some(Instant::now());
                 }
                 cx.notify();
             });

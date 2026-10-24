@@ -1310,6 +1310,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "tempfile",
+ "tokio",
  "unicode-segmentation",
 ]
 

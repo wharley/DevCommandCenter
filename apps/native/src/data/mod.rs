@@ -17,6 +17,7 @@ pub mod model_picker;
 pub mod plan_checklist;
 pub mod project_logo;
 pub mod prompt;
+pub mod provider_catalog;
 pub mod rail;
 pub mod recap;
 pub mod seen;
