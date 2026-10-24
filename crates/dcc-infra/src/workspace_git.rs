@@ -606,3 +606,88 @@ pub async fn workspace_pr_status(
         merge_state_status: resolved.merge_state_status,
     })
 }
+
+/// Most ignored files the tree lists; past this the ignore rules are matching
+/// build output, not the few local files someone wants to open.
+const GIT_IGNORED_FILES_LIMIT: usize = 2_000;
+
+/// Ignored files outside wholly ignored folders: `--directory` reports
+/// `node_modules/` as one entry instead of walking it, and those folder
+/// entries are dropped. Sorted, repo-relative forward slashes. Empty when the
+/// root is blank, not a git worktree, or git fails.
+pub fn git_ignored_files(workspace_root: &str) -> Result<Vec<String>, String> {
+    let root = workspace_root.trim();
+    if root.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let output = run_git_output(
+        root,
+        &[
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+        ],
+    )?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let root_path = std::path::Path::new(root);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut paths: Vec<String> = stdout
+        .split('\0')
+        .filter(|line| !line.is_empty() && !line.ends_with('/'))
+        .filter(|line| !line.ends_with(".DS_Store"))
+        // A symlinked folder is reported without the trailing slash.
+        .filter(|line| !root_path.join(line).is_dir())
+        .map(|line| line.to_string())
+        .take(GIT_IGNORED_FILES_LIMIT)
+        .collect();
+    paths.sort();
+    Ok(paths)
+}
+
+/// The worktree's files as git sees them: tracked files still on disk plus new
+/// files that are not ignored, so what an agent just created shows up before
+/// anyone stages it. Sorted, repo-relative forward slashes. Empty when the
+/// root is blank, not a git worktree, or git fails. Shared by the desktop's
+/// file tree and `@` mention and the phone's file search.
+pub fn git_tracked_files(workspace_root: &str) -> Result<Vec<String>, String> {
+    let root = workspace_root.trim();
+    if root.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let output = run_git_output(
+        root,
+        &[
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+    )?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let root_path = std::path::Path::new(root);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut paths: Vec<String> = stdout
+        .split('\0')
+        .filter(|line| !line.is_empty())
+        // `--cached` still lists tracked files deleted from the worktree.
+        .filter(|line| root_path.join(line).symlink_metadata().is_ok())
+        .map(|line| line.to_string())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}

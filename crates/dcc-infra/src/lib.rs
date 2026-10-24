@@ -25,6 +25,7 @@ pub mod native_mcp;
 pub mod notes;
 pub mod process;
 pub mod project_actions;
+pub mod prompt_attachments;
 pub mod runtime_owner;
 pub mod skills_context;
 mod repo_config;
