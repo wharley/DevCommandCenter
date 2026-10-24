@@ -215,6 +215,9 @@ pub struct HttpBackend {
     /// The relay connector serving this router, for the operator routes and
     /// to drop a revoked phone at once. Weak: the hub holds the router.
     remote: OnceLock<std::sync::Weak<RemoteHub>>,
+    /// The desktop app, inside it: creating a task runs the desktop's own
+    /// creation (its events reach the desktop's window).
+    app: OnceLock<tauri::AppHandle>,
 }
 
 impl HttpBackend {
@@ -240,6 +243,7 @@ impl HttpBackend {
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
+            app: OnceLock::new(),
         })
     }
 
@@ -262,7 +266,14 @@ impl HttpBackend {
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
+            app: OnceLock::new(),
         }
+    }
+
+    /// The desktop app the server runs in (task creation needs it).
+    pub fn with_app(self, app: tauri::AppHandle) -> Self {
+        let _ = self.app.set(app);
+        self
     }
 
     /// Shares the desktop's workspace state (same delivery-failure store).
@@ -637,6 +648,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/sessions/:session_id/steer",
             post(steer_turn_handler),
         )
+        .route("/api/v1/workspaces/create", post(create_task_handler))
         .route(
             "/api/v1/sessions/:session_id/queue",
             post(queue_turn_handler),
@@ -1406,6 +1418,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "DELETE /api/v1/sessions/:session_id/objective",
             "POST /api/v1/sessions/:session_id/objective/transition",
             "POST /api/v1/sessions/:session_id/steer",
+            "POST /api/v1/workspaces/create",
             "POST /api/v1/sessions/:session_id/queue",
             "PUT /api/v1/sessions/:session_id/queue/order",
             "POST /api/v1/sessions/:session_id/queue/dispatch-next",
@@ -2549,6 +2562,113 @@ struct SteerBody {
     prompt: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateTaskBody {
+    project_id: String,
+    workspace_root: String,
+    base_branch: String,
+    #[serde(default)]
+    isolation_mode: Option<dcc_core::application::WorkspaceIsolationMode>,
+    /// False leaves the project's linked folders out of this task.
+    #[serde(default = "default_true")]
+    include_linked_folders: bool,
+    /// The multi-project task's name (the desktop's "Nova tarefa").
+    #[serde(default)]
+    bundle_name: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// "Nova tarefa" in a project (`handleQuickCreateTask`): the project's linked
+/// Git folders make it a multi-project task, folders without Git come as
+/// context, and the desktop's own creation runs (setup report, mission spec,
+/// forge refresh), so its window shows the task at once.
+async fn create_task_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(body): Json<CreateTaskBody>,
+) -> Result<Json<Value>, HttpApiError> {
+    use dcc_core::application::linked_task::{
+        normalize_workspace_root, plan_linked_task, LinkedFolders, LinkedTaskPlan,
+        LinkedTaskPrimary,
+    };
+    use dcc_tauri::commands::workspace_commands::{
+        create_workspace_bundle_with_state, create_workspace_for_repo_with_repo,
+        CreateWorkspaceBundleForReposInput,
+    };
+    let app = backend.app.get().cloned().ok_or_else(|| {
+        HttpApiError::service_unavailable("creating a task needs the desktop app")
+    })?;
+    let repo = dcc_infra::db::SqliteWorkspaceRepo::open(&backend.workspace.db_path)
+        .map_err(|error| HttpApiError::internal(error.to_string()))?;
+    let repositories = dcc_core::ports::RepositoryRepo::list_repositories(&repo)
+        .await
+        .map_err(|error| HttpApiError::internal(error.to_string()))?;
+    let root = normalize_workspace_root(body.workspace_root.trim());
+    let paths = repositories
+        .iter()
+        .find(|repository| normalize_workspace_root(repository.root_path.trim()) == root)
+        .and_then(|repository| {
+            repo.list_repository_linked_folders()
+                .ok()?
+                .into_iter()
+                .find(|(id, _)| *id == repository.id)
+                .map(|(_, paths)| paths)
+        })
+        .unwrap_or_default();
+    let linked = LinkedFolders {
+        context_paths: dcc_infra::project_actions::linked_context_paths(&paths),
+        paths,
+    };
+    let primary = LinkedTaskPrimary {
+        project_id: body.project_id.clone(),
+        workspace_root: body.workspace_root.clone(),
+        base_branch: body.base_branch.clone(),
+    };
+    let output = match plan_linked_task(
+        &primary,
+        &linked,
+        &repositories,
+        body.isolation_mode.clone(),
+        body.include_linked_folders,
+    ) {
+        LinkedTaskPlan::Single { context_folders } => create_workspace_for_repo_with_repo(
+            &repo,
+            &app,
+            dcc_core::application::CreateWorkspaceForRepoInput {
+                project_id: dcc_core::domain::project::ProjectId(body.project_id),
+                workspace_root: body.workspace_root,
+                base_branch: body.base_branch,
+                name: None,
+                isolation_mode: body.isolation_mode,
+                context_folders,
+            },
+        )
+        .await
+        .map_err(HttpApiError::bad_request)?,
+        LinkedTaskPlan::Bundle { projects } => {
+            let mut created = create_workspace_bundle_with_state(
+                &backend.workspace,
+                &app,
+                CreateWorkspaceBundleForReposInput {
+                    name: body.bundle_name.unwrap_or_else(|| "Nova tarefa".to_string()),
+                    projects,
+                },
+            )
+            .await
+            .map_err(HttpApiError::bad_request)?;
+            created.workspaces.remove(0)
+        }
+    };
+    Ok(Json(json!({
+        "workspaceId": output.workspace.id,
+        "setupReport": output.setup_report,
+        "setupHints": output.setup_hints,
+    })))
+}
+
 /// Guidance into the running turn (the composer's "Orientar agora").
 async fn steer_turn_handler(
     State(backend): State<Arc<HttpBackend>>,
@@ -3230,6 +3350,18 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn creating_a_task_needs_the_desktop_app() {
+        let fixture = embedded_fixture().await;
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/workspaces/create",
+            json!({ "projectId": "p", "workspaceRoot": "/tmp/p", "baseBranch": "main" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     }
 
     #[test]

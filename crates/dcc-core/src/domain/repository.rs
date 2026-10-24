@@ -34,3 +34,26 @@ pub struct Repository {
     pub created_at: String,
     pub updated_at: String,
 }
+
+/// `repositoryDisplayName`: the name the person gave, else the repository's,
+/// else the folder's.
+pub fn repository_display_name(repository: &Repository) -> String {
+    repository
+        .display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| Some(repository.name.trim().to_string()).filter(|name| !name.is_empty()))
+        .or_else(|| path_leaf(&repository.root_path))
+        .unwrap_or_else(|| "Project".to_string())
+}
+
+/// The last segment of a path, either separator.
+pub fn path_leaf(path: &str) -> Option<String> {
+    path.trim()
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .find(|part| !part.is_empty())
+        .map(str::to_string)
+}

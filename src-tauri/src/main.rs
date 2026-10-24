@@ -3902,7 +3902,9 @@ fn start_embedded_http_server(
     };
     config.db_path = db_path.clone();
     let backend = match HttpBackend::embedded(session_state) {
-        Ok(backend) => backend.with_workspace_state(workspace_state),
+        Ok(backend) => backend
+            .with_workspace_state(workspace_state)
+            .with_app(app.handle().clone()),
         Err(error) => {
             eprintln!("[DCC HTTP] not started: {error}");
             return;

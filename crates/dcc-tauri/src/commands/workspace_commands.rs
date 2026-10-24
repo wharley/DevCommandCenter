@@ -6539,7 +6539,9 @@ pub async fn create_workspace_from_source_url(
     })
 }
 
-async fn create_workspace_for_repo_with_repo(
+/// The desktop's task creation (setup report, mission spec, forge refresh,
+/// linked context folders) for callers outside a Tauri command: the HTTP API.
+pub async fn create_workspace_for_repo_with_repo(
     repo: &SqliteWorkspaceRepo,
     app: &AppHandle,
     input: CreateWorkspaceForRepoInput,
@@ -6799,6 +6801,16 @@ pub async fn create_workspace_bundle_for_repos(
     app: AppHandle,
     input: CreateWorkspaceBundleForReposInput,
 ) -> Result<CreateWorkspaceBundleForReposOutput, String> {
+    create_workspace_bundle_with_state(&state, &app, input).await
+}
+
+/// A multi-project task without Tauri `State`, shared with the HTTP API.
+/// A project that fails rolls back the ones already created.
+pub async fn create_workspace_bundle_with_state(
+    state: &WorkspaceCommandState,
+    app: &AppHandle,
+    input: CreateWorkspaceBundleForReposInput,
+) -> Result<CreateWorkspaceBundleForReposOutput, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let repositories = repo
         .list_repositories()
@@ -6840,7 +6852,7 @@ pub async fn create_workspace_bundle_for_repos(
                 })
                 .map(|repository| repository.name.clone());
         }
-        match create_workspace_for_repo_with_repo(&repo, &app, project).await {
+        match create_workspace_for_repo_with_repo(&repo, app, project).await {
             Ok(output) => created.push(output),
             Err(error) => {
                 let rollback_targets = repo
@@ -6856,7 +6868,7 @@ pub async fn create_workspace_bundle_for_repos(
                     })
                     .collect::<Vec<_>>();
                 let rollback_errors =
-                    rollback_bundle_workspaces(&state, &repo, &rollback_targets).await;
+                    rollback_bundle_workspaces(state, &repo, &rollback_targets).await;
                 if rollback_errors.is_empty() {
                     return Err(error);
                 }
@@ -6880,7 +6892,7 @@ pub async fn create_workspace_bundle_for_repos(
                 .map(|output| output.workspace.clone())
                 .collect::<Vec<_>>();
             let rollback_errors =
-                rollback_bundle_workspaces(&state, &repo, &rollback_targets).await;
+                rollback_bundle_workspaces(state, &repo, &rollback_targets).await;
             if rollback_errors.is_empty() {
                 return Err(error.to_string());
             }

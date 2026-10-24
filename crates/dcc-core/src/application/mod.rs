@@ -17,6 +17,7 @@ pub mod rewind_conversation;
 pub mod send_turn;
 pub mod start_thread;
 pub mod steer_turn;
+pub mod linked_task;
 pub mod turn_queue;
 
 pub use abort_run::{abort_run, AbortRunInput, AbortRunOutput};
