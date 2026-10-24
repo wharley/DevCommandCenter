@@ -13,6 +13,7 @@ pub mod mcp;
 pub mod mcp_conformance;
 pub mod model_registry;
 pub mod objective;
+pub mod objective_form;
 pub mod project;
 pub mod provider;
 pub mod repository;
