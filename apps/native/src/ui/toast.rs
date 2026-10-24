@@ -25,6 +25,7 @@ pub enum ToastKind {
     Error,
     Success,
     Info,
+    Warning,
 }
 
 struct Toast {
@@ -87,6 +88,20 @@ impl Toaster {
 
     pub fn info(message: impl Into<SharedString>, cx: &mut App) {
         Self::show(ToastKind::Info, message.into(), None, cx);
+    }
+
+    /// sonner's `toast.warning(message, { description })`.
+    pub fn warning_with(
+        message: impl Into<SharedString>,
+        description: impl Into<SharedString>,
+        cx: &mut App,
+    ) {
+        Self::show(
+            ToastKind::Warning,
+            message.into(),
+            Some(description.into()),
+            cx,
+        );
     }
 
     fn show(
@@ -230,6 +245,7 @@ impl Toaster {
             ToastKind::Error => Some("sonner-error"),
             ToastKind::Success => Some("sonner-success"),
             ToastKind::Info => Some("sonner-info"),
+            ToastKind::Warning => Some("sonner-warning"),
         };
         div()
             .id(("toast", id as usize))

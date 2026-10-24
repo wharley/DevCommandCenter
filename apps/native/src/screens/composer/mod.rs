@@ -10,6 +10,7 @@ mod controls;
 mod drafts;
 mod handoff;
 mod mentions;
+mod objective;
 mod picker;
 mod popups;
 mod prompt;
@@ -45,6 +46,8 @@ pub struct ComposerSession {
     pub branch: Option<String>,
     pub usage_limit: Option<dcc_core::domain::usage_limit::SessionUsageLimit>,
     pub goal: Option<dcc_core::domain::goal::SessionGoal>,
+    /// The DCC's own objective (the toolbar's "Objetivo").
+    pub objective: Option<dcc_core::domain::objective::SessionObjective>,
     pub auto_resume: bool,
     pub context: Option<crate::data::conversation::ExecutionContext>,
 }
@@ -89,6 +92,7 @@ pub struct Composer {
     pub(crate) strip_busy: Option<strips::StripAction>,
     /// The execution-mode explainer under the composer.
     pub(crate) mode_open: bool,
+    pub(crate) objective: objective::ObjectiveState,
     _input_events: Subscription,
     _input_changes: Subscription,
 }
@@ -141,6 +145,7 @@ impl Composer {
             picker: picker::PickerState::new(window, cx),
             strip_busy: None,
             mode_open: false,
+            objective: objective::ObjectiveState::new(window, cx),
             _input_events: input_events,
             _input_changes: input_changes,
         }
@@ -166,6 +171,7 @@ impl Composer {
                 .update(cx, |input, cx| input.set_parts(parts, cx));
             self.mention = None;
         }
+        self.sync_objective(switched, cx);
         let disabled = self.session.session_id.is_none();
         let placeholder = if self.plan_mode() {
             cx.t("composer.placeholder.plan")

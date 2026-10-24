@@ -7,7 +7,7 @@ use gpui::{
     div, point, prelude::*, px,
 };
 
-use super::{Busy, Composer, context_rail, controls, picker, popups, strips};
+use super::{Busy, Composer, context_rail, controls, objective, picker, popups, strips};
 use crate::i18n::Translate;
 use crate::project::ProviderIcon;
 use crate::theme::ActiveTheme;
@@ -227,6 +227,9 @@ pub(super) fn render(
                                         .child(popups::attach_menu(composer, cx))
                                         .child(controls::approval_menu(composer, cx))
                                         .child(controls::plan_toggle(composer, cx))
+                                        .children(objective::objective_control(
+                                            composer, window, cx,
+                                        ))
                                         .children(strips::auto_resume_toggle(composer, cx)),
                                 )
                                 .child(

@@ -17,7 +17,7 @@ const ICONS = [
 	"shield-check", "sparkles", "square-terminal", "sticky-note", "trash-2",
 	"wrench", "terminal", "file-pen-line", "file-text", "globe", "list-todo", "plug", "brain",
 	"circle-alert", "circle-dashed", "circle", "corner-down-right", "hourglass", "copy", "file-code-corner",
-	"triangle-alert", "file", "file-image", "file-headphone", "ban", "shield-alert", "arrow-up", "square", "image", "braces", "paperclip", "shield", "shield-check", "clipboard-list", "zap", "star", "play", "target", "folder-git-2",
+	"triangle-alert", "file", "file-image", "file-headphone", "ban", "shield-alert", "arrow-up", "square", "image", "braces", "paperclip", "shield", "shield-check", "clipboard-list", "zap", "star", "play", "target", "folder-git-2", "pause",
 ];
 
 /** Icons the app also draws filled. */
@@ -102,4 +102,5 @@ const sonnerIcon = (name) => {
 writeFileSync(join(out, "sonner-error.svg"), sonnerIcon("ErrorIcon"));
 writeFileSync(join(out, "sonner-success.svg"), sonnerIcon("SuccessIcon"));
 writeFileSync(join(out, "sonner-info.svg"), sonnerIcon("InfoIcon"));
+writeFileSync(join(out, "sonner-warning.svg"), sonnerIcon("WarningIcon"));
 console.log(`wrote ${ICONS.length} icons`);

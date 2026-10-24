@@ -239,6 +239,7 @@ impl ConversationView {
             branch: next.branch.clone(),
             usage_limit: next.usage_limit.clone(),
             goal: next.goal.clone(),
+            objective: next.objective.clone(),
             auto_resume: next.auto_resume,
             context: next.context.clone(),
         };

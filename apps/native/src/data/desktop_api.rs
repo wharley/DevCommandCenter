@@ -10,6 +10,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use dcc_core::domain::objective::{ObjectiveTransition, SessionObjective, SessionObjectiveDraft};
 use dcc_core::domain::provider::ProviderDescriptor;
 use dcc_core::ports::provider::ProviderUserInputAnswer;
 use serde_json::{Value, json};
@@ -264,6 +265,48 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// Creates or rewrites the task's objective; `expected_generation` (the
+    /// one the form was opened from) makes a concurrent edit fail.
+    pub fn set_objective(
+        &self,
+        session_id: &str,
+        draft: &SessionObjectiveDraft,
+        expected_generation: Option<u64>,
+    ) -> Result<Option<SessionObjective>, ApiError> {
+        self.request(
+            "PUT",
+            &format!("/api/v1/sessions/{}/objective", encode(session_id)),
+            Some(&json!({ "draft": draft, "expectedGeneration": expected_generation })),
+        )
+        .map(objective_of)
+    }
+
+    /// Pause, resume or complete the objective.
+    pub fn transition_objective(
+        &self,
+        session_id: &str,
+        transition: ObjectiveTransition,
+        expected_generation: u64,
+    ) -> Result<Option<SessionObjective>, ApiError> {
+        self.post(
+            &format!(
+                "/api/v1/sessions/{}/objective/transition",
+                encode(session_id)
+            ),
+            &json!({ "transition": transition, "expectedGeneration": expected_generation }),
+        )
+        .map(objective_of)
+    }
+
+    pub fn clear_objective(&self, session_id: &str) -> Result<(), ApiError> {
+        self.request(
+            "DELETE",
+            &format!("/api/v1/sessions/{}/objective", encode(session_id)),
+            None,
+        )
+        .map(|_| ())
+    }
+
     /// "Continuar" on a task stopped by its usage limit.
     pub fn resume_after_usage_limit(&self, session_id: &str) -> Result<(), ApiError> {
         self.post(
@@ -330,6 +373,11 @@ fn parse_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
         out.extend_from_slice(rest.get(..size)?);
         rest = rest.get(size + 2..)?;
     }
+}
+
+/// `{objective}` from the objective routes.
+fn objective_of(value: Value) -> Option<SessionObjective> {
+    serde_json::from_value(value.get("objective")?.clone()).ok()
 }
 
 #[cfg(test)]
