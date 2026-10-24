@@ -12,6 +12,7 @@ pub mod git;
 pub mod workspace_actions;
 pub mod workspace_cleanup;
 pub mod workspace_deletion;
+pub mod workspace_file_preview;
 pub mod workspace_git;
 mod git_command;
 mod git_parsing;

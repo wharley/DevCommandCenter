@@ -3653,6 +3653,10 @@ export type WorkspaceGitPathInput = {
 	relativePath: string,
 };
 
+/**
+ *  Which side of a change a preview reads (the index, the worktree, or the
+ *  branch against its base).
+ */
 export type WorkspaceGitPreviewScope = "staged" | "unstaged" | "committed";
 
 export type WorkspaceGitPushInput = {

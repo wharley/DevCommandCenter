@@ -72,3 +72,13 @@ pub struct WorkspaceRemoteBranchDeletionTarget {
     #[serde(default)]
     pub push_url: String,
 }
+
+/// Which side of a change a preview reads (the index, the worktree, or the
+/// branch against its base).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceGitPreviewScope {
+    Staged,
+    Unstaged,
+    Committed,
+}
