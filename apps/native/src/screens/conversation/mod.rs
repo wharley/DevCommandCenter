@@ -228,6 +228,7 @@ impl ConversationView {
             self.list.splice(span.start + 1..span.end + 1, count);
         }
         let session = ComposerSession {
+            task_id: Some(next.task_id.clone()),
             session_id: next.session_id.clone(),
             provider_id: next.provider_id.clone(),
             model: next.model.clone(),

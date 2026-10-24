@@ -20,6 +20,13 @@ pub enum PopoverAlign {
     End,
 }
 
+/// Which side of the trigger the card opens on (`side`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopoverSide {
+    Bottom,
+    Top,
+}
+
 #[derive(IntoElement)]
 pub struct Popover {
     id: ElementId,
@@ -27,6 +34,7 @@ pub struct Popover {
     trigger: AnyElement,
     content: Content,
     align: PopoverAlign,
+    side: PopoverSide,
     side_offset: f32,
     /// `w-72` by default.
     width: f32,
@@ -49,6 +57,7 @@ impl Popover {
             trigger: trigger.into_any_element(),
             content: Box::new(content),
             align: PopoverAlign::Start,
+            side: PopoverSide::Bottom,
             side_offset: 4.0,
             width: 288.0,
             padding: 10.0,
@@ -58,6 +67,11 @@ impl Popover {
 
     pub fn align(mut self, align: PopoverAlign) -> Self {
         self.align = align;
+        self
+    }
+
+    pub fn side(mut self, side: PopoverSide) -> Self {
+        self.side = side;
         self
     }
 
@@ -130,15 +144,31 @@ impl RenderOnce for Popover {
                     }
                 })
                 .child((self.content)(window, cx));
-            let (spot, anchor) = match self.align {
-                PopoverAlign::Start => (div().left_0().bottom_0(), Anchor::TopLeft),
-                PopoverAlign::End => (div().right_0().bottom_0(), Anchor::TopRight),
+            let (spot, anchor, offset) = match (self.side, self.align) {
+                (PopoverSide::Bottom, PopoverAlign::Start) => {
+                    (div().left_0().bottom_0(), Anchor::TopLeft, self.side_offset)
+                }
+                (PopoverSide::Bottom, PopoverAlign::End) => (
+                    div().right_0().bottom_0(),
+                    Anchor::TopRight,
+                    self.side_offset,
+                ),
+                (PopoverSide::Top, PopoverAlign::Start) => (
+                    div().left_0().top_0(),
+                    Anchor::BottomLeft,
+                    -self.side_offset,
+                ),
+                (PopoverSide::Top, PopoverAlign::End) => (
+                    div().right_0().top_0(),
+                    Anchor::BottomRight,
+                    -self.side_offset,
+                ),
             };
             spot.absolute().size_0().child(
                 deferred(
                     anchored()
                         .anchor(anchor)
-                        .offset(point(px(0.0), px(self.side_offset)))
+                        .offset(point(px(0.0), px(offset)))
                         .snap_to_window_with_margin(px(8.0))
                         .child(card),
                 )

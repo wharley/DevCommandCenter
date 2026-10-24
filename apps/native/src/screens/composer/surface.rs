@@ -7,7 +7,8 @@ use gpui::{
     div, point, prelude::*, px,
 };
 
-use super::{Busy, Composer, popups};
+use super::{Busy, Composer, controls, popups};
+use crate::i18n::Translate;
 use crate::project::{ProviderIcon, model_label};
 use crate::theme::ActiveTheme;
 use crate::theme::color::mix_oklab;
@@ -60,6 +61,19 @@ fn model_chip(composer: &Composer, cx: &gpui::App) -> Option<AnyElement> {
                     .text_color(colors.foreground)
                     .child(SharedString::from(compact_model(provider, model))),
             )
+            .when(!composer.effort_levels().is_empty(), |chip| {
+                chip.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(px(12.0))
+                        .line_height(px(16.0))
+                        .text_color(colors.muted_foreground)
+                        .child(format!(
+                            "· {}",
+                            cx.t(&format!("composer.effort.{}", composer.effort_label_id()))
+                        )),
+                )
+            })
             .into_any_element(),
     )
 }
@@ -193,14 +207,15 @@ pub(super) fn render(
                             .items_end()
                             .justify_between()
                             .gap(px(12.0))
-                            // Approval mode and plan mode: screen 3c.
                             .child(
                                 div()
                                     .flex()
                                     .min_w_0()
                                     .items_center()
                                     .gap(px(6.0))
-                                    .child(popups::attach_menu(composer, cx)),
+                                    .child(popups::attach_menu(composer, cx))
+                                    .child(controls::approval_menu(composer, cx))
+                                    .child(controls::plan_toggle(composer, cx)),
                             )
                             .child(
                                 div()
@@ -214,5 +229,6 @@ pub(super) fn render(
                     ),
             ),
         )
+        .children(controls::full_access_dialog(composer, cx))
         .into_any_element()
 }

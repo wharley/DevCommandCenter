@@ -10,6 +10,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use dcc_core::domain::provider::ProviderDescriptor;
 use dcc_core::ports::provider::ProviderUserInputAnswer;
 use serde_json::{Value, json};
 
@@ -36,6 +37,37 @@ impl std::fmt::Display for ApiError {
             Self::Unauthorized => write!(f, "the desktop refused the local key"),
             Self::Failed(message) => write!(f, "{message}"),
         }
+    }
+}
+
+/// How the turn runs, as the composer chose it; `None` leaves the session's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TurnOptions {
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// `read_only` | `ask` | `auto` | `full_access`
+    pub approval_policy: Option<String>,
+    pub plan_mode: bool,
+    pub fast_mode: bool,
+}
+
+impl TurnOptions {
+    fn write_into(&self, body: &mut Value) {
+        let Some(map) = body.as_object_mut() else {
+            return;
+        };
+        let mut set = |key: &str, value: Option<&String>| {
+            if let Some(value) = value {
+                map.insert(key.into(), Value::String(value.clone()));
+            }
+        };
+        set("providerId", self.provider_id.as_ref());
+        set("model", self.model.as_ref());
+        set("effort", self.effort.as_ref());
+        set("approvalPolicy", self.approval_policy.as_ref());
+        map.insert("planMode".into(), Value::Bool(self.plan_mode));
+        map.insert("fastMode".into(), Value::Bool(self.fast_mode));
     }
 }
 
@@ -88,14 +120,22 @@ impl DesktopApi {
     }
 
     fn post(&self, path: &str, body: &Value) -> Result<Value, ApiError> {
+        self.request("POST", path, Some(body))
+    }
+
+    fn get(&self, path: &str) -> Result<Value, ApiError> {
+        self.request("GET", path, None)
+    }
+
+    fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, ApiError> {
         let address = SocketAddr::from(([127, 0, 0, 1], self.port));
         let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
             .map_err(|_| ApiError::DesktopClosed)?;
         stream.set_read_timeout(Some(IO_TIMEOUT)).ok();
         stream.set_write_timeout(Some(IO_TIMEOUT)).ok();
-        let payload = body.to_string();
+        let payload = body.map(Value::to_string).unwrap_or_default();
         let request = format!(
-            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-API-Key: {key}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n{payload}",
+            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-API-Key: {key}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n{payload}",
             port = self.port,
             key = self.api_key,
             length = payload.len(),
@@ -161,12 +201,24 @@ impl DesktopApi {
         session_id: &str,
         prompt: &str,
         retry_of_turn_id: Option<&str>,
+        options: &TurnOptions,
     ) -> Result<(), ApiError> {
+        let mut body =
+            json!({ "sessionId": session_id, "prompt": prompt, "retryOfTurnId": retry_of_turn_id });
+        options.write_into(&mut body);
         self.post(
             &format!("/api/v1/sessions/{}/turns", encode(session_id)),
-            &json!({ "sessionId": session_id, "prompt": prompt, "retryOfTurnId": retry_of_turn_id }),
+            &body,
         )
         .map(|_| ())
+    }
+
+    /// The providers the desktop runs, as its own composer sees them (the
+    /// phone's catalog: models, effort levels, approval modes, health).
+    pub fn providers(&self) -> Result<Vec<ProviderDescriptor>, ApiError> {
+        let value = self.get("/api/v1/mobile/catalog")?;
+        serde_json::from_value(value.get("providers").cloned().unwrap_or(Value::Null))
+            .map_err(|error| ApiError::Failed(error.to_string()))
     }
 
     /// Stops the running turn (the composer's stop button).
@@ -338,6 +390,30 @@ mod tests {
             DesktopApi::new(free, "k").respond_permission("s", "p", true),
             Err(ApiError::DesktopClosed)
         );
+    }
+
+    #[test]
+    fn turns_carry_the_composer_choices() {
+        let (port, server) = serve("200 OK", "{}");
+        let options = TurnOptions {
+            effort: Some("high".into()),
+            approval_policy: Some("full_access".into()),
+            plan_mode: true,
+            ..TurnOptions::default()
+        };
+        DesktopApi::new(port, "k")
+            .send_turn("s", "oi", None, &options)
+            .unwrap();
+        let request = server.join().unwrap();
+        for part in [
+            r#""effort":"high""#,
+            r#""approvalPolicy":"full_access""#,
+            r#""planMode":true"#,
+            r#""fastMode":false"#,
+        ] {
+            assert!(request.contains(part), "{part} in {request}");
+        }
+        assert!(!request.contains("providerId"));
     }
 
     #[test]

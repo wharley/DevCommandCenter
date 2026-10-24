@@ -5,10 +5,12 @@
 //! menu, a pasted image, a drop, or `@arquivo`.
 
 mod attachments;
+mod controls;
 mod drafts;
 mod mentions;
 mod popups;
 mod prompt;
+mod settings;
 mod surface;
 #[cfg(test)]
 mod tests;
@@ -27,6 +29,8 @@ const INPUT_MAX_HEIGHT: f32 = 240.0;
 /// What the conversation tells the composer about the open session.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ComposerSession {
+    /// The task (workspace) the conversation belongs to.
+    pub task_id: Option<String>,
     pub session_id: Option<String>,
     pub provider_id: Option<String>,
     pub model: Option<String>,
@@ -60,6 +64,14 @@ pub struct Composer {
     pub(crate) mention: Option<mentions::MentionMenu>,
     pub(crate) files: Option<mentions::FileList>,
     files_loading: bool,
+    /// The desktop's providers, as its composer sees them.
+    pub(crate) catalog: Option<std::sync::Arc<Vec<dcc_core::domain::provider::ProviderDescriptor>>>,
+    pub(crate) catalog_at: Option<std::time::Instant>,
+    catalog_loading: bool,
+    pub(crate) settings: crate::data::composer_settings::ComposerSettings,
+    pub(crate) approval_menu_open: bool,
+    /// "Ativar acesso completo?" waits for an answer.
+    pub(crate) confirm_full_access: bool,
     _input_events: Subscription,
     _input_changes: Subscription,
 }
@@ -99,6 +111,12 @@ impl Composer {
             mention: None,
             files: None,
             files_loading: false,
+            catalog: None,
+            catalog_at: None,
+            catalog_loading: false,
+            settings: settings::load_settings(),
+            approval_menu_open: false,
+            confirm_full_access: false,
             _input_events: input_events,
             _input_changes: input_changes,
         }
@@ -125,8 +143,18 @@ impl Composer {
             self.mention = None;
         }
         let disabled = self.session.session_id.is_none();
-        self.input
-            .update(cx, |input, cx| input.set_disabled(disabled, cx));
+        let placeholder = if self.plan_mode() {
+            cx.t("composer.placeholder.plan")
+        } else {
+            cx.t("composer.placeholder.default")
+        };
+        self.input.update(cx, |input, cx| {
+            input.set_disabled(disabled, cx);
+            input.set_placeholder(placeholder, cx);
+        });
+        if !disabled {
+            self.refresh_catalog(cx);
+        }
         cx.notify();
     }
 
@@ -239,6 +267,11 @@ impl Composer {
             return;
         };
         let resume_first = self.session.aborted && retry_of.is_some();
+        let options = if retry_of.is_some() {
+            self.retry_options(&prompt)
+        } else {
+            self.turn_options(&prompt)
+        };
         let endpoint = self.endpoint.clone();
         let failure = if retry_of.is_some() {
             cx.t("conversation.message.retryFailed")
@@ -255,7 +288,7 @@ impl Composer {
                     if resume_first {
                         api.resume(&session)?;
                     }
-                    api.send_turn(&session, &prompt, retry_of.as_deref())
+                    api.send_turn(&session, &prompt, retry_of.as_deref(), &options)
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
