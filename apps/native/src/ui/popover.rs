@@ -17,6 +17,8 @@ type OnOpenChange = Rc<dyn Fn(bool, &mut Window, &mut App)>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PopoverAlign {
     Start,
+    /// Under (or over) the middle of the trigger (`align="center"`).
+    Center,
     End,
 }
 
@@ -148,6 +150,16 @@ impl RenderOnce for Popover {
                 (PopoverSide::Bottom, PopoverAlign::Start) => {
                     (div().left_0().bottom_0(), Anchor::TopLeft, self.side_offset)
                 }
+                (PopoverSide::Bottom, PopoverAlign::Center) => (
+                    div().left(gpui::relative(0.5)).bottom_0(),
+                    Anchor::TopCenter,
+                    self.side_offset,
+                ),
+                (PopoverSide::Top, PopoverAlign::Center) => (
+                    div().left(gpui::relative(0.5)).top_0(),
+                    Anchor::BottomCenter,
+                    -self.side_offset,
+                ),
                 (PopoverSide::Bottom, PopoverAlign::End) => (
                     div().right_0().bottom_0(),
                     Anchor::TopRight,

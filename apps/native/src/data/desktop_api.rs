@@ -352,6 +352,23 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// "Nova tarefa" in a project: the desktop's own creation (linked
+    /// folders, setup report). Answers the new task and how its setup went.
+    pub fn create_task(&self, request: &CreateTaskRequest) -> Result<CreatedTask, ApiError> {
+        let value = self.post(
+            "/api/v1/workspaces/create",
+            &json!({
+                "projectId": request.project_id,
+                "workspaceRoot": request.workspace_root,
+                "baseBranch": request.base_branch,
+                "isolationMode": if request.worktree { "protectedWorktree" } else { "localDirect" },
+                "includeLinkedFolders": request.include_linked_folders,
+                "bundleName": request.bundle_name,
+            }),
+        )?;
+        serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
     /// Creates or rewrites the task's objective; `expected_generation` (the
     /// one the form was opened from) makes a concurrent edit fail.
     pub fn set_objective(
@@ -460,6 +477,29 @@ fn parse_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
         out.extend_from_slice(rest.get(..size)?);
         rest = rest.get(size + 2..)?;
     }
+}
+
+/// What "Nova tarefa" sends for a project.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateTaskRequest {
+    pub project_id: String,
+    pub workspace_root: String,
+    pub base_branch: String,
+    /// The "Worktree" checkbox: a protected worktree, else the checkout itself.
+    pub worktree: bool,
+    pub include_linked_folders: bool,
+    /// The name of a task over several projects.
+    pub bundle_name: String,
+}
+
+/// The task the desktop created, with its setup outcome.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedTask {
+    pub workspace_id: String,
+    pub setup_report: dcc_core::domain::workspace::WorkspaceSetupReport,
+    #[serde(default)]
+    pub setup_hints: Vec<crate::data::setup_report::SetupHint>,
 }
 
 /// `{queue}` from the queue routes.

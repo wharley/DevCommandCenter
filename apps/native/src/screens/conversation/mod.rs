@@ -51,6 +51,8 @@ type PacedProse = (paced::Paced, usize, Rc<Vec<Block>>);
 
 pub struct ConversationView {
     pub(crate) composer: Entity<Composer>,
+    /// A task just created: the composer takes the focus at the next frame.
+    focus_composer: bool,
     _composer_events: gpui::Subscription,
     task_id: Option<String>,
     wanted_session: Option<String>,
@@ -95,6 +97,7 @@ impl ConversationView {
         });
         Self {
             composer,
+            focus_composer: false,
             _composer_events: composer_events,
             task_id: None,
             wanted_session: None,
@@ -152,6 +155,12 @@ impl ConversationView {
         let (wake, woken) = futures::channel::mpsc::unbounded();
         self.refresh_wake = Some(wake);
         self._refresh = Some(self.refresh_loop(woken, cx));
+        cx.notify();
+    }
+
+    /// The next frame focuses the composer (a task just created).
+    pub fn focus_composer_soon(&mut self, cx: &mut Context<Self>) {
+        self.focus_composer = true;
         cx.notify();
     }
 
@@ -455,8 +464,12 @@ pub(crate) fn time_ago(
 }
 
 impl Render for ConversationView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport_width = f32::from(self.list.viewport_bounds().size.width);
+        if std::mem::take(&mut self.focus_composer) {
+            let handle = gpui::Focusable::focus_handle(self.composer.read(cx).input.read(cx), cx);
+            window.focus(&handle, cx);
+        }
         let muted = cx.theme().colors.muted_foreground;
         let entity = cx.entity();
         let empty = self.data.as_ref().is_none_or(|data| data.rows.is_empty());

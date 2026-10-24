@@ -16,6 +16,8 @@ type OnToggle = Box<dyn Fn(bool, &mut Window, &mut App) + 'static>;
 #[derive(IntoElement)]
 pub struct Checkbox {
     id: ElementId,
+    /// The side: 16px (`size-4`) unless set (`size-3.5`).
+    side: f32,
     checked: bool,
     disabled: bool,
     on_toggle: Option<OnToggle>,
@@ -25,6 +27,7 @@ impl Checkbox {
     pub fn new(id: impl Into<ElementId>, checked: bool) -> Self {
         Self {
             id: id.into(),
+            side: 16.0,
             checked,
             disabled: false,
             on_toggle: None,
@@ -33,6 +36,11 @@ impl Checkbox {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    pub fn side(mut self, side: f32) -> Self {
+        self.side = side;
         self
     }
 
@@ -53,8 +61,8 @@ impl RenderOnce for Checkbox {
             .flex_shrink_0()
             .items_center()
             .justify_center()
-            .size(px(16.0))
-            .rounded(px(4.0))
+            .size(px(self.side))
+            .rounded(px(self.side / 4.0))
             .border_1()
             .border_color(if checked {
                 colors.primary
@@ -75,7 +83,7 @@ impl RenderOnce for Checkbox {
                 })
             })
             .when(checked, |box_| {
-                box_.child(Icon::new("check").size(12.0).stroke(3.0))
+                box_.child(Icon::new("check").size(self.side * 0.75).stroke(3.0))
             })
     }
 }

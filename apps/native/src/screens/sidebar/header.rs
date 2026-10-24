@@ -1,9 +1,7 @@
 //! Top bar: the DCC mark, the code column toggle and the collapse button
 //! (`data-slot="window-safe-top"`).
 
-use std::sync::{Arc, OnceLock};
-
-use gpui::{Context, Image, ImageFormat, div, img, prelude::*, px};
+use gpui::{Context, div, img, prelude::*, px};
 
 use super::{Sidebar, SidebarEvent};
 use crate::i18n::Translate;
@@ -39,17 +37,6 @@ pub fn code_column_toggle(
     .into_any_element()
 }
 
-/// The desktop's own `public/dcc-glyph.svg` (gradients, so drawn as an image).
-fn glyph() -> Arc<Image> {
-    static GLYPH: OnceLock<Arc<Image>> = OnceLock::new();
-    GLYPH
-        .get_or_init(|| {
-            let svg = include_bytes!("../../../../../public/dcc-glyph.svg");
-            Arc::new(Image::from_bytes(ImageFormat::Svg, svg.to_vec()))
-        })
-        .clone()
-}
-
 pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
     let colors = &cx.theme().colors;
     let has_selection = sidebar.state.selected_task_id.is_some();
@@ -66,7 +53,11 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
                 .min_w_0()
                 .items_center()
                 .gap(px(6.0))
-                .child(img(glyph()).size(px(18.0)).flex_shrink_0())
+                .child(
+                    img(crate::assets::dcc_glyph())
+                        .size(px(18.0))
+                        .flex_shrink_0(),
+                )
                 .child(
                     div()
                         .font_weight(gpui::FontWeight::SEMIBOLD)

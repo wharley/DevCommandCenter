@@ -36,6 +36,8 @@ pub struct ProjectGlyph {
     seed: Option<String>,
     size: GlyphSize,
     tile: Option<f32>,
+    /// Overrides the corner radius (`size-9 rounded-xl`).
+    radius: Option<gpui::Pixels>,
     /// Shows the second frame (the parent flips it while an agent runs).
     moving: bool,
 }
@@ -48,6 +50,7 @@ impl ProjectGlyph {
             seed: seed.map(str::to_string),
             size: GlyphSize::Small,
             tile: None,
+            radius: None,
             moving: false,
         }
     }
@@ -60,6 +63,11 @@ impl ProjectGlyph {
     /// Overrides the tile side, like the rail's `size-[18px]`.
     pub fn tile(mut self, side: f32) -> Self {
         self.tile = Some(side);
+        self
+    }
+
+    pub fn radius(mut self, radius: gpui::Pixels) -> Self {
+        self.radius = Some(radius);
         self
     }
 
@@ -82,6 +90,7 @@ impl RenderOnce for ProjectGlyph {
             GlyphSize::Large => (36.0, theme.radius.xl, 18.0),
         };
         let tile = self.tile.unwrap_or(tile);
+        let radius = self.radius.unwrap_or(radius);
         // 80% of the content box (inside the 1px border), as the SVG's width.
         let content = (tile - 2.0) * 0.8;
 

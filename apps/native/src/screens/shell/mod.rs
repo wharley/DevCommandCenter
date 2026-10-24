@@ -14,11 +14,19 @@ use gpui::{
 
 use crate::prefs::{self, Prefs};
 use crate::screens::conversation::ConversationView;
-use crate::screens::sidebar::{Sidebar, SidebarEvent};
+use crate::screens::new_task::{NewTaskEvent, NewTaskView};
+use crate::screens::sidebar::{NavPage, Sidebar, SidebarEvent};
 use crate::theme::{ActiveTheme, Theme};
 use crate::ui::{ResizeHandle, Toaster};
 use layout::ShellLayout;
 use regions::{MainRegion, SidebarRegion};
+
+/// What the main area shows (`globalSurface`, else the selected task).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Surface {
+    Conversation,
+    NewTask,
+}
 
 /// Drag payload of the sidebar separator.
 #[derive(Clone, Copy)]
@@ -30,8 +38,14 @@ pub struct Shell {
     prefs_path: PathBuf,
     sidebar: Entity<Sidebar>,
     conversation: Entity<ConversationView>,
+    new_task: Entity<NewTaskView>,
+    pub(crate) surface: Surface,
+    /// The task the desktop just created: its composer takes the focus.
+    focus_on_open: Option<String>,
     _appearance: Subscription,
     _sidebar_events: Subscription,
+    _sidebar_data: Subscription,
+    _new_task_events: Subscription,
 }
 
 impl Shell {
@@ -57,14 +71,56 @@ impl Shell {
         });
         let sidebar_events = cx.subscribe(&sidebar, Self::on_sidebar_event);
         let conversation = cx.new(|cx| ConversationView::new(window, cx));
+        let new_task = cx.new(|_| NewTaskView::new());
+        // The new-task screen lists the projects the sidebar loads.
+        let sidebar_data = cx.observe(&sidebar, |this, sidebar, cx| {
+            let sidebar = sidebar.read(cx);
+            let (projects, counts) = (
+                sidebar.projects().to_vec(),
+                sidebar.linked_folder_counts().clone(),
+            );
+            this.new_task.update(cx, |new_task, cx| {
+                new_task.set_projects(&projects, &counts, cx)
+            });
+        });
+        let new_task_events = cx.subscribe(&new_task, Self::on_new_task_event);
         Self {
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
             prefs,
             prefs_path,
             sidebar,
             conversation,
+            new_task,
+            surface: Surface::Conversation,
+            focus_on_open: None,
             _appearance: appearance,
             _sidebar_events: sidebar_events,
+            _sidebar_data: sidebar_data,
+            _new_task_events: new_task_events,
+        }
+    }
+
+    fn show(&mut self, surface: Surface, cx: &mut Context<Self>) {
+        self.surface = surface;
+        let page = (surface == Surface::NewTask).then_some(NavPage::NewTask);
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.set_current_page(page, cx));
+        cx.notify();
+    }
+
+    fn on_new_task_event(
+        &mut self,
+        _: Entity<NewTaskView>,
+        event: &NewTaskEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            NewTaskEvent::Created(task_id) => {
+                self.focus_on_open = Some(task_id.clone());
+                let task_id = task_id.clone();
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.open_when_listed(task_id, cx));
+            }
         }
     }
 
@@ -86,9 +142,32 @@ impl Shell {
             }
             SidebarEvent::OpenTask(task_id) => {
                 let task_id = task_id.clone();
-                self.conversation
-                    .update(cx, |conversation, cx| conversation.open(&task_id, None, cx));
-                cx.notify();
+                let focus = self.focus_on_open.as_deref() == Some(task_id.as_str());
+                if focus {
+                    self.focus_on_open = None;
+                }
+                self.conversation.update(cx, |conversation, cx| {
+                    conversation.open(&task_id, None, cx);
+                    if focus {
+                        conversation.focus_composer_soon(cx);
+                    }
+                });
+                self.show(Surface::Conversation, cx);
+            }
+            SidebarEvent::NewTask => self.show(Surface::NewTask, cx),
+            SidebarEvent::NewTaskInProject { root_path, .. } => {
+                let project = sidebar
+                    .read(cx)
+                    .projects()
+                    .iter()
+                    .find(|project| project.root_path == *root_path)
+                    .cloned();
+                if let Some(project) = project {
+                    // `handleQuickCreateTask(repository)`: protected, with the
+                    // linked folders.
+                    self.new_task
+                        .update(cx, |new_task, cx| new_task.create(&project, true, true, cx));
+                }
             }
             SidebarEvent::OpenSession {
                 task_id,
@@ -98,7 +177,7 @@ impl Shell {
                 self.conversation.update(cx, |conversation, cx| {
                     conversation.open(&task_id, Some(session_id), cx)
                 });
-                cx.notify();
+                self.show(Surface::Conversation, cx);
             }
             _ => self.save_layout(cx),
         }
@@ -180,7 +259,10 @@ impl Render for Shell {
                             .ok();
                     }),
             )
-            .child(MainRegion::default().child(self.conversation.clone()))
+            .child(MainRegion::default().child(match self.surface {
+                Surface::Conversation => self.conversation.clone().into_any_element(),
+                Surface::NewTask => self.new_task.clone().into_any_element(),
+            }))
             .children(Toaster::handle(cx))
     }
 }

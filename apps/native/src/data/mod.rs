@@ -22,6 +22,7 @@ pub mod provider_catalog;
 pub mod rail;
 pub mod recap;
 pub mod seen;
+pub mod setup_report;
 pub mod snooze;
 pub mod tasks;
 pub mod time;

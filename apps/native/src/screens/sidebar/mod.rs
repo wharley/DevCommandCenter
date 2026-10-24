@@ -104,6 +104,10 @@ pub struct Sidebar {
     mascot_frame: bool,
     /// The page on screen a navigation row stands for.
     current_page: Option<NavPage>,
+    /// A task just created: opened as soon as the list has it.
+    pending_open: Option<String>,
+    /// The first load opens the first task, like the desktop does.
+    opened_first: bool,
     /// Tasks whose latest result has not been opened ("New result").
     unseen_results: HashSet<String>,
     /// Rows whose restore, complete or hold is in flight.
@@ -164,6 +168,8 @@ impl Sidebar {
             items,
             mascot_frame: false,
             current_page: None,
+            pending_open: None,
+            opened_first: false,
             unseen_results: HashSet::new(),
             pending: HashMap::new(),
             row_menu_open: None,
@@ -313,7 +319,53 @@ impl Sidebar {
         self.sync_items();
         self.refresh_completed_scan(cx);
         self.notice_section_moves(cx);
+        self.open_listed(cx);
         cx.notify();
+    }
+
+    /// A pending task once it is listed; on the first load, the first open
+    /// task in the rail's order (`workspaceList.find(isWorkspaceSelectable)`).
+    fn open_listed(&mut self, cx: &mut Context<Self>) {
+        if let Some(task_id) = self.pending_open.clone()
+            && self.state.task(&task_id).is_some()
+        {
+            self.pending_open = None;
+            self.opened_first = true;
+            self.open_task(&task_id, cx);
+            return;
+        }
+        if self.opened_first || self.state.selected_task_id.is_some() {
+            self.opened_first = true;
+            return;
+        }
+        self.opened_first = true;
+        let first = self.items.iter().find_map(|item| match item {
+            RailItem::Row { task_id, .. } => self
+                .state
+                .task(task_id)
+                .filter(|task| task.status.is_selectable())
+                .map(|task| task.id.clone()),
+            _ => None,
+        });
+        if let Some(task_id) = first {
+            self.open_task(&task_id, cx);
+        }
+    }
+
+    /// Reads the list now and opens `task_id` once it is there (a task the
+    /// desktop just created).
+    pub fn open_when_listed(&mut self, task_id: String, cx: &mut Context<Self>) {
+        self.pending_open = Some(task_id);
+        self._refresh = Self::refresh_loop(cx);
+    }
+
+    pub fn projects(&self) -> &[Project] {
+        &self.state.data.projects
+    }
+
+    /// How many folders each project links, by repository id.
+    pub fn linked_folder_counts(&self) -> &HashMap<String, usize> {
+        &self.state.data.linked_folder_counts
     }
 
     /// Updates the list in place: only the changed span is spliced, so live

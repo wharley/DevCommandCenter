@@ -14,6 +14,8 @@ pub mod markdown;
 pub mod prefs;
 pub mod project;
 pub mod screens;
+#[cfg(test)]
+mod test_support;
 pub mod theme;
 pub mod ui;
 

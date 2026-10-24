@@ -86,6 +86,20 @@ impl Toaster {
         Self::show(ToastKind::Success, message.into(), None, cx);
     }
 
+    /// sonner's `toast.success(message, { description })`.
+    pub fn success_with(
+        message: impl Into<SharedString>,
+        description: impl Into<SharedString>,
+        cx: &mut App,
+    ) {
+        Self::show(
+            ToastKind::Success,
+            message.into(),
+            Some(description.into()),
+            cx,
+        );
+    }
+
     pub fn info(message: impl Into<SharedString>, cx: &mut App) {
         Self::show(ToastKind::Info, message.into(), None, cx);
     }
@@ -110,6 +124,7 @@ impl Toaster {
         description: Option<SharedString>,
         cx: &mut App,
     ) {
+        let description = description.filter(|description| !description.is_empty());
         match Self::handle(cx) {
             Some(toaster) => toaster.update(cx, |toaster, cx| {
                 toaster.push(kind, message, description, cx)

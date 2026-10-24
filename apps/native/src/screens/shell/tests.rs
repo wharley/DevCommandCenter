@@ -87,3 +87,22 @@ fn a_collapsed_sidebar_opens_as_the_rail(cx: &mut TestAppContext) {
         assert_eq!(shell.layout.sidebar_width, 336.0);
     });
 }
+
+#[gpui::test]
+fn new_task_shows_its_screen_and_a_task_brings_the_conversation_back(cx: &mut TestAppContext) {
+    use super::Surface;
+    use crate::screens::sidebar::SidebarEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::NewTask));
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, _| assert_eq!(shell.surface, Surface::NewTask));
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("new-task").is_some());
+    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::OpenTask("any".into())));
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, _| {
+        assert_eq!(shell.surface, Surface::Conversation)
+    });
+}
