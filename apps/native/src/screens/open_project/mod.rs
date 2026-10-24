@@ -3,6 +3,7 @@
 //! projects it brings, the worktree choice and an optional name. The
 //! desktop creates the task; the dialog then closes and the task opens.
 
+mod sources;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -55,19 +56,56 @@ pub enum OpenProjectEvent {
     Closed,
 }
 
-/// How the dialog was asked for.
+/// `WorkspaceCreationMode`
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DialogMode {
+    #[default]
+    Open,
+    /// "Clone from URL".
+    Clone,
+}
+
+/// The project the dialog was opened from ("Abrir branch" on its menu).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepositoryContext {
+    pub project_id: String,
+    pub workspace_root: String,
+    pub label: String,
+}
+
+/// `WorkspaceStart`: from a base, or on an existing branch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+    New,
+    Branch,
+}
+
+/// How the dialog was asked for.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OpenRequest {
+    pub mode: DialogMode,
     /// "Selecionar vários projetos…": the project list starts open.
     pub multi: bool,
     pub worktree: bool,
     /// "Abrir outro projeto…": straight to the folder picker.
     pub pick_folder: bool,
+    pub context: Option<RepositoryContext>,
 }
 
 pub struct OpenProjectDialog {
     pub(crate) model: OpenProjectModel,
+    pub(crate) mode: DialogMode,
+    pub(crate) context: Option<RepositoryContext>,
+    pub(crate) start: Start,
     pub(crate) multi: bool,
+    /// Clone: the repository URL, the project id and the optional base.
+    pub(crate) repository_url: Entity<TextInput>,
+    pub(crate) project_id: Entity<TextInput>,
+    pub(crate) clone_base: Entity<TextInput>,
+    /// Branch: the URL and, once validated, what it points at.
+    pub(crate) source_url: Entity<TextInput>,
+    pub(crate) resolution: Option<(String, crate::data::desktop_api::SourceResolution)>,
+    pub(crate) resolving: bool,
     pub(crate) name: Entity<TextInput>,
     /// The repository path typed by hand when no project is listed.
     pub(crate) root: Entity<TextInput>,
@@ -87,22 +125,71 @@ impl OpenProjectDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let open = request.mode == DialogMode::Open;
+        // `initialTaskRepository(repositories, repositoryContext.workspaceRoot, last)`.
+        let first_root = request
+            .context
+            .as_ref()
+            .map(|context| context.workspace_root.clone())
+            .or_else(read_last_root);
         let model = OpenProjectModel::new(
             projects,
             linked,
-            request.multi,
+            open && request.multi,
             request.worktree,
-            read_last_root().as_deref(),
-            request.pick_folder,
+            first_root.as_deref(),
+            request.pick_folder || !open,
         );
         let placeholder = cx.t("workspaceDialog.defaultsFromBranch");
         let name = cx.new(|cx| TextInput::new(window, cx).with_placeholder(placeholder));
-        let root = cx.new(|cx| TextInput::new(window, cx).with_placeholder("/path/to/git/repo"));
+        let root_hint = if open {
+            "/path/to/git/repo"
+        } else {
+            "/path/to/clone/destination"
+        };
+        let root = cx.new(|cx| TextInput::new(window, cx).with_placeholder(root_hint));
+        let repository_url = cx.new(|cx| {
+            TextInput::new(window, cx).with_placeholder("https://github.com/org/repo.git")
+        });
+        let project_id = cx.new(|cx| TextInput::new(window, cx).with_placeholder("dcc-demo"));
+        let base_hint = cx.t("workspaceDialog.autoDetectPlaceholder");
+        let clone_base = cx.new(|cx| TextInput::new(window, cx).with_placeholder(base_hint));
+        let source_hint = cx.t("workspaceDialog.sourceUrlPlaceholder");
+        let source_url = cx.new(|cx| TextInput::new(window, cx).with_placeholder(source_hint));
+        let refresh = |_: &mut Self,
+                       _: &Entity<TextInput>,
+                       event: &TextInputEvent,
+                       _: &mut Window,
+                       cx: &mut Context<Self>| {
+            if *event == TextInputEvent::Changed {
+                cx.notify();
+            }
+        };
         let events = vec![
+            cx.subscribe_in(&repository_url, window, refresh),
+            cx.subscribe_in(&project_id, window, refresh),
+            cx.subscribe_in(&clone_base, window, refresh),
+            // A changed URL needs validating again.
+            cx.subscribe_in(
+                &source_url,
+                window,
+                |dialog, _, event: &TextInputEvent, _, cx| {
+                    if *event == TextInputEvent::Changed {
+                        dialog.resolution = None;
+                        cx.notify();
+                    }
+                },
+            ),
             cx.subscribe_in(
                 &root,
                 window,
                 |dialog, input, event: &TextInputEvent, _, cx| {
+                    if dialog.mode == DialogMode::Clone {
+                        if *event == TextInputEvent::Changed {
+                            cx.notify();
+                        }
+                        return;
+                    }
                     if matches!(event, TextInputEvent::Submitted | TextInputEvent::Blurred) {
                         let path = input.read(cx).text().trim().to_string();
                         if !path.is_empty() && path != dialog.model.workspace_root {
@@ -117,9 +204,23 @@ impl OpenProjectDialog {
                 }
             }),
         ];
+        let start = if request.context.is_some() && open {
+            Start::Branch
+        } else {
+            Start::New
+        };
         let mut dialog = Self {
             model,
+            mode: request.mode,
+            context: request.context.clone().filter(|_| open),
+            start,
             multi: request.multi,
+            repository_url,
+            project_id,
+            clone_base,
+            source_url,
+            resolution: None,
+            resolving: false,
             name,
             root,
             busy: false,
@@ -127,10 +228,10 @@ impl OpenProjectDialog {
             _events: events,
         };
         let root = dialog.model.workspace_root.clone();
-        if !root.is_empty() {
+        if open && !root.is_empty() {
             dialog.load_branches(root, cx);
         }
-        if request.pick_folder {
+        if open && request.pick_folder {
             dialog.pick_folder(cx);
         }
         dialog
@@ -160,18 +261,28 @@ impl OpenProjectDialog {
 
     /// "Outra pasta" / "Escolher pasta".
     pub(crate) fn pick_folder(&mut self, cx: &mut Context<Self>) {
+        let clone = self.mode == DialogMode::Clone;
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some(cx.t("workspaceDialog.pickFolderRepo")),
+            prompt: Some(cx.t(if clone {
+                "workspaceDialog.pickFolderClone"
+            } else {
+                "workspaceDialog.pickFolderRepo"
+            })),
         });
         cx.spawn(async move |this, cx| {
             let picked = paths.await;
             let _ = this.update(cx, |dialog, cx| match picked {
                 Ok(Ok(Some(paths))) => {
                     if let Some(path) = paths.into_iter().next() {
-                        dialog.use_folder(path.to_string_lossy().into_owned(), cx);
+                        let path = path.to_string_lossy().into_owned();
+                        if clone {
+                            dialog.clone_destination(path, cx);
+                        } else {
+                            dialog.use_folder(path, cx);
+                        }
                     }
                 }
                 Ok(Ok(None)) => {}
@@ -216,6 +327,12 @@ impl OpenProjectDialog {
         if self.busy {
             return;
         }
+        if self.mode == DialogMode::Clone {
+            return self.submit_clone(cx);
+        }
+        if self.is_source() {
+            return self.submit_source(cx);
+        }
         let name = self.name.read(cx).text().to_string();
         let Some(submission) = self.model.submission(&name, &cx.t("sidebar.newWorkspace")) else {
             return;
@@ -258,7 +375,7 @@ impl OpenProjectDialog {
                     Ok((created, remembered)) => {
                         let id = match created {
                             Created::Single(task) => {
-                                crate::screens::new_task::notify(&task, cx);
+                                crate::screens::new_task::notify(&task, false, cx);
                                 task.workspace_id
                             }
                             Created::Bundle { id, count } => {

@@ -151,7 +151,7 @@ impl NewTaskView {
                 this.pending = None;
                 match result {
                     Ok(created) => {
-                        notify(&created, cx);
+                        notify(&created, false, cx);
                         cx.emit(NewTaskEvent::Created(created.workspace_id));
                     }
                     Err(ApiError::DesktopClosed) => {
@@ -177,8 +177,8 @@ impl Default for NewTaskView {
 }
 
 /// `notifyWorkspaceCreationResult`: created, with how its setup went.
-pub(crate) fn notify(created: &CreatedTask, cx: &mut gpui::App) {
-    let notice = creation_notice(&created.setup_report, &created.setup_hints);
+pub(crate) fn notify(created: &CreatedTask, clone: bool, cx: &mut gpui::App) {
+    let notice = creation_notice(&created.setup_report, &created.setup_hints, clone);
     let title = cx.t(notice.title_key);
     let description: Option<SharedString> =
         notice.description.map(|description| match description {

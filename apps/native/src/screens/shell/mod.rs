@@ -1,6 +1,7 @@
 //! The window's frame: sidebar, resize separator and main area
 //! (`App.tsx` root `<main>`). Owns the layout and follows the OS theme.
 
+mod bootstrap;
 pub mod layout;
 mod regions;
 #[cfg(test)]
@@ -43,6 +44,8 @@ pub struct Shell {
     pub(crate) surface: Surface,
     /// The task the desktop just created: its composer takes the focus.
     focus_on_open: Option<String>,
+    /// "Provedor atual" on the no-task screen, read when it shows.
+    bootstrap_provider: Option<(String, Option<String>)>,
     /// "Abrir projeto", while open.
     open_project: Option<(Entity<OpenProjectDialog>, Subscription)>,
     _appearance: Subscription,
@@ -82,6 +85,9 @@ impl Shell {
                 sidebar.projects().to_vec(),
                 sidebar.linked_folders().clone(),
             );
+            if sidebar.has_open_task() == Some(false) && this.bootstrap_provider.is_none() {
+                this.bootstrap_provider = bootstrap::current_provider();
+            }
             this.new_task.update(cx, |new_task, cx| {
                 new_task.set_projects(&projects, &linked, cx)
             });
@@ -97,6 +103,7 @@ impl Shell {
             surface: Surface::Conversation,
             focus_on_open: None,
             open_project: None,
+            bootstrap_provider: None,
             _appearance: appearance,
             _sidebar_events: sidebar_events,
             _sidebar_data: sidebar_data,
@@ -131,12 +138,31 @@ impl Shell {
                         multi: *multi,
                         worktree: !*multi || *worktree,
                         pick_folder: !*multi,
+                        ..OpenRequest::default()
                     },
                     window,
                     cx,
                 );
             }
         }
+    }
+
+    /// The no-task screen's "Abrir projeto" and "Clone from URL".
+    fn open_from_bootstrap(&mut self, clone: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let mode = if clone {
+            crate::screens::open_project::DialogMode::Clone
+        } else {
+            crate::screens::open_project::DialogMode::Open
+        };
+        self.open_project_dialog(
+            OpenRequest {
+                mode,
+                worktree: true,
+                ..OpenRequest::default()
+            },
+            window,
+            cx,
+        );
     }
 
     /// A task the desktop just created opens once the list has it.
@@ -201,6 +227,40 @@ impl Shell {
                 self.show(Surface::Conversation, cx);
             }
             SidebarEvent::NewTask => self.show(Surface::NewTask, cx),
+            SidebarEvent::CloneProject => {
+                self.show(Surface::Conversation, cx);
+                self.open_project_dialog(
+                    OpenRequest {
+                        mode: crate::screens::open_project::DialogMode::Clone,
+                        worktree: true,
+                        ..OpenRequest::default()
+                    },
+                    window,
+                    cx,
+                );
+            }
+            // "Abrir branch" on a project's menu: `openWorkspaceDialog("open", project)`.
+            SidebarEvent::OpenBranchInProject {
+                project_id,
+                root_path,
+                label,
+                ..
+            } => {
+                self.show(Surface::Conversation, cx);
+                self.open_project_dialog(
+                    OpenRequest {
+                        worktree: true,
+                        context: Some(crate::screens::open_project::RepositoryContext {
+                            project_id: project_id.clone(),
+                            workspace_root: root_path.clone(),
+                            label: label.clone(),
+                        }),
+                        ..OpenRequest::default()
+                    },
+                    window,
+                    cx,
+                );
+            }
             // "Vários projetos" in the + menu: `openWorkspaceDialog("open")`.
             SidebarEvent::OpenProject => {
                 self.show(Surface::Conversation, cx);
@@ -209,6 +269,7 @@ impl Shell {
                         multi: false,
                         worktree: true,
                         pick_folder: false,
+                        ..OpenRequest::default()
                     },
                     window,
                     cx,
@@ -319,6 +380,10 @@ impl Render for Shell {
                     }),
             )
             .child(MainRegion::default().child(match self.surface {
+                // No task at all: `WorkspaceBootstrapState`.
+                Surface::Conversation if self.sidebar.read(cx).has_open_task() == Some(false) => {
+                    bootstrap::render(self, cx)
+                }
                 Surface::Conversation => self.conversation.clone().into_any_element(),
                 Surface::NewTask => self.new_task.clone().into_any_element(),
             }))

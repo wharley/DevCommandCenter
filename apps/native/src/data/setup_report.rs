@@ -74,8 +74,17 @@ fn commands(hints: &[SetupHint]) -> String {
         .join(" • ")
 }
 
-/// `notifyWorkspaceCreationResult` for "open".
-pub fn creation_notice(report: &WorkspaceSetupReport, hints: &[SetupHint]) -> CreationNotice {
+/// `notifyWorkspaceCreationResult`; `clone` is its "clone" mode.
+pub fn creation_notice(
+    report: &WorkspaceSetupReport,
+    hints: &[SetupHint],
+    clone: bool,
+) -> CreationNotice {
+    let created = if clone {
+        "workspaceDialog.toastCloneSuccess"
+    } else {
+        "workspaceDialog.toastCreateSuccess"
+    };
     let commands = commands(hints);
     let problem = report
         .steps
@@ -97,17 +106,17 @@ pub fn creation_notice(report: &WorkspaceSetupReport, hints: &[SetupHint]) -> Cr
     match report.status {
         WorkspaceSetupStatus::Pending => CreationNotice {
             tone: Tone::Success,
-            title_key: "workspaceDialog.toastCreateSuccess",
+            title_key: created,
             description: None,
         },
         WorkspaceSetupStatus::Completed => CreationNotice {
             tone: Tone::Success,
-            title_key: "workspaceDialog.toastCreateSuccess",
+            title_key: created,
             description: key("workspaceDialog.toastSetupCompleted"),
         },
         WorkspaceSetupStatus::Warning => CreationNotice {
             tone: Tone::Warning,
-            title_key: "workspaceDialog.toastCreateSuccess",
+            title_key: created,
             description: problem
                 .map(Description::Text)
                 .or_else(|| key("workspaceDialog.toastSetupWarning")),
@@ -121,7 +130,7 @@ pub fn creation_notice(report: &WorkspaceSetupReport, hints: &[SetupHint]) -> Cr
         },
         WorkspaceSetupStatus::Skipped => CreationNotice {
             tone: Tone::Success,
-            title_key: "workspaceDialog.toastCreateSuccess",
+            title_key: created,
             description: (!hints.is_empty()).then_some(Description::Key {
                 key: "workspaceDialog.toastSetupSuggestions",
                 commands,
@@ -171,16 +180,17 @@ mod tests {
             message: None,
         };
         let hints = [hint("yarn install"), hint("cargo build")];
-        let pending = creation_notice(&report(WorkspaceSetupStatus::Pending, None), &hints);
+        let pending = creation_notice(&report(WorkspaceSetupStatus::Pending, None), &hints, false);
         assert_eq!((pending.tone, pending.description), (Tone::Success, None));
         let failed = creation_notice(
             &report(WorkspaceSetupStatus::Failed, Some("exit 1")),
             &hints,
+            false,
         );
         assert_eq!(failed.tone, Tone::Error);
         assert_eq!(failed.title_key, "workspaceDialog.toastSetupFailedTitle");
         assert_eq!(failed.description, Some(Description::Text("exit 1".into())));
-        let warning = creation_notice(&report(WorkspaceSetupStatus::Warning, None), &hints);
+        let warning = creation_notice(&report(WorkspaceSetupStatus::Warning, None), &hints, false);
         assert_eq!(
             warning.description,
             Some(Description::Key {
@@ -188,7 +198,8 @@ mod tests {
                 commands: "yarn install • cargo build".into()
             })
         );
-        let skipped = creation_notice(&report(WorkspaceSetupStatus::Skipped, None), &[]);
+        let skipped = creation_notice(&report(WorkspaceSetupStatus::Skipped, None), &[], true);
         assert_eq!(skipped.description, None);
+        assert_eq!(skipped.title_key, "workspaceDialog.toastCloneSuccess");
     }
 }

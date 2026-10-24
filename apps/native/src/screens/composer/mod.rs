@@ -17,6 +17,7 @@ mod popups;
 mod prompt;
 mod queue;
 mod settings;
+pub(crate) use settings::load_settings;
 mod strips;
 mod surface;
 #[cfg(test)]

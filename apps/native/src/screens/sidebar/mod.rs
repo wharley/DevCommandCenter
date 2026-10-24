@@ -359,6 +359,12 @@ impl Sidebar {
         self._refresh = Self::refresh_loop(cx);
     }
 
+    /// Whether a task is open, once the list has loaded (`None` before).
+    pub fn has_open_task(&self) -> Option<bool> {
+        self.opened_first
+            .then(|| self.state.selected_task_id.is_some())
+    }
+
     pub fn projects(&self) -> &[Project] {
         &self.state.data.projects
     }

@@ -77,6 +77,7 @@ fn one_project_creates_a_task_with_its_branch_and_name(cx: &mut TestAppContext) 
         multi: false,
         worktree: true,
         pick_folder: false,
+        ..OpenRequest::default()
     };
     let (dialog, cx) = open(
         cx,
@@ -145,6 +146,7 @@ fn linked_projects_make_a_multi_project_task(cx: &mut TestAppContext) {
         multi: true,
         worktree: true,
         pick_folder: false,
+        ..OpenRequest::default()
     };
     let (dialog, cx) = open(
         cx,
@@ -176,4 +178,119 @@ fn linked_projects_make_a_multi_project_task(cx: &mut TestAppContext) {
     assert_eq!(body["name"], "Nova tarefa");
     assert_eq!(body["projects"][0]["workspaceRoot"], root);
     assert_eq!(body["projects"][1]["baseBranch"], "develop");
+}
+
+#[gpui::test]
+fn clone_takes_the_url_and_a_destination(cx: &mut TestAppContext) {
+    use super::DialogMode;
+    let (port, server) = fake_desktop(CREATED.into());
+    let request = OpenRequest {
+        mode: DialogMode::Clone,
+        worktree: true,
+        ..OpenRequest::default()
+    };
+    let (dialog, cx) = open(
+        cx,
+        vec![project("/code/app", "app", "main")],
+        HashMap::new(),
+        request,
+    );
+    dialog.update(cx, |dialog, cx| {
+        dialog.endpoint = Some(DesktopApi::new(port, "k"));
+        assert!(!dialog.can_submit(cx));
+        dialog.repository_url.update(cx, |input, cx| {
+            input.set_text("https://github.com/org/meu-repo.git", cx)
+        });
+        dialog.clone_destination("/work/Meu Repo".into(), cx);
+        assert_eq!(dialog.project_id.read(cx).text(), "meu-repo");
+        assert!(dialog.can_submit(cx));
+        dialog.submit(cx);
+    });
+    cx.run_until_parked();
+    let (request, body) = server.join().unwrap();
+    assert_eq!(request, "POST /api/v1/workspaces/clone");
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["repositoryUrl"], "https://github.com/org/meu-repo.git");
+    assert_eq!(body["workspaceRoot"], "/work/Meu Repo");
+    assert_eq!(body["projectId"], "meu-repo");
+    assert_eq!(body["baseBranch"], "");
+    assert_eq!(body["name"], serde_json::Value::Null);
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("open-project").is_some());
+}
+
+#[gpui::test]
+fn a_project_opens_an_existing_branch_but_not_a_pr(cx: &mut TestAppContext) {
+    use super::{RepositoryContext, Start};
+    use crate::test_support::fake_desktop_answers;
+    let resolution = |kind: &str| {
+        serde_json::json!({
+            "kind": kind, "url": "u", "provider": "github", "host": "github.com",
+            "repository": "org/app", "headBranch": "feat/x", "headSha": "abc",
+            "baseBranch": "main", "changeRequestNumber": null, "title": "Feature X",
+            "author": null, "state": null, "sourceRepository": null, "isCrossRepository": false
+        })
+        .to_string()
+    };
+    let (port, server) = fake_desktop_answers(vec![
+        (200, resolution("pull_request")),
+        (200, resolution("branch")),
+        (200, CREATED.into()),
+    ]);
+    let request = OpenRequest {
+        worktree: true,
+        context: Some(RepositoryContext {
+            project_id: "app".into(),
+            workspace_root: "/code/app".into(),
+            label: "Checkout".into(),
+        }),
+        ..OpenRequest::default()
+    };
+    let (dialog, cx) = open(
+        cx,
+        vec![project("/code/app", "app", "main")],
+        HashMap::new(),
+        request,
+    );
+    let url = "https://github.com/org/app/tree/feat/x";
+    dialog.update(cx, |dialog, cx| {
+        dialog.endpoint = Some(DesktopApi::new(port, "k"));
+        assert_eq!(
+            dialog.start,
+            Start::Branch,
+            "opened from a project: a branch first"
+        );
+        assert!(dialog.is_source());
+        dialog
+            .source_url
+            .update(cx, |input, cx| input.set_text(url, cx));
+        assert!(!dialog.can_submit(cx), "validate first");
+        dialog.validate_source(cx);
+    });
+    cx.run_until_parked();
+    dialog.update(cx, |dialog, cx| {
+        assert!(dialog.resolution.is_none(), "a PR goes to the PR hub");
+        dialog.validate_source(cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("open-project").is_some());
+    dialog.update(cx, |dialog, cx| {
+        assert!(dialog.can_submit(cx));
+        dialog
+            .name
+            .update(cx, |input, cx| input.set_text("Feature X", cx));
+        dialog.submit(cx);
+    });
+    cx.run_until_parked();
+    let calls = server.join().unwrap();
+    assert_eq!(calls[0].0, "POST /api/v1/workspaces/source-url/resolve");
+    assert!(calls[0].1.contains(r#""workspaceRoot":"/code/app""#));
+    assert_eq!(calls[2].0, "POST /api/v1/workspaces/from-source-url");
+    let body: serde_json::Value = serde_json::from_str(&calls[2].1).unwrap();
+    assert_eq!(body["projectId"], "app");
+    assert_eq!(body["url"], url);
+    assert_eq!(body["name"], "Feature X");
 }

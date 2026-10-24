@@ -129,3 +129,38 @@ fn several_projects_opens_the_open_project_dialog(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("open-project").is_some());
 }
+
+#[gpui::test]
+fn the_sidebar_opens_clone_and_open_branch(cx: &mut TestAppContext) {
+    use crate::screens::open_project::DialogMode;
+    use crate::screens::sidebar::SidebarEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::CloneProject));
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, cx| {
+        let (dialog, _) = shell.open_project.as_ref().expect("clone opened");
+        assert_eq!(dialog.read(cx).mode, DialogMode::Clone);
+    });
+    sidebar.update(cx, |_, cx| {
+        cx.emit(SidebarEvent::OpenBranchInProject {
+            project_id: "app".into(),
+            root_path: "/code/app".into(),
+            base_branch: "main".into(),
+            label: "Checkout".into(),
+        })
+    });
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, cx| {
+        let (dialog, _) = shell.open_project.as_ref().expect("open branch opened");
+        let dialog = dialog.read(cx);
+        assert_eq!(dialog.mode, DialogMode::Open);
+        assert_eq!(
+            dialog
+                .context
+                .as_ref()
+                .map(|context| context.label.as_str()),
+            Some("Checkout")
+        );
+    });
+}

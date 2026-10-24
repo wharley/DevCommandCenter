@@ -419,6 +419,49 @@ impl DesktopApi {
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
     }
 
+    /// "Clonar": the repository cloned into `workspaceRoot`, with a task in it.
+    pub fn clone_workspace(
+        &self,
+        input: &dcc_core::application::CreateWorkspaceFromUrlInput,
+    ) -> Result<CreatedTask, ApiError> {
+        let value = self.post("/api/v1/workspaces/clone", &json!(input))?;
+        serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
+    /// "Validar": what a branch URL points at in the project.
+    pub fn resolve_source_url(
+        &self,
+        workspace_root: &str,
+        url: &str,
+    ) -> Result<SourceResolution, ApiError> {
+        let value = self.post(
+            "/api/v1/workspaces/source-url/resolve",
+            &json!({ "workspaceRoot": workspace_root, "url": url, "forgeLogin": null }),
+        )?;
+        serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
+    /// "Abrir branch": a task on an existing branch of the project.
+    pub fn create_from_source_url(
+        &self,
+        project_id: &str,
+        workspace_root: &str,
+        url: &str,
+        name: Option<&str>,
+    ) -> Result<CreatedTask, ApiError> {
+        let value = self.post(
+            "/api/v1/workspaces/from-source-url",
+            &json!({
+                "projectId": project_id,
+                "workspaceRoot": workspace_root,
+                "url": url,
+                "name": name,
+                "forgeLogin": null,
+            }),
+        )?;
+        serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
     /// The dialog's multi-project task. Answers its primary task and how many
     /// projects it has.
     pub fn create_workspace_bundle(
@@ -559,6 +602,23 @@ pub struct CreateTaskRequest {
     pub include_linked_folders: bool,
     /// The name of a task over several projects.
     pub bundle_name: String,
+}
+
+/// What a branch or PR URL points at (`WorkspaceSourceUrlResolution`).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceResolution {
+    /// `branch` or `pull_request`.
+    pub kind: String,
+    pub repository: String,
+    pub head_branch: String,
+    pub base_branch: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub is_cross_repository: bool,
+    #[serde(default)]
+    pub source_repository: Option<String>,
 }
 
 /// The task the desktop created, with its setup outcome.
