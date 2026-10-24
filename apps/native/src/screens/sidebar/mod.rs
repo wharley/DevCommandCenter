@@ -363,9 +363,11 @@ impl Sidebar {
         &self.state.data.projects
     }
 
-    /// How many folders each project links, by repository id.
-    pub fn linked_folder_counts(&self) -> &HashMap<String, usize> {
-        &self.state.data.linked_folder_counts
+    /// The folders each project links, by repository id.
+    pub fn linked_folders(
+        &self,
+    ) -> &HashMap<String, dcc_core::application::linked_task::LinkedFolders> {
+        &self.state.data.linked_folders
     }
 
     /// Updates the list in place: only the changed span is spliced, so live

@@ -112,6 +112,57 @@ fn menu_row(
         .into_any_element()
 }
 
+/// A menu row that is an action, not a project.
+fn action_row(
+    id: &'static str,
+    icon: AnyElement,
+    title: SharedString,
+    description: Option<SharedString>,
+    disabled: bool,
+    on_click: impl Fn(&mut NewTaskView, &mut Context<NewTaskView>) + 'static,
+    cx: &mut Context<NewTaskView>,
+) -> AnyElement {
+    let colors = cx.theme().colors.clone();
+    let hover = colors.accent;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .rounded(px(4.0))
+        .px(px(8.0))
+        .py(px(8.0))
+        .when(disabled, |row| row.opacity(0.5))
+        .when(!disabled, |row| {
+            row.cursor_pointer()
+                .hover(move |style| style.bg(hover))
+                .on_click(cx.listener(move |view, _, _, cx| on_click(view, cx)))
+        })
+        .child(icon)
+        .child(match description {
+            None => div().text_size(px(14.0)).child(title).into_any_element(),
+            Some(description) => div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .line_height(px(16.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .line_height(px(14.0))
+                        .text_color(colors.muted_foreground)
+                        .child(description),
+                )
+                .into_any_element(),
+        })
+        .into_any_element()
+}
+
 fn project_menu(view: &NewTaskView, cx: &mut Context<NewTaskView>) -> AnyElement {
     let colors = cx.theme().colors.clone();
     let busy = view.busy();
@@ -146,6 +197,33 @@ fn project_menu(view: &NewTaskView, cx: &mut Context<NewTaskView>) -> AnyElement
         .collect();
     let heading = cx.t("newTask.projects");
     let muted = colors.muted_foreground;
+    let separator = colors.border;
+    // First, not after a scrolling list: for a first project none of the
+    // listed ones is the answer.
+    let open_other = action_row(
+        "new-task-open-other",
+        Icon::new("folder-git-2")
+            .size(16.0)
+            .color(muted)
+            .into_any_element(),
+        cx.t("newTask.openAnotherProject"),
+        None,
+        busy,
+        |view, cx| view.open_project(false, cx),
+        cx,
+    );
+    let several = action_row(
+        "new-task-several",
+        Icon::new("boxes")
+            .size(16.0)
+            .color(gpui::rgb(0x06b6d4).into())
+            .into_any_element(),
+        cx.t("newTask.multipleProjects"),
+        Some(cx.t("newTask.multipleProjectsDescription")),
+        busy || view.projects().len() < 2,
+        |view, cx| view.open_project(true, cx),
+        cx,
+    );
     let entity = cx.entity().downgrade();
     Popover::new(
         "new-task-projects",
@@ -158,6 +236,8 @@ fn project_menu(view: &NewTaskView, cx: &mut Context<NewTaskView>) -> AnyElement
                 .flex_col()
                 .max_h(px(384.0))
                 .overflow_y_scroll()
+                .child(open_other)
+                .child(div().my(px(4.0)).h(px(1.0)).bg(separator))
                 .child(
                     div()
                         .px(px(8.0))
@@ -168,6 +248,8 @@ fn project_menu(view: &NewTaskView, cx: &mut Context<NewTaskView>) -> AnyElement
                         .child(heading),
                 )
                 .children(rows)
+                .child(div().my(px(4.0)).h(px(1.0)).bg(separator))
+                .child(several)
                 .into_any_element()
         },
         move |open, _, cx| {

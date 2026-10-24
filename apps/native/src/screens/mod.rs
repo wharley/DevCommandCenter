@@ -3,5 +3,6 @@
 pub mod composer;
 pub mod conversation;
 pub mod new_task;
+pub mod open_project;
 pub mod shell;
 pub mod sidebar;

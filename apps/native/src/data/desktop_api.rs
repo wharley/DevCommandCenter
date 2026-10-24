@@ -410,6 +410,34 @@ impl DesktopApi {
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
     }
 
+    /// The open-project dialog's single task, exactly as chosen there.
+    pub fn create_workspace(
+        &self,
+        input: &dcc_core::application::CreateWorkspaceForRepoInput,
+    ) -> Result<CreatedTask, ApiError> {
+        let value = self.post("/api/v1/workspaces", &json!(input))?;
+        serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
+    /// The dialog's multi-project task. Answers its primary task and how many
+    /// projects it has.
+    pub fn create_workspace_bundle(
+        &self,
+        name: &str,
+        projects: &[dcc_core::application::CreateWorkspaceForRepoInput],
+    ) -> Result<(String, usize), ApiError> {
+        let value = self.post(
+            "/api/v1/workspace-bundles",
+            &json!({ "name": name, "projects": projects }),
+        )?;
+        let id = value
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::Failed("the desktop did not answer a task".into()))?;
+        let count = value.get("count").and_then(Value::as_u64).unwrap_or(1) as usize;
+        Ok((id.to_string(), count))
+    }
+
     /// Creates or rewrites the task's objective; `expected_generation` (the
     /// one the form was opened from) makes a concurrent edit fail.
     pub fn set_objective(

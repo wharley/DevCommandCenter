@@ -106,3 +106,26 @@ fn new_task_shows_its_screen_and_a_task_brings_the_conversation_back(cx: &mut Te
         assert_eq!(shell.surface, Surface::Conversation)
     });
 }
+
+#[gpui::test]
+fn several_projects_opens_the_open_project_dialog(cx: &mut TestAppContext) {
+    use crate::screens::new_task::NewTaskEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let new_task = shell.read_with(cx, |shell, _| shell.new_task.clone());
+    new_task.update(cx, |_, cx| {
+        cx.emit(NewTaskEvent::OpenProject {
+            multi: true,
+            worktree: false,
+        })
+    });
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, cx| {
+        let (dialog, _) = shell.open_project.as_ref().expect("the dialog opened");
+        let dialog = dialog.read(cx);
+        assert!(dialog.multi);
+        assert!(!dialog.model.worktree, "the screen's choice comes along");
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("open-project").is_some());
+}

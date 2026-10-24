@@ -15,6 +15,7 @@ use gpui::{
 use crate::prefs::{self, Prefs};
 use crate::screens::conversation::ConversationView;
 use crate::screens::new_task::{NewTaskEvent, NewTaskView};
+use crate::screens::open_project::{OpenProjectDialog, OpenProjectEvent, OpenRequest};
 use crate::screens::sidebar::{NavPage, Sidebar, SidebarEvent};
 use crate::theme::{ActiveTheme, Theme};
 use crate::ui::{ResizeHandle, Toaster};
@@ -42,6 +43,8 @@ pub struct Shell {
     pub(crate) surface: Surface,
     /// The task the desktop just created: its composer takes the focus.
     focus_on_open: Option<String>,
+    /// "Abrir projeto", while open.
+    open_project: Option<(Entity<OpenProjectDialog>, Subscription)>,
     _appearance: Subscription,
     _sidebar_events: Subscription,
     _sidebar_data: Subscription,
@@ -69,21 +72,21 @@ impl Shell {
                 cx,
             )
         });
-        let sidebar_events = cx.subscribe(&sidebar, Self::on_sidebar_event);
+        let sidebar_events = cx.subscribe_in(&sidebar, window, Self::on_sidebar_event);
         let conversation = cx.new(|cx| ConversationView::new(window, cx));
         let new_task = cx.new(|_| NewTaskView::new());
         // The new-task screen lists the projects the sidebar loads.
         let sidebar_data = cx.observe(&sidebar, |this, sidebar, cx| {
             let sidebar = sidebar.read(cx);
-            let (projects, counts) = (
+            let (projects, linked) = (
                 sidebar.projects().to_vec(),
-                sidebar.linked_folder_counts().clone(),
+                sidebar.linked_folders().clone(),
             );
             this.new_task.update(cx, |new_task, cx| {
-                new_task.set_projects(&projects, &counts, cx)
+                new_task.set_projects(&projects, &linked, cx)
             });
         });
-        let new_task_events = cx.subscribe(&new_task, Self::on_new_task_event);
+        let new_task_events = cx.subscribe_in(&new_task, window, Self::on_new_task_event);
         Self {
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
             prefs,
@@ -93,6 +96,7 @@ impl Shell {
             new_task,
             surface: Surface::Conversation,
             focus_on_open: None,
+            open_project: None,
             _appearance: appearance,
             _sidebar_events: sidebar_events,
             _sidebar_data: sidebar_data,
@@ -110,26 +114,68 @@ impl Shell {
 
     fn on_new_task_event(
         &mut self,
-        _: Entity<NewTaskView>,
+        _: &Entity<NewTaskView>,
         event: &NewTaskEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
-            NewTaskEvent::Created(task_id) => {
-                self.focus_on_open = Some(task_id.clone());
-                let task_id = task_id.clone();
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.open_when_listed(task_id, cx));
+            NewTaskEvent::Created(task_id) => self.open_created(task_id.clone(), cx),
+            NewTaskEvent::OpenProject { multi, worktree } => {
+                // `setGlobalSurface(null)` first, as the desktop.
+                self.show(Surface::Conversation, cx);
+                self.open_project_dialog(
+                    // "Abrir outro projeto…" opens protected; "vários" keeps the
+                    // screen's choice.
+                    OpenRequest {
+                        multi: *multi,
+                        worktree: !*multi || *worktree,
+                        pick_folder: !*multi,
+                    },
+                    window,
+                    cx,
+                );
             }
         }
+    }
+
+    /// A task the desktop just created opens once the list has it.
+    fn open_created(&mut self, task_id: String, cx: &mut Context<Self>) {
+        self.focus_on_open = Some(task_id.clone());
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.open_when_listed(task_id, cx));
+    }
+
+    fn open_project_dialog(
+        &mut self,
+        request: OpenRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sidebar = self.sidebar.read(cx);
+        let (projects, linked) = (
+            sidebar.projects().to_vec(),
+            sidebar.linked_folders().clone(),
+        );
+        let dialog = cx.new(|cx| OpenProjectDialog::new(&projects, &linked, request, window, cx));
+        let events = cx.subscribe(&dialog, |this, _, event: &OpenProjectEvent, cx| {
+            if let OpenProjectEvent::Created(task_id) = event {
+                this.open_created(task_id.clone(), cx);
+            }
+            this.open_project = None;
+            cx.notify();
+        });
+        self.open_project = Some((dialog, events));
+        cx.notify();
     }
 
     /// Screens the sidebar opens arrive one by one; until then their events
     /// only matter here when they change the frame.
     fn on_sidebar_event(
         &mut self,
-        sidebar: Entity<Sidebar>,
+        sidebar: &Entity<Sidebar>,
         event: &SidebarEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
@@ -155,6 +201,19 @@ impl Shell {
                 self.show(Surface::Conversation, cx);
             }
             SidebarEvent::NewTask => self.show(Surface::NewTask, cx),
+            // "Vários projetos" in the + menu: `openWorkspaceDialog("open")`.
+            SidebarEvent::OpenProject => {
+                self.show(Surface::Conversation, cx);
+                self.open_project_dialog(
+                    OpenRequest {
+                        multi: false,
+                        worktree: true,
+                        pick_folder: false,
+                    },
+                    window,
+                    cx,
+                );
+            }
             SidebarEvent::NewTaskInProject { root_path, .. } => {
                 let project = sidebar
                     .read(cx)
@@ -263,6 +322,7 @@ impl Render for Shell {
                 Surface::Conversation => self.conversation.clone().into_any_element(),
                 Surface::NewTask => self.new_task.clone().into_any_element(),
             }))
+            .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))
             .children(Toaster::handle(cx))
     }
 }

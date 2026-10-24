@@ -9,6 +9,7 @@ mod view;
 
 use std::collections::HashMap;
 
+use dcc_core::application::linked_task::LinkedFolders;
 use gpui::{Context, EventEmitter, SharedString};
 
 use crate::data::desktop_api::{ApiError, CreateTaskRequest, CreatedTask, DesktopApi};
@@ -22,12 +23,15 @@ use crate::ui::Toaster;
 pub enum NewTaskEvent {
     /// The desktop created this task: open it with the composer focused.
     Created(String),
+    /// "Abrir outro projeto…" (straight to the folder picker) or
+    /// "Selecionar vários projetos…", in the screen's worktree choice.
+    OpenProject { multi: bool, worktree: bool },
 }
 
 pub struct NewTaskView {
     projects: Vec<Project>,
     /// Linked folders per project (by repository id).
-    linked_counts: HashMap<String, usize>,
+    linked: HashMap<String, LinkedFolders>,
     /// Per task: a protected worktree unless unticked (`useWorktree`).
     pub(crate) worktree: bool,
     pub(crate) include_linked: bool,
@@ -44,7 +48,7 @@ impl NewTaskView {
     pub fn new() -> Self {
         Self {
             projects: Vec::new(),
-            linked_counts: HashMap::new(),
+            linked: HashMap::new(),
             worktree: true,
             include_linked: true,
             pending: None,
@@ -57,14 +61,14 @@ impl NewTaskView {
     pub fn set_projects(
         &mut self,
         projects: &[Project],
-        linked_counts: &HashMap<String, usize>,
+        linked: &HashMap<String, LinkedFolders>,
         cx: &mut Context<Self>,
     ) {
-        if self.projects == projects && &self.linked_counts == linked_counts {
+        if self.projects == projects && &self.linked == linked {
             return;
         }
         self.projects = projects.to_vec();
-        self.linked_counts = linked_counts.clone();
+        self.linked = linked.clone();
         cx.notify();
     }
 
@@ -74,14 +78,29 @@ impl NewTaskView {
 
     /// "+N" when the project links folders and they come along.
     pub(crate) fn linked_badge(&self, project: &Project) -> Option<usize> {
-        let count = self.linked_counts.get(&project.id).copied().unwrap_or(0);
+        let count = self.linked_count(project);
         (count > 0 && self.include_linked).then_some(count)
     }
 
     pub(crate) fn any_linked(&self) -> bool {
         self.projects
             .iter()
-            .any(|project| self.linked_counts.get(&project.id).copied().unwrap_or(0) > 0)
+            .any(|project| self.linked_count(project) > 0)
+    }
+
+    fn linked_count(&self, project: &Project) -> usize {
+        self.linked
+            .get(&project.id)
+            .map_or(0, |linked| linked.paths.len())
+    }
+
+    pub(crate) fn open_project(&mut self, multi: bool, cx: &mut Context<Self>) {
+        self.menu_open = false;
+        cx.emit(NewTaskEvent::OpenProject {
+            multi,
+            worktree: self.worktree,
+        });
+        cx.notify();
     }
 
     pub(crate) fn busy(&self) -> bool {
@@ -158,7 +177,7 @@ impl Default for NewTaskView {
 }
 
 /// `notifyWorkspaceCreationResult`: created, with how its setup went.
-fn notify(created: &CreatedTask, cx: &mut gpui::App) {
+pub(crate) fn notify(created: &CreatedTask, cx: &mut gpui::App) {
     let notice = creation_notice(&created.setup_report, &created.setup_hints);
     let title = cx.t(notice.title_key);
     let description: Option<SharedString> =

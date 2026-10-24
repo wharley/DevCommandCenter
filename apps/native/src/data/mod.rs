@@ -15,6 +15,7 @@ pub mod git_watch;
 pub mod goal;
 pub mod loader;
 pub mod model_picker;
+pub mod open_project;
 pub mod plan_checklist;
 pub mod project_logo;
 pub mod prompt;

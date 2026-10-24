@@ -41,7 +41,13 @@ fn picking_a_project_creates_the_task_with_the_choices(cx: &mut TestAppContext) 
     let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let seen = events.clone();
     let projects = vec![project("app", "Checkout"), project("api", "API")];
-    let counts = HashMap::from([("/code/app".to_string(), 2)]);
+    let counts = HashMap::from([(
+        "/code/app".to_string(),
+        dcc_core::application::linked_task::LinkedFolders {
+            paths: vec!["/code/api".into(), "/notes".into()],
+            context_paths: vec!["/notes".into()],
+        },
+    )]);
     view.update(cx, |view, cx| {
         cx.subscribe_self(move |_, event: &NewTaskEvent, _| seen.borrow_mut().push(event.clone()))
             .detach();

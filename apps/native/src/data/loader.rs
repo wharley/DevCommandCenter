@@ -47,9 +47,9 @@ pub struct SidebarData {
     pub agents: Vec<super::agents::AgentRecord>,
     /// Tasks an agent proposed or started, by the task they hang under.
     pub child_tasks: HashMap<String, Vec<super::child_tasks::ChildTask>>,
-    /// How many folders each project links, by repository id ("+N" on the
-    /// new-task screen).
-    pub linked_folder_counts: HashMap<String, usize>,
+    /// The folders each project links, by repository id, and which of them
+    /// have no Git (they ride along as context).
+    pub linked_folders: HashMap<String, dcc_core::application::linked_task::LinkedFolders>,
 }
 
 pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
@@ -126,14 +126,20 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
 
     let agents = super::agents::load(&sessions)?;
 
-    let linked_folder_counts = workspaces
+    let linked_folders = workspaces
         .list_repository_linked_folders()?
         .into_iter()
         .filter(|(_, paths)| !paths.is_empty())
-        .map(|(id, paths)| (id.0, paths.len()))
+        .map(|(id, paths)| {
+            let linked = dcc_core::application::linked_task::LinkedFolders {
+                context_paths: dcc_infra::project_actions::linked_context_paths(&paths),
+                paths,
+            };
+            (id.0, linked)
+        })
         .collect();
     Ok(SidebarData {
-        linked_folder_counts,
+        linked_folders,
         tasks,
         projects,
         activities,
