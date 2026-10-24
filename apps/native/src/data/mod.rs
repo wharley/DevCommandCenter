@@ -12,6 +12,7 @@ pub mod deletion;
 pub mod desktop_api;
 pub mod disk;
 pub mod git_watch;
+pub mod goal;
 pub mod loader;
 pub mod model_picker;
 pub mod plan_checklist;

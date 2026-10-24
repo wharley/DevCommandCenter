@@ -7,7 +7,7 @@ use gpui::{
     div, point, prelude::*, px,
 };
 
-use super::{Busy, Composer, controls, picker, popups};
+use super::{Busy, Composer, context_rail, controls, picker, popups, strips};
 use crate::i18n::Translate;
 use crate::project::ProviderIcon;
 use crate::theme::ActiveTheme;
@@ -170,69 +170,79 @@ pub(super) fn render(
         .pb(px(12.0))
         .pt(px(8.0))
         .child(
-            div().mx_auto().w_full().max_w(px(832.0)).child(
-                div()
-                    .id("composer")
-                    .relative()
-                    .on_drop(cx.listener(|composer, paths: &ExternalPaths, _, cx| {
-                        composer.add_paths(paths.paths().to_vec(), cx)
-                    }))
-                    .drag_over::<ExternalPaths>(move |style, _, _, _| {
-                        style.border_color(drop_border)
-                    })
-                    .children(popups::mention_popup(composer, cx))
-                    .flex()
-                    .flex_col()
-                    .rounded(px(18.0))
-                    .border_1()
-                    .border_color(border)
-                    .bg(colors.sidebar)
-                    .shadow(shadows)
-                    .px(px(16.0))
-                    .py(px(12.0))
-                    .when(disabled, |surface| surface.opacity(0.6))
-                    .child(
-                        div()
-                            .id("composer-input")
-                            .min_h(px(INPUT_MIN_HEIGHT))
-                            .text_size(px(14.0))
-                            .line_height(px(20.0))
-                            .text_color(colors.foreground)
-                            .cursor_text()
-                            .on_click(move |_, window, cx| {
-                                let handle = input.read(cx).focus_handle(cx);
-                                window.focus(&handle, cx);
-                            })
-                            .child(composer.input.clone()),
-                    )
-                    .child(
-                        div()
-                            .mt(px(10.0))
-                            .flex()
-                            .items_end()
-                            .justify_between()
-                            .gap(px(12.0))
-                            .child(
-                                div()
-                                    .flex()
-                                    .min_w_0()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .child(popups::attach_menu(composer, cx))
-                                    .child(controls::approval_menu(composer, cx))
-                                    .child(controls::plan_toggle(composer, cx)),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_shrink_0()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .children(model_chip(composer, cx))
-                                    .child(div().ml(px(6.0)).child(action_button(composer, cx))),
-                            ),
-                    ),
-            ),
+            div()
+                .mx_auto()
+                .w_full()
+                .max_w(px(832.0))
+                .child(
+                    div()
+                        .id("composer")
+                        .relative()
+                        .on_drop(cx.listener(|composer, paths: &ExternalPaths, _, cx| {
+                            composer.add_paths(paths.paths().to_vec(), cx)
+                        }))
+                        .drag_over::<ExternalPaths>(move |style, _, _, _| {
+                            style.border_color(drop_border)
+                        })
+                        .children(popups::mention_popup(composer, cx))
+                        .flex()
+                        .flex_col()
+                        .rounded(px(18.0))
+                        .border_1()
+                        .border_color(border)
+                        .bg(colors.sidebar)
+                        .shadow(shadows)
+                        .px(px(16.0))
+                        .py(px(12.0))
+                        .when(disabled, |surface| surface.opacity(0.6))
+                        .children(strips::usage_limit_strip(composer, cx))
+                        .children(strips::goal_strip(composer, cx))
+                        .child(
+                            div()
+                                .id("composer-input")
+                                .min_h(px(INPUT_MIN_HEIGHT))
+                                .text_size(px(14.0))
+                                .line_height(px(20.0))
+                                .text_color(colors.foreground)
+                                .cursor_text()
+                                .on_click(move |_, window, cx| {
+                                    let handle = input.read(cx).focus_handle(cx);
+                                    window.focus(&handle, cx);
+                                })
+                                .child(composer.input.clone()),
+                        )
+                        .child(
+                            div()
+                                .mt(px(10.0))
+                                .flex()
+                                .items_end()
+                                .justify_between()
+                                .gap(px(12.0))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .min_w_0()
+                                        .items_center()
+                                        .gap(px(6.0))
+                                        .child(popups::attach_menu(composer, cx))
+                                        .child(controls::approval_menu(composer, cx))
+                                        .child(controls::plan_toggle(composer, cx))
+                                        .children(strips::auto_resume_toggle(composer, cx)),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_shrink_0()
+                                        .items_center()
+                                        .gap(px(6.0))
+                                        .children(model_chip(composer, cx))
+                                        .child(
+                                            div().ml(px(6.0)).child(action_button(composer, cx)),
+                                        ),
+                                ),
+                        ),
+                )
+                .children(context_rail::context_rail(composer, cx)),
         )
         .children(controls::full_access_dialog(composer, cx))
         .into_any_element()

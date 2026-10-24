@@ -12,9 +12,12 @@ use dcc_core::domain::session::{SessionEventRecord, SessionId, WorkspaceSessionS
 use dcc_core::domain::timeline::activity::{TurnTokenTotals, total_turn_tokens};
 use dcc_core::domain::timeline::{TimelineMessage, project_session};
 use dcc_core::domain::workspace::WorkspaceId;
-use dcc_core::ports::{DelegationRepo, SessionRepo, UsageRepo, WorkspaceRepo};
+use dcc_core::ports::{DelegationRepo, RepositoryRepo, SessionRepo, UsageRepo, WorkspaceRepo};
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 use futures::executor::block_on;
+
+/// How often the checkout's branch is read from git.
+const GIT_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Events read per query when catching up.
 const EVENT_PAGE: usize = 5_000;
@@ -38,6 +41,14 @@ pub struct Conversation {
     /// a provider handoff.
     pub workspace_name: Option<String>,
     pub branch: Option<String>,
+    /// What the rail under the composer shows (`ExecutionContextRail`).
+    pub context: Option<ExecutionContext>,
+    /// The plan limit that stopped the latest turn, while it stands.
+    pub usage_limit: Option<dcc_core::domain::usage_limit::SessionUsageLimit>,
+    /// The provider's own goal (`/goal`), while the session has one.
+    pub goal: Option<dcc_core::domain::goal::SessionGoal>,
+    /// "Continuar sozinho se o limite acabar" for this conversation.
+    pub auto_resume: bool,
     pub rows: Arc<Vec<TimelineMessage>>,
     /// The task's delegations by id, for the cards' live status and report.
     pub delegations: HashMap<String, DelegationRecord>,
@@ -59,7 +70,39 @@ pub struct EventCache {
     last_sequence: u64,
     rows: Arc<Vec<TimelineMessage>>,
     turn_tokens: Arc<HashMap<String, TurnTokenTotals>>,
+    /// The checkout's branch and when git was last asked.
+    current_branch: Option<(std::time::Instant, Option<String>)>,
 }
+
+/// The task's place: its project, branch and checkout.
+#[derive(Clone, Debug, Default)]
+pub struct ExecutionContext {
+    pub project_label: Option<String>,
+    pub project_icon: Option<String>,
+    pub project_color: Option<String>,
+    pub project_seed: Option<String>,
+    /// The branch the task was made on (`source.headBranch ?? baseBranch`).
+    pub base_branch: Option<String>,
+    /// What git says now; read every few seconds.
+    pub current_branch: Option<String>,
+    /// A protected worktree, not the project's own checkout.
+    pub isolated: bool,
+    pub setup_report: Option<dcc_core::domain::workspace::WorkspaceSetupReport>,
+}
+
+impl PartialEq for ExecutionContext {
+    fn eq(&self, other: &Self) -> bool {
+        self.project_label == other.project_label
+            && self.project_icon == other.project_icon
+            && self.project_color == other.project_color
+            && self.base_branch == other.base_branch
+            && self.current_branch == other.current_branch
+            && self.isolated == other.isolated
+            && format!("{:?}", self.setup_report) == format!("{:?}", other.setup_report)
+    }
+}
+
+impl Eq for ExecutionContext {}
 
 /// What a delegation card reads from the stored record.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -228,9 +271,37 @@ pub fn load(
     };
     let activity = SessionActivityInput::from_summary(summary);
     let session_id = summary.session.id.0.clone();
-    conversation.workspace_path =
-        block_on(SqliteWorkspaceRepo::open(db_path)?.get_workspace(&workspace))?
-            .map(|workspace| workspace.worktree_path.unwrap_or(workspace.root_path));
+    let workspaces = SqliteWorkspaceRepo::open(db_path)?;
+    if let Some(record) = block_on(workspaces.get_workspace(&workspace))? {
+        // `source.headBranch ?? baseBranch`
+        let branch = record
+            .source
+            .as_ref()
+            .map(|source| source.head_branch.clone())
+            .unwrap_or_else(|| record.base_branch.clone());
+        let path = record
+            .worktree_path
+            .clone()
+            .unwrap_or_else(|| record.root_path.clone());
+        let repositories = block_on(workspaces.list_repositories())?;
+        let project = repositories
+            .iter()
+            .find(|repository| repository.root_path == record.root_path)
+            .map(crate::data::tasks::Project::from_repository);
+        conversation.context = Some(ExecutionContext {
+            project_label: project.as_ref().map(|project| project.display_name.clone()),
+            project_icon: project.as_ref().and_then(|project| project.icon.clone()),
+            project_color: project.as_ref().and_then(|project| project.color.clone()),
+            project_seed: Some(record.root_path.clone()),
+            base_branch: Some(branch.clone()),
+            current_branch: None,
+            isolated: record.worktree_path.is_some(),
+            setup_report: record.setup_report.clone(),
+        });
+        conversation.workspace_name = record.name.clone();
+        conversation.branch = Some(branch);
+        conversation.workspace_path = Some(path);
+    }
     conversation.session_id = Some(session_id.clone());
     conversation.provider_id = Some(summary.session.provider_id.clone());
     conversation.model = summary.session.model.clone();
@@ -238,6 +309,8 @@ pub fn load(
     conversation.waiting = activity.waiting_reason().is_some();
     conversation.aborted =
         summary.session.state == dcc_core::domain::session::SessionState::Aborted;
+    conversation.usage_limit = summary.usage_limit.clone();
+    conversation.goal = summary.goal.clone();
 
     if cache.session_id.as_deref() != Some(session_id.as_str()) {
         *cache = EventCache {
@@ -263,6 +336,33 @@ pub fn load(
             cache.turn_tokens = Arc::new(tokens);
         }
     }
+    // The session's own choice, else the global preference.
+    conversation.auto_resume = dcc_core::domain::usage_limit::session_auto_resume_choice(
+        &cache.events,
+    )
+    .unwrap_or_else(|| {
+        db_path
+            .parent()
+            .is_some_and(|dir| dcc_infra::usage_limit_settings::load_settings(dir).auto_resume)
+    });
+    if let (Some(context), Some(root)) = (
+        conversation.context.as_mut(),
+        conversation.workspace_path.as_deref(),
+    ) {
+        let stale = cache
+            .current_branch
+            .as_ref()
+            .is_none_or(|(at, _)| at.elapsed() >= GIT_EVERY);
+        if stale {
+            // One `rev-parse`, not a whole status: "HEAD" when detached.
+            let branch = dcc_infra::workspace_git::resolve_current_branch_name(root).ok();
+            cache.current_branch = Some((std::time::Instant::now(), branch));
+        }
+        context.current_branch = cache
+            .current_branch
+            .as_ref()
+            .and_then(|(_, branch)| branch.clone());
+    }
     conversation.rows = cache.rows.clone();
     conversation.turn_tokens = cache.turn_tokens.clone();
     conversation.last_sequence = cache.last_sequence;
@@ -282,5 +382,11 @@ impl Conversation {
             && self.delegations == other.delegations
             && self.children == other.children
             && self.turn_tokens == other.turn_tokens
+            && self.workspace_name == other.workspace_name
+            && self.branch == other.branch
+            && self.context == other.context
+            && self.usage_limit == other.usage_limit
+            && format!("{:?}", self.goal) == format!("{:?}", other.goal)
+            && self.auto_resume == other.auto_resume
     }
 }

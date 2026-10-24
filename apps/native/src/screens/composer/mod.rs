@@ -5,6 +5,7 @@
 //! menu, a pasted image, a drop, or `@arquivo`.
 
 mod attachments;
+mod context_rail;
 mod controls;
 mod drafts;
 mod handoff;
@@ -13,6 +14,7 @@ mod picker;
 mod popups;
 mod prompt;
 mod settings;
+mod strips;
 mod surface;
 #[cfg(test)]
 mod tests;
@@ -41,6 +43,10 @@ pub struct ComposerSession {
     pub workspace_path: Option<String>,
     pub workspace_name: Option<String>,
     pub branch: Option<String>,
+    pub usage_limit: Option<dcc_core::domain::usage_limit::SessionUsageLimit>,
+    pub goal: Option<dcc_core::domain::goal::SessionGoal>,
+    pub auto_resume: bool,
+    pub context: Option<crate::data::conversation::ExecutionContext>,
 }
 
 /// Something the conversation should do after the composer acted.
@@ -79,6 +85,10 @@ pub struct Composer {
     /// The conversation so far, for a provider handoff.
     pub(crate) history: std::sync::Arc<Vec<dcc_core::domain::timeline::TimelineMessage>>,
     pub(crate) picker: picker::PickerState,
+    /// A strip's action (resume, goal, auto-resume) on its way.
+    pub(crate) strip_busy: Option<strips::StripAction>,
+    /// The execution-mode explainer under the composer.
+    pub(crate) mode_open: bool,
     _input_events: Subscription,
     _input_changes: Subscription,
 }
@@ -129,6 +139,8 @@ impl Composer {
             confirm_full_access: false,
             history: Default::default(),
             picker: picker::PickerState::new(window, cx),
+            strip_busy: None,
+            mode_open: false,
             _input_events: input_events,
             _input_changes: input_changes,
         }
@@ -274,6 +286,19 @@ impl Composer {
         self.replace_draft(&text, window, cx);
     }
 
+    /// A turn the composer writes itself (the goal's resume or clear):
+    /// sent as is, never in plan mode (`sendGoalPrompt`).
+    pub(crate) fn send_text(&mut self, prompt: &str, cx: &mut Context<Self>) {
+        if self.session.session_id.is_none() || self.busy.is_some() {
+            return;
+        }
+        let options = crate::data::desktop_api::TurnOptions {
+            plan_mode: false,
+            ..self.turn_options(prompt)
+        };
+        self.dispatch(prompt.to_string(), None, options, false, cx);
+    }
+
     fn submit(
         &mut self,
         prompt: String,
@@ -282,15 +307,26 @@ impl Composer {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(session) = self.session.session_id.clone() else {
-            return;
-        };
-        let resume_first = self.session.aborted && retry_of.is_some();
         let options = if retry_of.is_some() {
             self.retry_options(&prompt)
         } else {
             self.turn_options(&prompt)
         };
+        self.dispatch(prompt, retry_of, options, from_field, cx);
+    }
+
+    fn dispatch(
+        &mut self,
+        prompt: String,
+        retry_of: Option<String>,
+        options: crate::data::desktop_api::TurnOptions,
+        from_field: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.session.session_id.clone() else {
+            return;
+        };
+        let resume_first = self.session.aborted && retry_of.is_some();
         let handoff = options
             .provider_id
             .clone()

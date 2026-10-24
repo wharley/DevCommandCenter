@@ -19,6 +19,8 @@ use crate::theme::{ActiveTheme, Appearance};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GlyphSize {
+    /// `size="sm" className="size-4"`: the 16px tile under the composer.
+    Tiny,
     /// `size="sm"`: 20px tile.
     Small,
     /// `size="md"`: 28px tile.
@@ -74,6 +76,7 @@ impl RenderOnce for ProjectGlyph {
         let seed = self.seed.as_deref();
         let palette = colors(resolve_color(self.color.as_deref(), seed), appearance);
         let (tile, radius, symbol) = match self.size {
+            GlyphSize::Tiny => (16.0, theme.radius.md, 12.0),
             GlyphSize::Small => (20.0, theme.radius.md, 12.0),
             GlyphSize::Medium => (28.0, theme.radius.lg, 14.0),
             GlyphSize::Large => (36.0, theme.radius.xl, 18.0),

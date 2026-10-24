@@ -17,11 +17,11 @@ const ICONS = [
 	"shield-check", "sparkles", "square-terminal", "sticky-note", "trash-2",
 	"wrench", "terminal", "file-pen-line", "file-text", "globe", "list-todo", "plug", "brain",
 	"circle-alert", "circle-dashed", "circle", "corner-down-right", "hourglass", "copy", "file-code-corner",
-	"triangle-alert", "file", "file-image", "file-headphone", "ban", "shield-alert", "arrow-up", "square", "image", "braces", "paperclip", "shield", "shield-check", "clipboard-list", "zap", "star",
+	"triangle-alert", "file", "file-image", "file-headphone", "ban", "shield-alert", "arrow-up", "square", "image", "braces", "paperclip", "shield", "shield-check", "clipboard-list", "zap", "star", "play", "target", "folder-git-2",
 ];
 
 /** Icons the app also draws filled. */
-const FILLED = ["star", "zap"];
+const FILLED = ["star", "zap", "play"];
 
 const here = dirname(fileURLToPath(import.meta.url));
 const lucide = join(here, "../../../node_modules/lucide-react");

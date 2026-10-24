@@ -242,6 +242,28 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// "Continuar sozinho se o limite acabar" for one conversation.
+    pub fn set_auto_resume(&self, session_id: &str, enabled: bool) -> Result<(), ApiError> {
+        self.request(
+            "PUT",
+            &format!(
+                "/api/v1/sessions/{}/usage-limit/auto-resume",
+                encode(session_id)
+            ),
+            Some(&json!({ "enabled": enabled })),
+        )
+        .map(|_| ())
+    }
+
+    /// "Fechar" on a finished goal (a route desktops from 2026-10-24 serve).
+    pub fn dismiss_goal(&self, session_id: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/sessions/{}/goal/dismiss", encode(session_id)),
+            &json!({}),
+        )
+        .map(|_| ())
+    }
+
     /// "Continuar" on a task stopped by its usage limit.
     pub fn resume_after_usage_limit(&self, session_id: &str) -> Result<(), ApiError> {
         self.post(

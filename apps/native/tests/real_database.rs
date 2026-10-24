@@ -303,6 +303,19 @@ fn loads_task_conversations_on_a_database_copy() {
             started.elapsed(),
             first.running,
         );
+        println!(
+            "    context {:?} · branch {:?} · limit {} · goal {:?} · auto-resume {}",
+            first.context.as_ref().map(|context| (
+                context.project_label.as_deref(),
+                context.current_branch.as_deref(),
+                context.base_branch.as_deref(),
+                context.isolated
+            )),
+            first.branch,
+            first.usage_limit.is_some(),
+            first.goal.as_ref().map(|goal| goal.status),
+            first.auto_resume,
+        );
         assert!(first.same_as(&again) || first.running);
     }
 }

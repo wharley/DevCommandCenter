@@ -16,6 +16,43 @@ fn open(cx: &mut TestAppContext) -> (gpui::Entity<Composer>, &mut gpui::VisualTe
     cx.add_window_view(Composer::new)
 }
 
+/// A desktop that answers one request with `response`; joining it gives
+/// the request line ("POST /api/v1/…") and the body.
+fn fake_desktop(response: String) -> (u16, std::thread::JoinHandle<(String, String)>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request = String::new();
+        reader.read_line(&mut request).unwrap();
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = value.trim().parse().unwrap();
+            }
+            if line == "\r\n" {
+                break;
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        let mut stream = stream;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{response}",
+            response.len()
+        )
+        .unwrap();
+        let request = request.split(' ').take(2).collect::<Vec<_>>().join(" ");
+        (request, String::from_utf8(body).unwrap())
+    });
+    (port, server)
+}
+
 fn session(id: &str) -> ComposerSession {
     ComposerSession {
         session_id: Some(id.into()),
@@ -211,32 +248,10 @@ fn claude_only() -> Vec<dcc_core::domain::provider::ProviderDescriptor> {
 
 #[gpui::test]
 fn turn_settings_follow_the_catalog_and_go_with_the_send(cx: &mut TestAppContext) {
-    use std::io::{BufRead, BufReader, Read, Write};
     use std::sync::Arc;
 
     use dcc_core::domain::provider::ProviderApprovalPolicy;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let server = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let mut length = 0;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                length = value.trim().parse().unwrap();
-            }
-            if line == "\r\n" {
-                break;
-            }
-        }
-        let mut body = vec![0; length];
-        reader.read_exact(&mut body).unwrap();
-        let mut stream = stream;
-        write!(stream, "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{{}}").unwrap();
-        String::from_utf8(body).unwrap()
-    });
+    let (port, server) = fake_desktop("{}".into());
     let (composer, cx) = open(cx);
     composer.update_in(cx, |composer, window, cx| {
         composer.endpoint = Some(DesktopApi::new(port, "k"));
@@ -266,7 +281,7 @@ fn turn_settings_follow_the_catalog_and_go_with_the_send(cx: &mut TestAppContext
     cx.simulate_input("pense nisso, ultrathink");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    let body = server.join().unwrap();
+    let (_, body) = server.join().unwrap();
     for part in [
         r#""approvalPolicy":"full_access""#,
         r#""planMode":true"#,
@@ -279,32 +294,10 @@ fn turn_settings_follow_the_catalog_and_go_with_the_send(cx: &mut TestAppContext
 
 #[gpui::test]
 fn the_picker_moves_the_conversation_and_hands_off(cx: &mut TestAppContext) {
-    use std::io::{BufRead, BufReader, Read, Write};
     use std::sync::Arc;
 
     use crate::data::model_picker::FAVORITES_TAB;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let server = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let mut length = 0;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                length = value.trim().parse().unwrap();
-            }
-            if line == "\r\n" {
-                break;
-            }
-        }
-        let mut body = vec![0; length];
-        reader.read_exact(&mut body).unwrap();
-        let mut stream = stream;
-        write!(stream, "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{{}}").unwrap();
-        String::from_utf8(body).unwrap()
-    });
+    let (port, server) = fake_desktop("{}".into());
     // A conversation with a turn already on Claude.
     let events: Vec<dcc_core::domain::session::SessionEventRecord> = [
         serde_json::json!({ "type": "turn_started", "turnId": "t1", "prompt": "Primeiro pedido" }),
@@ -355,7 +348,7 @@ fn the_picker_moves_the_conversation_and_hands_off(cx: &mut TestAppContext) {
     cx.simulate_input("continue daqui");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    let body = server.join().unwrap();
+    let (_, body) = server.join().unwrap();
     for part in [
         r#""providerId":"codex""#,
         r#""model":"gpt-6.1-sol""#,
@@ -371,7 +364,6 @@ fn the_picker_moves_the_conversation_and_hands_off(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn the_model_chip_opens_at_once_and_takes_the_desktop_list(cx: &mut TestAppContext) {
-    use std::io::{BufRead, BufReader, Write};
     let (composer, cx) = open(cx);
     // No desktop: the built-in list opens the picker anyway.
     let dead = std::net::TcpListener::bind("127.0.0.1:0")
@@ -392,28 +384,10 @@ fn the_model_chip_opens_at_once_and_takes_the_desktop_list(cx: &mut TestAppConte
     });
     cx.run_until_parked();
     // The desktop answers: its list replaces the built-in one.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let body = serde_json::json!({ "providers": catalog(), "repositories": [], "workspaces": [] })
-        .to_string();
-    let server = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            if line == "\r\n" {
-                break;
-            }
-        }
-        let mut stream = stream;
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{body}",
-            body.len()
-        )
-        .unwrap();
-    });
+    let (port, server) = fake_desktop(
+        serde_json::json!({ "providers": catalog(), "repositories": [], "workspaces": [] })
+            .to_string(),
+    );
     composer.update_in(cx, |composer, window, cx| {
         composer.endpoint = Some(DesktopApi::new(port, "k"));
         composer.set_picker_open(true, window, cx);
@@ -427,5 +401,137 @@ fn the_model_chip_opens_at_once_and_takes_the_desktop_list(cx: &mut TestAppConte
             2,
             "the desktop's list"
         );
+    });
+}
+
+fn limited() -> dcc_core::domain::usage_limit::SessionUsageLimit {
+    dcc_core::domain::usage_limit::SessionUsageLimit {
+        turn_id: dcc_core::domain::session::TurnId("t1".into()),
+        hit_at: "2026-10-24T10:00:00Z".into(),
+        resets_at: None,
+        auto_resume: false,
+        auto_resumes_used: 0,
+    }
+}
+
+fn goal(status: dcc_core::domain::goal::GoalStatus) -> dcc_core::domain::goal::SessionGoal {
+    dcc_core::domain::goal::SessionGoal {
+        objective: "Testes verdes".into(),
+        status,
+        checks: 2,
+        last_check: None,
+        tokens_used: Some(12_000),
+        token_budget: None,
+        time_used_seconds: None,
+        completes_with_turn: false,
+        updated_at: "2026-10-24T10:00:00Z".into(),
+    }
+}
+
+#[gpui::test]
+fn continuar_resumes_a_task_stopped_by_its_limit(cx: &mut TestAppContext) {
+    let (port, server) = fake_desktop("{}".into());
+    let (composer, cx) = open(cx);
+    composer.update(cx, |composer, cx| {
+        composer.endpoint = Some(DesktopApi::new(port, "k"));
+        composer.catalog = Some(std::sync::Arc::new(catalog()));
+        composer.catalog_at = Some(std::time::Instant::now());
+        composer.set_session(
+            ComposerSession {
+                usage_limit: Some(limited()),
+                ..session("a")
+            },
+            cx,
+        );
+        composer.resume_after_limit(cx);
+        assert_eq!(
+            composer.strip_busy,
+            Some(super::strips::StripAction::Resume)
+        );
+        // A second click while it's on its way does nothing.
+        composer.resume_after_limit(cx);
+    });
+    cx.run_until_parked();
+    let (request, _) = server.join().unwrap();
+    assert_eq!(request, "POST /api/v1/sessions/a/usage-limit/resume");
+    composer.read_with(cx, |composer, _| assert_eq!(composer.strip_busy, None));
+}
+
+#[gpui::test]
+fn goal_buttons_send_the_providers_command_or_dismiss(cx: &mut TestAppContext) {
+    use dcc_core::domain::goal::GoalStatus;
+    let (port, server) = fake_desktop("{}".into());
+    let (composer, cx) = open(cx);
+    composer.update(cx, |composer, cx| {
+        composer.endpoint = Some(DesktopApi::new(port, "k"));
+        composer.catalog = Some(std::sync::Arc::new(catalog()));
+        composer.catalog_at = Some(std::time::Instant::now());
+        composer.set_session(
+            ComposerSession {
+                provider_id: Some("codex".into()),
+                goal: Some(goal(GoalStatus::Paused)),
+                ..session("a")
+            },
+            cx,
+        );
+        composer.goal_action(super::strips::StripAction::GoalResume, cx);
+    });
+    cx.run_until_parked();
+    let (request, body) = server.join().unwrap();
+    assert_eq!(request, "POST /api/v1/sessions/a/turns");
+    assert!(body.contains(r#""prompt":"/goal resume""#), "{body}");
+    assert!(!body.contains(r#""planMode":true"#), "{body}");
+    // A finished goal closes through the desktop, no turn.
+    let (port, server) = fake_desktop("{\"ok\":true}".into());
+    composer.update(cx, |composer, cx| {
+        composer.endpoint = Some(DesktopApi::new(port, "k"));
+        composer.catalog = Some(std::sync::Arc::new(catalog()));
+        composer.catalog_at = Some(std::time::Instant::now());
+        composer.set_session(
+            ComposerSession {
+                goal: Some(goal(GoalStatus::Complete)),
+                ..session("a")
+            },
+            cx,
+        );
+        composer.goal_action(super::strips::StripAction::GoalDismiss, cx);
+    });
+    cx.run_until_parked();
+    let (request, _) = server.join().unwrap();
+    assert_eq!(request, "POST /api/v1/sessions/a/goal/dismiss");
+}
+
+#[gpui::test]
+fn the_auto_resume_toggle_saves_and_goes_back_on_failure(cx: &mut TestAppContext) {
+    let (port, server) = fake_desktop("{}".into());
+    let (composer, cx) = open(cx);
+    composer.update(cx, |composer, cx| {
+        composer.endpoint = Some(DesktopApi::new(port, "k"));
+        composer.catalog = Some(std::sync::Arc::new(catalog()));
+        composer.catalog_at = Some(std::time::Instant::now());
+        composer.set_session(session("a"), cx);
+        composer.toggle_auto_resume(cx);
+        assert!(composer.session.auto_resume, "flips at once");
+    });
+    cx.run_until_parked();
+    let (request, body) = server.join().unwrap();
+    assert_eq!(request, "PUT /api/v1/sessions/a/usage-limit/auto-resume");
+    assert_eq!(body, r#"{"enabled":true}"#);
+    composer.read_with(cx, |composer, _| assert!(composer.session.auto_resume));
+    // With the desktop closed the switch goes back.
+    let dead = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    composer.update(cx, |composer, cx| {
+        composer.endpoint = Some(DesktopApi::new(dead, "k"));
+        composer.toggle_auto_resume(cx);
+        assert!(!composer.session.auto_resume);
+    });
+    cx.run_until_parked();
+    composer.read_with(cx, |composer, _| {
+        assert!(composer.session.auto_resume, "back to on");
+        assert_eq!(composer.strip_busy, None);
     });
 }

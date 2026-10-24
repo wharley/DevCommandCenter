@@ -237,6 +237,10 @@ impl ConversationView {
             workspace_path: next.workspace_path.clone(),
             workspace_name: next.workspace_name.clone(),
             branch: next.branch.clone(),
+            usage_limit: next.usage_limit.clone(),
+            goal: next.goal.clone(),
+            auto_resume: next.auto_resume,
+            context: next.context.clone(),
         };
         let history = next.rows.clone();
         self.composer.update(cx, |composer, cx| {
