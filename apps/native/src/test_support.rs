@@ -87,3 +87,37 @@ pub fn git_checkout(files: &[(&str, &str)]) -> tempfile::TempDir {
     );
     dir
 }
+
+/// A database of its own holding one task at `root` (in `worktree` when it
+/// has one), for views that read the task by its folder.
+pub fn task_database(
+    dir: &std::path::Path,
+    id: &str,
+    root: &std::path::Path,
+    worktree: Option<&std::path::Path>,
+) -> std::path::PathBuf {
+    use dcc_core::domain::project::ProjectId;
+    use dcc_core::domain::workspace::{Workspace, WorkspaceId, WorkspaceState};
+    let path = dir.join("database.sqlite");
+    let repo = dcc_infra::db::SqliteWorkspaceRepo::open(&path).unwrap();
+    futures::executor::block_on(dcc_core::ports::WorkspaceRepo::save_workspace(
+        &repo,
+        &Workspace {
+            id: WorkspaceId(id.to_string()),
+            project_id: ProjectId("project".to_string()),
+            name: None,
+            root_path: root.to_string_lossy().into_owned(),
+            base_branch: "main".to_string(),
+            worktree_path: worktree.map(|path| path.to_string_lossy().into_owned()),
+            source: None,
+            state: WorkspaceState::Ready,
+            setup_report: None,
+            pinned_at: None,
+            snoozed_until: None,
+            created_at: "2026-10-24T00:00:00Z".to_string(),
+            updated_at: "2026-10-24T00:00:00Z".to_string(),
+        },
+    ))
+    .unwrap();
+    path
+}

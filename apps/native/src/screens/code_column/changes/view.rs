@@ -644,7 +644,11 @@ fn row(column: &mut CodeColumn, index: usize, cx: &mut Context<CodeColumn>) -> A
 }
 
 /// The tab's content: a message until the status is read, then the review.
-pub(crate) fn changes(column: &mut CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
+pub(crate) fn changes(
+    column: &mut CodeColumn,
+    window: &mut Window,
+    cx: &mut Context<CodeColumn>,
+) -> AnyElement {
     let colors = cx.theme().colors.clone();
     column.changes.follow_theme(dark(cx));
     let message = |text: SharedString, color: Hsla| {
@@ -733,8 +737,13 @@ pub(crate) fn changes(column: &mut CodeColumn, cx: &mut Context<CodeColumn>) -> 
             })
             .into_any_element()
     };
-    // The git section around the review (`border-b border-border/60`); its
-    // delivery header above arrives with screen 5d.
+    // "Atualizando arquivos alterados…" while a step or a sync runs.
+    let updating = (column.delivery.busy || column.delivery.syncing).then(|| updating(cx));
+    let header = crate::screens::code_column::delivery::header(column, cx);
+    let toolbar = crate::screens::code_column::delivery::toolbar(column, cx);
+    let dialogs = crate::screens::code_column::delivery::dialogs(column, window, cx);
+    // The git section (`border-b border-border/60`): the delivery header,
+    // the sync bar, then the review under its `border-t`.
     div()
         .flex()
         .flex_1()
@@ -743,6 +752,58 @@ pub(crate) fn changes(column: &mut CodeColumn, cx: &mut Context<CodeColumn>) -> 
         .overflow_hidden()
         .border_b_1()
         .border_color(colors.border.opacity(0.6))
-        .child(content)
+        .child(header)
+        .child(
+            div()
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .flex_col()
+                .gap(px(8.0))
+                .overflow_hidden()
+                .children(toolbar)
+                .child(
+                    div()
+                        .relative()
+                        .flex()
+                        .flex_1()
+                        .min_h_0()
+                        .min_w_0()
+                        .flex_col()
+                        .border_t_1()
+                        .border_color(colors.border.opacity(0.35))
+                        .child(content)
+                        .children(updating),
+                ),
+        )
+        .children(dialogs)
+        .into_any_element()
+}
+
+fn updating(cx: &mut Context<CodeColumn>) -> AnyElement {
+    let colors = cx.theme().colors.clone();
+    div()
+        .absolute()
+        .right(px(8.0))
+        .top(px(8.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(colors.border.opacity(0.6))
+        .bg(colors.background.opacity(0.95))
+        .px(px(8.0))
+        .py(px(4.0))
+        .text_size(px(10.0))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(colors.muted_foreground)
+        .shadow_sm()
+        .child(
+            div()
+                .text_color(colors.primary)
+                .child(spinner("changes-updating", 14.0)),
+        )
+        .child(cx.t("inspector.changes.updatingGit"))
         .into_any_element()
 }

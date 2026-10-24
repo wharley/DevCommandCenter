@@ -171,9 +171,7 @@ impl CodeColumn {
             let diff = cx
                 .background_executor()
                 .spawn(async move {
-                    futures::executor::block_on(
-                        dcc_infra::workspace_git::workspace_git_branch_diff(&db_path, &path),
-                    )
+                    dcc_infra::workspace_git::workspace_git_branch_diff(&db_path, &path).await
                 })
                 .await;
             let _ = this.update(cx, |column, cx| {

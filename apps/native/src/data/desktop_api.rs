@@ -440,6 +440,75 @@ impl DesktopApi {
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
     }
 
+    /// One of the task's delivery actions (`workspace_delivery`), by its id.
+    fn delivery(&self, workspace_id: &str, action: &str, body: &Value) -> Result<Value, ApiError> {
+        self.post(
+            &format!(
+                "/api/v1/workspaces/{}/delivery/{action}",
+                encode(workspace_id)
+            ),
+            body,
+        )
+    }
+
+    /// The header's commit preview: everything staged when nothing is, and
+    /// the staged snapshot's message.
+    pub fn prepare_commit(&self, workspace_id: &str) -> Result<CommitSuggestion, ApiError> {
+        let value = self.delivery(workspace_id, "prepare-commit", &json!({}))?;
+        serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
+    /// The reviewed commit, pushed unless the repository has no remote.
+    pub fn commit_reviewed(
+        &self,
+        workspace_id: &str,
+        message: &str,
+        body: Option<&str>,
+        staged_fingerprint: &str,
+        push: bool,
+    ) -> Result<(), ApiError> {
+        self.delivery(
+            workspace_id,
+            "commit-reviewed",
+            &json!({
+                "message": message,
+                "body": body,
+                "stagedFingerprint": staged_fingerprint,
+                "push": push,
+            }),
+        )
+        .map(|_| ())
+    }
+
+    /// `push`, `merge` or `complete`: no input.
+    pub fn deliver(&self, workspace_id: &str, action: &str) -> Result<(), ApiError> {
+        self.delivery(workspace_id, action, &json!({})).map(|_| ())
+    }
+
+    /// The header's "Criar PR": no title or body (the forge fills it), not a draft.
+    pub fn create_request(&self, workspace_id: &str) -> Result<(), ApiError> {
+        self.delivery(
+            workspace_id,
+            "request",
+            &json!({ "title": null, "body": null, "draft": false, "includeLocalChanges": false }),
+        )
+        .map(|_| ())
+    }
+
+    /// "Atualizar worktree" with the base (the PR's when it has one).
+    pub fn sync_base(
+        &self,
+        workspace_id: &str,
+        base_branch: Option<&str>,
+    ) -> Result<SyncedBase, ApiError> {
+        let value = self.delivery(
+            workspace_id,
+            "sync-base",
+            &json!({ "baseBranch": base_branch }),
+        )?;
+        serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
     /// A git action of the changes list on one file (or `.` for "stage all").
     pub fn git_action(&self, action: GitAction, root: &str, path: &str) -> Result<(), ApiError> {
         self.post(
@@ -622,6 +691,27 @@ fn parse_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
 }
 
 /// What "Nova tarefa" sends for a project.
+/// `WorkspaceGitCommitSuggestionOutput`, as the preview reads it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitSuggestion {
+    pub subject: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub staged_file_count: u32,
+    pub staged_fingerprint: String,
+}
+
+/// `WorkspaceGitSyncBaseOutput`
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedBase {
+    pub remote: String,
+    pub base_branch: String,
+    pub updated: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreateTaskRequest {
     pub project_id: String,

@@ -1,0 +1,163 @@
+//! The review's delivery header (`GitSectionHeader`): the branch, the pull
+//! request's link, and the button that takes the task's next step —
+//! commit and push (after a preview of the message), push, create or open
+//! the pull request, merge it — plus the bar to bring the base in when the
+//! branch is behind. The steps run in the desktop (`workspace_delivery`);
+//! the pull request's state is read here, from the forge's CLI, with the
+//! status.
+
+mod actions;
+mod dialogs;
+mod header;
+#[cfg(test)]
+mod tests;
+mod toolbar;
+
+pub(crate) use dialogs::dialogs;
+pub(crate) use header::header;
+pub(crate) use toolbar::toolbar;
+
+use dcc_core::domain::commit_mode::{CommitButtonStatus, CommitMode, resolve_commit_mode};
+use dcc_core::domain::workspace::Workspace;
+use dcc_core::domain::workspace_git::WorkspacePrStatusOutput;
+use gpui::{Context, Entity};
+
+use super::CodeColumn;
+use crate::ui::text_area::TextArea;
+
+/// A step that asks first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Confirm {
+    Merge,
+    SyncBase,
+}
+
+/// "Revisar mensagem do commit": the staged snapshot's message, editable.
+pub(crate) struct Preview {
+    pub subject: Entity<TextArea>,
+    pub body: Entity<TextArea>,
+    pub staged_files: u32,
+    pub fingerprint: String,
+}
+
+#[derive(Default)]
+pub(crate) struct Delivery {
+    /// The task whose checkout this is (its id runs the steps; its state and
+    /// worktree decide the completion after a merge).
+    pub task: Option<Workspace>,
+    pub pr: Option<WorkspacePrStatusOutput>,
+    /// A step is running (`isGitActionInProgress`).
+    pub busy: bool,
+    pub syncing: bool,
+    /// The status is being read again.
+    pub reading: bool,
+    pub button: Option<CommitButtonStatus>,
+    pub confirm: Option<Confirm>,
+    pub preview: Option<Preview>,
+    /// The task completed after its merge, once.
+    pub completed: Option<String>,
+}
+
+impl Delivery {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn button(&self) -> CommitButtonStatus {
+        self.button.unwrap_or(CommitButtonStatus::Idle)
+    }
+
+    /// "PR", or "MR" on GitLab.
+    pub fn request_label(&self) -> &'static str {
+        if self.pr.as_ref().and_then(|pr| pr.provider.as_deref()) == Some("gitlab") {
+            "MR"
+        } else {
+            "PR"
+        }
+    }
+}
+
+impl CodeColumn {
+    /// The branch the header names (`gitBranch ?? workspaceBranch`).
+    pub(crate) fn current_branch(&self) -> Option<String> {
+        self.status
+            .as_ref()
+            .and_then(|status| status.current_branch.clone())
+            .filter(|branch| !branch.is_empty() && branch != "HEAD")
+    }
+
+    /// The task's own branch (`workspace.branch`: the imported source's
+    /// head, else its base).
+    pub(crate) fn task_branch(&self) -> Option<String> {
+        let task = self.delivery.task.as_ref()?;
+        Some(
+            task.source
+                .as_ref()
+                .map(|source| source.head_branch.clone())
+                .unwrap_or_else(|| task.base_branch.clone()),
+        )
+        .filter(|branch| !branch.is_empty())
+    }
+
+    pub(crate) fn commit_mode(&self) -> CommitMode {
+        let branch = self
+            .current_branch()
+            .or_else(|| self.task_branch())
+            .unwrap_or_default();
+        // The conflict state (and its "ready" check) arrives with the
+        // resolver, on the stage.
+        resolve_commit_mode(
+            &branch,
+            self.status.as_ref(),
+            self.delivery.pr.as_ref(),
+            false,
+        )
+    }
+
+    /// The task and its pull request, read with the status while
+    /// "Mudanças" shows (`useWorkspacePrStatus`, every ten seconds).
+    pub(crate) fn read_pull_request(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        if self.tab != super::CodeColumnTab::Changes {
+            return;
+        }
+        let (db_path, branch) = (self.db_path.clone(), self.current_branch());
+        self._pull_request = Some(cx.spawn(async move |this, cx| {
+            let path = root.clone();
+            let (task, pr) = cx
+                .background_executor()
+                // Straight on the background executor: the forge's context
+                // blocks on its own futures inside, which a `block_on`
+                // around it would refuse.
+                .spawn(async move {
+                    let task = match dcc_infra::db::SqliteWorkspaceRepo::open(&db_path) {
+                        Ok(repo) => dcc_infra::workspace_git::find_workspace_by_root(&repo, &path)
+                            .await
+                            .ok()
+                            .flatten(),
+                        Err(_) => None,
+                    };
+                    let pr = dcc_infra::workspace_git::workspace_pr_status(
+                        &db_path, &path, branch, None,
+                    )
+                    .await
+                    .ok();
+                    (task, pr)
+                })
+                .await;
+            let _ = this.update(cx, |column, cx| {
+                if column.root.as_deref() != Some(root.as_str()) {
+                    return;
+                }
+                column.delivery.task = task;
+                if let Some(pr) = pr {
+                    column.delivery.pr = Some(pr);
+                }
+                column.complete_if_merged(cx);
+                cx.notify();
+            });
+        }));
+    }
+}

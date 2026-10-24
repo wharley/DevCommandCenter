@@ -27,5 +27,5 @@ pub use scrollbar::ListScrollbar;
 pub use text::{Tracked, tabular_nums};
 pub use text_area::{TextArea, TextAreaEvent};
 pub use text_input::{TextInput, TextInputEvent};
-pub use toast::Toaster;
+pub use toast::{ToastKind, Toaster};
 pub use tooltip::Tooltip;

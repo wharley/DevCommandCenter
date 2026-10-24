@@ -26,6 +26,8 @@ pub enum ToastKind {
     Success,
     Info,
     Warning,
+    /// sonner's `toast.loading`: stays, turning, until settled.
+    Loading,
 }
 
 struct Toast {
@@ -133,6 +135,60 @@ impl Toaster {
         );
     }
 
+    /// `toast.loading(message)`: the id to settle it with.
+    pub fn loading(message: impl Into<SharedString>, cx: &mut App) -> Option<u64> {
+        let message = message.into();
+        let toaster = Self::handle(cx)?;
+        Some(toaster.update(cx, |toaster, cx| {
+            toaster.push(ToastKind::Loading, message, None, cx)
+        }))
+    }
+
+    /// `toast.success(message, { id })` and the like: the loading toast
+    /// becomes this one, in place, and its time starts.
+    pub fn settle(
+        id: Option<u64>,
+        kind: ToastKind,
+        message: impl Into<SharedString>,
+        description: Option<SharedString>,
+        cx: &mut App,
+    ) {
+        let (message, description) = (message.into(), description.filter(|d| !d.is_empty()));
+        let Some((toaster, id)) = Self::handle(cx).zip(id) else {
+            return Self::show(kind, message, description, cx);
+        };
+        toaster.update(cx, |toaster, cx| {
+            if let Some(at) = toaster.toasts.iter().position(|toast| toast.id == id) {
+                let toast = &mut toaster.toasts[at];
+                toast.kind = kind;
+                toast.message = message;
+                toast.description = description;
+                toast._timer = if kind == ToastKind::Loading {
+                    Task::ready(())
+                } else {
+                    Self::timer(id, cx)
+                };
+                cx.notify();
+            } else {
+                toaster.push(kind, message, description, cx);
+            }
+        });
+    }
+
+    /// `toast.dismiss(id)`
+    pub fn dismiss_id(id: Option<u64>, cx: &mut App) {
+        if let Some((toaster, id)) = Self::handle(cx).zip(id) {
+            toaster.update(cx, |toaster, cx| toaster.dismiss(id, cx));
+        }
+    }
+
+    fn timer(id: u64, cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(LIFETIME).await;
+            let _ = this.update(cx, |toaster, cx| toaster.expire(id, cx));
+        })
+    }
+
     fn show(
         kind: ToastKind,
         message: SharedString,
@@ -141,9 +197,11 @@ impl Toaster {
     ) {
         let description = description.filter(|description| !description.is_empty());
         match Self::handle(cx) {
-            Some(toaster) => toaster.update(cx, |toaster, cx| {
-                toaster.push(kind, message, description, cx)
-            }),
+            Some(toaster) => {
+                toaster.update(cx, |toaster, cx| {
+                    toaster.push(kind, message, description, cx);
+                });
+            }
             None => eprintln!("[dcc-native] {message}"),
         }
     }
@@ -154,13 +212,14 @@ impl Toaster {
         message: SharedString,
         description: Option<SharedString>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        let timer = cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(LIFETIME).await;
-            let _ = this.update(cx, |toaster, cx| toaster.expire(id, cx));
-        });
+        let timer = if kind == ToastKind::Loading {
+            Task::ready(())
+        } else {
+            Self::timer(id, cx)
+        };
         self.toasts.push(Toast {
             id,
             kind,
@@ -170,6 +229,7 @@ impl Toaster {
             _timer: timer,
         });
         cx.notify();
+        id
     }
 
     fn expire(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -276,7 +336,9 @@ impl Toaster {
             ToastKind::Success => Some("sonner-success"),
             ToastKind::Info => Some("sonner-info"),
             ToastKind::Warning => Some("sonner-warning"),
+            ToastKind::Loading => None,
         };
+        let loading = toast.kind == ToastKind::Loading;
         div()
             .id(("toast", id as usize))
             .relative()
@@ -298,6 +360,17 @@ impl Toaster {
                 spread_radius: px(0.0),
                 inset: false,
             }])
+            .when(loading, |toast| {
+                toast.child(
+                    div()
+                        .flex()
+                        .flex_shrink_0()
+                        .size(px(16.0))
+                        .items_center()
+                        .justify_center()
+                        .child(crate::ui::spinner(("toast-loading", id as usize), 16.0)),
+                )
+            })
             .when_some(icon, |toast, icon| {
                 toast.child(
                     div()

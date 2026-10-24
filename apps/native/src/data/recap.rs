@@ -7,103 +7,16 @@ use std::collections::HashSet;
 
 use dcc_core::domain::workspace_git::{WorkspaceGitStatusOutput, WorkspacePrStatusOutput};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CommitMode {
-    CreatePr,
-    OpenPr,
-    CommitAndPush,
-    Push,
-    Fix,
-    ResolveConflicts,
-    CompleteMerge,
-    Merge,
-    Merged,
-    Closed,
-}
+pub use dcc_core::domain::commit_mode::CommitMode;
 
-fn has_changes(git: Option<&WorkspaceGitStatusOutput>) -> bool {
-    git.is_some_and(|git| !git.staged.is_empty() || !git.unstaged.is_empty())
-}
-
-fn ahead(git: Option<&WorkspaceGitStatusOutput>) -> u32 {
-    git.map_or(0, |git| git.ahead_of_remote_count)
-}
-
-/// `resolveCommitMode`
+/// `resolveCommitMode` as the rail reads it: without the conflict state
+/// (the Rust status has no `conflictResolutionReady`).
 pub fn resolve_commit_mode(
     branch: &str,
     git: Option<&WorkspaceGitStatusOutput>,
     pr: Option<&WorkspacePrStatusOutput>,
 ) -> CommitMode {
-    let pr_head = pr.and_then(|pr| pr.head_branch.as_deref());
-    let belongs = pr_head.is_none_or(|head| head == branch);
-    let pr_state = pr
-        .filter(|_| belongs)
-        .and_then(|pr| pr.state.as_deref())
-        .map(str::to_lowercase);
-
-    if let Some(git) = git
-        && git.merge_in_progress
-    {
-        // The Rust status has no `conflictResolutionReady`; it is never true here.
-        return if git.conflict_count == 0 {
-            CommitMode::CompleteMerge
-        } else {
-            CommitMode::ResolveConflicts
-        };
-    }
-    if git.is_some_and(|git| git.conflict_count > 0) {
-        return CommitMode::ResolveConflicts;
-    }
-    match pr_state.as_deref() {
-        Some("merged") => return CommitMode::Merged,
-        Some("closed") => return CommitMode::OpenPr,
-        Some("open") => {
-            if has_changes(git) {
-                return CommitMode::CommitAndPush;
-            }
-            if ahead(git) > 0 {
-                return CommitMode::Push;
-            }
-            let pr = pr.expect("an open state comes from a pull request");
-            if pr.mergeable.as_deref() == Some("CONFLICTING") {
-                return CommitMode::ResolveConflicts;
-            }
-            let merge_state = pr.merge_state_status.as_deref().map(str::to_uppercase);
-            if matches!(
-                merge_state.as_deref(),
-                Some("DIRTY" | "BLOCKED" | "UNSTABLE")
-            ) {
-                return CommitMode::Fix;
-            }
-            return CommitMode::Merge;
-        }
-        _ => {}
-    }
-    if has_changes(git) {
-        return CommitMode::CommitAndPush;
-    }
-    if ahead(git) > 0 {
-        return CommitMode::Push;
-    }
-    let normalized = branch.to_lowercase();
-    if normalized.contains("closed") {
-        CommitMode::Closed
-    } else if normalized.contains("merged") {
-        CommitMode::Merged
-    } else if normalized.contains("conflict") {
-        CommitMode::ResolveConflicts
-    } else if normalized.contains("merge") {
-        CommitMode::Merge
-    } else if normalized.contains("fix") {
-        CommitMode::Fix
-    } else if normalized.contains("pr/") {
-        CommitMode::OpenPr
-    } else if normalized.contains("push") {
-        CommitMode::Push
-    } else {
-        CommitMode::CreatePr
-    }
+    dcc_core::domain::commit_mode::resolve_commit_mode(branch, git, pr, false)
 }
 
 /// `WorkspaceRecapTone`: graded by value, only `Attention` spends chroma.

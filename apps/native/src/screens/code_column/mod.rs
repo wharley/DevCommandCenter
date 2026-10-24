@@ -3,6 +3,7 @@
 //! in the center of the workbench.
 
 mod changes;
+mod delivery;
 mod tree;
 mod view;
 
@@ -77,6 +78,7 @@ pub struct CodeColumn {
     /// The last status read failed (shown until one succeeds).
     pub(crate) status_error: Option<String>,
     pub(crate) changes: changes::Changes,
+    pub(crate) delivery: delivery::Delivery,
     pub(crate) by_path: HashMap<String, TreeStatus>,
     pub(crate) changed_folders: HashSet<String>,
     file_set: Option<String>,
@@ -98,6 +100,9 @@ pub struct CodeColumn {
     _branch: Option<Task<()>>,
     _git: Option<Task<()>>,
     _scrollbar_fade: Option<Task<()>>,
+    _pull_request: Option<Task<()>>,
+    _delivery: Option<Task<()>>,
+    _button: Option<Task<()>>,
 }
 
 impl EventEmitter<CodeColumnEvent> for CodeColumn {}
@@ -112,6 +117,7 @@ impl CodeColumn {
             status: None,
             status_error: None,
             changes: changes::Changes::new(),
+            delivery: delivery::Delivery::default(),
             by_path: HashMap::new(),
             changed_folders: HashSet::new(),
             file_set: None,
@@ -128,6 +134,9 @@ impl CodeColumn {
             _branch: None,
             _git: None,
             _scrollbar_fade: None,
+            _pull_request: None,
+            _delivery: None,
+            _button: None,
         }
     }
 
@@ -145,6 +154,7 @@ impl CodeColumn {
         self.status = None;
         self.status_error = None;
         self.changes.reset();
+        self.delivery.reset();
         self.by_path.clear();
         self.changed_folders.clear();
         self.file_set = None;
@@ -159,8 +169,9 @@ impl CodeColumn {
         if self.tab != tab {
             self.tab = tab;
             cx.emit(CodeColumnEvent::TabChanged(tab));
-            // The branch is read while "Mudanças" shows.
+            // The branch and its pull request are read while "Mudanças" shows.
             self.read_branch(cx);
+            self.read_pull_request(cx);
             cx.notify();
         }
     }
@@ -307,6 +318,13 @@ impl CodeColumn {
             };
             loop {
                 let path = root.clone();
+                // A read after the first one runs the header's line (`isFetching`).
+                let _ = this.update(cx, |column, cx| {
+                    if column.status.is_some() && column.tab == CodeColumnTab::Changes {
+                        column.delivery.reading = true;
+                        cx.notify();
+                    }
+                });
                 let status = cx
                     .background_executor()
                     .spawn(
@@ -314,6 +332,7 @@ impl CodeColumn {
                     )
                     .await;
                 let alive = this.update(cx, |column, cx| {
+                    column.delivery.reading = false;
                     if column.root.as_deref() != Some(root.as_str()) {
                         return;
                     }
@@ -321,6 +340,7 @@ impl CodeColumn {
                         Ok(status) => {
                             column.apply_status(status, cx);
                             column.read_branch(cx);
+                            column.read_pull_request(cx);
                         }
                         Err(error) => {
                             column.status_error = Some(error);
