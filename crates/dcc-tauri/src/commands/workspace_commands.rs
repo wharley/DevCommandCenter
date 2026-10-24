@@ -10967,46 +10967,15 @@ pub async fn list_mission_specs(
 ) -> Result<ListMissionSpecsOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
 
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
+    let Some((specs_canonical, files)) =
+        dcc_infra::mission_specs::spec_files(&input.workspace_root)?
+    else {
         return Ok(ListMissionSpecsOutput { specs: Vec::new() });
-    }
-
-    let specs_dir = PathBuf::from(root).join(".devcommandcenter").join("specs");
-    if !specs_dir.is_dir() {
-        return Ok(ListMissionSpecsOutput { specs: Vec::new() });
-    }
-
-    let root_canonical = PathBuf::from(root)
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    let specs_canonical = specs_dir
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    if !specs_canonical.starts_with(&root_canonical) {
-        return Err("mission specs directory must stay inside the workspace".to_string());
-    }
+    };
 
     let mut specs = Vec::new();
-    for entry in fs::read_dir(&specs_dir).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !file_name.ends_with(".spec.md") {
-            continue;
-        }
-
-        let file_canonical = path.canonicalize().map_err(|error| error.to_string())?;
-        if !file_canonical.starts_with(&specs_canonical) {
-            continue;
-        }
-
+    for (file_name, path) in files {
+        let file_name = file_name.as_str();
         let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
         let validation_name = file_name.replace(".spec.md", ".validation.json");
         let validation_path = specs_canonical.join(&validation_name);
@@ -11019,8 +10988,6 @@ pub async fn list_mission_specs(
             validation,
         });
     }
-
-    specs.sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(ListMissionSpecsOutput { specs })
 }

@@ -19,6 +19,7 @@ pub mod repository;
 pub mod session;
 pub mod thread;
 pub mod timeline;
+pub mod turn_instructions;
 pub mod usage;
 pub mod usage_limit;
 pub mod workspace;
