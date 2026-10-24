@@ -12,8 +12,8 @@ use dcc_core::domain::session::{SessionEventRecord, SessionId, WorkspaceSessionS
 use dcc_core::domain::timeline::activity::{TurnTokenTotals, total_turn_tokens};
 use dcc_core::domain::timeline::{TimelineMessage, project_session};
 use dcc_core::domain::workspace::WorkspaceId;
-use dcc_core::ports::{DelegationRepo, SessionRepo, UsageRepo};
-use dcc_infra::db::SqliteSessionRepo;
+use dcc_core::ports::{DelegationRepo, SessionRepo, UsageRepo, WorkspaceRepo};
+use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 use futures::executor::block_on;
 
 /// Events read per query when catching up.
@@ -31,6 +31,9 @@ pub struct Conversation {
     pub waiting: bool,
     /// The session was stopped; retry and continue reopen it first.
     pub aborted: bool,
+    /// The task's checkout (`worktreePath ?? rootPath`): mentions list its
+    /// files and attachments inside it go relative.
+    pub workspace_path: Option<String>,
     pub rows: Arc<Vec<TimelineMessage>>,
     /// The task's delegations by id, for the cards' live status and report.
     pub delegations: HashMap<String, DelegationRecord>,
@@ -221,6 +224,9 @@ pub fn load(
     };
     let activity = SessionActivityInput::from_summary(summary);
     let session_id = summary.session.id.0.clone();
+    conversation.workspace_path =
+        block_on(SqliteWorkspaceRepo::open(db_path)?.get_workspace(&workspace))?
+            .map(|workspace| workspace.worktree_path.unwrap_or(workspace.root_path));
     conversation.session_id = Some(session_id.clone());
     conversation.provider_id = Some(summary.session.provider_id.clone());
     conversation.model = summary.session.model.clone();
@@ -268,6 +274,7 @@ impl Conversation {
             && self.running == other.running
             && self.waiting == other.waiting
             && self.aborted == other.aborted
+            && self.workspace_path == other.workspace_path
             && self.delegations == other.delegations
             && self.children == other.children
             && self.turn_tokens == other.turn_tokens

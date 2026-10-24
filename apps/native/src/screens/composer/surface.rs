@@ -3,11 +3,11 @@
 //! with the prompt field and the toolbar under it.
 
 use gpui::{
-    AnyElement, BoxShadow, Context, Focusable, FontWeight, SharedString, Window, div, point,
-    prelude::*, px,
+    AnyElement, BoxShadow, Context, ExternalPaths, Focusable, FontWeight, SharedString, Window,
+    div, point, prelude::*, px,
 };
 
-use super::{Busy, Composer};
+use super::{Busy, Composer, popups};
 use crate::project::{ProviderIcon, model_label};
 use crate::theme::ActiveTheme;
 use crate::theme::color::mix_oklab;
@@ -144,6 +144,7 @@ pub(super) fn render(
     }
     let disabled = composer.session.session_id.is_none();
     let input = composer.input.clone();
+    let drop_border = mix_oklab(colors.accent_calm, 0.7, colors.border);
     div()
         .flex_shrink_0()
         .px(px(16.0))
@@ -154,6 +155,13 @@ pub(super) fn render(
                 div()
                     .id("composer")
                     .relative()
+                    .on_drop(cx.listener(|composer, paths: &ExternalPaths, _, cx| {
+                        composer.add_paths(paths.paths().to_vec(), cx)
+                    }))
+                    .drag_over::<ExternalPaths>(move |style, _, _, _| {
+                        style.border_color(drop_border)
+                    })
+                    .children(popups::mention_popup(composer, cx))
                     .flex()
                     .flex_col()
                     .rounded(px(18.0))
@@ -185,8 +193,15 @@ pub(super) fn render(
                             .items_end()
                             .justify_between()
                             .gap(px(12.0))
-                            // Attachments, approval mode and plan mode: screen 3b–3c.
-                            .child(div().flex().min_w_0().items_center().gap(px(6.0)))
+                            // Approval mode and plan mode: screen 3c.
+                            .child(
+                                div()
+                                    .flex()
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(popups::attach_menu(composer, cx)),
+                            )
                             .child(
                                 div()
                                     .flex()

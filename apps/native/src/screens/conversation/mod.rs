@@ -233,6 +233,7 @@ impl ConversationView {
             model: next.model.clone(),
             running: next.running,
             aborted: next.aborted,
+            workspace_path: next.workspace_path.clone(),
         };
         self.composer
             .update(cx, |composer, cx| composer.set_session(session, cx));

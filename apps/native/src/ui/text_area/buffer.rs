@@ -1,6 +1,8 @@
 //! The text a multi-line field edits: content, selection (in UTF-8 byte
 //! offsets on grapheme boundaries), the IME's marked range and undo history.
-//! No GPUI here; the view maps keys and layout onto these operations.
+//! An inline chip (an attachment, a mentioned file) is one `CHIP` character
+//! in the text; its data sits in `chips`, the n-th chip for the n-th `CHIP`,
+//! and travels with the text through undo. No GPUI here.
 
 use std::ops::Range;
 use std::time::{Duration, Instant};
@@ -11,10 +13,14 @@ use unicode_segmentation::UnicodeSegmentation;
 const UNDO_GROUP: Duration = Duration::from_millis(600);
 const UNDO_LIMIT: usize = 200;
 
+/// The character that stands for a chip in the text.
+pub const CHIP: char = '\u{FFFC}';
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Snapshot {
+struct Snapshot<C> {
     text: String,
     selection: Range<usize>,
+    chips: Vec<C>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,18 +29,34 @@ enum EditKind {
     Other,
 }
 
-#[derive(Debug, Default)]
-pub struct Buffer {
+#[derive(Debug)]
+pub struct Buffer<C = ()> {
     text: String,
+    chips: Vec<C>,
     pub selection: Range<usize>,
     pub reversed: bool,
     pub marked: Option<Range<usize>>,
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
+    undo: Vec<Snapshot<C>>,
+    redo: Vec<Snapshot<C>>,
     last_edit: Option<(EditKind, Instant)>,
 }
 
-impl Buffer {
+impl<C> Default for Buffer<C> {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            chips: Vec::new(),
+            selection: 0..0,
+            reversed: false,
+            marked: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            last_edit: None,
+        }
+    }
+}
+
+impl<C: Clone> Buffer<C> {
     pub fn text(&self) -> &str {
         &self.text
     }
@@ -46,10 +68,18 @@ impl Buffer {
     /// Replaces everything (a draft restored, the field cleared after send),
     /// with the caret at the end and no history.
     pub fn set_text(&mut self, text: &str) {
-        self.text = text.to_string();
+        self.text = text.replace(CHIP, "");
+        self.chips.clear();
         self.selection = self.text.len()..self.text.len();
         self.reversed = false;
         self.marked = None;
+        self.undo.clear();
+        self.redo.clear();
+        self.last_edit = None;
+    }
+
+    /// Drops undo and redo (after filling the field programmatically).
+    pub fn forget_history(&mut self) {
         self.undo.clear();
         self.redo.clear();
         self.last_edit = None;
@@ -172,10 +202,64 @@ impl Buffer {
             .unwrap_or(offset..offset)
     }
 
-    fn snapshot(&self) -> Snapshot {
+    fn snapshot(&self) -> Snapshot<C> {
         Snapshot {
             text: self.text.clone(),
             selection: self.selection.clone(),
+            chips: self.chips.clone(),
+        }
+    }
+
+    pub fn chips(&self) -> &[C] {
+        &self.chips
+    }
+
+    /// The chips in text order with the byte offset of each.
+    pub fn chip_offsets(&self) -> impl Iterator<Item = (usize, &C)> {
+        self.text
+            .char_indices()
+            .filter(|(_, c)| *c == CHIP)
+            .map(|(index, _)| index)
+            .zip(self.chips.iter())
+    }
+
+    fn chips_before(&self, offset: usize) -> usize {
+        self.text[..offset].matches(CHIP).count()
+    }
+
+    /// Drops the chips whose characters `range` covers.
+    fn remove_chips_in(&mut self, range: &Range<usize>) {
+        let first = self.chips_before(range.start);
+        let count = self.text[range.clone()].matches(CHIP).count();
+        self.chips
+            .drain(first..(first + count).min(self.chips.len()));
+    }
+
+    /// Puts a chip at the caret (replacing the selection), as one edit.
+    pub fn insert_chip(&mut self, chip: C) {
+        let range = self
+            .marked
+            .clone()
+            .unwrap_or_else(|| self.selection.clone());
+        self.record(EditKind::Other, Instant::now());
+        self.remove_chips_in(&range);
+        let index = self.chips_before(range.start);
+        self.chips.insert(index, chip);
+        let mut buffer = [0u8; 4];
+        self.text
+            .replace_range(range.clone(), CHIP.encode_utf8(&mut buffer));
+        let caret = range.start + CHIP.len_utf8();
+        self.selection = caret..caret;
+        self.reversed = false;
+        self.marked = None;
+        self.last_edit = Some((EditKind::Other, Instant::now()));
+    }
+
+    /// Removes the chip that starts at `offset`.
+    pub fn remove_chip_at(&mut self, offset: usize) {
+        if self.text[offset..].starts_with(CHIP) {
+            self.replace(Some(offset..offset + CHIP.len_utf8()), "");
+            self.last_edit = Some((EditKind::Other, Instant::now()));
         }
     }
 
@@ -198,6 +282,9 @@ impl Buffer {
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection.clone());
         let range = self.clamp(range.start)..self.clamp(range.end);
+        // Chips only enter through `insert_chip`.
+        let cleaned = text.replace(CHIP, "");
+        let text = cleaned.as_str();
         let typing = !text.contains('\n') && text.chars().count() <= 1;
         self.record(
             if typing {
@@ -207,6 +294,7 @@ impl Buffer {
             },
             Instant::now(),
         );
+        self.remove_chips_in(&range);
         self.text.replace_range(range.clone(), text);
         let caret = range.start + text.len();
         self.selection = caret..caret;
@@ -228,6 +316,9 @@ impl Buffer {
         if self.marked.is_none() {
             self.record(EditKind::Other, Instant::now());
         }
+        let text = text.replace(CHIP, "");
+        let text = text.as_str();
+        self.remove_chips_in(&range);
         self.text.replace_range(range.clone(), text);
         self.marked = (!text.is_empty()).then(|| range.start..range.start + text.len());
         self.selection = match selected {
@@ -270,8 +361,9 @@ impl Buffer {
         true
     }
 
-    fn restore(&mut self, snapshot: Snapshot) {
+    fn restore(&mut self, snapshot: Snapshot<C>) {
         self.text = snapshot.text;
+        self.chips = snapshot.chips;
         self.selection = snapshot.selection;
         self.reversed = false;
         self.marked = None;
@@ -306,7 +398,7 @@ impl Buffer {
 mod tests {
     use super::*;
 
-    fn buffer(text: &str) -> Buffer {
+    fn buffer(text: &str) -> Buffer<&'static str> {
         let mut buffer = Buffer::default();
         buffer.set_text(text);
         buffer
@@ -367,6 +459,31 @@ mod tests {
         b.move_to(0);
         b.delete_to(b.next_word(0));
         assert_eq!(b.text(), "");
+    }
+
+    #[test]
+    fn chips_move_with_the_text_and_undo() {
+        let mut b = buffer("ver  agora");
+        b.move_to(4);
+        b.insert_chip("a.rs");
+        b.insert_chip("b.png");
+        assert_eq!(b.chips(), &["a.rs", "b.png"]);
+        b.move_to(0);
+        b.insert_chip("first");
+        assert_eq!(b.chips(), &["first", "a.rs", "b.png"]);
+        // Backspace over a chip removes it whole.
+        let after_a = b.chip_offsets().nth(1).unwrap().0 + CHIP.len_utf8();
+        b.move_to(after_a);
+        b.delete_to(b.previous_boundary(after_a));
+        assert_eq!(b.chips(), &["first", "b.png"]);
+        assert!(b.undo());
+        assert_eq!(b.chips(), &["first", "a.rs", "b.png"]);
+        // Selecting across chips and typing drops them.
+        b.select_all();
+        b.replace(None, "x");
+        assert!(b.chips().is_empty());
+        b.replace(None, "\u{FFFC}");
+        assert_eq!(b.text(), "x");
     }
 
     #[test]

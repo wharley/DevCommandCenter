@@ -1,9 +1,14 @@
 //! Screen 3: the composer (`WorkspaceComposer`) under the conversation. The
 //! prompt goes to the desktop, which runs the agent (`data::desktop_api`):
 //! Enter sends, the stop button interrupts, and a draft is kept per
-//! conversation while you move between tasks.
+//! conversation while you move between tasks. Files go in as chips: the +
+//! menu, a pasted image, a drop, or `@arquivo`.
 
+mod attachments;
 mod drafts;
+mod mentions;
+mod popups;
+mod prompt;
 mod surface;
 #[cfg(test)]
 mod tests;
@@ -27,6 +32,7 @@ pub struct ComposerSession {
     pub model: Option<String>,
     pub running: bool,
     pub aborted: bool,
+    pub workspace_path: Option<String>,
 }
 
 /// Something the conversation should do after the composer acted.
@@ -50,7 +56,12 @@ pub struct Composer {
     pub(crate) busy: Option<Busy>,
     /// Where the turns go instead of the desktop's own endpoint (tests).
     pub(crate) endpoint: Option<DesktopApi>,
+    /// The `@arquivo` popup, while open.
+    pub(crate) mention: Option<mentions::MentionMenu>,
+    pub(crate) files: Option<mentions::FileList>,
+    files_loading: bool,
     _input_events: Subscription,
+    _input_changes: Subscription,
 }
 
 impl EventEmitter<ComposerEvent> for Composer {}
@@ -69,16 +80,27 @@ impl Composer {
             |this, _, event: &TextAreaEvent, window, cx| match event {
                 TextAreaEvent::Submitted => this.send(window, cx),
                 TextAreaEvent::Changed => this.remember_draft(cx),
-                _ => {}
+                TextAreaEvent::MenuUp => this.move_mention(-1, cx),
+                TextAreaEvent::MenuDown => this.move_mention(1, cx),
+                TextAreaEvent::MenuAccept => this.accept_mention(None, cx),
+                TextAreaEvent::Cancelled => this.close_mention(cx),
+                TextAreaEvent::PastedNonText => this.paste_image(cx),
+                TextAreaEvent::Blurred => {}
             },
         );
+        // Typing or moving the caret may open, filter or close the popup.
+        let input_changes = cx.observe(&input, |this, _, cx| this.update_mention(cx));
         Self {
             input,
             session: ComposerSession::default(),
             drafts: drafts::load(),
             busy: None,
             endpoint: None,
+            mention: None,
+            files: None,
+            files_loading: false,
             _input_events: input_events,
+            _input_changes: input_changes,
         }
     }
 
@@ -97,8 +119,10 @@ impl Composer {
                 .and_then(|id| self.drafts.get(id))
                 .cloned()
                 .unwrap_or_default();
+            let parts = prompt::parts_of(&draft);
             self.input
-                .update(cx, |input, cx| input.set_text(&draft, cx));
+                .update(cx, |input, cx| input.set_parts(parts, cx));
+            self.mention = None;
         }
         let disabled = self.session.session_id.is_none();
         self.input
@@ -113,7 +137,9 @@ impl Composer {
 
     /// Puts text in the field (the continuation prompt), replacing the draft.
     pub fn replace_draft(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.input.update(cx, |input, cx| input.set_text(text, cx));
+        let parts = prompt::parts_of(text);
+        self.input
+            .update(cx, |input, cx| input.set_parts(parts, cx));
         self.focus(window, cx);
     }
 
@@ -121,7 +147,7 @@ impl Composer {
         let Some(session) = self.session.session_id.clone() else {
             return;
         };
-        let text = self.input.read(cx).text().to_string();
+        let text = self.prompt(cx);
         let changed = if text.trim().is_empty() {
             self.drafts.remove(&session).is_some()
         } else {
@@ -133,18 +159,24 @@ impl Composer {
         cx.notify();
     }
 
+    /// What would be sent now: the text with its chips as `@path`.
+    pub(crate) fn prompt(&self, cx: &App) -> String {
+        let input = self.input.read(cx);
+        prompt::serialize(input.text(), &input.chips())
+    }
+
     pub(crate) fn can_send(&self, cx: &App) -> bool {
         self.session.session_id.is_some()
             && !self.session.running
             && self.busy.is_none()
-            && !self.input.read(cx).text().trim().is_empty()
+            && !self.prompt(cx).is_empty()
     }
 
     pub(crate) fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.can_send(cx) {
             return;
         }
-        let prompt = self.input.read(cx).text().trim().to_string();
+        let prompt = self.prompt(cx);
         self.submit(prompt, None, true, window, cx);
     }
 

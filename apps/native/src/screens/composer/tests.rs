@@ -94,3 +94,87 @@ fn continuation_quotes_the_original_request() {
     );
     assert_eq!(continuation_prompt(None, " Continue. ", "x"), "Continue.");
 }
+
+#[gpui::test]
+fn mentions_pick_files_and_attachments_become_paths(cx: &mut TestAppContext) {
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    use super::mentions::FileList;
+    let (composer, cx) = open(cx);
+    composer.update_in(cx, |composer, window, cx| {
+        composer.files = Some(FileList {
+            root: "/repo".into(),
+            files: Arc::new(vec![
+                "src/app.rs".into(),
+                "src/payment.ts".into(),
+                "docs/readme.md".into(),
+            ]),
+            read_at: Instant::now(),
+        });
+        composer.set_session(
+            ComposerSession {
+                workspace_path: Some("/repo".into()),
+                ..session("a")
+            },
+            cx,
+        );
+        composer.focus(window, cx);
+    });
+    cx.simulate_input("ver @p");
+    composer.read_with(cx, |composer, _| {
+        let menu = composer.mention.as_ref().expect("the popup opened");
+        assert_eq!(
+            menu.options,
+            vec!["src/payment.ts".to_string(), "src/app.rs".to_string()]
+        );
+    });
+    // ↓ then Enter picks the second file; Enter does not send while it's open.
+    cx.simulate_keystrokes("down enter");
+    composer.read_with(cx, |composer, cx| {
+        assert!(composer.mention.is_none());
+        assert_eq!(composer.prompt(cx), "ver @src/app.rs");
+        assert_eq!(composer.busy, None);
+    });
+    // A picked file inside the checkout goes relative, outside stays absolute.
+    composer.update(cx, |composer, cx| {
+        composer.add_paths(
+            vec!["/repo/docs/shot.png".into(), "/tmp/notes.txt".into()],
+            cx,
+        )
+    });
+    cx.simulate_input("fim");
+    composer.read_with(cx, |composer, cx| {
+        assert_eq!(
+            composer.prompt(cx),
+            "ver @src/app.rs @docs/shot.png @/tmp/notes.txtfim"
+        );
+        let chips = composer.input.read(cx).chips();
+        assert!(matches!(chips[1].1, crate::ui::text_area::Chip::Image(_)));
+    });
+    // Backspace after a chip removes it whole.
+    composer.update(cx, |composer, cx| {
+        let input = composer.input.clone();
+        input.update(cx, |input, cx| input.set_text("", cx));
+    });
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn long_pastes_become_a_snippet_chip(cx: &mut TestAppContext) {
+    let (composer, cx) = open(cx);
+    composer.update_in(cx, |composer, window, cx| {
+        composer.set_session(session("a"), cx);
+        composer.focus(window, cx);
+    });
+    let long = "linha\n".repeat(300);
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string(long.clone()));
+    cx.simulate_input("antes ");
+    cx.simulate_keystrokes("cmd-v");
+    cx.run_until_parked();
+    composer.read_with(cx, |composer, cx| {
+        let chips = composer.input.read(cx).chips();
+        assert_eq!(chips.len(), 1);
+        assert_eq!(composer.prompt(cx), format!("antes \n{}", long.trim_end()));
+    });
+}

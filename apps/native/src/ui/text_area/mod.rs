@@ -4,6 +4,7 @@
 //! desktop's composer; the owner styles the box around it.
 
 mod buffer;
+pub mod chip;
 mod element;
 mod handler;
 
@@ -16,8 +17,19 @@ use gpui::{
     prelude::*, px,
 };
 
-pub use buffer::Buffer;
-use element::TextAreaElement;
+pub use buffer::{Buffer, CHIP};
+pub use chip::Chip;
+
+/// A piece of the field's content, to fill it at once (a restored draft).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Part {
+    Text(String),
+    Chip(Chip),
+}
+
+/// Pastes this long become a snippet chip (`LARGE_PASTE_CHAR_THRESHOLD`).
+const LARGE_PASTE: usize = 1200;
+use element::{DisplayMap, TextAreaElement};
 
 actions!(
     text_area,
@@ -51,6 +63,7 @@ actions!(
         Newline,
         Submit,
         Cancel,
+        Tab,
         Paste,
         Cut,
         Copy,
@@ -98,6 +111,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-enter", Newline, Some(CONTEXT)),
         KeyBinding::new("enter", Submit, Some(CONTEXT)),
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),
+        KeyBinding::new("tab", Tab, Some(CONTEXT)),
         KeyBinding::new("cmd-v", Paste, Some(CONTEXT)),
         KeyBinding::new("cmd-x", Cut, Some(CONTEXT)),
         KeyBinding::new("cmd-c", Copy, Some(CONTEXT)),
@@ -116,17 +130,24 @@ pub enum TextAreaEvent {
     Blurred,
     /// A paste the clipboard held as something other than text (an image).
     PastedNonText,
+    /// ↑ / ↓ / Tab while the owner's menu is open (`set_menu_open`).
+    MenuUp,
+    MenuDown,
+    MenuAccept,
 }
 
 /// The laid-out text of the last frame, for clicks, arrows and the IME.
 pub(crate) struct Layout {
-    /// Each hard line: its byte offset, its wrapped layout and its top in
-    /// content coordinates.
+    /// Each hard line: its byte offset in the display copy, its wrapped
+    /// layout and its top in content coordinates.
     lines: Vec<(usize, WrappedLine, Pixels)>,
     line_height: Pixels,
     /// Where the visible part was painted.
     bounds: Bounds<Pixels>,
     content_height: Pixels,
+    map: DisplayMap,
+    /// Each chip's close button and the chip's offset in the text.
+    chip_closes: Vec<(Bounds<Pixels>, usize)>,
 }
 
 impl Layout {
@@ -137,8 +158,9 @@ impl Layout {
             .find(|(start, line, _)| *start <= offset && offset <= start + line.len())
     }
 
-    /// The caret's top-left for `offset`, in content coordinates.
+    /// The caret's top-left for a text `offset`, in content coordinates.
     fn position_for(&self, offset: usize) -> Point<Pixels> {
+        let offset = self.map.to_display(offset);
         match self.line_for_offset(offset) {
             Some((start, line, top)) => {
                 let position = line
@@ -150,8 +172,12 @@ impl Layout {
         }
     }
 
-    /// The offset nearest a point in content coordinates.
+    /// The text offset nearest a point in content coordinates.
     fn offset_for(&self, position: Point<Pixels>) -> usize {
+        self.map.to_text(self.display_offset_for(position))
+    }
+
+    fn display_offset_for(&self, position: Point<Pixels>) -> usize {
         let Some(first) = self.lines.first() else {
             return 0;
         };
@@ -181,7 +207,9 @@ impl Layout {
 
 pub struct TextArea {
     focus_handle: FocusHandle,
-    pub(crate) buffer: Buffer,
+    pub(crate) buffer: Buffer<Chip>,
+    /// The owner shows a menu over the field: ↑↓, Enter and Tab are its.
+    menu_open: bool,
     placeholder: SharedString,
     max_height: Option<Pixels>,
     disabled: bool,
@@ -206,6 +234,7 @@ impl TextArea {
         Self {
             focus_handle,
             buffer: Buffer::default(),
+            menu_open: false,
             placeholder: SharedString::default(),
             max_height: None,
             disabled: false,
@@ -247,6 +276,66 @@ impl TextArea {
 
     pub fn text(&self) -> &str {
         self.buffer.text()
+    }
+
+    /// The chips in text order with each one's offset.
+    pub fn chips(&self) -> Vec<(usize, Chip)> {
+        self.buffer
+            .chip_offsets()
+            .map(|(offset, chip)| (offset, chip.clone()))
+            .collect()
+    }
+
+    pub fn cursor(&self) -> usize {
+        self.buffer.cursor()
+    }
+
+    pub fn has_selection(&self) -> bool {
+        !self.buffer.selection.is_empty()
+    }
+
+    pub fn set_menu_open(&mut self, open: bool) {
+        self.menu_open = open;
+    }
+
+    /// Replaces everything with these parts, with no undo history.
+    pub fn set_parts(&mut self, parts: Vec<Part>, cx: &mut Context<Self>) {
+        self.buffer.set_text("");
+        for part in parts {
+            match part {
+                Part::Text(text) => self.buffer.replace(None, &text),
+                Part::Chip(chip) => self.buffer.insert_chip(chip),
+            }
+        }
+        self.buffer.forget_history();
+        self.reveal_cursor = true;
+        cx.emit(TextAreaEvent::Changed);
+        cx.notify();
+    }
+
+    /// Puts a chip at the caret, or in place of `range` (the typed `@query`).
+    pub fn insert_chip(
+        &mut self,
+        chip: Chip,
+        range: Option<std::ops::Range<usize>>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(range) = range {
+            self.buffer.move_to(range.start);
+            self.buffer.select_to(range.end);
+        }
+        self.buffer.insert_chip(chip);
+        self.after_edit(cx);
+    }
+
+    /// Adds a chip at the very end (a pasted image), keeping the caret.
+    pub fn append_chip(&mut self, chip: Chip, cx: &mut Context<Self>) {
+        let cursor = self.buffer.cursor();
+        let end = self.buffer.text().len();
+        self.buffer.move_to(end);
+        self.buffer.insert_chip(chip);
+        self.buffer.move_to(cursor);
+        self.after_edit(cx);
     }
 
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -329,11 +418,27 @@ impl TextArea {
     }
 
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
+        if self.menu_open {
+            cx.emit(TextAreaEvent::MenuUp);
+            return;
+        }
         self.vertical(-1.0, false, cx);
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
+        if self.menu_open {
+            cx.emit(TextAreaEvent::MenuDown);
+            return;
+        }
         self.vertical(1.0, false, cx);
+    }
+
+    fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
+        if self.menu_open {
+            cx.emit(TextAreaEvent::MenuAccept);
+        } else {
+            window.focus_next(cx);
+        }
     }
 
     fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
@@ -407,7 +512,7 @@ impl TextArea {
         cx.notify();
     }
 
-    fn edit(&mut self, edit: impl FnOnce(&mut Buffer), cx: &mut Context<Self>) {
+    fn edit(&mut self, edit: impl FnOnce(&mut Buffer<Chip>), cx: &mut Context<Self>) {
         if self.disabled {
             return;
         }
@@ -460,9 +565,14 @@ impl TextArea {
     }
 
     fn submit(&mut self, _: &Submit, _: &mut Window, cx: &mut Context<Self>) {
-        if self.buffer.marked.is_none() {
-            cx.emit(TextAreaEvent::Submitted);
+        if self.buffer.marked.is_some() {
+            return;
         }
+        cx.emit(if self.menu_open {
+            TextAreaEvent::MenuAccept
+        } else {
+            TextAreaEvent::Submitted
+        });
     }
 
     fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
@@ -473,7 +583,12 @@ impl TextArea {
         match cx.read_from_clipboard().and_then(|item| item.text()) {
             Some(text) => {
                 let text = text.replace("\r\n", "\n");
-                self.edit(|buffer| buffer.replace(None, &text), cx);
+                if text.encode_utf16().count() >= LARGE_PASTE {
+                    // The whole text still goes in the prompt.
+                    self.edit(|buffer| buffer.insert_chip(Chip::Snippet(text)), cx);
+                } else {
+                    self.edit(|buffer| buffer.replace(None, &text), cx);
+                }
             }
             None => cx.emit(TextAreaEvent::PastedNonText),
         }
@@ -535,6 +650,17 @@ impl TextArea {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus_handle, cx);
+        if let Some(chip) = self.layout.as_ref().and_then(|layout| {
+            layout
+                .chip_closes
+                .iter()
+                .find(|(close, _)| close.contains(&event.position))
+                .map(|(_, offset)| *offset)
+        }) {
+            self.buffer.remove_chip_at(chip);
+            self.after_edit(cx);
+            return;
+        }
         let offset = self.offset_at(event.position);
         self.goal_x = None;
         if event.modifiers.shift {
@@ -634,6 +760,7 @@ impl Render for TextArea {
             .on_action(cx.listener(Self::newline))
             .on_action(cx.listener(Self::submit))
             .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(Self::tab))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))
