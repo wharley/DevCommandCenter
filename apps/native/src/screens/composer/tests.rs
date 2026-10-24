@@ -787,3 +787,98 @@ fn the_queue_tray_moves_edits_and_sends_the_next(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("queue-tray").is_some());
 }
+
+fn new_task(auto_named: bool) -> ComposerSession {
+    ComposerSession {
+        task_id: Some("ws-1".into()),
+        project_id: Some("checkout".into()),
+        start: Some(crate::data::conversation::ThreadStart {
+            workspace_id: "ws-1".into(),
+            project_id: "checkout".into(),
+            additional_workspace_ids: vec!["ws-2".into()],
+            name: (!auto_named).then(|| "Pagamentos".to_string()),
+            auto_named,
+        }),
+        ..ComposerSession::default()
+    }
+}
+
+#[gpui::test]
+fn the_first_prompt_starts_the_conversation_and_names_the_task(cx: &mut TestAppContext) {
+    let (port, server) = fake_desktop_answers(vec![
+        (200, r#"{"session":{"id":"s-new"}}"#.into()),
+        (200, "{}".into()),
+        (200, r#"{"applied":true}"#.into()),
+    ]);
+    let (composer, cx) = open(cx);
+    composer.update_in(cx, |composer, window, cx| {
+        with_catalog(composer, port);
+        composer.set_session(new_task(true), cx);
+        assert!(composer.session.usable());
+        assert_eq!(
+            composer.selected_provider_id().as_deref(),
+            Some("claude_code")
+        );
+        composer.focus(window, cx);
+    });
+    cx.simulate_input("Preciso que você corrija o login do checkout");
+    composer.read_with(cx, |composer, cx| assert!(composer.can_send(cx)));
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let calls = server.join().unwrap();
+    assert_eq!(calls[0].0, "POST /api/v1/sessions/start");
+    let start: serde_json::Value = serde_json::from_str(&calls[0].1).unwrap();
+    assert_eq!(start["workspaceId"], "ws-1");
+    assert_eq!(start["additionalWorkspaceIds"], serde_json::json!(["ws-2"]));
+    assert_eq!(start["projectId"], "checkout");
+    assert_eq!(start["providerId"], "claude_code");
+    assert_eq!(start["model"], "claude-sonnet-5-5");
+    assert_eq!(start["title"], "Corrija o login do checkout");
+    assert_eq!(calls[1].0, "POST /api/v1/sessions/s-new/turns");
+    assert!(
+        calls[1]
+            .1
+            .contains(r#""prompt":"Preciso que você corrija o login do checkout""#)
+    );
+    assert!(!calls[1].1.contains("providerId"), "{}", calls[1].1);
+    assert_eq!(calls[2].0, "POST /api/v1/sessions/s-new/task-title");
+    assert_eq!(
+        calls[2].1,
+        r#"{"workspaceId":"ws-1","title":"Corrija o login do checkout"}"#
+    );
+    composer.read_with(cx, |composer, cx| {
+        assert_eq!(composer.input.read(cx).text(), "");
+        assert_eq!(composer.busy, None);
+    });
+}
+
+#[gpui::test]
+fn a_named_task_keeps_its_name(cx: &mut TestAppContext) {
+    let (port, server) = fake_desktop_answers(vec![
+        (200, r#"{"session":{"id":"s-new"}}"#.into()),
+        (200, "{}".into()),
+    ]);
+    let (composer, cx) = open(cx);
+    composer.update_in(cx, |composer, window, cx| {
+        with_catalog(composer, port);
+        composer.set_session(new_task(false), cx);
+        // Picking a model makes it this project's and the global default.
+        composer.select_model("codex".into(), Some("gpt-6.1-sol".into()), cx);
+        assert_eq!(composer.selected_provider_id().as_deref(), Some("codex"));
+        let pick = composer.settings.project_pick("checkout").cloned().unwrap();
+        assert_eq!(
+            (pick.provider_id.as_str(), pick.model_id.as_str()),
+            ("codex", "gpt-6.1-sol")
+        );
+        assert_eq!(composer.settings.global_pick, Some(pick));
+        composer.focus(window, cx);
+    });
+    cx.simulate_input("rode os testes");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let calls = server.join().unwrap();
+    assert_eq!(calls.len(), 2);
+    let start: serde_json::Value = serde_json::from_str(&calls[0].1).unwrap();
+    assert_eq!(start["providerId"], "codex");
+    assert_eq!(start["title"], "Pagamentos");
+}

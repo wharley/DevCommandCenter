@@ -44,7 +44,7 @@ fn tone(policy: ProviderApprovalPolicy, cx: &gpui::App) -> (Hsla, Option<Hsla>) 
 
 pub(super) fn approval_menu(composer: &Composer, cx: &mut Context<Composer>) -> AnyElement {
     let colors = cx.theme().colors.clone();
-    let disabled = composer.session.session_id.is_none();
+    let disabled = !composer.session.usable();
     let policies = menu_policies(&composer.supported_policies());
     let selected = composer.approval();
     let Some(selected) = selected.filter(|_| !policies.is_empty()) else {
@@ -329,7 +329,7 @@ pub(super) fn full_access_dialog(
 pub(super) fn plan_toggle(composer: &Composer, cx: &mut Context<Composer>) -> AnyElement {
     let colors = cx.theme().colors.clone();
     let on = composer.plan_mode();
-    let disabled = composer.session.session_id.is_none();
+    let disabled = !composer.session.usable();
     let color: Hsla = if on {
         hex(PLAN)
     } else {

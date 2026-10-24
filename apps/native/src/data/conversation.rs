@@ -53,6 +53,10 @@ pub struct Conversation {
     pub auto_resume: bool,
     /// Follow-ups waiting for the running turn, in order.
     pub queue: Arc<Vec<QueuedTurn>>,
+    /// No conversation yet: the first prompt starts one.
+    pub start: Option<ThreadStart>,
+    /// The task's project (`repository.projectId`).
+    pub project_id: Option<String>,
     /// The DCC's own durable objective (the composer's "Objetivo").
     pub objective: Option<dcc_core::domain::objective::SessionObjective>,
     pub rows: Arc<Vec<TimelineMessage>>,
@@ -79,6 +83,20 @@ pub struct EventCache {
     queue: Arc<Vec<QueuedTurn>>,
     /// The checkout's branch and when git was last asked.
     current_branch: Option<(std::time::Instant, Option<String>)>,
+}
+
+/// A task with no conversation yet: what its first prompt starts one with
+/// (`startThread`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThreadStart {
+    pub workspace_id: String,
+    pub project_id: String,
+    /// The other projects of a multi-project task (its bundle's members).
+    pub additional_workspace_ids: Vec<String>,
+    /// How the sidebar names it: its own name, else its PR or branch title.
+    pub name: Option<String>,
+    /// Still a placeholder ("Nova tarefa"): the first prompt names it.
+    pub auto_named: bool,
 }
 
 /// The task's place: its project, branch and checkout.
@@ -211,6 +229,57 @@ fn read_events(
     }
 }
 
+/// What the first prompt of a task with no conversation starts it with.
+fn thread_start(
+    workspaces: &SqliteWorkspaceRepo,
+    record: &dcc_core::domain::workspace::Workspace,
+) -> anyhow::Result<ThreadStart> {
+    use dcc_core::domain::task_title::is_automatic_task_title;
+    use dcc_core::ports::WorkspaceBundleRepo;
+    let bundle = block_on(workspaces.get_workspace_bundle_for_workspace(&record.id))?
+        .filter(|bundle| bundle.bundle.primary_workspace_id == record.id);
+    let explicit = record
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+    let source = record.source.as_ref().and_then(|source| {
+        source
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .or_else(|| Some(source.head_branch.trim()).filter(|branch| !branch.is_empty()))
+    });
+    // `workspaceToSummary().isAutoNamed`; a multi-project task goes by its bundle.
+    let auto_named = match &bundle {
+        Some(bundle) => is_automatic_task_title(Some(&bundle.bundle.name)),
+        None => {
+            (explicit.is_none() && source.is_none())
+                || explicit.is_some_and(|name| is_automatic_task_title(Some(name)))
+        }
+    };
+    Ok(ThreadStart {
+        workspace_id: record.id.0.clone(),
+        project_id: record.project_id.0.clone(),
+        additional_workspace_ids: bundle
+            .as_ref()
+            .map(|bundle| {
+                bundle
+                    .members
+                    .iter()
+                    .map(|member| member.workspace_id.0.clone())
+                    .filter(|id| *id != record.id.0)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        name: bundle
+            .map(|bundle| bundle.bundle.name)
+            .or_else(|| explicit.or(source).map(str::to_string)),
+        auto_named,
+    })
+}
+
 /// Reads the task's conversation. Only the events after those in `cache`
 /// are read; the rows are projected again from all of them when any arrive.
 pub fn load(
@@ -273,13 +342,10 @@ pub fn load(
             .iter()
             .find(|summary| summary.session.id.0 == id && summary.thread.archived_at.is_none())
     });
-    let Some(summary) = wanted.or_else(|| choose_session(&summaries, &delegated)) else {
-        return Ok(conversation);
-    };
-    let activity = SessionActivityInput::from_summary(summary);
-    let session_id = summary.session.id.0.clone();
+    let summary = wanted.or_else(|| choose_session(&summaries, &delegated));
     let workspaces = SqliteWorkspaceRepo::open(db_path)?;
-    if let Some(record) = block_on(workspaces.get_workspace(&workspace))? {
+    let record = block_on(workspaces.get_workspace(&workspace))?;
+    if let Some(record) = &record {
         // `source.headBranch ?? baseBranch`
         let branch = record
             .source
@@ -306,9 +372,19 @@ pub fn load(
             setup_report: record.setup_report.clone(),
         });
         conversation.workspace_name = record.name.clone();
+        conversation.project_id = Some(record.project_id.0.clone());
         conversation.branch = Some(branch);
         conversation.workspace_path = Some(path);
     }
+    let Some(summary) = summary else {
+        conversation.start = record
+            .as_ref()
+            .map(|record| thread_start(&workspaces, record))
+            .transpose()?;
+        return Ok(conversation);
+    };
+    let activity = SessionActivityInput::from_summary(summary);
+    let session_id = summary.session.id.0.clone();
     conversation.session_id = Some(session_id.clone());
     conversation.provider_id = Some(summary.session.provider_id.clone());
     conversation.model = summary.session.model.clone();
@@ -403,5 +479,7 @@ impl Conversation {
             && self.auto_resume == other.auto_resume
             && self.objective == other.objective
             && self.queue == other.queue
+            && self.start == other.start
+            && self.project_id == other.project_id
     }
 }

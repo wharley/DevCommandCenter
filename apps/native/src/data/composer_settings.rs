@@ -137,6 +137,12 @@ pub struct ComposerSettings {
     /// "Resposta direta" (`dcc.composer.response-style`).
     #[serde(default)]
     pub fast: bool,
+    /// The last pick anywhere (`dcc.selectedProviderId` / `dcc.selectedModelId`).
+    #[serde(default)]
+    pub global_pick: Option<crate::data::provider_selection::Pick>,
+    /// project → its last pick (`dcc.projectComposerSelections`).
+    #[serde(default)]
+    project_pick: HashMap<String, crate::data::provider_selection::Pick>,
 }
 
 impl ComposerSettings {
@@ -207,6 +213,22 @@ impl ComposerSettings {
 
     pub fn set_selection(&mut self, session: &str, selection: Selection) {
         self.selection.insert(session.to_string(), selection);
+    }
+
+    pub fn project_pick(&self, project: &str) -> Option<&crate::data::provider_selection::Pick> {
+        self.project_pick.get(project)
+    }
+
+    /// An explicit pick: the default for new tasks here and elsewhere.
+    pub fn remember_pick(
+        &mut self,
+        project: Option<&str>,
+        pick: crate::data::provider_selection::Pick,
+    ) {
+        if let Some(project) = project {
+            self.project_pick.insert(project.to_string(), pick.clone());
+        }
+        self.global_pick = Some(pick);
     }
 
     /// `resolvePlanModeState`

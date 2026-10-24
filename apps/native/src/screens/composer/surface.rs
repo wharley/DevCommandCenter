@@ -25,7 +25,7 @@ fn model_chip(composer: &Composer, cx: &mut Context<Composer>) -> Option<AnyElem
         .model()
         .map(|model| model.label.clone())
         .unwrap_or_else(|| model_id.clone());
-    let disabled = composer.session.session_id.is_none();
+    let disabled = !composer.session.usable();
     let hover = colors.accent.opacity(0.6);
     let trigger = div()
         .flex()
@@ -222,7 +222,7 @@ pub(super) fn render(
             inset: false,
         });
     }
-    let disabled = composer.session.session_id.is_none();
+    let disabled = !composer.session.usable();
     let input = composer.input.clone();
     let drop_border = mix_oklab(colors.accent_calm, 0.7, colors.border);
     div()

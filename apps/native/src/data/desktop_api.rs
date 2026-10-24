@@ -352,6 +352,47 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// `startThread`: the task's first conversation, on the composer's
+    /// provider and model. Answers the new session's id.
+    pub fn start_thread(
+        &self,
+        start: &crate::data::conversation::ThreadStart,
+        provider_id: &str,
+        model: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<String, ApiError> {
+        let value = self.post(
+            "/api/v1/sessions/start",
+            &json!({
+                "workspaceId": start.workspace_id,
+                "additionalWorkspaceIds": start.additional_workspace_ids,
+                "projectId": start.project_id,
+                "providerId": provider_id,
+                "model": model,
+                "title": title,
+            }),
+        )?;
+        value
+            .pointer("/session/id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| ApiError::Failed("the desktop did not answer a session".into()))
+    }
+
+    /// Names an automatically named task after its first prompt.
+    pub fn apply_task_title(
+        &self,
+        session_id: &str,
+        workspace_id: &str,
+        title: &str,
+    ) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/sessions/{}/task-title", encode(session_id)),
+            &json!({ "workspaceId": workspace_id, "title": title }),
+        )
+        .map(|_| ())
+    }
+
     /// "Nova tarefa" in a project: the desktop's own creation (linked
     /// folders, setup report). Answers the new task and how its setup went.
     pub fn create_task(&self, request: &CreateTaskRequest) -> Result<CreatedTask, ApiError> {

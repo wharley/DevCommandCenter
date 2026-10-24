@@ -11,7 +11,7 @@ use crate::theme::ActiveTheme;
 use crate::ui::{Button, ButtonVariant, Icon, Menu, MenuEntry, MenuItem};
 
 pub(super) fn attach_menu(composer: &Composer, cx: &mut Context<Composer>) -> AnyElement {
-    let disabled = composer.session.session_id.is_none();
+    let disabled = !composer.session.usable();
     let muted = cx.theme().colors.muted_foreground;
     let entity = cx.entity().downgrade();
     let label = cx.t("composer.attachments.add");

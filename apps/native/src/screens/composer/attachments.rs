@@ -41,7 +41,7 @@ impl Composer {
 
     /// Files picked or dropped go in at the caret, in order.
     pub(crate) fn add_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
-        if self.session.session_id.is_none() || paths.is_empty() {
+        if !self.session.usable() || paths.is_empty() {
             return;
         }
         let chips: Vec<Chip> = paths.iter().map(|path| self.chip_for(path)).collect();
@@ -86,7 +86,7 @@ impl Composer {
                 _ => None,
             })
             .collect();
-        if images.is_empty() || self.session.session_id.is_none() {
+        if images.is_empty() || !self.session.usable() {
             return;
         }
         let failure = cx.t("composer.attachments.error");

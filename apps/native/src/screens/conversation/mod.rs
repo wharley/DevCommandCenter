@@ -250,6 +250,8 @@ impl ConversationView {
             goal: next.goal.clone(),
             objective: next.objective.clone(),
             queue: next.queue.clone(),
+            start: next.start.clone(),
+            project_id: next.project_id.clone(),
             auto_resume: next.auto_resume,
             context: next.context.clone(),
         };
@@ -463,6 +465,60 @@ pub(crate) fn time_ago(
     Some(time::distance_to_now(at, view.now_ms(), english).into())
 }
 
+/// `ConversationLaunchState`: a task starts through its composer, so the
+/// empty viewport only names it.
+fn launch_state(
+    start: &crate::data::conversation::ThreadStart,
+    cx: &mut Context<ConversationView>,
+) -> AnyElement {
+    let colors = cx.theme().colors.clone();
+    let name = start
+        .name
+        .clone()
+        .map(gpui::SharedString::from)
+        .unwrap_or_else(|| cx.t("sidebar.newWorkspace"));
+    div()
+        .debug_selector(|| "conversation-launch".into())
+        .flex()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .px(px(24.0))
+        .py(px(40.0))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .max_w(px(672.0))
+                .child(
+                    div()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(colors.foreground)
+                        .line_height(px(34.0))
+                        .child(crate::ui::Tracked::new(
+                            cx.t("conversationLaunch.title"),
+                            26.0,
+                            -0.035,
+                        )),
+                )
+                .child(
+                    div()
+                        .mt(px(12.0))
+                        .max_w(px(576.0))
+                        .text_center()
+                        .text_size(px(13.0))
+                        .line_height(px(24.0))
+                        .text_color(colors.muted_foreground)
+                        .child(cx.t_with(
+                            "conversationLaunch.hint",
+                            &crate::i18n::Args::default().with("workspaceName", name.to_string()),
+                        )),
+                ),
+        )
+        .into_any_element()
+}
+
 impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport_width = f32::from(self.list.viewport_bounds().size.width);
@@ -473,7 +529,14 @@ impl Render for ConversationView {
         let muted = cx.theme().colors.muted_foreground;
         let entity = cx.entity();
         let empty = self.data.as_ref().is_none_or(|data| data.rows.is_empty());
-        let body = if self.loading || empty {
+        let launch = self
+            .data
+            .as_ref()
+            .filter(|data| data.rows.is_empty())
+            .and_then(|data| data.start.as_ref());
+        let body = if let (false, Some(start)) = (self.loading, launch) {
+            launch_state(start, cx)
+        } else if self.loading || empty {
             let note = if self.loading {
                 Some(cx.t("conversation.loading.title"))
             } else {

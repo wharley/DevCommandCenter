@@ -39,14 +39,31 @@ impl Composer {
         self.settings.selection(session, provider)
     }
 
+    /// A task with no conversation yet: the project's last pick, else the
+    /// global one (`draftProviderId` / `draftModelId`).
+    pub(crate) fn new_task_pick(&self) -> Option<crate::data::provider_selection::Pick> {
+        let start = self.session.start.as_ref()?;
+        crate::data::provider_selection::new_task_pick(
+            self.catalog.as_deref()?,
+            self.settings.project_pick(&start.project_id),
+            self.settings.global_pick.as_ref(),
+        )
+    }
+
     /// The provider the next turn runs on: the pick, else the session's.
     pub(crate) fn selected_provider_id(&self) -> Option<String> {
+        if self.session.session_id.is_none() {
+            return self.new_task_pick().map(|pick| pick.provider_id);
+        }
         self.selection()
             .map(|selection| selection.provider_id.clone())
             .or_else(|| self.session.provider_id.clone())
     }
 
     pub(crate) fn selected_model_id(&self) -> Option<String> {
+        if self.session.session_id.is_none() {
+            return self.new_task_pick().map(|pick| pick.model_id);
+        }
         match self.selection() {
             Some(selection) => selection.model_id.clone(),
             None => self.session.model.clone(),
@@ -73,12 +90,6 @@ impl Composer {
         model_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let (Some(session), Some(session_provider)) = (
-            self.session.session_id.clone(),
-            self.session.provider_id.clone(),
-        ) else {
-            return;
-        };
         let model_id = model_id.or_else(|| {
             self.catalog
                 .as_ref()?
@@ -88,14 +99,30 @@ impl Composer {
                 .first()
                 .map(|model| model.id.clone())
         });
-        self.settings.set_selection(
-            &session,
-            composer_settings::Selection {
-                provider_id,
-                model_id,
-                session_provider_id: session_provider,
-            },
-        );
+        // Every explicit pick is the default for new tasks, here and elsewhere.
+        if let Some(model) = model_id.clone() {
+            let project = self.session.project_id.clone();
+            self.settings.remember_pick(
+                project.as_deref(),
+                crate::data::provider_selection::Pick {
+                    provider_id: provider_id.clone(),
+                    model_id: model,
+                },
+            );
+        }
+        if let (Some(session), Some(session_provider)) = (
+            self.session.session_id.clone(),
+            self.session.provider_id.clone(),
+        ) {
+            self.settings.set_selection(
+                &session,
+                composer_settings::Selection {
+                    provider_id,
+                    model_id,
+                    session_provider_id: session_provider,
+                },
+            );
+        }
         self.save_settings();
         cx.notify();
     }

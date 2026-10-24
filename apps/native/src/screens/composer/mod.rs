@@ -8,6 +8,7 @@ mod attachments;
 mod context_rail;
 mod controls;
 mod drafts;
+mod first_send;
 mod handoff;
 mod mentions;
 mod objective;
@@ -47,12 +48,32 @@ pub struct ComposerSession {
     pub branch: Option<String>,
     pub usage_limit: Option<dcc_core::domain::usage_limit::SessionUsageLimit>,
     pub goal: Option<dcc_core::domain::goal::SessionGoal>,
+    /// The task's project, for the per-project model pick.
+    pub project_id: Option<String>,
+    /// No conversation yet: the first prompt starts one.
+    pub start: Option<crate::data::conversation::ThreadStart>,
     /// Follow-ups waiting for the running turn (`project_turn_queue`).
     pub queue: std::sync::Arc<Vec<dcc_core::domain::session::QueuedTurn>>,
     /// The DCC's own objective (the toolbar's "Objetivo").
     pub objective: Option<dcc_core::domain::objective::SessionObjective>,
     pub auto_resume: bool,
     pub context: Option<crate::data::conversation::ExecutionContext>,
+}
+
+impl ComposerSession {
+    /// The field takes a prompt: a conversation, or a task about to start one.
+    pub fn usable(&self) -> bool {
+        self.session_id.is_some() || self.start.is_some()
+    }
+
+    /// Where the field's draft is kept: the conversation, else the task.
+    pub fn draft_key(&self) -> Option<String> {
+        self.session_id.clone().or_else(|| {
+            self.start
+                .as_ref()
+                .map(|start| format!("task:{}", start.workspace_id))
+        })
+    }
 }
 
 /// Something the conversation should do after the composer acted.
@@ -164,14 +185,13 @@ impl Composer {
         if session == self.session {
             return;
         }
-        let switched = session.session_id != self.session.session_id;
+        let switched = session.draft_key() != self.session.draft_key();
         self.session = session;
         if switched {
             let draft = self
                 .session
-                .session_id
-                .as_ref()
-                .and_then(|id| self.drafts.get(id))
+                .draft_key()
+                .and_then(|id| self.drafts.get(&id))
                 .cloned()
                 .unwrap_or_default();
             let parts = prompt::parts_of(&draft);
@@ -180,7 +200,7 @@ impl Composer {
             self.mention = None;
         }
         self.sync_objective(switched, cx);
-        let disabled = self.session.session_id.is_none();
+        let disabled = !self.session.usable();
         let placeholder = if self.plan_mode() {
             cx.t("composer.placeholder.plan")
         } else {
@@ -217,7 +237,7 @@ impl Composer {
     }
 
     fn remember_draft(&mut self, cx: &mut Context<Self>) {
-        let Some(session) = self.session.session_id.clone() else {
+        let Some(session) = self.session.draft_key() else {
             return;
         };
         let text = self.prompt(cx);
@@ -241,7 +261,7 @@ impl Composer {
     /// Something to send, and nobody waiting on the desktop. While a turn
     /// runs it goes to the queue (`canQueueActiveTurn`).
     pub(crate) fn can_send(&self, cx: &App) -> bool {
-        self.session.session_id.is_some()
+        (self.session.session_id.is_some() || self.new_task_pick().is_some())
             && self.busy.is_none()
             && !self.prompt(cx).trim().is_empty()
     }
@@ -344,6 +364,9 @@ impl Composer {
         cx: &mut Context<Self>,
     ) {
         let Some(session) = self.session.session_id.clone() else {
+            if retry_of.is_none() {
+                self.first_send(prompt, options, from_field, cx);
+            }
             return;
         };
         let resume_first = self.session.aborted && retry_of.is_some();
@@ -409,7 +432,7 @@ impl Composer {
 
     fn clear_field(&mut self, cx: &mut Context<Self>) {
         self.input.update(cx, |input, cx| input.set_text("", cx));
-        if let Some(session) = &self.session.session_id
+        if let Some(session) = &self.session.draft_key()
             && self.drafts.remove(session).is_some()
         {
             drafts::save_later(self.drafts.clone(), cx);
