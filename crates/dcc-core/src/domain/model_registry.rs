@@ -35,6 +35,18 @@ pub fn entries_for(provider_id: &str) -> Option<&'static [ModelEntry]> {
     }
 }
 
+/// `resolveModelLabel` over the static catalogs: the label of the model with
+/// exactly this id, whichever provider lists it. `None` for models only a
+/// runtime discovers (Cursor, Antigravity) or unknown ids.
+pub fn label_for(model: &str) -> Option<&'static str> {
+    let model = model.trim();
+    [CLAUDE_CODE, CODEX, GEMINI, DROID, GROK]
+        .iter()
+        .flat_map(|entries| entries.iter())
+        .find(|entry| entry.id == model)
+        .map(|entry| entry.label)
+}
+
 /// True when `model` (or one of its aliases) is in the provider's static
 /// catalog. `None` when the provider has no static catalog.
 pub fn is_known_model(provider_id: &str, model: &str) -> Option<bool> {
@@ -337,7 +349,18 @@ pub const GROK: &[ModelEntry] = &[ModelEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_alias, CLAUDE_CODE, CODEX, DROID, GEMINI, GROK};
+    use super::{label_for, resolve_alias, CLAUDE_CODE, CODEX, DROID, GEMINI, GROK};
+
+    #[test]
+    fn labels_come_from_any_static_catalog() {
+        let entry = &CODEX[0];
+        assert_eq!(label_for(entry.id), Some(entry.label));
+        assert_eq!(
+            label_for(&format!(" {} ", CLAUDE_CODE[0].id)),
+            Some(CLAUDE_CODE[0].label)
+        );
+        assert_eq!(label_for("not-a-model"), None);
+    }
 
     #[test]
     fn codex_catalog_matches_the_current_picker() {

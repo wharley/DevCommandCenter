@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use super::{Annotation, ToolCall};
+use crate::domain::usage::ModelTokenUsage;
 
 /// What a tool call did, coarse enough to summarise a turn in one sentence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -260,6 +261,37 @@ pub fn turn_duration_ms(started_at: Option<&str>, ended_at: Option<&str>) -> Opt
     (ms >= 0).then_some(ms)
 }
 
+/// A turn's usage summed over the models it used.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TurnTokenTotals {
+    pub input: u64,
+    pub output: u64,
+    pub cached: u64,
+    pub reasoning: u64,
+    pub total: u64,
+    pub cost_usd: Option<f64>,
+}
+
+/// `totalTurnTokens`: `None` when the provider reported nothing.
+pub fn total_turn_tokens(models: &[ModelTokenUsage]) -> Option<TurnTokenTotals> {
+    let mut totals = TurnTokenTotals::default();
+    for usage in models {
+        totals.input += usage.input_tokens;
+        totals.output += usage.output_tokens;
+        totals.cached += usage.cached_input_tokens;
+        totals.reasoning += usage.reasoning_output_tokens;
+        totals.total += if usage.total_tokens > 0 {
+            usage.total_tokens
+        } else {
+            usage.input_tokens + usage.output_tokens
+        };
+        if let Some(cost) = usage.cost_usd {
+            totals.cost_usd = Some(totals.cost_usd.unwrap_or(0.0) + cost);
+        }
+    }
+    (totals.total > 0).then_some(totals)
+}
+
 /// `formatTokenCount`: `950`, `4.2k`, `38k`, `1.2M`.
 pub fn format_token_count(value: u64) -> String {
     if value < 1000 {
@@ -336,6 +368,26 @@ pub fn classify_diff_line(line: &str) -> DiffLineKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn turn_tokens_sum_the_models_and_skip_empty_turns() {
+        let usage = |input, output, total, cost| ModelTokenUsage {
+            input_tokens: input,
+            output_tokens: output,
+            total_tokens: total,
+            cost_usd: cost,
+            ..ModelTokenUsage::default()
+        };
+        let totals =
+            total_turn_tokens(&[usage(1000, 200, 0, Some(0.5)), usage(10, 5, 20, None)]).unwrap();
+        assert_eq!(
+            (totals.input, totals.output, totals.total),
+            (1010, 205, 1220)
+        );
+        assert_eq!(totals.cost_usd, Some(0.5));
+        assert_eq!(total_turn_tokens(&[usage(0, 0, 0, None)]), None);
+        assert_eq!(total_turn_tokens(&[]), None);
+    }
 
     fn call(action: &str, command: Option<&str>, file: Option<&str>) -> ToolCall {
         ToolCall {
