@@ -9,6 +9,7 @@ pub mod activity;
 mod events;
 mod fold;
 mod hand_back;
+mod pending;
 mod project;
 mod summary;
 #[cfg(test)]
@@ -19,6 +20,7 @@ use crate::domain::session::{AssistantMessagePhase, SessionEventRecord, TurnEvid
 use crate::ports::provider::{ProviderUserInputAnswer, ProviderUserInputQuestion};
 
 pub use hand_back::{parse_delegation_hand_back, DelegationHandBack, HandBackOutcome};
+pub use pending::pending_permission_requests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {

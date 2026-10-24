@@ -431,3 +431,16 @@ fn hand_back_turns_are_recognised() {
     );
     assert!(super::parse_delegation_hand_back("Olá").is_none());
 }
+
+#[test]
+fn only_open_permission_requests_wait_in_the_panel() {
+    let script = Script::new()
+        .started("turn-1", "Alpha")
+        .push(json!({ "type": "turn_permission_requested", "turnId": "turn-1", "requestId": "p1", "toolName": "Bash", "title": null, "description": null, "command": "ls", "file": null }))
+        .push(json!({ "type": "turn_permission_resolved", "turnId": "turn-1", "requestId": "p1", "behavior": "allow" }))
+        .push(json!({ "type": "turn_permission_requested", "turnId": "turn-1", "requestId": "p2", "toolName": "Edit", "title": null, "description": null, "command": null, "file": "a.rs" }));
+    let rows = script.project();
+    let pending = super::pending_permission_requests(&rows);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id(), "p2");
+}
