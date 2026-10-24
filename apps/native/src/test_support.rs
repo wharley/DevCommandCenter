@@ -53,6 +53,64 @@ pub fn fake_desktop_answers(
     (port, server)
 }
 
+/// A desktop that answers by route: each request takes the first answer left
+/// for its path, in order; any other path gets a 404 and is not recorded
+/// (views also read things the test doesn't follow). It stops once every
+/// answer is taken, giving back the recorded requests.
+pub fn fake_desktop_routes(
+    routes: Vec<(&'static str, u16, String)>,
+) -> (u16, std::thread::JoinHandle<Vec<(String, String)>>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let mut routes: Vec<Option<(&'static str, u16, String)>> =
+            routes.into_iter().map(Some).collect();
+        let mut seen = Vec::new();
+        while routes.iter().any(Option::is_some) {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = value.trim().parse().unwrap();
+                }
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let path = request.split(' ').nth(1).unwrap_or_default().to_string();
+            let taken = routes
+                .iter_mut()
+                .find(|route| route.as_ref().is_some_and(|(route, _, _)| *route == path))
+                .and_then(Option::take);
+            let (status, response) = match taken {
+                Some((_, status, response)) => {
+                    let request = request.split(' ').take(2).collect::<Vec<_>>().join(" ");
+                    seen.push((request, String::from_utf8(body).unwrap()));
+                    (status, response)
+                }
+                None => (404, "{}".to_string()),
+            };
+            let mut stream = stream;
+            write!(
+                stream,
+                "HTTP/1.1 {status} X\r\ncontent-length: {}\r\n\r\n{response}",
+                response.len()
+            )
+            .unwrap();
+        }
+        seen
+    });
+    (port, server)
+}
+
 /// Runs git in `dir` (with a fixed author) and fails the test when it does.
 pub fn git(dir: &std::path::Path, args: &[&str]) {
     let output = std::process::Command::new("git")

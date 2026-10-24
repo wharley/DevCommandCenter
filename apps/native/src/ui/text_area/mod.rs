@@ -345,6 +345,14 @@ impl TextArea {
         cx.notify();
     }
 
+    /// Adds text at the very end, the caret after it (a request filled in).
+    pub fn append_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        let end = self.buffer.text().len();
+        self.buffer.move_to(end);
+        self.buffer.replace(None, text);
+        self.after_edit(cx);
+    }
+
     /// Inserts at the caret (a mention, an attachment path), as one edit.
     pub fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
         self.buffer.replace(None, text);

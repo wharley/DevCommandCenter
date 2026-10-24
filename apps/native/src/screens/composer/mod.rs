@@ -243,6 +243,25 @@ impl Composer {
         self.focus(window, cx);
     }
 
+    /// `appendComposerText`: a request from elsewhere (a failed delivery, PR
+    /// conversations) after what is there, a blank line between; false when
+    /// the composer can't take it.
+    pub fn append_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.session.usable() || text.trim().is_empty() {
+            return false;
+        }
+        self.input.update(cx, |input, cx| {
+            let lead = if input.text().trim().is_empty() {
+                ""
+            } else {
+                "\n\n"
+            };
+            input.append_text(&format!("{lead}{text}"), cx);
+        });
+        self.focus(window, cx);
+        true
+    }
+
     /// Puts text in the field (the continuation prompt), replacing the draft.
     pub fn replace_draft(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         let parts = prompt::parts_of(text);

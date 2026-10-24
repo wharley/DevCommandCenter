@@ -4,6 +4,7 @@
 pub mod actions;
 pub mod activity;
 pub mod agents;
+pub mod avatar;
 pub mod child_tasks;
 pub mod code_tree;
 pub mod composer_settings;
@@ -13,6 +14,7 @@ pub mod deletion;
 pub mod desktop_api;
 pub mod diff;
 pub mod disk;
+pub mod forge;
 pub mod git_watch;
 pub mod goal;
 pub mod highlight;

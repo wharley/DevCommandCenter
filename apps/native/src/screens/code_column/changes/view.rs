@@ -741,7 +741,18 @@ pub(crate) fn changes(
     let updating = (column.delivery.busy || column.delivery.syncing).then(|| updating(cx));
     let header = crate::screens::code_column::delivery::header(column, cx);
     let toolbar = crate::screens::code_column::delivery::toolbar(column, cx);
-    let dialogs = crate::screens::code_column::delivery::dialogs(column, window, cx);
+    let mut dialogs = crate::screens::code_column::delivery::dialogs(column, window, cx);
+    dialogs.extend(crate::screens::code_column::review::recovery_confirm(
+        column, cx,
+    ));
+    // The pull request's sections (`grid gap-2 px-2 empty:hidden`).
+    let sections: Vec<AnyElement> =
+        crate::screens::code_column::review::failure_section(column, cx)
+            .into_iter()
+            .chain(crate::screens::code_column::review::review_section(
+                column, cx,
+            ))
+            .collect();
     // The git section (`border-b border-border/60`): the delivery header,
     // the sync bar, then the review under its `border-t`.
     div()
@@ -762,6 +773,17 @@ pub(crate) fn changes(
                 .gap(px(8.0))
                 .overflow_hidden()
                 .children(toolbar)
+                .when(!sections.is_empty(), |area| {
+                    area.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_shrink_0()
+                            .gap(px(8.0))
+                            .px(px(8.0))
+                            .children(sections),
+                    )
+                })
                 .child(
                     div()
                         .relative()

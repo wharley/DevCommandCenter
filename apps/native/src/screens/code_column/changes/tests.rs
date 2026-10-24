@@ -246,8 +246,13 @@ fn the_git_actions_go_through_the_desktop(cx: &mut TestAppContext) {
     git(repo.path(), &["add", "b.txt"]);
     let root = repo.path().to_string_lossy().into_owned();
     let ok = || (200, r#"{"ok":true}"#.to_string());
-    let (port, server) =
-        crate::test_support::fake_desktop_answers(vec![ok(), ok(), ok(), ok(), ok()]);
+    let (port, server) = crate::test_support::fake_desktop_routes(vec![
+        ("/api/v1/git/stage-file", ok().0, ok().1),
+        ("/api/v1/git/unstage-file", ok().0, ok().1),
+        ("/api/v1/git/unstage-file", ok().0, ok().1),
+        ("/api/v1/git/discard-file", ok().0, ok().1),
+        ("/api/v1/git/discard-file", ok().0, ok().1),
+    ]);
     let (column, cx) = open(cx);
     column.update(cx, |column, cx| {
         column.endpoint = Some(DesktopApi::new(port, "k"));
@@ -319,7 +324,8 @@ fn a_failed_action_says_so_and_frees_the_list(cx: &mut TestAppContext) {
     let repo = git_checkout(&[("a.txt", "um\n")]);
     std::fs::write(repo.path().join("a.txt"), "dois\n").unwrap();
     let root = repo.path().to_string_lossy().into_owned();
-    let (port, server) = crate::test_support::fake_desktop_answers(vec![(
+    let (port, server) = crate::test_support::fake_desktop_routes(vec![(
+        "/api/v1/git/stage-file",
         400,
         r#"{"error":{"code":"bad_request","message":"git add: index.lock exists"}}"#.to_string(),
     )]);

@@ -509,6 +509,105 @@ impl DesktopApi {
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
     }
 
+    fn decoded<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
+        serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
+    /// `workspaceForgeContext`: the checkout's forge and who acts on it.
+    pub fn forge_context(&self, root: &str) -> Result<crate::data::forge::ForgeContext, ApiError> {
+        Self::decoded(self.post("/api/v1/forge/context", &json!({ "workspaceRoot": root }))?)
+    }
+
+    /// `getForgeCliAccounts`: the CLI's accounts on that host.
+    pub fn forge_accounts(
+        &self,
+        provider: &str,
+        host: Option<&str>,
+    ) -> Result<crate::data::forge::ForgeAccounts, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/forge/accounts",
+            &json!({ "provider": provider, "host": host, "forceRefresh": null }),
+        )?)
+    }
+
+    pub fn review_state(
+        &self,
+        root: &str,
+        branch: Option<&str>,
+        login: Option<&str>,
+    ) -> Result<crate::data::forge::ReviewState, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/forge/review-state",
+            &json!({ "workspaceRoot": root, "branch": branch, "forgeLogin": login }),
+        )?)
+    }
+
+    pub fn reviewer_candidates(
+        &self,
+        root: &str,
+        number: u32,
+        query: Option<&str>,
+        login: Option<&str>,
+    ) -> Result<crate::data::forge::ReviewerCandidates, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/forge/reviewer-candidates",
+            &json!({ "workspaceRoot": root, "number": number, "query": query, "forgeLogin": login }),
+        )?)
+    }
+
+    /// Ask (or ask again) `add`, withdraw `remove`.
+    pub fn request_reviewers(
+        &self,
+        root: &str,
+        number: u32,
+        add: &[String],
+        remove: &[String],
+        login: Option<&str>,
+    ) -> Result<(), ApiError> {
+        self.post(
+            "/api/v1/forge/request-reviewers",
+            &json!({
+                "workspaceRoot": root,
+                "number": number,
+                "add": add,
+                "remove": remove,
+                "forgeLogin": login,
+            }),
+        )
+        .map(|_| ())
+    }
+
+    /// The last delivery failure the desktop captured for this checkout.
+    pub fn delivery_failure(
+        &self,
+        root: &str,
+    ) -> Result<Option<crate::data::forge::DeliveryFailure>, ApiError> {
+        let output: crate::data::forge::DeliveryFailureOutput = Self::decoded(self.post(
+            "/api/v1/git/delivery-failure",
+            &json!({ "workspaceRoot": root }),
+        )?)?;
+        Ok(output.snapshot)
+    }
+
+    /// `workspaceDeliveryRecoveryExecute`: one of the failure's actions.
+    pub fn delivery_recovery(
+        &self,
+        root: &str,
+        attempt_token: &str,
+        action: &str,
+        login: Option<&str>,
+    ) -> Result<crate::data::forge::Recovered, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/git/delivery-recovery",
+            &json!({
+                "workspaceRoot": root,
+                "attemptToken": attempt_token,
+                "action": action,
+                "forgeLogin": login,
+            }),
+        )?)
+    }
+
     /// A git action of the changes list on one file (or `.` for "stage all").
     pub fn git_action(&self, action: GitAction, root: &str, path: &str) -> Result<(), ApiError> {
         self.post(

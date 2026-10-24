@@ -273,7 +273,10 @@ pub(crate) fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyEl
                         .text_color(colors.muted_foreground)
                         .child(title),
                 )
-                .children(request_link(column, cx)),
+                .children(request_link(column, cx))
+                .children(crate::screens::code_column::review::identity_chip(
+                    column, cx,
+                )),
         )
         .child(
             div()

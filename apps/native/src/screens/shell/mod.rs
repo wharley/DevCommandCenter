@@ -166,6 +166,14 @@ impl Shell {
                 let composer = self.conversation.read(cx).composer.clone();
                 composer.update(cx, |composer, cx| composer.mention_file(path, window, cx));
             }
+            CodeColumnEvent::AskAgent { prompt, delivered } => {
+                let composer = self.conversation.read(cx).composer.clone();
+                let sent =
+                    composer.update(cx, |composer, cx| composer.append_text(prompt, window, cx));
+                if sent {
+                    crate::ui::Toaster::success(delivered.clone(), cx);
+                }
+            }
             CodeColumnEvent::Close => self.set_code_column(false, None, cx),
             CodeColumnEvent::TabChanged(tab) => self.set_code_column(true, Some(*tab), cx),
         }

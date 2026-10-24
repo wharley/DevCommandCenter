@@ -488,6 +488,7 @@ impl CodeColumn {
                 }
                 column.read_branch(cx);
                 column.read_pull_request(cx);
+                column.read_review(true, cx);
             });
         })
         .detach();

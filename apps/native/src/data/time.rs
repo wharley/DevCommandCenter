@@ -225,3 +225,15 @@ mod distance_tests {
         assert_eq!(distance_to_now(now - 120_000, now, true), "2 minutes ago");
     }
 }
+
+/// `new Date(value).toLocaleString()` in pt-BR (`24/10/2026, 12:00:00`), or
+/// the value as it came when it is not a date.
+pub fn local_date_time(value: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|at| {
+            at.with_timezone(&chrono::Local)
+                .format("%d/%m/%Y, %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|_| value.to_string())
+}

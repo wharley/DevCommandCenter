@@ -10,7 +10,7 @@ use serde_json::Value;
 use super::super::{CodeColumn, CodeColumnTab};
 use super::Confirm;
 use crate::data::desktop_api::DesktopApi;
-use crate::test_support::{fake_desktop_answers, git, git_checkout, task_database};
+use crate::test_support::{fake_desktop_routes, git, git_checkout, task_database};
 use crate::theme::{Theme, ThemePreference};
 use crate::ui::Toaster;
 
@@ -20,12 +20,12 @@ struct Setup {
 }
 
 /// The column on "Mudanças" over `root`, its task in a database of its
-/// own, the desktop answering `answers` in turn.
+/// own, the desktop answering each step's route in turn.
 fn open<'a>(
     cx: &'a mut TestAppContext,
     root: &std::path::Path,
     worktree: Option<&std::path::Path>,
-    answers: Vec<(u16, String)>,
+    answers: Vec<(&'static str, u16, String)>,
 ) -> (
     gpui::Entity<CodeColumn>,
     &'a mut gpui::VisualTestContext,
@@ -38,7 +38,7 @@ fn open<'a>(
     });
     let db = tempfile::tempdir().unwrap();
     let db_path = task_database(db.path(), "w-1", root, worktree);
-    let (port, server) = fake_desktop_answers(answers);
+    let (port, server) = fake_desktop_routes(answers);
     let checkout = worktree.unwrap_or(root).to_string_lossy().into_owned();
     let (column, cx) = cx.add_window_view(|_, cx| {
         let mut column = CodeColumn::new(CodeColumnTab::Changes, cx);
@@ -53,9 +53,16 @@ fn open<'a>(
     (column, cx, Setup { _db: db, server })
 }
 
-fn ok() -> (u16, String) {
-    (200, r#"{"ok":true}"#.to_string())
+fn ok(path: &'static str) -> (&'static str, u16, String) {
+    (path, 200, r#"{"ok":true}"#.to_string())
 }
+
+const PREPARE: &str = "/api/v1/workspaces/w-1/delivery/prepare-commit";
+const COMMIT: &str = "/api/v1/workspaces/w-1/delivery/commit-reviewed";
+const MERGE: &str = "/api/v1/workspaces/w-1/delivery/merge";
+const COMPLETE: &str = "/api/v1/workspaces/w-1/delivery/complete";
+const PUSH: &str = "/api/v1/workspaces/w-1/delivery/push";
+const SYNC: &str = "/api/v1/workspaces/w-1/delivery/sync-base";
 
 fn requests(setup: Setup) -> Vec<(String, Value)> {
     setup
@@ -95,7 +102,12 @@ fn a_local_commit_goes_through_its_preview(cx: &mut TestAppContext) {
     let repo = git_checkout(&[("a.txt", "um\n")]);
     std::fs::write(repo.path().join("a.txt"), "dois\n").unwrap();
     let suggestion = r#"{"subject":"chore: update a","body":null,"stagedFileCount":1,"stagedFingerprint":"fp-1","source":"heuristic-git-staged"}"#;
-    let (column, cx, setup) = open(cx, repo.path(), None, vec![(200, suggestion.into()), ok()]);
+    let (column, cx, setup) = open(
+        cx,
+        repo.path(),
+        None,
+        vec![(PREPARE, 200, suggestion.into()), ok(COMMIT)],
+    );
     column.read_with(cx, |column, _| {
         assert_eq!(column.commit_mode(), CommitMode::CommitAndPush);
         assert_eq!(column.delivery.task.as_ref().unwrap().id.0, "w-1");
@@ -148,7 +160,7 @@ fn a_local_commit_goes_through_its_preview(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_merge_asks_first_then_completes_the_task(cx: &mut TestAppContext) {
     let repo = git_checkout(&[("a.txt", "um\n")]);
-    let (column, cx, setup) = open(cx, repo.path(), None, vec![ok(), ok()]);
+    let (column, cx, setup) = open(cx, repo.path(), None, vec![ok(MERGE), ok(COMPLETE)]);
     column.update(cx, |column, cx| {
         column.delivery.pr = Some(open_pr("open"));
         cx.notify();
@@ -221,6 +233,7 @@ fn tracked_checkout(ahead: bool) -> tempfile::TempDir {
 fn a_push_the_checks_stop_says_so(cx: &mut TestAppContext) {
     let dir = tracked_checkout(true);
     let refused = (
+        PUSH,
         409,
         r#"{"error":{"code":"checks_failed","message":"Os checks configurados para antes do push falharam."}}"#
             .to_string(),
@@ -250,7 +263,7 @@ fn a_branch_behind_offers_to_sync_with_the_base(cx: &mut TestAppContext) {
         cx,
         &dir.path().join("repo"),
         None,
-        vec![(200, synced.into())],
+        vec![(SYNC, 200, synced.into())],
     );
     column.read_with(cx, |column, _| {
         assert_eq!(column.status.as_ref().unwrap().behind_of_remote_count, 1)
@@ -279,7 +292,7 @@ fn a_branch_behind_offers_to_sync_with_the_base(cx: &mut TestAppContext) {
 fn a_merged_task_with_its_own_worktree_completes_once(cx: &mut TestAppContext) {
     let repo = git_checkout(&[("a.txt", "um\n")]);
     let parent = tempfile::tempdir().unwrap();
-    let (column, cx, setup) = open(cx, parent.path(), Some(repo.path()), vec![ok()]);
+    let (column, cx, setup) = open(cx, parent.path(), Some(repo.path()), vec![ok(COMPLETE)]);
     column.update(cx, |column, cx| {
         column.delivery.pr = Some(open_pr("merged"));
         assert_eq!(column.commit_mode(), CommitMode::Merged);

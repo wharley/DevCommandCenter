@@ -4,6 +4,7 @@
 
 mod changes;
 mod delivery;
+mod review;
 mod tree;
 mod view;
 
@@ -51,6 +52,12 @@ pub enum CodeColumnEvent {
     OpenFile(String),
     /// "Mencionar no chat": `@path` in the composer.
     Mention(String),
+    /// A request for the agent after the composer's text (`onPrefillComposer`),
+    /// and what to say once it is there.
+    AskAgent {
+        prompt: String,
+        delivered: gpui::SharedString,
+    },
     Close,
     TabChanged(CodeColumnTab),
 }
@@ -79,6 +86,7 @@ pub struct CodeColumn {
     pub(crate) status_error: Option<String>,
     pub(crate) changes: changes::Changes,
     pub(crate) delivery: delivery::Delivery,
+    pub(crate) review: review::Review,
     pub(crate) by_path: HashMap<String, TreeStatus>,
     pub(crate) changed_folders: HashSet<String>,
     file_set: Option<String>,
@@ -103,6 +111,9 @@ pub struct CodeColumn {
     _pull_request: Option<Task<()>>,
     _delivery: Option<Task<()>>,
     _button: Option<Task<()>>,
+    _review: Option<Task<()>>,
+    _recovery: Option<Task<()>>,
+    _reviewers: Option<Task<()>>,
 }
 
 impl EventEmitter<CodeColumnEvent> for CodeColumn {}
@@ -118,6 +129,7 @@ impl CodeColumn {
             status_error: None,
             changes: changes::Changes::new(),
             delivery: delivery::Delivery::default(),
+            review: review::Review::default(),
             by_path: HashMap::new(),
             changed_folders: HashSet::new(),
             file_set: None,
@@ -137,6 +149,9 @@ impl CodeColumn {
             _pull_request: None,
             _delivery: None,
             _button: None,
+            _review: None,
+            _recovery: None,
+            _reviewers: None,
         }
     }
 
@@ -155,6 +170,7 @@ impl CodeColumn {
         self.status_error = None;
         self.changes.reset();
         self.delivery.reset();
+        self.review.reset();
         self.by_path.clear();
         self.changed_folders.clear();
         self.file_set = None;
@@ -172,6 +188,7 @@ impl CodeColumn {
             // The branch and its pull request are read while "Mudanças" shows.
             self.read_branch(cx);
             self.read_pull_request(cx);
+            self.read_review(false, cx);
             cx.notify();
         }
     }
@@ -341,6 +358,7 @@ impl CodeColumn {
                             column.apply_status(status, cx);
                             column.read_branch(cx);
                             column.read_pull_request(cx);
+                            column.read_review(false, cx);
                         }
                         Err(error) => {
                             column.status_error = Some(error);
