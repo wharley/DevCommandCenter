@@ -620,6 +620,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             get(usage_limit_auto_resume_handler).put(set_usage_limit_auto_resume_handler),
         )
         .route(
+            "/api/v1/sessions/:session_id/goal/dismiss",
+            post(dismiss_goal_handler),
+        )
+        .route(
             "/api/v1/sessions/:session_id/abort",
             post(abort_session_handler),
         )
@@ -1366,6 +1370,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/sessions/:session_id/restore",
             "POST /api/v1/sessions/:session_id/respond-user-input",
             "POST /api/v1/sessions/:session_id/respond-permission",
+            "POST /api/v1/sessions/:session_id/goal/dismiss",
             "POST /api/v1/auth/bearer/rotate"
         ],
         "rpcCompatibility": "POST /rpc"
@@ -2381,6 +2386,20 @@ async fn usage_limit_settings_handler(
     State(backend): State<Arc<HttpBackend>>,
 ) -> Result<Json<Value>, HttpApiError> {
     Ok(Json(json!(backend.sessions.usage_limit_settings())))
+}
+
+/// "Fechar" on a finished goal (the desktop's `session_dismiss_goal`), for
+/// the native app's composer.
+async fn dismiss_goal_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    backend
+        .sessions
+        .dismiss_finished_goal(&SessionId(session_id))
+        .await
+        .map_err(|error| classify_session_error(error.to_string()))?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// "Continuar" on a task stopped by its usage limit.

@@ -42,6 +42,15 @@ pub fn continuation_prompt(last_step: Option<&str>) -> String {
     }
 }
 
+/// The global "Continuar sozinho se o limite acabar": the choice new limits
+/// start with when the task made none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageLimitSettings {
+    #[serde(default)]
+    pub auto_resume: bool,
+}
+
 /// What the session knows about the limit that stopped its latest turn.
 /// Facts only; the phase depends on the clock (`usage_limit_phase`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]

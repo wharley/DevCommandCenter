@@ -18,7 +18,6 @@
 //! (Codex `account/rateLimitResetCredit/consume`) on its own: only the
 //! person does, from the usage dialog.
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -30,12 +29,9 @@ use dcc_core::domain::usage_limit::{
 };
 use dcc_core::ports::events::CoreEvent;
 use dcc_core::ports::EventBus;
-use serde::{Deserialize, Serialize};
-use specta::Type;
 
 use crate::state::SessionCommandState;
 
-pub const SETTINGS_FILE_NAME: &str = "usage-limit-settings.json";
 /// How often waiting limits are checked when nothing is due sooner.
 pub const CHECK_EVERY: Duration = Duration::from_secs(15);
 /// After a resume fails to start, wait this long before trying again.
@@ -44,29 +40,10 @@ const RETRY_AFTER_FAILURE_SECS: i64 = 300;
 /// task then shows the limit and the person resumes it).
 const MAX_START_FAILURES: u32 = 3;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageLimitSettings {
-    /// The choice new limits start with when the task made none.
-    #[serde(default)]
-    pub auto_resume: bool,
-}
-
-pub fn load_settings(app_data_dir: &Path) -> UsageLimitSettings {
-    std::fs::read(app_data_dir.join(SETTINGS_FILE_NAME))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<UsageLimitSettings>(&bytes).ok())
-        .unwrap_or_default()
-}
-
-pub fn save_settings(app_data_dir: &Path, settings: UsageLimitSettings) -> Result<(), String> {
-    std::fs::create_dir_all(app_data_dir).map_err(|e| e.to_string())?;
-    let path = app_data_dir.join(SETTINGS_FILE_NAME);
-    let temp = path.with_extension("json.tmp");
-    let bytes = serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?;
-    std::fs::write(&temp, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&temp, &path).map_err(|e| e.to_string())
-}
+// The global "continue by itself" choice and its file are shared with the
+// native app (`dcc_infra::usage_limit_settings`).
+pub use dcc_core::domain::usage_limit::UsageLimitSettings;
+pub use dcc_infra::usage_limit_settings::{load_settings, save_settings, SETTINGS_FILE_NAME};
 
 /// A random slack in the 1–3 minute range.
 pub fn random_slack_secs() -> i64 {

@@ -29,6 +29,7 @@ pub mod project_actions;
 pub mod prompt_attachments;
 pub mod runtime_owner;
 pub mod skills_context;
+pub mod usage_limit_settings;
 mod repo_config;
 mod workspace_setup_plan;
 
