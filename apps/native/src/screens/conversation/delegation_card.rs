@@ -14,6 +14,7 @@ use crate::data::conversation::Conversation;
 use crate::data::prompt::basename;
 use crate::i18n::{Args, Translate};
 use crate::markdown::{MarkdownStyle, render_markdown};
+use crate::project::{model_label, provider_label};
 use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
 use crate::ui::Icon;
@@ -142,11 +143,11 @@ pub(super) fn delegation_card(
             status_key(&status)
         ))
     };
-    let agent_label = record.map(|record| {
-        record
-            .model_id
-            .clone()
-            .unwrap_or_else(|| record.provider_id.clone())
+    // `decisions.modelLabel ?? decisions.providerLabel`.
+    let agent_label = record.map(|record| match &record.model_id {
+        Some(model) => model_label(model),
+        None => provider_label(&record.provider_id)
+            .map_or_else(|| record.provider_id.clone(), str::to_string),
     });
     let mode_label = if is_task {
         Some(cx.t("delegation.proposal.kind"))

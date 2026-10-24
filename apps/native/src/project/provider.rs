@@ -11,6 +11,26 @@ use crate::assets::provider_mark;
 use crate::theme::ActiveTheme;
 use crate::ui::Icon;
 
+/// The provider's name as its `dcc-providers` descriptor labels it.
+pub fn provider_label(provider_id: &str) -> Option<&'static str> {
+    Some(match provider_id {
+        "claude_code" => "Claude Code",
+        "codex" => "Codex",
+        "gemini" => "Gemini CLI (legacy)",
+        "cursor" => "Cursor",
+        "droid" => "Droid",
+        "grok" => "Grok Build",
+        "antigravity" => "Antigravity",
+        _ => return None,
+    })
+}
+
+/// A model's label from the static catalogs, else its id.
+pub fn model_label(model: &str) -> String {
+    dcc_core::domain::model_registry::label_for(model)
+        .map_or_else(|| model.trim().to_string(), str::to_string)
+}
+
 /// `agentBrandKey` in `@dcc/mascots`.
 pub fn brand_key(provider: &str) -> Option<&'static str> {
     let value = provider.to_lowercase();

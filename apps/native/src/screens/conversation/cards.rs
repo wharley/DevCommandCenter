@@ -10,6 +10,7 @@ use gpui::{AnyElement, App, FontWeight, SharedString, div, prelude::*, px};
 
 use crate::agent::{AgentMascot, RobotState};
 use crate::i18n::Translate;
+use crate::project::model_label;
 use crate::theme::ActiveTheme;
 use crate::ui::{Icon, Tracked};
 
@@ -332,8 +333,9 @@ pub(super) fn native_subagent_card(
     let status = display_status(agent, parent_streaming);
     let identity = agent
         .model
-        .clone()
-        .or_else(|| agent.requested_model.clone())
+        .as_deref()
+        .map(model_label)
+        .or_else(|| agent.requested_model.as_deref().map(model_label))
         .or_else(|| agent.name.clone())
         .or_else(|| agent.role.clone());
     let details: Vec<String> = [agent.name.clone(), agent.role.clone()]

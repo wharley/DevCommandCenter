@@ -281,10 +281,15 @@ fn prose(
     content: &str,
     id: &str,
     folded: bool,
+    streaming: bool,
     window: &mut Window,
     cx: &mut Context<ConversationView>,
 ) -> AnyElement {
-    let blocks = view.markdown(content);
+    let blocks = if streaming {
+        view.paced_markdown(id, content, window)
+    } else {
+        view.markdown(content)
+    };
     let style = if folded {
         MarkdownStyle {
             size: 12.5,
@@ -351,11 +356,14 @@ pub(super) fn turn_activity(
             let segment_scope = format!("{scope}-s{index}");
             rows.push(match segment {
                 TurnSegment::Prose(annotation) => {
-                    let content = match annotation {
-                        Annotation::Commentary { content, .. } => content.as_str(),
-                        _ => "",
+                    let (content, streaming) = match annotation {
+                        Annotation::Commentary {
+                            content, streaming, ..
+                        } => (content.as_str(), *streaming),
+                        _ => ("", false),
                     };
-                    prose(view, content, &segment_scope, false, window, cx)
+                    let streaming = streaming && index + 1 == count;
+                    prose(view, content, &segment_scope, false, streaming, window, cx)
                 }
                 TurnSegment::Work(items) => {
                     live_run(view, items, index + 1 == count, &segment_scope, cx)
@@ -517,7 +525,7 @@ pub(super) fn turn_activity(
                         Annotation::Commentary { content, .. } => content.as_str(),
                         _ => "",
                     };
-                    prose(view, content, &segment_scope, true, window, cx)
+                    prose(view, content, &segment_scope, true, false, window, cx)
                 }
                 TurnSegment::Work(items) => run_list(view, items, false, &segment_scope, cx),
             });

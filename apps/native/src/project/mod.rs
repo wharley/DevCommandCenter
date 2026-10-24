@@ -8,7 +8,7 @@ use gpui::Hsla;
 
 pub(crate) use glyph::sprite;
 pub use glyph::{GlyphSize, ProjectGlyph};
-pub use provider::ProviderIcon;
+pub use provider::{ProviderIcon, model_label, provider_label};
 
 use crate::theme::Appearance;
 use crate::theme::tailwind::{self as tw, Oklch};

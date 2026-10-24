@@ -9,9 +9,10 @@ use std::sync::Arc;
 use dcc_core::domain::attention::SessionActivityInput;
 use dcc_core::domain::delegation::{Delegation, DelegationKind, DelegationStatus};
 use dcc_core::domain::session::{SessionEventRecord, SessionId, WorkspaceSessionSummary};
+use dcc_core::domain::timeline::activity::{TurnTokenTotals, total_turn_tokens};
 use dcc_core::domain::timeline::{TimelineMessage, project_session};
 use dcc_core::domain::workspace::WorkspaceId;
-use dcc_core::ports::DelegationRepo;
+use dcc_core::ports::{DelegationRepo, UsageRepo};
 use dcc_infra::db::SqliteSessionRepo;
 use futures::executor::block_on;
 
@@ -33,6 +34,9 @@ pub struct Conversation {
     pub delegations: HashMap<String, DelegationRecord>,
     /// Child conversations' state and title, by session id.
     pub children: HashMap<String, ChildSession>,
+    /// Provider-reported tokens by turn, for the turn footer. Read while no
+    /// turn runs, like the desktop.
+    pub turn_tokens: Arc<HashMap<String, TurnTokenTotals>>,
     /// Highest event sequence read, so a refresh only reads what is new.
     pub last_sequence: u64,
 }
@@ -45,6 +49,7 @@ pub struct EventCache {
     events: Vec<SessionEventRecord>,
     last_sequence: u64,
     rows: Arc<Vec<TimelineMessage>>,
+    turn_tokens: Arc<HashMap<String, TurnTokenTotals>>,
 }
 
 /// What a delegation card reads from the stored record.
@@ -222,7 +227,20 @@ pub fn load(
         cache.events.extend(fresh);
         cache.rows = Arc::new(project_session(&cache.events, &session_id));
     }
+    if !conversation.running {
+        let usage = block_on(sessions.list_session_turn_usage(&summary.session.id))?;
+        let tokens: HashMap<String, TurnTokenTotals> = usage
+            .iter()
+            .filter_map(|turn| {
+                total_turn_tokens(&turn.models).map(|totals| (turn.turn_id.clone(), totals))
+            })
+            .collect();
+        if *cache.turn_tokens != tokens {
+            cache.turn_tokens = Arc::new(tokens);
+        }
+    }
     conversation.rows = cache.rows.clone();
+    conversation.turn_tokens = cache.turn_tokens.clone();
     conversation.last_sequence = cache.last_sequence;
     Ok(conversation)
 }
@@ -237,5 +255,6 @@ impl Conversation {
             && self.waiting == other.waiting
             && self.delegations == other.delegations
             && self.children == other.children
+            && self.turn_tokens == other.turn_tokens
     }
 }

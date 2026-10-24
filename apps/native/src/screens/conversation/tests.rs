@@ -51,7 +51,10 @@ fn history(live: bool) -> Conversation {
         json!({ "type": "turn_started", "turnId": "t2", "prompt": "Agora rode" }),
         json!({ "type": "turn_tool_call_started", "turnId": "t2", "toolCallId": "c4", "action": "Bash", "command": "yarn test", "file": null }),
     ];
-    if !live {
+    if live {
+        kinds.push(json!({ "type": "turn_assistant_message_started", "turnId": "t2", "messageId": "m2", "phase": "commentary" }));
+        kinds.push(json!({ "type": "turn_assistant_message_delta", "turnId": "t2", "messageId": "m2", "content": "Rodando os testes agora, já volto com o resultado" }));
+    } else {
         kinds.push(json!({ "type": "turn_aborted", "turnId": "t2", "reason": "parou" }));
     }
     let events = records(kinds);
@@ -120,6 +123,8 @@ fn draws_settled_and_live_turns_with_their_details_open(cx: &mut TestAppContext)
         assert!(view.list.item_count() == data.rows.len() + 2);
         // The rows were drawn: their markdown went through the cache.
         assert!(view.markdown.borrow().len() >= 2);
+        // The live narration went through the paced reveal.
+        assert!(!view.paced.borrow().is_empty());
     });
 }
 

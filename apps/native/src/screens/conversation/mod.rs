@@ -8,6 +8,7 @@ mod activity;
 mod assistant_row;
 mod cards;
 mod delegation_card;
+mod paced;
 mod system_rows;
 #[cfg(test)]
 mod tests;
@@ -41,6 +42,9 @@ const LIVE_STEP: Duration = Duration::from_millis(450);
 /// The thread list starts its trail gutter at this width (`@container 54rem`).
 const TRAIL_WIDTH: f32 = 864.0;
 
+/// A streaming text's reveal, the length last laid out and its blocks.
+type PacedProse = (paced::Paced, usize, Rc<Vec<Block>>);
+
 pub struct ConversationView {
     task_id: Option<String>,
     wanted_session: Option<String>,
@@ -52,6 +56,8 @@ pub struct ConversationView {
     /// How many steps each long run shows (`RUN_PAGE_SIZE` pages).
     run_limits: HashMap<SharedString, usize>,
     markdown: RefCell<HashMap<u64, Rc<Vec<Block>>>>,
+    /// Streaming prose being revealed, with what was last laid out.
+    paced: RefCell<HashMap<SharedString, PacedProse>>,
     mascot_frame: bool,
     now_ms: i64,
     /// The list's width at the last frame (rows can't ask the list while it
@@ -79,6 +85,7 @@ impl ConversationView {
             open: HashSet::new(),
             run_limits: HashMap::new(),
             markdown: RefCell::new(HashMap::new()),
+            paced: RefCell::new(HashMap::new()),
             mascot_frame: false,
             now_ms: time::now_ms(),
             viewport_width: 0.0,
@@ -104,6 +111,7 @@ impl ConversationView {
             self.open.clear();
             self.run_limits.clear();
             self.markdown.borrow_mut().clear();
+            self.paced.borrow_mut().clear();
         }
         self.task_id = Some(task_id.to_string());
         self.wanted_session = session_id;
@@ -241,6 +249,32 @@ impl ConversationView {
             .entry(key)
             .or_insert_with(|| Rc::new(parse(text)))
             .clone()
+    }
+
+    /// Streaming prose as far as the reveal got, with the caret, asking for
+    /// the next frame while there is more to show.
+    pub(crate) fn paced_markdown(
+        &self,
+        key: &str,
+        target: &str,
+        window: &mut Window,
+    ) -> Rc<Vec<Block>> {
+        let mut paced = self.paced.borrow_mut();
+        let (state, laid_out, blocks) = paced
+            .entry(SharedString::from(key.to_string()))
+            .or_insert_with(|| (paced::Paced::new(target), usize::MAX, Rc::new(Vec::new())));
+        if state.advance(target, Instant::now()) {
+            window.request_animation_frame();
+        }
+        if *laid_out != state.shown {
+            *laid_out = state.shown;
+            *blocks = Rc::new(parse(&format!(
+                "{}{}",
+                &target[..state.shown],
+                paced::CARET
+            )));
+        }
+        blocks.clone()
     }
 
     pub(crate) fn now_ms(&self) -> i64 {

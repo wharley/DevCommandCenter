@@ -288,11 +288,18 @@ fn loads_task_conversations_on_a_database_copy() {
         let started = Instant::now();
         let again = conversation::load(&path, &task.id, None, &mut cache).expect("again");
         println!(
-            "{} · session {:?} · {} rows · {} delegations · cold {cold:?}, warm {:?} · running={}",
+            "{} · session {:?} · {} rows · {} delegations · {} turns with tokens · model {:?} → {} · cold {cold:?}, warm {:?} · running={}",
             task.display_title(),
             first.session_id,
             first.rows.len(),
             first.delegations.len(),
+            first.turn_tokens.len(),
+            first.model,
+            first
+                .model
+                .as_deref()
+                .map(dcc_native::project::model_label)
+                .unwrap_or_default(),
             started.elapsed(),
             first.running,
         );

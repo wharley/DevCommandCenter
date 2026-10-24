@@ -3,7 +3,9 @@
 //! subagents and requests it raised, the answer, the footer and, when the
 //! turn stopped short, why.
 
-use dcc_core::domain::timeline::activity::{format_elapsed, is_activity, turn_duration_ms};
+use dcc_core::domain::timeline::activity::{
+    TurnTokenTotals, format_elapsed, format_token_count, is_activity, turn_duration_ms,
+};
 use dcc_core::domain::timeline::{Annotation, TimelineMessage};
 use gpui::{AnyElement, Context, FontWeight, SharedString, Window, div, prelude::*, px};
 
@@ -14,13 +16,65 @@ use super::cards::{
 use super::{ConversationView, time_ago};
 use crate::agent::{AgentMascot, RobotState};
 use crate::data::conversation::Conversation;
-use crate::i18n::{Args, Translate};
+use crate::i18n::{Args, I18n, Locale, Translate};
 use crate::markdown::{MarkdownStyle, render_markdown};
+use crate::project::model_label;
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
-use crate::ui::Icon;
+use crate::ui::{Icon, Tooltip};
 
-fn footer(view: &ConversationView, message: &TimelineMessage, cx: &gpui::App) -> AnyElement {
+/// `toLocaleString()` for a token count: `12.345` in Portuguese, `12,345` in English.
+fn grouped(value: u64, english: bool) -> String {
+    let digits = value.to_string();
+    let separator = if english { ',' } else { '.' };
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(separator);
+        }
+        out.push(digit);
+    }
+    out
+}
+
+fn token_breakdown(totals: &TurnTokenTotals, cx: &gpui::App) -> String {
+    let english = cx.global::<I18n>().locale() == Locale::En;
+    let line = |key: &str, value: u64| {
+        cx.t_with(key, &Args::default().with("value", grouped(value, english)))
+            .to_string()
+    };
+    let mut lines = vec![
+        line("conversation.turnFooter.tokensIn", totals.input),
+        line("conversation.turnFooter.tokensOut", totals.output),
+    ];
+    if totals.cached > 0 {
+        lines.push(line("conversation.turnFooter.tokensCached", totals.cached));
+    }
+    if totals.reasoning > 0 {
+        lines.push(line(
+            "conversation.turnFooter.tokensReasoning",
+            totals.reasoning,
+        ));
+    }
+    if let Some(cost) = totals.cost_usd {
+        lines.push(
+            cx.t_with(
+                "conversation.turnFooter.cost",
+                &Args::default().with("value", format!("{cost:.4}")),
+            )
+            .to_string(),
+        );
+    }
+    lines.join("\n")
+}
+
+/// `TurnFooter`: when, how long and, once settled, the tokens it used.
+fn footer(
+    view: &ConversationView,
+    data: &Conversation,
+    message: &TimelineMessage,
+    cx: &gpui::App,
+) -> AnyElement {
     let colors = &cx.theme().colors;
     let stamp = time_ago(view, message.created_at.as_deref(), cx);
     let duration = (!message.streaming)
@@ -32,7 +86,16 @@ fn footer(view: &ConversationView, message: &TimelineMessage, cx: &gpui::App) ->
         })
         .flatten()
         .map(format_elapsed);
-    // Token counts come from the usage store, read with screen 2b.
+    let tokens = (!message.streaming)
+        .then(|| {
+            message
+                .turn_id
+                .as_ref()
+                .and_then(|turn| data.turn_tokens.get(turn))
+        })
+        .flatten();
+    let separated = |content: AnyElement| div().flex().gap(px(6.0)).child("·").child(content);
+    let id = &message.id;
     div()
         .flex()
         .flex_wrap()
@@ -44,7 +107,32 @@ fn footer(view: &ConversationView, message: &TimelineMessage, cx: &gpui::App) ->
         .text_color(colors.muted_foreground.opacity(0.7))
         .font_features(crate::ui::tabular_nums())
         .children(stamp)
-        .children(duration.map(|duration| div().flex().gap(px(6.0)).child("·").child(duration)))
+        .children(duration.map(|duration| {
+            separated(
+                Tooltip::text(
+                    SharedString::from(format!("{id}-duration")),
+                    div().child(duration),
+                    cx.t("conversation.turnFooter.durationHint"),
+                )
+                .into_any_element(),
+            )
+        }))
+        .children(tokens.map(|totals| {
+            let label = cx.t_with(
+                "conversation.turnFooter.tokens",
+                &Args::default()
+                    .with("input", format_token_count(totals.input))
+                    .with("output", format_token_count(totals.output)),
+            );
+            separated(
+                Tooltip::text(
+                    SharedString::from(format!("{id}-tokens")),
+                    div().child(label),
+                    token_breakdown(totals, cx),
+                )
+                .into_any_element(),
+            )
+        }))
         .into_any_element()
 }
 
@@ -214,7 +302,7 @@ pub(super) fn assistant_row(
                     div()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(colors.foreground.opacity(0.8))
-                        .child(SharedString::from(model.trim().to_string())),
+                        .child(SharedString::from(model_label(model))),
                 )
                 .into_any_element(),
         );
@@ -315,7 +403,7 @@ pub(super) fn assistant_row(
                 .into_any_element(),
         );
     }
-    column.push(footer(view, message, cx));
+    column.push(footer(view, data, message, cx));
     if let Some(notice) = incomplete_notice(message, cx) {
         column.push(notice);
     }
