@@ -105,11 +105,6 @@ impl Composer {
         if open == self.picker.open {
             return;
         }
-        if open && self.catalog.is_none() {
-            // Nothing to show yet: read the catalog and wait for another click.
-            self.refresh_catalog(cx);
-            return;
-        }
         self.picker.open = open;
         if open {
             self.refresh_catalog(cx);

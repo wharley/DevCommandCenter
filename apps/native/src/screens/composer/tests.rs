@@ -368,3 +368,64 @@ fn the_picker_moves_the_conversation_and_hands_off(cx: &mut TestAppContext) {
         assert!(body.contains(part), "{part} in {body}");
     }
 }
+
+#[gpui::test]
+fn the_model_chip_opens_at_once_and_takes_the_desktop_list(cx: &mut TestAppContext) {
+    use std::io::{BufRead, BufReader, Write};
+    let (composer, cx) = open(cx);
+    // No desktop: the built-in list opens the picker anyway.
+    let dead = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    composer.update_in(cx, |composer, window, cx| {
+        composer.endpoint = Some(DesktopApi::new(dead, "k"));
+        composer.set_session(session("a"), cx);
+        composer.set_picker_open(true, window, cx);
+        assert!(composer.picker.open);
+        assert!(
+            !composer.picker_rows(cx).is_empty(),
+            "the built-in models show"
+        );
+        composer.set_picker_open(false, window, cx);
+    });
+    cx.run_until_parked();
+    // The desktop answers: its list replaces the built-in one.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let body = serde_json::json!({ "providers": catalog(), "repositories": [], "workspaces": [] })
+        .to_string();
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" {
+                break;
+            }
+        }
+        let mut stream = stream;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+    });
+    composer.update_in(cx, |composer, window, cx| {
+        composer.endpoint = Some(DesktopApi::new(port, "k"));
+        composer.set_picker_open(true, window, cx);
+    });
+    cx.run_until_parked();
+    server.join().unwrap();
+    composer.read_with(cx, |composer, _| {
+        assert!(composer.picker.open);
+        assert_eq!(
+            composer.catalog.as_ref().unwrap().len(),
+            2,
+            "the desktop's list"
+        );
+    });
+}

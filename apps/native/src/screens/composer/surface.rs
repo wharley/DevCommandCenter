@@ -25,7 +25,7 @@ fn model_chip(composer: &Composer, cx: &mut Context<Composer>) -> Option<AnyElem
         .model()
         .map(|model| model.label.clone())
         .unwrap_or_else(|| model_id.clone());
-    let disabled = composer.session.session_id.is_none() || composer.catalog.is_none();
+    let disabled = composer.session.session_id.is_none();
     let hover = colors.accent.opacity(0.6);
     let trigger = div()
         .flex()

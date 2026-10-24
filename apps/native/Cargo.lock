@@ -1295,6 +1295,7 @@ dependencies = [
  "chrono",
  "dcc-core",
  "dcc-infra",
+ "dcc-providers",
  "dirs 6.0.0",
  "futures",
  "gpui-pre",
@@ -1310,6 +1311,24 @@ dependencies = [
  "smallvec",
  "tempfile",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "dcc-providers"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "dcc-core",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

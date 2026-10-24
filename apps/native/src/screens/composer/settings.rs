@@ -276,7 +276,8 @@ impl Composer {
                         this.catalog = Some(Arc::new(providers));
                         this.catalog_at = Some(Instant::now());
                     }
-                    // A closed or older desktop: try again at the next session switch.
+                    // A closed desktop: the built-in list stays and the next
+                    // look tries again.
                     _ => this.catalog_at = None,
                 }
                 cx.notify();

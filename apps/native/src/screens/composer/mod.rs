@@ -118,7 +118,10 @@ impl Composer {
             mention: None,
             files: None,
             files_loading: false,
-            catalog: None,
+            // The built-in descriptors until the desktop's live list arrives.
+            catalog: Some(std::sync::Arc::new(
+                dcc_providers::offline_catalog().providers,
+            )),
             catalog_at: None,
             catalog_loading: false,
             settings: settings::load_settings(),

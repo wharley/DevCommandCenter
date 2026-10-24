@@ -35,6 +35,8 @@ resvg = "0.46"
 pulldown-cmark = { version = "0.13", default-features = false }
 dcc-core = { path = "../../crates/dcc-core" }
 dcc-infra = { path = "../../crates/dcc-infra" }
+# The provider descriptors, for the model picker before the desktop answers.
+dcc-providers = { path = "../../crates/dcc-providers" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Tags the Metal layer as sRGB (see src/app/color_space.rs).
