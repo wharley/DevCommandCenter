@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use dcc_core::domain::objective::{ObjectiveTransition, SessionObjective, SessionObjectiveDraft};
 use dcc_core::domain::provider::ProviderDescriptor;
+use dcc_core::domain::session::QueuedTurn;
 use dcc_core::ports::provider::ProviderUserInputAnswer;
 use serde_json::{Value, json};
 
@@ -27,6 +28,11 @@ pub enum ApiError {
     AlreadyAnswered,
     /// The local key did not match.
     Unauthorized,
+    /// A 409 with a reason of its own (`steer_window_closed`).
+    Refused {
+        code: String,
+        message: String,
+    },
     Failed(String),
 }
 
@@ -36,6 +42,7 @@ impl std::fmt::Display for ApiError {
             Self::DesktopClosed => write!(f, "the desktop app is not running"),
             Self::AlreadyAnswered => write!(f, "already answered"),
             Self::Unauthorized => write!(f, "the desktop refused the local key"),
+            Self::Refused { message, .. } => write!(f, "{message}"),
             Self::Failed(message) => write!(f, "{message}"),
         }
     }
@@ -157,7 +164,13 @@ impl DesktopApi {
         match status {
             200..=299 => Ok(value),
             401 | 403 => Err(ApiError::Unauthorized),
-            409 => Err(ApiError::AlreadyAnswered),
+            409 => match value.pointer("/error/code").and_then(Value::as_str) {
+                None | Some("already_resolved") => Err(ApiError::AlreadyAnswered),
+                Some(code) => Err(ApiError::Refused {
+                    code: code.to_string(),
+                    message: error_message(&value).unwrap_or_else(|| code.to_string()),
+                }),
+            },
             _ => Err(ApiError::Failed(
                 error_message(&value).unwrap_or_else(|| format!("HTTP {status}")),
             )),
@@ -260,6 +273,80 @@ impl DesktopApi {
     pub fn dismiss_goal(&self, session_id: &str) -> Result<(), ApiError> {
         self.post(
             &format!("/api/v1/sessions/{}/goal/dismiss", encode(session_id)),
+            &json!({}),
+        )
+        .map(|_| ())
+    }
+
+    /// "Enfileirar para depois": a follow-up the desktop sends when the
+    /// running turn ends, on the session's own provider and model.
+    pub fn queue_turn(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        options: &TurnOptions,
+    ) -> Result<(), ApiError> {
+        let mut body = json!({ "sessionId": session_id, "prompt": prompt });
+        TurnOptions {
+            provider_id: None,
+            model: None,
+            ..options.clone()
+        }
+        .write_into(&mut body);
+        self.post(
+            &format!("/api/v1/sessions/{}/queue", encode(session_id)),
+            &body,
+        )
+        .map(|_| ())
+    }
+
+    /// "Orientar o agente agora": guidance into the running turn. A turn
+    /// already wrapping up answers `Refused { code: "steer_window_closed" }`.
+    pub fn steer_turn(&self, session_id: &str, prompt: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/sessions/{}/steer", encode(session_id)),
+            &json!({ "prompt": prompt }),
+        )
+        .map(|_| ())
+    }
+
+    pub fn remove_queued_turn(
+        &self,
+        session_id: &str,
+        queued_turn_id: &str,
+    ) -> Result<Vec<QueuedTurn>, ApiError> {
+        self.request(
+            "DELETE",
+            &format!(
+                "/api/v1/sessions/{}/queue/{}",
+                encode(session_id),
+                encode(queued_turn_id)
+            ),
+            None,
+        )
+        .map(queue_of)
+    }
+
+    pub fn reorder_queue(
+        &self,
+        session_id: &str,
+        queued_turn_ids: &[String],
+    ) -> Result<Vec<QueuedTurn>, ApiError> {
+        self.request(
+            "PUT",
+            &format!("/api/v1/sessions/{}/queue/order", encode(session_id)),
+            Some(&json!({ "queuedTurnIds": queued_turn_ids })),
+        )
+        .map(queue_of)
+    }
+
+    /// "Enviar próxima": the head of the queue while no turn runs.
+    pub fn dispatch_next_queued_turn(&self, session_id: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!(
+                "/api/v1/sessions/{}/queue/dispatch-next",
+                encode(session_id)
+            ),
             &json!({}),
         )
         .map(|_| ())
@@ -373,6 +460,15 @@ fn parse_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
         out.extend_from_slice(rest.get(..size)?);
         rest = rest.get(size + 2..)?;
     }
+}
+
+/// `{queue}` from the queue routes.
+fn queue_of(value: Value) -> Vec<QueuedTurn> {
+    value
+        .get("queue")
+        .cloned()
+        .and_then(|queue| serde_json::from_value(queue).ok())
+        .unwrap_or_default()
 }
 
 /// `{objective}` from the objective routes.

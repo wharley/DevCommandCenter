@@ -19,36 +19,52 @@ fn open(cx: &mut TestAppContext) -> (gpui::Entity<Composer>, &mut gpui::VisualTe
 /// A desktop that answers one request with `response`; joining it gives
 /// the request line ("POST /api/v1/…") and the body.
 fn fake_desktop(response: String) -> (u16, std::thread::JoinHandle<(String, String)>) {
+    let (port, server) = fake_desktop_answers(vec![(200, response)]);
+    (
+        port,
+        std::thread::spawn(move || server.join().unwrap().remove(0)),
+    )
+}
+
+/// A desktop that answers each request in turn with `(status, body)`.
+fn fake_desktop_answers(
+    answers: Vec<(u16, String)>,
+) -> (u16, std::thread::JoinHandle<Vec<(String, String)>>) {
     use std::io::{BufRead, BufReader, Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        let mut request = String::new();
-        reader.read_line(&mut request).unwrap();
-        let mut length = 0;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                length = value.trim().parse().unwrap();
-            }
-            if line == "\r\n" {
-                break;
-            }
-        }
-        let mut body = vec![0; length];
-        reader.read_exact(&mut body).unwrap();
-        let mut stream = stream;
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{response}",
-            response.len()
-        )
-        .unwrap();
-        let request = request.split(' ').take(2).collect::<Vec<_>>().join(" ");
-        (request, String::from_utf8(body).unwrap())
+        answers
+            .into_iter()
+            .map(|(status, response)| {
+                let (stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request = String::new();
+                reader.read_line(&mut request).unwrap();
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap();
+                    }
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let mut stream = stream;
+                write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\ncontent-length: {}\r\n\r\n{response}",
+                    response.len()
+                )
+                .unwrap();
+                let request = request.split(' ').take(2).collect::<Vec<_>>().join(" ");
+                (request, String::from_utf8(body).unwrap())
+            })
+            .collect()
     });
     (port, server)
 }
@@ -103,9 +119,11 @@ fn types_keeps_drafts_and_sends_on_enter(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn running_turns_show_stop_and_keep_enter_from_sending(cx: &mut TestAppContext) {
+fn enter_while_the_agent_works_queues_the_message(cx: &mut TestAppContext) {
+    let (port, server) = fake_desktop("{}".into());
     let (composer, cx) = open(cx);
     composer.update_in(cx, |composer, window, cx| {
+        with_catalog(composer, port);
         composer.set_session(
             ComposerSession {
                 running: true,
@@ -114,12 +132,60 @@ fn running_turns_show_stop_and_keep_enter_from_sending(cx: &mut TestAppContext) 
             cx,
         );
         composer.focus(window, cx);
+        assert!(!composer.can_steer(), "Claude here takes no guidance");
     });
-    cx.simulate_input("depois");
+    cx.simulate_input("depois rode os testes");
     cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let (request, body) = server.join().unwrap();
+    assert_eq!(request, "POST /api/v1/sessions/a/queue");
+    assert!(
+        body.contains(r#""prompt":"depois rode os testes""#),
+        "{body}"
+    );
+    assert!(
+        !body.contains("providerId"),
+        "the session's own provider: {body}"
+    );
     composer.read_with(cx, |composer, cx| {
-        assert!(!composer.can_send(cx));
         assert_eq!(composer.busy, None);
+        assert_eq!(composer.input.read(cx).text(), "", "the field empties");
+    });
+}
+
+#[gpui::test]
+fn guidance_that_arrives_late_goes_to_the_queue(cx: &mut TestAppContext) {
+    let closed = serde_json::json!({ "ok": false, "error": {
+        "code": "steer_window_closed", "message": "provider error: steer_window_closed" } })
+    .to_string();
+    let (port, server) = fake_desktop_answers(vec![(409, closed), (200, "{}".into())]);
+    let (composer, cx) = open(cx);
+    composer.update_in(cx, |composer, window, cx| {
+        with_catalog(composer, port);
+        let mut providers = catalog();
+        providers[0].capabilities.supports_steering = true;
+        composer.catalog = Some(std::sync::Arc::new(providers));
+        composer.set_session(
+            ComposerSession {
+                running: true,
+                ..session("a")
+            },
+            cx,
+        );
+        composer.focus(window, cx);
+        assert!(composer.can_steer());
+    });
+    cx.simulate_input("use a outra API");
+    composer.update(cx, |composer, cx| {
+        composer.follow_up(super::queue::FollowUp::Steer, cx)
+    });
+    cx.run_until_parked();
+    let calls = server.join().unwrap();
+    assert_eq!(calls[0].0, "POST /api/v1/sessions/a/steer");
+    assert_eq!(calls[0].1, r#"{"prompt":"use a outra API"}"#);
+    assert_eq!(calls[1].0, "POST /api/v1/sessions/a/queue");
+    composer.read_with(cx, |composer, cx| {
+        assert_eq!(composer.input.read(cx).text(), "");
     });
 }
 
@@ -712,4 +778,64 @@ fn a_refresh_keeps_what_the_person_is_typing(cx: &mut TestAppContext) {
         assert_eq!(composer.objective.form(cx).intent, "");
         assert!(!composer.objective.dirty(cx));
     });
+}
+
+fn queued(id: &str, prompt: &str) -> dcc_core::domain::session::QueuedTurn {
+    serde_json::from_value(serde_json::json!({
+        "id": id, "sessionId": "a", "prompt": prompt, "planMode": false,
+        "fastMode": false, "createdAt": "2026-10-24T10:00:00Z"
+    }))
+    .unwrap()
+}
+
+#[gpui::test]
+fn the_queue_tray_moves_edits_and_sends_the_next(cx: &mut TestAppContext) {
+    let queue = std::sync::Arc::new(vec![queued("q1", "primeiro"), queued("q2", "segundo")]);
+    let reordered =
+        serde_json::json!({ "queue": [queued("q2", "segundo"), queued("q1", "primeiro")] });
+    let after_edit = serde_json::json!({ "queue": [queued("q1", "primeiro")] });
+    let (port, server) = fake_desktop_answers(vec![
+        (200, reordered.to_string()),
+        (200, after_edit.to_string()),
+        (200, r#"{"dispatched":true}"#.into()),
+    ]);
+    let (composer, cx) = open(cx);
+    composer.update_in(cx, |composer, window, cx| {
+        with_catalog(composer, port);
+        composer.set_session(
+            ComposerSession {
+                queue: queue.clone(),
+                ..session("a")
+            },
+            cx,
+        );
+        composer.move_queued(0, true, window, cx);
+        // One action at a time.
+        composer.dispatch_next(window, cx);
+    });
+    cx.run_until_parked();
+    composer.update_in(cx, |composer, window, cx| {
+        assert_eq!(composer.session.queue[0].id, "q2");
+        composer.edit_queued("q2".into(), window, cx);
+    });
+    cx.run_until_parked();
+    composer.update_in(cx, |composer, window, cx| {
+        assert_eq!(
+            composer.input.read(cx).text(),
+            "segundo",
+            "back in the field"
+        );
+        assert_eq!(composer.session.queue.len(), 1);
+        composer.dispatch_next(window, cx);
+    });
+    cx.run_until_parked();
+    let calls = server.join().unwrap();
+    assert_eq!(calls[0].0, "PUT /api/v1/sessions/a/queue/order");
+    assert_eq!(calls[0].1, r#"{"queuedTurnIds":["q2","q1"]}"#);
+    assert_eq!(calls[1].0, "DELETE /api/v1/sessions/a/queue/q2");
+    assert_eq!(calls[2].0, "POST /api/v1/sessions/a/queue/dispatch-next");
+    // The tray lays out over the prompt.
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("queue-tray").is_some());
 }

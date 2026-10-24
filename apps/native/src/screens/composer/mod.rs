@@ -14,6 +14,7 @@ mod objective;
 mod picker;
 mod popups;
 mod prompt;
+mod queue;
 mod settings;
 mod strips;
 mod surface;
@@ -46,6 +47,8 @@ pub struct ComposerSession {
     pub branch: Option<String>,
     pub usage_limit: Option<dcc_core::domain::usage_limit::SessionUsageLimit>,
     pub goal: Option<dcc_core::domain::goal::SessionGoal>,
+    /// Follow-ups waiting for the running turn (`project_turn_queue`).
+    pub queue: std::sync::Arc<Vec<dcc_core::domain::session::QueuedTurn>>,
     /// The DCC's own objective (the toolbar's "Objetivo").
     pub objective: Option<dcc_core::domain::objective::SessionObjective>,
     pub auto_resume: bool,
@@ -63,6 +66,8 @@ pub enum ComposerEvent {
 pub(crate) enum Busy {
     Sending,
     Stopping,
+    Queueing,
+    Steering,
 }
 
 pub struct Composer {
@@ -93,6 +98,8 @@ pub struct Composer {
     /// The execution-mode explainer under the composer.
     pub(crate) mode_open: bool,
     pub(crate) objective: objective::ObjectiveState,
+    /// A queue tray action on its way.
+    pub(crate) queue_busy: Option<queue::QueueAction>,
     _input_events: Subscription,
     _input_changes: Subscription,
 }
@@ -146,6 +153,7 @@ impl Composer {
             strip_busy: None,
             mode_open: false,
             objective: objective::ObjectiveState::new(window, cx),
+            queue_busy: None,
             _input_events: input_events,
             _input_changes: input_changes,
         }
@@ -230,15 +238,21 @@ impl Composer {
         prompt::serialize(input.text(), &input.chips())
     }
 
+    /// Something to send, and nobody waiting on the desktop. While a turn
+    /// runs it goes to the queue (`canQueueActiveTurn`).
     pub(crate) fn can_send(&self, cx: &App) -> bool {
         self.session.session_id.is_some()
-            && !self.session.running
             && self.busy.is_none()
-            && !self.prompt(cx).is_empty()
+            && !self.prompt(cx).trim().is_empty()
     }
 
+    /// Enter or the send button; Enter while the agent works queues.
     pub(crate) fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.can_send(cx) {
+            return;
+        }
+        if self.session.running {
+            self.follow_up(queue::FollowUp::Queue, cx);
             return;
         }
         let prompt = self.prompt(cx);

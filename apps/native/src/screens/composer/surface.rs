@@ -7,12 +7,12 @@ use gpui::{
     div, point, prelude::*, px,
 };
 
-use super::{Busy, Composer, context_rail, controls, objective, picker, popups, strips};
+use super::{Busy, Composer, context_rail, controls, objective, picker, popups, queue, strips};
 use crate::i18n::Translate;
 use crate::project::ProviderIcon;
 use crate::theme::ActiveTheme;
 use crate::theme::color::mix_oklab;
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, spinner};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip, spinner};
 
 /// `--dcc-composer-input-min-height` (4rem).
 const INPUT_MIN_HEIGHT: f32 = 64.0;
@@ -83,24 +83,85 @@ fn model_chip(composer: &Composer, cx: &mut Context<Composer>) -> Option<AnyElem
     Some(picker::model_menu(composer, trigger, cx))
 }
 
+/// While the agent works: stop, and with something written, queue it for
+/// later or (when the provider takes it) steer the running turn.
+fn running_buttons(composer: &Composer, cx: &mut Context<Composer>) -> AnyElement {
+    let stopping = composer.busy == Some(Busy::Stopping);
+    let stop = Button::new("composer-stop")
+        .variant(ButtonVariant::Destructive)
+        .size(ButtonSize::Icon)
+        .disabled(stopping)
+        .on_click(cx.listener(|composer, _, _, cx| composer.stop(cx)))
+        .child(if stopping {
+            spinner("composer-stopping", 14.0).into_any_element()
+        } else {
+            div()
+                .size(px(12.0))
+                .rounded(px(2.0))
+                .bg(cx.theme().colors.destructive)
+                .into_any_element()
+        });
+    let written = !composer.prompt(cx).trim().is_empty();
+    let disabled = !composer.can_send(cx);
+    let queue =
+        written.then(|| {
+            let queueing = composer.busy == Some(Busy::Queueing);
+            Tooltip::text(
+                "composer-queue-tip",
+                Button::new("composer-queue")
+                    .variant(ButtonVariant::Outline)
+                    .size(ButtonSize::Icon)
+                    .disabled(disabled)
+                    .on_click(cx.listener(|composer, _, _, cx| {
+                        composer.follow_up(queue::FollowUp::Queue, cx)
+                    }))
+                    .child(if queueing {
+                        spinner("composer-queueing", 14.0).into_any_element()
+                    } else {
+                        Icon::new("list-plus")
+                            .size(15.0)
+                            .stroke(2.2)
+                            .into_any_element()
+                    }),
+                cx.t("composer.followUp.queue"),
+            )
+        });
+    let steer =
+        (written && composer.can_steer()).then(|| {
+            let steering = composer.busy == Some(Busy::Steering);
+            Tooltip::text(
+                "composer-steer-tip",
+                Button::new("composer-steer")
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::Icon)
+                    .disabled(disabled)
+                    .on_click(cx.listener(|composer, _, _, cx| {
+                        composer.follow_up(queue::FollowUp::Steer, cx)
+                    }))
+                    .child(if steering {
+                        spinner("composer-steering", 14.0).into_any_element()
+                    } else {
+                        Icon::new("corner-up-right")
+                            .size(15.0)
+                            .stroke(2.1)
+                            .into_any_element()
+                    }),
+                cx.t("composer.followUp.steerNow"),
+            )
+        });
+    div()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(stop)
+        .children(queue)
+        .children(steer)
+        .into_any_element()
+}
+
 fn action_button(composer: &Composer, cx: &mut Context<Composer>) -> AnyElement {
     if composer.session.running {
-        let stopping = composer.busy == Some(Busy::Stopping);
-        return Button::new("composer-stop")
-            .variant(ButtonVariant::Destructive)
-            .size(ButtonSize::Icon)
-            .disabled(stopping)
-            .on_click(cx.listener(|composer, _, _, cx| composer.stop(cx)))
-            .child(if stopping {
-                spinner("composer-stopping", 14.0).into_any_element()
-            } else {
-                div()
-                    .size(px(12.0))
-                    .rounded(px(2.0))
-                    .bg(cx.theme().colors.destructive)
-                    .into_any_element()
-            })
-            .into_any_element();
+        return running_buttons(composer, cx);
     }
     let sending = composer.busy == Some(Busy::Sending);
     Button::new("composer-send")
@@ -197,6 +258,7 @@ pub(super) fn render(
                         .when(disabled, |surface| surface.opacity(0.6))
                         .children(strips::usage_limit_strip(composer, cx))
                         .children(strips::goal_strip(composer, cx))
+                        .children(queue::queue_tray(composer, cx))
                         .child(
                             div()
                                 .id("composer-input")

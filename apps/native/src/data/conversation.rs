@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use dcc_core::domain::attention::SessionActivityInput;
 use dcc_core::domain::delegation::{Delegation, DelegationKind, DelegationStatus};
-use dcc_core::domain::session::{SessionEventRecord, SessionId, WorkspaceSessionSummary};
+use dcc_core::domain::session::{
+    QueuedTurn, SessionEventRecord, SessionId, WorkspaceSessionSummary,
+};
 use dcc_core::domain::timeline::activity::{TurnTokenTotals, total_turn_tokens};
 use dcc_core::domain::timeline::{TimelineMessage, project_session};
 use dcc_core::domain::workspace::WorkspaceId;
@@ -49,6 +51,8 @@ pub struct Conversation {
     pub goal: Option<dcc_core::domain::goal::SessionGoal>,
     /// "Continuar sozinho se o limite acabar" for this conversation.
     pub auto_resume: bool,
+    /// Follow-ups waiting for the running turn, in order.
+    pub queue: Arc<Vec<QueuedTurn>>,
     /// The DCC's own durable objective (the composer's "Objetivo").
     pub objective: Option<dcc_core::domain::objective::SessionObjective>,
     pub rows: Arc<Vec<TimelineMessage>>,
@@ -72,6 +76,7 @@ pub struct EventCache {
     last_sequence: u64,
     rows: Arc<Vec<TimelineMessage>>,
     turn_tokens: Arc<HashMap<String, TurnTokenTotals>>,
+    queue: Arc<Vec<QueuedTurn>>,
     /// The checkout's branch and when git was last asked.
     current_branch: Option<(std::time::Instant, Option<String>)>,
 }
@@ -326,6 +331,10 @@ pub fn load(
         cache.last_sequence = last.sequence;
         cache.events.extend(fresh);
         cache.rows = Arc::new(project_session(&cache.events, &session_id));
+        let queue = dcc_core::application::project_turn_queue(&cache.events);
+        if *cache.queue != queue {
+            cache.queue = Arc::new(queue);
+        }
     }
     if !conversation.running {
         let usage = block_on(sessions.list_session_turn_usage(&summary.session.id))?;
@@ -367,6 +376,7 @@ pub fn load(
             .and_then(|(_, branch)| branch.clone());
     }
     conversation.rows = cache.rows.clone();
+    conversation.queue = cache.queue.clone();
     conversation.turn_tokens = cache.turn_tokens.clone();
     conversation.last_sequence = cache.last_sequence;
     Ok(conversation)
@@ -392,5 +402,6 @@ impl Conversation {
             && format!("{:?}", self.goal) == format!("{:?}", other.goal)
             && self.auto_resume == other.auto_resume
             && self.objective == other.objective
+            && self.queue == other.queue
     }
 }

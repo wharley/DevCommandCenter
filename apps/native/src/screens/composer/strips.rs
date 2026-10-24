@@ -162,6 +162,14 @@ pub(super) fn usage_limit_strip(
             };
             format!(" · {}", cx.t_with(key, &Args::default().with("time", time)))
         });
+    // `usageLimit.queued`: the follow-ups that go once it continues.
+    let body = match composer.session.queue.len() {
+        0 => body,
+        count => SharedString::from(format!(
+            "{body} {}",
+            cx.t_with("usageLimit.queued", &Args::count(count as i64))
+        )),
+    };
     let busy = composer.strip_busy == Some(StripAction::Resume);
     let disabled = composer.session.running || composer.strip_busy.is_some();
     // Continuing on another account needs the accounts and a desktop route

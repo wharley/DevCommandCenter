@@ -240,6 +240,7 @@ impl ConversationView {
             usage_limit: next.usage_limit.clone(),
             goal: next.goal.clone(),
             objective: next.objective.clone(),
+            queue: next.queue.clone(),
             auto_resume: next.auto_resume,
             context: next.context.clone(),
         };
