@@ -634,6 +634,26 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(transition_objective_handler),
         )
         .route(
+            "/api/v1/sessions/:session_id/steer",
+            post(steer_turn_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/queue",
+            post(queue_turn_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/queue/order",
+            axum::routing::put(reorder_turn_queue_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/queue/dispatch-next",
+            post(dispatch_next_queued_turn_handler),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/queue/:queued_turn_id",
+            axum::routing::delete(remove_queued_turn_handler),
+        )
+        .route(
             "/api/v1/sessions/:session_id/abort",
             post(abort_session_handler),
         )
@@ -1385,6 +1405,11 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "PUT /api/v1/sessions/:session_id/objective",
             "DELETE /api/v1/sessions/:session_id/objective",
             "POST /api/v1/sessions/:session_id/objective/transition",
+            "POST /api/v1/sessions/:session_id/steer",
+            "POST /api/v1/sessions/:session_id/queue",
+            "PUT /api/v1/sessions/:session_id/queue/order",
+            "POST /api/v1/sessions/:session_id/queue/dispatch-next",
+            "DELETE /api/v1/sessions/:session_id/queue/:queued_turn_id",
             "POST /api/v1/auth/bearer/rotate"
         ],
         "rpcCompatibility": "POST /rpc"
@@ -2498,6 +2523,123 @@ async fn clear_objective_handler(
     Ok(Json(json!({ "objective": null })))
 }
 
+/// The queue's and steering's errors: a bad request, a queued turn that is
+/// gone (404), or a turn already wrapping up (409 `steer_window_closed`, the
+/// client queues the guidance instead).
+fn follow_up_error(error: String) -> HttpApiError {
+    if error.contains(dcc_core::ports::STEER_WINDOW_CLOSED) {
+        return HttpApiError::Refused(dcc_core::ports::STEER_WINDOW_CLOSED, error, Value::Null);
+    }
+    let normalized = error.to_lowercase();
+    if normalized.contains("not found") {
+        HttpApiError::not_found(error)
+    } else if normalized.starts_with("invalid input")
+        || normalized.contains("only be queued while")
+        || normalized.contains("no active turn")
+    {
+        HttpApiError::bad_request(error)
+    } else {
+        classify_session_error(error)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SteerBody {
+    prompt: String,
+}
+
+/// Guidance into the running turn (the composer's "Orientar agora").
+async fn steer_turn_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<SteerBody>,
+) -> Result<Json<Value>, HttpApiError> {
+    let output = dcc_tauri::commands::session_commands::steer_turn_with_state(
+        &backend.sessions,
+        dcc_core::application::SteerTurnInput {
+            session_id: SessionId(session_id),
+            prompt: body.prompt,
+        },
+    )
+    .await
+    .map_err(follow_up_error)?;
+    Ok(Json(json!({ "turnId": output.turn_id })))
+}
+
+/// A follow-up for after the running turn, with the same body as a turn.
+async fn queue_turn_handler(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
+    Path(session_id): Path<String>,
+    Json(mut input): Json<SendTurnInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    input.session_id = SessionId(session_id);
+    mobile::resolve_turn_approval_policy(config, &backend, &mut input).await?;
+    let queued = dcc_tauri::commands::session_commands::queue_turn_with_state(
+        &backend.sessions,
+        dcc_core::application::QueueTurnInput { turn: input },
+    )
+    .await
+    .map_err(follow_up_error)?;
+    Ok(Json(json!({ "queuedTurn": queued })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReorderQueueBody {
+    queued_turn_ids: Vec<String>,
+}
+
+async fn reorder_turn_queue_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<ReorderQueueBody>,
+) -> Result<Json<Value>, HttpApiError> {
+    let queue = dcc_core::application::reorder_turn_queue(
+        &backend.sessions,
+        &backend.sessions,
+        dcc_core::application::ReorderTurnQueueInput {
+            session_id: SessionId(session_id),
+            queued_turn_ids: body.queued_turn_ids,
+        },
+    )
+    .await
+    .map_err(|error| follow_up_error(error.to_string()))?;
+    Ok(Json(json!({ "queue": queue })))
+}
+
+async fn remove_queued_turn_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Path((session_id, queued_turn_id)): Path<(String, String)>,
+) -> Result<Json<Value>, HttpApiError> {
+    let queue = dcc_core::application::remove_queued_turn(
+        &backend.sessions,
+        &backend.sessions,
+        dcc_core::application::RemoveQueuedTurnInput {
+            session_id: SessionId(session_id),
+            queued_turn_id,
+        },
+    )
+    .await
+    .map_err(|error| follow_up_error(error.to_string()))?;
+    Ok(Json(json!({ "queue": queue })))
+}
+
+/// "Enviar o próximo": the head of the queue when no turn runs (after a
+/// pause, a stop or a limit).
+async fn dispatch_next_queued_turn_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let dispatched = backend
+        .sessions
+        .dispatch_next_queued_turn(&SessionId(session_id))
+        .await
+        .map_err(|error| follow_up_error(error.to_string()))?;
+    Ok(Json(json!({ "dispatched": dispatched })))
+}
+
 /// "Continuar" on a task stopped by its usage limit.
 async fn resume_after_usage_limit_handler(
     State(backend): State<Arc<HttpBackend>>,
@@ -3007,6 +3149,97 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_queue_routes_add_reorder_and_remove_follow_ups() {
+        use dcc_core::domain::session::{SessionEventKind, SessionEventRecord, TurnId};
+        let fixture = embedded_fixture().await;
+        let base = "/api/v1/sessions/http-respond/queue";
+        // Nothing runs yet: a follow-up has nothing to wait for.
+        let (status, _) = post_json(
+            &fixture.app,
+            base,
+            json!({ "sessionId": "", "prompt": "depois" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        SessionEventRepo::append_event(
+            &fixture.state,
+            &SessionEventRecord {
+                event_id: Uuid::new_v4().to_string(),
+                session_id: fixture.session_id.clone(),
+                sequence: 0,
+                occurred_at: "2026-10-24T00:00:01Z".to_string(),
+                kind: SessionEventKind::TurnStarted {
+                    turn_id: TurnId("t1".to_string()),
+                    prompt: "agora".to_string(),
+                    plan_mode: None,
+                    model: None,
+                    evidence: None,
+                    retry_of_turn_id: None,
+                    approval_policy: None,
+                },
+            },
+        )
+        .await
+        .expect("turn started");
+        let mut ids = Vec::new();
+        for prompt in ["primeiro", "segundo"] {
+            let (status, body) = post_json(
+                &fixture.app,
+                base,
+                json!({ "sessionId": "", "prompt": prompt, "planMode": false }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert_eq!(body["queuedTurn"]["prompt"], prompt);
+            ids.push(body["queuedTurn"]["id"].as_str().unwrap().to_string());
+        }
+        let (status, body) = send_json(
+            &fixture.app,
+            "PUT",
+            &format!("{base}/order"),
+            json!({ "queuedTurnIds": [ids[1], ids[0]] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["queue"][0]["prompt"], "segundo");
+        let (status, _) = send_json(
+            &fixture.app,
+            "PUT",
+            &format!("{base}/order"),
+            json!({ "queuedTurnIds": [ids[0]] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "every queued turn once");
+        let (status, body) = send_json(
+            &fixture.app,
+            "DELETE",
+            &format!("{base}/{}", ids[1]),
+            Value::Null,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["queue"].as_array().unwrap().len(), 1);
+        let (status, _) = send_json(
+            &fixture.app,
+            "DELETE",
+            &format!("{base}/{}", ids[1]),
+            Value::Null,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn a_turn_wrapping_up_refuses_steering_with_its_own_code() {
+        let error = follow_up_error(format!(
+            "provider error: {}",
+            dcc_core::ports::STEER_WINDOW_CLOSED
+        ));
+        assert_eq!(error.status(), StatusCode::CONFLICT);
+        assert_eq!(error.code(), dcc_core::ports::STEER_WINDOW_CLOSED);
     }
 
     #[tokio::test(flavor = "current_thread")]

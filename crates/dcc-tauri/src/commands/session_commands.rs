@@ -2621,14 +2621,23 @@ pub async fn steer_turn(
     state: State<'_, SessionCommandState>,
     input: SteerTurnInput,
 ) -> Result<SteerTurnOutput, String> {
-    let (_, turn_id) = active_turn_for_steer(&*state, &*state, &input)
+    steer_turn_with_state(&state, input).await
+}
+
+/// Guidance into the running turn without Tauri `State`, shared with the
+/// HTTP API. A turn already wrapping up fails with `STEER_WINDOW_CLOSED`.
+pub async fn steer_turn_with_state(
+    state: &SessionCommandState,
+    input: SteerTurnInput,
+) -> Result<SteerTurnOutput, String> {
+    let (_, turn_id) = active_turn_for_steer(state, state, &input)
         .await
         .map_err(|error| error.to_string())?;
     state
         .steer_provider_turn(&input.session_id, input.prompt.trim())
         .await
         .map_err(|error| error.to_string())?;
-    record_turn_steer(&*state, &*state, &*state, input, turn_id)
+    record_turn_steer(state, state, state, input, turn_id)
         .await
         .map_err(|error| error.to_string())
 }
@@ -2678,11 +2687,20 @@ pub async fn queue_turn(
     state: State<'_, SessionCommandState>,
     input: QueueTurnInput,
 ) -> Result<QueuedTurn, String> {
+    queue_turn_with_state(&state, input).await
+}
+
+/// A follow-up for after the running turn, without Tauri `State`, shared
+/// with the HTTP API.
+pub async fn queue_turn_with_state(
+    state: &SessionCommandState,
+    input: QueueTurnInput,
+) -> Result<QueuedTurn, String> {
     state
         .validate_queued_turn_approval_policy(&input.turn.session_id, input.turn.approval_policy)
         .await
         .map_err(|error| error.to_string())?;
-    let history = SessionEventRepo::list_events_by_session(&*state, &input.turn.session_id)
+    let history = SessionEventRepo::list_events_by_session(state, &input.turn.session_id)
         .await
         .map_err(|error| error.to_string())?;
     let projection =
@@ -2690,7 +2708,7 @@ pub async fn queue_turn(
     if projection.active_turn_id.is_none() {
         return Err("follow-ups can only be queued while a turn is active".to_string());
     }
-    run_queue_turn(&*state, &*state, input)
+    run_queue_turn(state, state, input)
         .await
         .map_err(|error| error.to_string())
 }
