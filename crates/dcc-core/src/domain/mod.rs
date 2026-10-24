@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod attention;
+pub mod commit_mode;
 pub mod computer_use_conformance;
 pub mod decision;
 pub mod delegation;

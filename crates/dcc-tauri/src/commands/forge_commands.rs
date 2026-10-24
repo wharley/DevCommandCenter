@@ -979,7 +979,15 @@ pub async fn workspace_change_request_merge(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPushInput,
 ) -> Result<(), String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_change_request_merge_with_state(&state, input).await
+}
+
+/// `workspace_change_request_merge` for callers without a Tauri `State`.
+pub async fn workspace_change_request_merge_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitPushInput,
+) -> Result<(), String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());

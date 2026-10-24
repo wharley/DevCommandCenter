@@ -3982,9 +3982,17 @@ pub async fn workspace_git_sync_base(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitSyncBaseInput,
 ) -> Result<WorkspaceGitSyncBaseOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_git_sync_base_with_state(&state, input).await
+}
+
+/// `workspace_git_sync_base` for callers without a Tauri `State`.
+pub async fn workspace_git_sync_base_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitSyncBaseInput,
+) -> Result<WorkspaceGitSyncBaseOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     sync_workspace_branch(
-        &state,
+        state,
         &input.workspace_root,
         input.base_branch.as_deref(),
         None,

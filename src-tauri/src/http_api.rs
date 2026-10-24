@@ -564,6 +564,11 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/mobile/workspaces/:workspace_id/delivery/:action",
             post(delivery::act),
         )
+        // The same delivery for the native app's review header.
+        .route(
+            "/api/v1/workspaces/:workspace_id/delivery/:action",
+            post(delivery::act),
+        )
         .route(
             "/api/v1/mobile/agent-requests/:request_id/respond",
             post(attention::respond_agent_request),
@@ -1451,6 +1456,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/git/unstage-file",
             "POST /api/v1/git/discard-file",
             "POST /api/v1/git/stage-all",
+            "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
             "POST /api/v1/sessions/:session_id/queue",
             "PUT /api/v1/sessions/:session_id/queue/order",
@@ -4960,6 +4966,95 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         let (status, _) = post_json(&fixture.app, "/api/v1/git/discard-file", file("../x")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_review_header_previews_commits_pushes_and_syncs_with_the_base() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        let fixture = embedded_fixture().await;
+        let base = tempfile::tempdir().expect("git dirs");
+        let base = std::fs::canonicalize(base.path()).unwrap().to_path_buf();
+        let remote = base.join("remote.git");
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&base, &["init", "--bare", "-b", "main", remote.to_str().unwrap()]);
+        git(&repo, &["init", "-b", "main"]);
+        git(&repo, &["config", "user.name", "DCC Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        std::fs::write(repo.join("README.md"), "oi\n").unwrap();
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-m", "init"]);
+        git(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(&repo, &["push", "-u", "origin", "main"]);
+        git(&repo, &["switch", "-c", "dcc/revisao"]);
+        git(&repo, &["push", "-u", "origin", "dcc/revisao"]);
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        dcc_core::ports::WorkspaceRepo::save_workspace(
+            &workspaces,
+            &Workspace {
+                id: WorkspaceId("w-review".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: None,
+                root_path: repo.to_string_lossy().to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-24T00:00:00Z".to_string(),
+                updated_at: "2026-10-24T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        std::fs::write(repo.join("docs/guia.md"), "um\n").unwrap();
+        let action = |name: &str| format!("/api/v1/workspaces/w-review/delivery/{name}");
+
+        // The preview stages everything and reads the deterministic message.
+        let (status, preview) = post_json(&fixture.app, &action("prepare-commit"), json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{preview}");
+        assert_eq!(preview["stagedFileCount"], 1);
+        assert!(!preview["subject"].as_str().unwrap().is_empty());
+        assert_eq!(git(&repo, &["diff", "--cached", "--name-only"]).trim(), "docs/guia.md");
+
+        // The person's edited message is what lands, pushed.
+        let (status, body) = post_json(
+            &fixture.app,
+            &action("commit-reviewed"),
+            json!({
+                "message": "docs: add the guide",
+                "body": "Written by hand.",
+                "stagedFingerprint": preview["stagedFingerprint"],
+                "push": true,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            git(&remote, &["log", "-1", "--format=%s%n%b", "dcc/revisao"]).trim(),
+            "docs: add the guide\nWritten by hand."
+        );
+
+        // The base moved: syncing merges it in.
+        git(&repo, &["switch", "main"]);
+        std::fs::write(repo.join("base.txt"), "nova\n").unwrap();
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-m", "base"]);
+        git(&repo, &["push", "origin", "main"]);
+        git(&repo, &["switch", "dcc/revisao"]);
+        let (status, synced) =
+            post_json(&fixture.app, &action("sync-base"), json!({ "baseBranch": "main" })).await;
+        assert_eq!(status, StatusCode::OK, "{synced}");
+        assert_eq!(synced["updated"], true);
+        assert!(repo.join("base.txt").exists());
+
+        // Nothing left to commit: the preview says so.
+        let (status, _) = post_json(&fixture.app, &action("prepare-commit"), json!({})).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 

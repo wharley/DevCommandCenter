@@ -1,6 +1,8 @@
 //! Delivering a task from the phone: diff summary, commit (with the
 //! desktop's deterministic message, editable), push, "Atualizar e enviar",
-//! PR (draft or not), PR/CI state, complete and archive.
+//! PR (draft or not), PR/CI state, complete and archive. The native app's
+//! review header uses the same actions (and its own: the commit preview,
+//! the reviewed commit, merge, sync with the base).
 //!
 //! Everything runs through `dcc_tauri::commands::workspace_delivery`, the
 //! desktop's own delivery functions in the desktop's order. The task is
@@ -8,7 +10,7 @@
 //! Destructive steps (push, archive) are confirmed in the app.
 use super::*;
 use dcc_tauri::commands::workspace_delivery::{
-    self, DeliveryCommitInput, DeliveryError, DeliveryRequestInput,
+    self, DeliveryCommitInput, DeliveryError, DeliveryRequestInput, DeliveryReviewedCommitInput,
 };
 
 fn classify(error: DeliveryError) -> HttpApiError {
@@ -66,22 +68,58 @@ pub(super) async fn act(
     raw: axum::body::Bytes,
 ) -> Result<Json<Value>, HttpApiError> {
     let state = &backend.workspace;
+    let done = |result: Result<(), DeliveryError>| result.map(|()| json!({ "ok": true }));
     let result = match action.as_str() {
         "commit" => {
             let input: DeliveryCommitInput = body(&raw)?;
-            workspace_delivery::delivery_commit(state, &backend.sessions, &workspace_id, input).await
+            done(
+                workspace_delivery::delivery_commit(state, &backend.sessions, &workspace_id, input)
+                    .await,
+            )
         }
-        "push" => workspace_delivery::delivery_push(state, &workspace_id).await,
-        "sync-and-push" => workspace_delivery::delivery_sync_and_push(state, &workspace_id).await,
+        "push" => done(workspace_delivery::delivery_push(state, &workspace_id).await),
+        "sync-and-push" => {
+            done(workspace_delivery::delivery_sync_and_push(state, &workspace_id).await)
+        }
         "request" => {
             let input: DeliveryRequestInput = body(&raw)?;
-            workspace_delivery::delivery_create_request(state, &backend.sessions, &workspace_id, input)
-                .await
+            done(
+                workspace_delivery::delivery_create_request(
+                    state,
+                    &backend.sessions,
+                    &workspace_id,
+                    input,
+                )
+                .await,
+            )
         }
-        "complete" => workspace_delivery::delivery_complete(state, &workspace_id).await,
-        "archive" => workspace_delivery::delivery_archive(state, &workspace_id).await,
+        "complete" => done(workspace_delivery::delivery_complete(state, &workspace_id).await),
+        "archive" => done(workspace_delivery::delivery_archive(state, &workspace_id).await),
+        // The native app's review header (`GitSectionHeader`).
+        "prepare-commit" => {
+            workspace_delivery::delivery_prepare_commit(state, &backend.sessions, &workspace_id)
+                .await
+                .map(|suggestion| json!(suggestion))
+        }
+        "commit-reviewed" => {
+            let input: DeliveryReviewedCommitInput = body(&raw)?;
+            done(workspace_delivery::delivery_commit_reviewed(state, &workspace_id, input).await)
+        }
+        "merge" => done(workspace_delivery::delivery_merge(state, &workspace_id).await),
+        "sync-base" => {
+            let input: SyncBaseInput = body(&raw)?;
+            workspace_delivery::delivery_sync_base(state, &workspace_id, input.base_branch)
+                .await
+                .map(|output| json!(output))
+        }
         _ => return Err(HttpApiError::not_found("unknown delivery action")),
     };
-    result.map_err(classify)?;
-    Ok(Json(json!({ "ok": true })))
+    result.map(Json).map_err(classify)
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncBaseInput {
+    #[serde(default)]
+    base_branch: Option<String>,
 }

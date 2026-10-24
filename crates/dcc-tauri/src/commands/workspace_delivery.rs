@@ -28,7 +28,8 @@ use specta::Type;
 use crate::{
     commands::{
         forge_commands::{
-            workspace_change_request_create_with_state, workspace_change_request_title,
+            workspace_change_request_create_with_state, workspace_change_request_merge_with_state,
+            workspace_change_request_title,
             workspace_pipeline_status_with_state, workspace_pr_status_with_state,
             WorkspacePipelineStatusInput, WorkspacePrStatusInput, WorkspacePrStatusOutput,
         },
@@ -38,7 +39,9 @@ use crate::{
             workspace_git_branch_diff_with_state, workspace_git_commit_push_with_state,
             workspace_git_commit_suggestion_with_state, workspace_git_commit_with_state,
             workspace_git_push_with_state, workspace_git_stage_all_with_state,
-            workspace_git_status_with_state, workspace_project_automation_config_with_state,
+            workspace_git_status_with_state, workspace_git_sync_base_with_state,
+            workspace_project_automation_config_with_state, WorkspaceGitCommitSuggestionOutput,
+            WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput,
             workspace_run_project_tasks_with_state, WorkspaceChangeRequestCreateInput,
             WorkspaceGitBranchDiffInput, WorkspaceGitChangeEntry, WorkspaceGitCommitInput,
             WorkspaceGitCommitPushInput, WorkspaceGitCommitSuggestionInput,
@@ -549,6 +552,146 @@ pub async fn delivery_commit(
             message,
             body,
             staged_fingerprint,
+        },
+    )
+    .await?)
+}
+
+/// The commit of the task's review header, after its preview: the message
+/// the person read and edited, guarded by the staged snapshot they saw.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryReviewedCommitInput {
+    pub message: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    pub staged_fingerprint: String,
+    /// Without a remote the commit stays local (and skips the checks that
+    /// guard a push).
+    pub push: bool,
+}
+
+/// The header's "Commit e enviar" preview (`prepareInspectorCommitMessage`):
+/// everything staged when nothing is, then the staged snapshot's
+/// deterministic message, body and fingerprint.
+pub async fn delivery_prepare_commit(
+    state: &WorkspaceCommandState,
+    sessions: &SessionCommandState,
+    workspace_id: &str,
+) -> Result<WorkspaceGitCommitSuggestionOutput, DeliveryError> {
+    let target = target(state, workspace_id).await?;
+    let status = git_status(state, &target.root).await?;
+    if status.staged.is_empty() && status.unstaged.is_empty() {
+        return Err(DeliveryError::Invalid("Não há mudanças para commitar.".into()));
+    }
+    if status.staged.is_empty() {
+        workspace_git_stage_all_with_state(
+            state,
+            WorkspaceGitPathInput {
+                workspace_root: target.root.clone(),
+                relative_path: ".".to_string(),
+            },
+        )
+        .await?;
+    }
+    Ok(workspace_git_commit_suggestion_with_state(
+        state,
+        sessions,
+        WorkspaceGitCommitSuggestionInput {
+            workspace_root: target.root.clone(),
+            provider_id: None,
+            model: None,
+            provider_runtime: None,
+        },
+    )
+    .await?)
+}
+
+/// `handleInspectorCommit` on "Commit e enviar": the before-push checks,
+/// then the reviewed commit and its push (only the commit without a remote).
+pub async fn delivery_commit_reviewed(
+    state: &WorkspaceCommandState,
+    workspace_id: &str,
+    input: DeliveryReviewedCommitInput,
+) -> Result<(), DeliveryError> {
+    let target = target(state, workspace_id).await?;
+    let status = git_status(state, &target.root).await?;
+    if input.push {
+        run_before_push_checks(state, &target.root).await?;
+    }
+    // The person's own selection stays; nothing staged stages everything.
+    if status.staged.is_empty() {
+        workspace_git_stage_all_with_state(
+            state,
+            WorkspaceGitPathInput {
+                workspace_root: target.root.clone(),
+                relative_path: ".".to_string(),
+            },
+        )
+        .await?;
+    }
+    let message = input.message.trim().to_string();
+    if message.is_empty() {
+        return Err(DeliveryError::Invalid("A mensagem do commit está vazia.".into()));
+    }
+    let body = edited(input.body);
+    if !input.push {
+        return Ok(workspace_git_commit_with_state(
+            state,
+            WorkspaceGitCommitInput {
+                workspace_root: target.root.clone(),
+                message,
+                body,
+                staged_fingerprint: input.staged_fingerprint,
+            },
+        )
+        .await?);
+    }
+    if let Err(error) = workspace_git_commit_push_with_state(
+        state,
+        WorkspaceGitCommitPushInput {
+            workspace_root: target.root.clone(),
+            message,
+            body,
+            staged_fingerprint: input.staged_fingerprint,
+            forge_login: None,
+        },
+    )
+    .await
+    {
+        return Err(explain_push_error(state, &target.root, error).await);
+    }
+    Ok(())
+}
+
+/// "Fazer merge do PR" once confirmed (`executeConfirmedMerge`); completing
+/// the task after it is a separate step (`complete`).
+pub async fn delivery_merge(state: &WorkspaceCommandState, workspace_id: &str) -> Result<(), DeliveryError> {
+    let target = target(state, workspace_id).await?;
+    Ok(workspace_change_request_merge_with_state(
+        state,
+        WorkspaceGitPushInput {
+            workspace_root: target.root.clone(),
+            forge_login: None,
+        },
+    )
+    .await?)
+}
+
+/// "Sincronizar com a base" once confirmed (`executeConfirmedSyncBase`): the
+/// base merged in, onto the pull request's base when it has one.
+pub async fn delivery_sync_base(
+    state: &WorkspaceCommandState,
+    workspace_id: &str,
+    base_branch: Option<String>,
+) -> Result<WorkspaceGitSyncBaseOutput, DeliveryError> {
+    let target = target(state, workspace_id).await?;
+    Ok(workspace_git_sync_base_with_state(
+        state,
+        WorkspaceGitSyncBaseInput {
+            workspace_root: target.root.clone(),
+            base_branch: base_branch.filter(|branch| !branch.trim().is_empty()),
+            forge_login: None,
         },
     )
     .await?)
