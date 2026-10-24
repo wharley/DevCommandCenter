@@ -650,6 +650,15 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         )
         .route("/api/v1/workspaces/create", post(create_task_handler))
         .route("/api/v1/workspaces", post(create_workspace_handler))
+        .route("/api/v1/workspaces/clone", post(clone_workspace_handler))
+        .route(
+            "/api/v1/workspaces/source-url/resolve",
+            post(resolve_source_url_handler),
+        )
+        .route(
+            "/api/v1/workspaces/from-source-url",
+            post(create_from_source_url_handler),
+        )
         .route(
             "/api/v1/workspace-bundles",
             post(create_workspace_bundle_handler),
@@ -1429,6 +1438,9 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/sessions/:session_id/steer",
             "POST /api/v1/workspaces/create",
             "POST /api/v1/workspaces",
+            "POST /api/v1/workspaces/clone",
+            "POST /api/v1/workspaces/source-url/resolve",
+            "POST /api/v1/workspaces/from-source-url",
             "POST /api/v1/workspace-bundles",
             "POST /api/v1/sessions/:session_id/task-title",
             "POST /api/v1/sessions/:session_id/queue",
@@ -2663,7 +2675,9 @@ async fn create_task_handler(
                 &backend.workspace,
                 &app,
                 CreateWorkspaceBundleForReposInput {
-                    name: body.bundle_name.unwrap_or_else(|| "Nova tarefa".to_string()),
+                    name: body
+                        .bundle_name
+                        .unwrap_or_else(|| "Nova tarefa".to_string()),
                     projects,
                 },
             )
@@ -2681,9 +2695,11 @@ async fn create_task_handler(
 
 /// The desktop app the creation runs in.
 fn desktop_app(backend: &HttpBackend) -> Result<tauri::AppHandle, HttpApiError> {
-    backend.app.get().cloned().ok_or_else(|| {
-        HttpApiError::service_unavailable("creating a task needs the desktop app")
-    })
+    backend
+        .app
+        .get()
+        .cloned()
+        .ok_or_else(|| HttpApiError::service_unavailable("creating a task needs the desktop app"))
 }
 
 /// The open-project dialog's single task, exactly as chosen there (base
@@ -2695,10 +2711,70 @@ async fn create_workspace_handler(
     let app = desktop_app(&backend)?;
     let repo = dcc_infra::db::SqliteWorkspaceRepo::open(&backend.workspace.db_path)
         .map_err(|error| HttpApiError::internal(error.to_string()))?;
+    let output = dcc_tauri::commands::workspace_commands::create_workspace_for_repo_with_repo(
+        &repo, &app, input,
+    )
+    .await
+    .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!({
+        "workspaceId": output.workspace.id,
+        "setupReport": output.setup_report,
+        "setupHints": output.setup_hints,
+    })))
+}
+
+/// "Clonar": clones the repository into the folder chosen and starts a task
+/// in it (`cloneWorkspaceFromUrl`).
+async fn clone_workspace_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<
+        dcc_core::application::create_workspace_from_url::CreateWorkspaceFromUrlInput,
+    >,
+) -> Result<Json<Value>, HttpApiError> {
+    let app = desktop_app(&backend)?;
+    let output = dcc_tauri::commands::workspace_commands::create_workspace_from_url_with_state(
+        &backend.workspace,
+        &app,
+        input,
+    )
+    .await
+    .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!({
+        "workspaceId": output.workspace.id,
+        "setupReport": output.setup_report,
+        "setupHints": output.setup_hints,
+    })))
+}
+
+/// "Validar": what a branch or PR URL points at in the project.
+async fn resolve_source_url_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::workspace_commands::ResolveWorkspaceSourceUrlInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let resolution =
+        dcc_tauri::commands::workspace_commands::resolve_workspace_source_url_with_state(
+            &backend.workspace,
+            input,
+        )
+        .await
+        .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!(resolution)))
+}
+
+/// "Abrir branch": a task on an existing branch of the project.
+async fn create_from_source_url_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::workspace_commands::CreateWorkspaceFromSourceUrlInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let app = desktop_app(&backend)?;
     let output =
-        dcc_tauri::commands::workspace_commands::create_workspace_for_repo_with_repo(&repo, &app, input)
-            .await
-            .map_err(HttpApiError::bad_request)?;
+        dcc_tauri::commands::workspace_commands::create_workspace_from_source_url_with_state(
+            &backend.workspace,
+            &app,
+            input,
+        )
+        .await
+        .map_err(HttpApiError::bad_request)?;
     Ok(Json(json!({
         "workspaceId": output.workspace.id,
         "setupReport": output.setup_report,
@@ -3446,11 +3522,19 @@ mod tests {
     async fn naming_a_task_checks_the_session_and_the_title() {
         let fixture = embedded_fixture().await;
         let uri = "/api/v1/sessions/http-respond/task-title";
-        let (status, body) =
-            post_json(&fixture.app, uri, json!({ "workspaceId": "workspace", "title": "   " })).await;
+        let (status, body) = post_json(
+            &fixture.app,
+            uri,
+            json!({ "workspaceId": "workspace", "title": "   " }),
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-        let (status, body) =
-            post_json(&fixture.app, uri, json!({ "workspaceId": "other", "title": "Corrigir" })).await;
+        let (status, body) = post_json(
+            &fixture.app,
+            uri,
+            json!({ "workspaceId": "other", "title": "Corrigir" }),
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         let (status, body) = post_json(
             &fixture.app,
@@ -3459,6 +3543,18 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resolving_a_source_url_refuses_a_folder_that_is_no_project() {
+        let fixture = embedded_fixture().await;
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/workspaces/source-url/resolve",
+            json!({ "workspaceRoot": "/definitely/not/here", "url": "https://github.com/o/r/tree/main", "forgeLogin": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -3479,6 +3575,14 @@ mod tests {
             (
                 "/api/v1/workspace-bundles",
                 json!({ "name": "Nova tarefa", "projects": [] }),
+            ),
+            (
+                "/api/v1/workspaces/clone",
+                json!({ "projectId": "p", "repositoryUrl": "https://x/y.git", "workspaceRoot": "/tmp/y", "baseBranch": "", "name": null }),
+            ),
+            (
+                "/api/v1/workspaces/from-source-url",
+                json!({ "projectId": "p", "workspaceRoot": "/tmp/p", "url": "https://x/y/tree/b", "name": null, "forgeLogin": null }),
             ),
         ] {
             let (status, answer) = post_json(&fixture.app, uri, body).await;

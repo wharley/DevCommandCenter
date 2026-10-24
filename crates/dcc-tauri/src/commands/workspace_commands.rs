@@ -6377,6 +6377,15 @@ pub async fn resolve_workspace_source_url(
     state: State<'_, WorkspaceCommandState>,
     input: ResolveWorkspaceSourceUrlInput,
 ) -> Result<WorkspaceSourceUrlResolution, String> {
+    resolve_workspace_source_url_with_state(&state, input).await
+}
+
+/// A branch or PR URL read against the project, without Tauri `State`
+/// (shared with the HTTP API).
+pub async fn resolve_workspace_source_url_with_state(
+    state: &WorkspaceCommandState,
+    input: ResolveWorkspaceSourceUrlInput,
+) -> Result<WorkspaceSourceUrlResolution, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     Ok(
@@ -6390,6 +6399,16 @@ pub async fn resolve_workspace_source_url(
 pub async fn create_workspace_from_source_url(
     state: State<'_, WorkspaceCommandState>,
     app: AppHandle,
+    input: CreateWorkspaceFromSourceUrlInput,
+) -> Result<CreateWorkspaceForRepoOutput, String> {
+    create_workspace_from_source_url_with_state(&state, &app, input).await
+}
+
+/// A task on an existing branch of the project ("Abrir branch"), without
+/// Tauri `State` (shared with the HTTP API).
+pub async fn create_workspace_from_source_url_with_state(
+    state: &WorkspaceCommandState,
+    app: &AppHandle,
     input: CreateWorkspaceFromSourceUrlInput,
 ) -> Result<CreateWorkspaceForRepoOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
@@ -6915,6 +6934,16 @@ pub async fn create_workspace_from_url(
     app: AppHandle,
     input: CreateWorkspaceFromUrlInput,
 ) -> Result<CreateWorkspaceFromUrlOutput, String> {
+    create_workspace_from_url_with_state(&state, &app, input).await
+}
+
+/// "Clonar": clones the repository and starts a task in it, without Tauri
+/// `State` (shared with the HTTP API).
+pub async fn create_workspace_from_url_with_state(
+    state: &WorkspaceCommandState,
+    app: &AppHandle,
+    input: CreateWorkspaceFromUrlInput,
+) -> Result<CreateWorkspaceFromUrlOutput, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let git = CommandGitOps::new();
     let events = TauriEventBus::new(app.clone());
@@ -6929,7 +6958,7 @@ pub async fn create_workspace_from_url(
     let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
     let setup_report = append_forge_binding_pending(&setup_report, &workspace.root_path);
     persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
-    schedule_repository_forge_metadata_refresh(&repo, &workspace, app);
+    schedule_repository_forge_metadata_refresh(&repo, &workspace, app.clone());
 
     Ok(CreateWorkspaceFromUrlOutput {
         workspace,
