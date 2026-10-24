@@ -3238,7 +3238,15 @@ pub async fn workspace_git_stage_file(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPathInput,
 ) -> Result<(), String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_git_stage_file_with_state(&state, input).await
+}
+
+/// `workspace_git_stage_file` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_stage_file_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -3265,7 +3273,15 @@ pub async fn workspace_git_unstage_file(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPathInput,
 ) -> Result<(), String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_git_unstage_file_with_state(&state, input).await
+}
+
+/// `workspace_git_unstage_file` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_unstage_file_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -3296,7 +3312,15 @@ pub async fn workspace_git_discard_file(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitPathInput,
 ) -> Result<(), String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_git_discard_file_with_state(&state, input).await
+}
+
+/// `workspace_git_discard_file` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_discard_file_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitPathInput,
+) -> Result<(), String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());

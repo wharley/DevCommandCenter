@@ -58,6 +58,7 @@ use uuid::Uuid;
 
 mod attention;
 mod delivery;
+mod git_changes;
 mod mobile;
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
@@ -663,6 +664,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/workspace-bundles",
             post(create_workspace_bundle_handler),
         )
+        .route("/api/v1/git/stage-file", post(git_changes::stage_file))
+        .route("/api/v1/git/unstage-file", post(git_changes::unstage_file))
+        .route("/api/v1/git/discard-file", post(git_changes::discard_file))
+        .route("/api/v1/git/stage-all", post(git_changes::stage_all))
         .route(
             "/api/v1/sessions/:session_id/task-title",
             post(apply_task_title_handler),
@@ -1442,6 +1447,10 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/workspaces/source-url/resolve",
             "POST /api/v1/workspaces/from-source-url",
             "POST /api/v1/workspace-bundles",
+            "POST /api/v1/git/stage-file",
+            "POST /api/v1/git/unstage-file",
+            "POST /api/v1/git/discard-file",
+            "POST /api/v1/git/stage-all",
             "POST /api/v1/sessions/:session_id/task-title",
             "POST /api/v1/sessions/:session_id/queue",
             "PUT /api/v1/sessions/:session_id/queue/order",
@@ -4875,6 +4884,83 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_changes_list_stages_unstages_and_discards_in_a_task_checkout() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        let fixture = embedded_fixture().await;
+        let base = tempfile::tempdir().expect("git dir");
+        let repo = std::fs::canonicalize(base.path()).unwrap().to_path_buf();
+        git(&repo, &["init", "-b", "main"]);
+        git(&repo, &["config", "user.name", "DCC Test"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        std::fs::write(repo.join("a.txt"), "um\n").unwrap();
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-m", "init"]);
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        dcc_core::ports::WorkspaceRepo::save_workspace(
+            &workspaces,
+            &Workspace {
+                id: WorkspaceId("w-changes".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: None,
+                root_path: repo.to_string_lossy().to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-24T00:00:00Z".to_string(),
+                updated_at: "2026-10-24T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let root = repo.to_string_lossy().to_string();
+        let file = |path: &str| json!({ "workspaceRoot": root, "relativePath": path });
+        std::fs::write(repo.join("a.txt"), "dois\n").unwrap();
+        std::fs::write(repo.join("novo.txt"), "x\n").unwrap();
+
+        let (status, body) = post_json(&fixture.app, "/api/v1/git/stage-file", file("a.txt")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            git(&repo, &["diff", "--cached", "--name-only"]).trim(),
+            "a.txt"
+        );
+        let (status, _) = post_json(&fixture.app, "/api/v1/git/unstage-file", file("a.txt")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(git(&repo, &["diff", "--cached", "--name-only"]).trim(), "");
+        let (status, _) = post_json(&fixture.app, "/api/v1/git/stage-all", file(".")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            git(&repo, &["diff", "--cached", "--name-only"]).trim(),
+            "a.txt\nnovo.txt"
+        );
+        git(&repo, &["reset", "-q"]);
+        // Discarding a new file removes it; a tracked one goes back to HEAD.
+        let (status, _) =
+            post_json(&fixture.app, "/api/v1/git/discard-file", file("novo.txt")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!repo.join("novo.txt").exists());
+        let (status, _) = post_json(&fixture.app, "/api/v1/git/discard-file", file("a.txt")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(std::fs::read_to_string(repo.join("a.txt")).unwrap(), "um\n");
+
+        // A folder that is no task's checkout is refused; a path out of it too.
+        let other = tempfile::tempdir().unwrap();
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/git/discard-file",
+            json!({ "workspaceRoot": other.path(), "relativePath": "a.txt" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        let (status, _) = post_json(&fixture.app, "/api/v1/git/discard-file", file("../x")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
