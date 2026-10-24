@@ -7,7 +7,9 @@
 mod attachments;
 mod controls;
 mod drafts;
+mod handoff;
 mod mentions;
+mod picker;
 mod popups;
 mod prompt;
 mod settings;
@@ -37,6 +39,8 @@ pub struct ComposerSession {
     pub running: bool,
     pub aborted: bool,
     pub workspace_path: Option<String>,
+    pub workspace_name: Option<String>,
+    pub branch: Option<String>,
 }
 
 /// Something the conversation should do after the composer acted.
@@ -72,6 +76,9 @@ pub struct Composer {
     pub(crate) approval_menu_open: bool,
     /// "Ativar acesso completo?" waits for an answer.
     pub(crate) confirm_full_access: bool,
+    /// The conversation so far, for a provider handoff.
+    pub(crate) history: std::sync::Arc<Vec<dcc_core::domain::timeline::TimelineMessage>>,
+    pub(crate) picker: picker::PickerState,
     _input_events: Subscription,
     _input_changes: Subscription,
 }
@@ -117,6 +124,8 @@ impl Composer {
             settings: settings::load_settings(),
             approval_menu_open: false,
             confirm_full_access: false,
+            history: Default::default(),
+            picker: picker::PickerState::new(window, cx),
             _input_events: input_events,
             _input_changes: input_changes,
         }
@@ -156,6 +165,13 @@ impl Composer {
             self.refresh_catalog(cx);
         }
         cx.notify();
+    }
+
+    pub fn set_history(
+        &mut self,
+        history: std::sync::Arc<Vec<dcc_core::domain::timeline::TimelineMessage>>,
+    ) {
+        self.history = history;
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -272,6 +288,19 @@ impl Composer {
         } else {
             self.turn_options(&prompt)
         };
+        let handoff = options
+            .provider_id
+            .clone()
+            .map(|destination| handoff::HandoffRequest {
+                source_provider: self.session.provider_id.clone(),
+                destination_provider: destination,
+                workspace_name: self.session.workspace_name.clone(),
+                workspace_path: self.session.workspace_path.clone(),
+                branch: self.session.branch.clone(),
+                history: self.history.clone(),
+                prompt: prompt.clone(),
+                db_path: crate::data::loader::database_path(),
+            });
         let endpoint = self.endpoint.clone();
         let failure = if retry_of.is_some() {
             cx.t("conversation.message.retryFailed")
@@ -285,6 +314,14 @@ impl Composer {
                 .background_executor()
                 .spawn(async move {
                     let api = api(endpoint)?;
+                    let mut options = options;
+                    if let Some(request) = handoff {
+                        options.tool_instructions =
+                            dcc_core::domain::turn_instructions::merge_tool_instructions(
+                                options.tool_instructions.as_deref(),
+                                handoff::build(&request).as_deref(),
+                            );
+                    }
                     if resume_first {
                         api.resume(&session)?;
                     }

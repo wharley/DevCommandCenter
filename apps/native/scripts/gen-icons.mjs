@@ -17,8 +17,11 @@ const ICONS = [
 	"shield-check", "sparkles", "square-terminal", "sticky-note", "trash-2",
 	"wrench", "terminal", "file-pen-line", "file-text", "globe", "list-todo", "plug", "brain",
 	"circle-alert", "circle-dashed", "circle", "corner-down-right", "hourglass", "copy", "file-code-corner",
-	"triangle-alert", "file", "file-image", "file-headphone", "ban", "shield-alert", "arrow-up", "square", "image", "braces", "paperclip", "shield", "shield-check", "clipboard-list", "zap",
+	"triangle-alert", "file", "file-image", "file-headphone", "ban", "shield-alert", "arrow-up", "square", "image", "braces", "paperclip", "shield", "shield-check", "clipboard-list", "zap", "star",
 ];
+
+/** Icons the app also draws filled. */
+const FILLED = ["star", "zap"];
 
 const here = dirname(fileURLToPath(import.meta.url));
 const lucide = join(here, "../../../node_modules/lucide-react");
@@ -43,6 +46,10 @@ for (const name of ICONS) {
 		.join("");
 	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="{{stroke}}" stroke-linecap="round" stroke-linejoin="round">${children}</svg>\n`;
 	writeFileSync(join(out, `${name}.svg`), svg);
+	// `fill="currentColor"` (a starred ⭐, Resposta direta on): a filled twin.
+	if (FILLED.includes(name)) {
+		writeFileSync(join(out, `${name}-filled.svg`), svg.replace('fill="none"', 'fill="#000"'));
+	}
 }
 copyFileSync(join(lucide, "LICENSE"), join(out, "LICENSE-lucide"));
 

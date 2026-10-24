@@ -50,6 +50,8 @@ pub struct TurnOptions {
     pub approval_policy: Option<String>,
     pub plan_mode: bool,
     pub fast_mode: bool,
+    /// Background instructions (delegation, a provider handoff).
+    pub tool_instructions: Option<String>,
 }
 
 impl TurnOptions {
@@ -66,6 +68,7 @@ impl TurnOptions {
         set("model", self.model.as_ref());
         set("effort", self.effort.as_ref());
         set("approvalPolicy", self.approval_policy.as_ref());
+        set("toolInstructions", self.tool_instructions.as_ref());
         map.insert("planMode".into(), Value::Bool(self.plan_mode));
         map.insert("fastMode".into(), Value::Bool(self.fast_mode));
     }

@@ -108,8 +108,23 @@ pub struct EffortChoice {
     pub ultrathink: bool,
 }
 
+/// A conversation's own provider and model (`dcc.sessionComposerSelections`),
+/// kept while the conversation is still on the provider it was picked on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Selection {
+    pub provider_id: String,
+    pub model_id: Option<String>,
+    pub session_provider_id: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComposerSettings {
+    /// session → its pick in the model picker.
+    #[serde(default)]
+    selection: HashMap<String, Selection>,
+    /// The picker's ⭐ (`dcc.composer.model-favorites.v1`).
+    #[serde(default)]
+    pub favorites: Vec<crate::data::model_picker::ModelFavorite>,
     /// `task|provider` → policy key.
     #[serde(default)]
     approval: HashMap<String, String>,
@@ -180,6 +195,18 @@ impl ComposerSettings {
 
     pub fn set_effort(&mut self, task: &str, choice: EffortChoice) {
         self.effort.insert(task.to_string(), choice);
+    }
+
+    /// The conversation's pick while it still applies (its provider is the
+    /// one the conversation was on when it was picked).
+    pub fn selection(&self, session: &str, session_provider: &str) -> Option<&Selection> {
+        self.selection
+            .get(session)
+            .filter(|selection| selection.session_provider_id == session_provider)
+    }
+
+    pub fn set_selection(&mut self, session: &str, selection: Selection) {
+        self.selection.insert(session.to_string(), selection);
     }
 
     /// `resolvePlanModeState`

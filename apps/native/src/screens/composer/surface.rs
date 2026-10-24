@@ -7,9 +7,9 @@ use gpui::{
     div, point, prelude::*, px,
 };
 
-use super::{Busy, Composer, controls, popups};
+use super::{Busy, Composer, controls, picker, popups};
 use crate::i18n::Translate;
-use crate::project::{ProviderIcon, model_label};
+use crate::project::ProviderIcon;
 use crate::theme::ActiveTheme;
 use crate::theme::color::mix_oklab;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, spinner};
@@ -17,65 +17,70 @@ use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, spinner};
 /// `--dcc-composer-input-min-height` (4rem).
 const INPUT_MIN_HEIGHT: f32 = 64.0;
 
-/// `getCompactComposerModelLabel`: Claude's models drop the "Claude ".
-fn compact_model(provider: Option<&str>, model: &str) -> String {
-    let label = model_label(model);
-    if provider == Some("claude_code") {
-        let trimmed = label
-            .strip_prefix("Claude ")
-            .unwrap_or(&label)
-            .trim()
-            .to_string();
-        if !trimmed.is_empty() {
-            return trimmed;
-        }
-    }
-    label
-}
-
-fn model_chip(composer: &Composer, cx: &gpui::App) -> Option<AnyElement> {
-    let model = composer.session.model.as_deref()?;
-    let provider = composer.session.provider_id.as_deref();
-    let colors = &cx.theme().colors;
-    // The picker (provider, model, effort) arrives with screen 3c; the chip
-    // shows the session's model meanwhile.
-    Some(
-        div()
-            .flex()
-            .h(px(28.0))
-            .min_w_0()
-            .max_w(px(224.0))
-            .items_center()
-            .gap(px(6.0))
-            .px(px(4.0))
-            .rounded(px(9.0))
-            .text_color(colors.muted_foreground)
-            .children(provider.map(|provider| ProviderIcon::new(provider).size(13.0)))
-            .child(
+fn model_chip(composer: &Composer, cx: &mut Context<Composer>) -> Option<AnyElement> {
+    let model_id = composer.selected_model_id()?;
+    let provider = composer.selected_provider_id();
+    let colors = cx.theme().colors.clone();
+    let label = composer
+        .model()
+        .map(|model| model.label.clone())
+        .unwrap_or_else(|| model_id.clone());
+    let disabled = composer.session.session_id.is_none() || composer.catalog.is_none();
+    let hover = colors.accent.opacity(0.6);
+    let trigger = div()
+        .flex()
+        .h(px(28.0))
+        .min_w_0()
+        .max_w(px(224.0))
+        .items_center()
+        .gap(px(6.0))
+        .px(px(4.0))
+        .py(px(2.0))
+        .rounded(px(9.0))
+        .text_color(colors.muted_foreground)
+        .when(!disabled, |chip| {
+            chip.cursor_pointer().hover(move |style| style.bg(hover))
+        })
+        .when(disabled, |chip| chip.opacity(0.45))
+        .children(
+            provider
+                .as_deref()
+                .map(|provider| ProviderIcon::new(provider).size(13.0)),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(px(12.0))
+                .line_height(px(16.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(colors.foreground)
+                .child(SharedString::from(picker::compact_model(
+                    provider.as_deref(),
+                    &label,
+                ))),
+        )
+        .when(!composer.effort_levels().is_empty(), |chip| {
+            chip.child(
                 div()
-                    .min_w_0()
-                    .truncate()
+                    .flex_shrink_0()
                     .text_size(px(12.0))
                     .line_height(px(16.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(colors.foreground)
-                    .child(SharedString::from(compact_model(provider, model))),
+                    .text_color(colors.muted_foreground)
+                    .child(format!(
+                        "· {}",
+                        cx.t(&format!("composer.effort.{}", composer.effort_label_id()))
+                    )),
             )
-            .when(!composer.effort_levels().is_empty(), |chip| {
-                chip.child(
-                    div()
-                        .flex_shrink_0()
-                        .text_size(px(12.0))
-                        .line_height(px(16.0))
-                        .text_color(colors.muted_foreground)
-                        .child(format!(
-                            "· {}",
-                            cx.t(&format!("composer.effort.{}", composer.effort_label_id()))
-                        )),
-                )
-            })
-            .into_any_element(),
-    )
+        })
+        .child(
+            div()
+                .flex_shrink_0()
+                .opacity(0.4)
+                .child(Icon::new("chevron-down").size(12.0)),
+        )
+        .into_any_element();
+    Some(picker::model_menu(composer, trigger, cx))
 }
 
 fn action_button(composer: &Composer, cx: &mut Context<Composer>) -> AnyElement {

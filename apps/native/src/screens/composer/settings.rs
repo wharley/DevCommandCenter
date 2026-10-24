@@ -32,8 +32,29 @@ impl Composer {
         self.session.task_id.as_deref().unwrap_or_default()
     }
 
+    /// The conversation's pick in the picker, while it still applies.
+    fn selection(&self) -> Option<&composer_settings::Selection> {
+        let session = self.session.session_id.as_deref()?;
+        let provider = self.session.provider_id.as_deref()?;
+        self.settings.selection(session, provider)
+    }
+
+    /// The provider the next turn runs on: the pick, else the session's.
+    pub(crate) fn selected_provider_id(&self) -> Option<String> {
+        self.selection()
+            .map(|selection| selection.provider_id.clone())
+            .or_else(|| self.session.provider_id.clone())
+    }
+
+    pub(crate) fn selected_model_id(&self) -> Option<String> {
+        match self.selection() {
+            Some(selection) => selection.model_id.clone(),
+            None => self.session.model.clone(),
+        }
+    }
+
     pub(crate) fn provider(&self) -> Option<&ProviderDescriptor> {
-        let id = self.session.provider_id.as_deref()?;
+        let id = self.selected_provider_id()?;
         self.catalog
             .as_ref()?
             .iter()
@@ -41,8 +62,65 @@ impl Composer {
     }
 
     pub(crate) fn model(&self) -> Option<&ProviderModelDescriptor> {
-        let id = self.session.model.as_deref()?;
+        let id = self.selected_model_id()?;
         self.provider()?.models.iter().find(|model| model.id == id)
+    }
+
+    /// The picker chose a provider (its first model) or a model.
+    pub(crate) fn select_model(
+        &mut self,
+        provider_id: String,
+        model_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(session), Some(session_provider)) = (
+            self.session.session_id.clone(),
+            self.session.provider_id.clone(),
+        ) else {
+            return;
+        };
+        let model_id = model_id.or_else(|| {
+            self.catalog
+                .as_ref()?
+                .iter()
+                .find(|provider| provider.id.0 == provider_id)?
+                .models
+                .first()
+                .map(|model| model.id.clone())
+        });
+        self.settings.set_selection(
+            &session,
+            composer_settings::Selection {
+                provider_id,
+                model_id,
+                session_provider_id: session_provider,
+            },
+        );
+        self.save_settings();
+        cx.notify();
+    }
+
+    pub(crate) fn set_effort(&mut self, choice: EffortChoice, cx: &mut Context<Self>) {
+        let task = self.task().to_string();
+        self.settings.set_effort(&task, choice);
+        self.save_settings();
+        cx.notify();
+    }
+
+    pub(crate) fn set_fast(&mut self, fast: bool, cx: &mut Context<Self>) {
+        self.settings.fast = fast;
+        self.save_settings();
+        cx.notify();
+    }
+
+    pub(crate) fn set_favorites(
+        &mut self,
+        favorites: Vec<crate::data::model_picker::ModelFavorite>,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.favorites = crate::data::model_picker::clean_favorites(favorites);
+        self.save_settings();
+        cx.notify();
     }
 
     /// `selectedModel?.effortLevels ?? DEFAULT_EFFORT_LEVELS`
@@ -77,13 +155,13 @@ impl Composer {
     }
 
     pub(crate) fn approval(&self) -> Option<ProviderApprovalPolicy> {
-        let provider = self.session.provider_id.as_deref()?;
+        let provider = self.selected_provider_id()?;
         self.settings
-            .approval(self.task(), provider, &self.supported_policies())
+            .approval(self.task(), &provider, &self.supported_policies())
     }
 
     pub(crate) fn set_approval(&mut self, policy: ProviderApprovalPolicy, cx: &mut Context<Self>) {
-        let Some(provider) = self.session.provider_id.clone() else {
+        let Some(provider) = self.selected_provider_id() else {
             return;
         };
         let task = self.task().to_string();
@@ -131,9 +209,22 @@ impl Composer {
     /// The choices a send carries (`submitFromComposer`'s envelope).
     pub(crate) fn turn_options(&self, prompt: &str) -> TurnOptions {
         let choice = self.effort_choice();
+        let provider_id = self
+            .selected_provider_id()
+            .filter(|id| Some(id) != self.session.provider_id.as_ref());
+        let model = self
+            .selected_model_id()
+            .filter(|id| provider_id.is_some() || Some(id) != self.session.model.as_ref());
+        let delegation = self.catalog.as_ref().and_then(|catalog| {
+            dcc_core::domain::turn_instructions::resolve_delegate_task_tool_instructions(
+                self.provider(),
+                catalog,
+            )
+        });
         TurnOptions {
-            provider_id: None,
-            model: None,
+            provider_id,
+            model,
+            tool_instructions: delegation,
             effort: Some(composer_settings::effective_effort(
                 &choice.effort,
                 &self.effort_levels(),

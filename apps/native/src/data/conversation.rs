@@ -34,6 +34,10 @@ pub struct Conversation {
     /// The task's checkout (`worktreePath ?? rootPath`): mentions list its
     /// files and attachments inside it go relative.
     pub workspace_path: Option<String>,
+    /// The task's name and branch (`source.headBranch ?? baseBranch`), for
+    /// a provider handoff.
+    pub workspace_name: Option<String>,
+    pub branch: Option<String>,
     pub rows: Arc<Vec<TimelineMessage>>,
     /// The task's delegations by id, for the cards' live status and report.
     pub delegations: HashMap<String, DelegationRecord>,

@@ -235,9 +235,14 @@ impl ConversationView {
             running: next.running,
             aborted: next.aborted,
             workspace_path: next.workspace_path.clone(),
+            workspace_name: next.workspace_name.clone(),
+            branch: next.branch.clone(),
         };
-        self.composer
-            .update(cx, |composer, cx| composer.set_session(session, cx));
+        let history = next.rows.clone();
+        self.composer.update(cx, |composer, cx| {
+            composer.set_history(history);
+            composer.set_session(session, cx)
+        });
         self.data = Some(next);
         cx.notify();
     }
