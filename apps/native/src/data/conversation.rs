@@ -29,6 +29,8 @@ pub struct Conversation {
     pub running: bool,
     /// The latest turn waits on the person (a permission or a question).
     pub waiting: bool,
+    /// The session was stopped; retry and continue reopen it first.
+    pub aborted: bool,
     pub rows: Arc<Vec<TimelineMessage>>,
     /// The task's delegations by id, for the cards' live status and report.
     pub delegations: HashMap<String, DelegationRecord>,
@@ -224,6 +226,8 @@ pub fn load(
     conversation.model = summary.session.model.clone();
     conversation.running = activity.is_running();
     conversation.waiting = activity.waiting_reason().is_some();
+    conversation.aborted =
+        summary.session.state == dcc_core::domain::session::SessionState::Aborted;
 
     if cache.session_id.as_deref() != Some(session_id.as_str()) {
         *cache = EventCache {
@@ -263,6 +267,7 @@ impl Conversation {
             && self.last_sequence == other.last_sequence
             && self.running == other.running
             && self.waiting == other.waiting
+            && self.aborted == other.aborted
             && self.delegations == other.delegations
             && self.children == other.children
             && self.turn_tokens == other.turn_tokens

@@ -5646,7 +5646,9 @@
   "native": {
     "desktopOpen": "DCC is open: delete from there, or close it to delete from here.",
     "memoryPending": "This task's memory isn't saved yet. Open DCC to save it before deleting.",
-    "desktopClosed": "The agent runs in DCC: open DCC to answer.",
-    "alreadyAnswered": "This was already answered."
+    "desktopClosed": "The agent runs in DCC: open DCC to continue.",
+    "alreadyAnswered": "This was already answered.",
+    "sendFailed": "Couldn't send to the agent.",
+    "stopFailed": "Couldn't stop the agent."
   }
 }

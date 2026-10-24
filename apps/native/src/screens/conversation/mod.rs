@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use dcc_core::domain::timeline::{Role, TimelineMessage};
 use gpui::{
-    AnyElement, Context, ListAlignment, ListState, SharedString, Task, Window, div, list,
+    AnyElement, Context, Entity, ListAlignment, ListState, SharedString, Task, Window, div, list,
     prelude::*, px,
 };
 
@@ -34,6 +34,7 @@ use crate::data::conversation::{self, Conversation, EventCache};
 use crate::data::{loader, time};
 use crate::i18n::{I18n, Locale, Translate};
 use crate::markdown::{Block, parse};
+use crate::screens::composer::{Composer, ComposerEvent, ComposerSession};
 use crate::theme::ActiveTheme;
 use crate::ui::ListScrollbar;
 
@@ -49,6 +50,8 @@ const TRAIL_WIDTH: f32 = 864.0;
 type PacedProse = (paced::Paced, usize, Rc<Vec<Block>>);
 
 pub struct ConversationView {
+    pub(crate) composer: Entity<Composer>,
+    _composer_events: gpui::Subscription,
     task_id: Option<String>,
     wanted_session: Option<String>,
     data: Option<Rc<Conversation>>,
@@ -76,13 +79,23 @@ pub struct ConversationView {
 }
 
 impl ConversationView {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        let composer_events =
+            cx.subscribe(
+                &composer,
+                |view, _, event: &ComposerEvent, cx| match event {
+                    ComposerEvent::Refresh => view.refresh_now(cx),
+                },
+            );
         let list = ListState::new(0, ListAlignment::Bottom, px(800.0));
         let weak = cx.weak_entity();
         list.set_scroll_handler(move |_, _, cx| {
             let _ = weak.update(cx, |view: &mut ConversationView, cx| view.list_scrolled(cx));
         });
         Self {
+            composer,
+            _composer_events: composer_events,
             task_id: None,
             wanted_session: None,
             data: None,
@@ -214,8 +227,42 @@ impl ConversationView {
             // Items are [top spacer, rows…, bottom spacer].
             self.list.splice(span.start + 1..span.end + 1, count);
         }
+        let session = ComposerSession {
+            session_id: next.session_id.clone(),
+            provider_id: next.provider_id.clone(),
+            model: next.model.clone(),
+            running: next.running,
+            aborted: next.aborted,
+        };
+        self.composer
+            .update(cx, |composer, cx| composer.set_session(session, cx));
         self.data = Some(next);
         cx.notify();
+    }
+
+    /// "Tentar de novo" on the interrupted last turn.
+    pub(crate) fn retry(
+        &mut self,
+        prompt: String,
+        turn_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.composer.update(cx, |composer, cx| {
+            composer.retry(prompt, turn_id, window, cx)
+        });
+    }
+
+    /// "Continuar": the continuation prompt waits in the composer.
+    pub(crate) fn continue_interrupted(
+        &mut self,
+        original: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.composer.update(cx, |composer, cx| {
+            composer.continue_interrupted(original, window, cx)
+        });
     }
 
     /// Mascot steps and the live clock while a turn runs; otherwise the
@@ -448,5 +495,8 @@ impl Render for ConversationView {
                     }),
             )
             .children(permission_panel::permission_panel(self, cx))
+            .when(self.task_id.is_some(), |area| {
+                area.child(self.composer.clone())
+            })
     }
 }

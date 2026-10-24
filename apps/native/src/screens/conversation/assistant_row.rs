@@ -6,7 +6,7 @@
 use dcc_core::domain::timeline::activity::{
     TurnTokenTotals, format_elapsed, format_token_count, is_activity, turn_duration_ms,
 };
-use dcc_core::domain::timeline::{Annotation, TimelineMessage};
+use dcc_core::domain::timeline::{Annotation, Role, TimelineMessage};
 use gpui::{AnyElement, Context, FontWeight, SharedString, Window, div, prelude::*, px};
 
 use super::activity::{TurnActivity, turn_activity};
@@ -22,7 +22,7 @@ use crate::markdown::{MarkdownStyle, render_markdown};
 use crate::project::model_label;
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
-use crate::ui::{Icon, Tooltip};
+use crate::ui::{Button, ButtonVariant, Icon, Tooltip};
 
 /// `toLocaleString()` for a token count: `12.345` in Portuguese, `12,345` in English.
 fn grouped(value: u64, english: bool) -> String {
@@ -137,7 +137,56 @@ fn footer(
         .into_any_element()
 }
 
-fn incomplete_notice(message: &TimelineMessage, cx: &gpui::App) -> Option<AnyElement> {
+/// The prompt and turn of the person's message an interrupted reply answers,
+/// when that reply is the conversation's last one.
+pub(super) struct Recovery {
+    pub prompt: String,
+    pub turn_id: Option<String>,
+}
+
+fn recovery_for(data: &Conversation, message: &TimelineMessage) -> Option<Recovery> {
+    message
+        .status
+        .as_ref()
+        .filter(|status| !status.usage_limited)?;
+    let latest = data
+        .rows
+        .iter()
+        .rev()
+        .find(|row| row.role == Role::Assistant)?;
+    if latest.id != message.id {
+        return None;
+    }
+    let index = data.rows.iter().position(|row| row.id == message.id)?;
+    let prompt = data.rows[..index]
+        .iter()
+        .rev()
+        .find(|row| row.role == Role::User && row.hand_back.is_none() && row.turn_id.is_some());
+    Some(Recovery {
+        prompt: prompt.map(|row| row.content.clone()).unwrap_or_default(),
+        turn_id: prompt.and_then(|row| row.turn_id.clone()),
+    })
+}
+
+fn recovery_button(id: String, label: SharedString) -> Button {
+    Button::new(SharedString::from(id))
+        .variant(ButtonVariant::Outline)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(px(11.0))
+                .child(Icon::new("rotate-ccw").size(12.0))
+                .child(label),
+        )
+}
+
+fn incomplete_notice(
+    message: &TimelineMessage,
+    recovery: Option<Recovery>,
+    cx: &mut Context<ConversationView>,
+) -> Option<AnyElement> {
     let status = message.status.as_ref()?;
     let theme = cx.theme();
     let colors = theme.colors.clone();
@@ -219,9 +268,40 @@ fn incomplete_notice(message: &TimelineMessage, cx: &gpui::App) -> Option<AnyEle
         .filter(|reason| !reason.is_empty())
         .map(SharedString::from)
         .unwrap_or_else(|| cx.t("conversation.message.incomplete"));
-    // Retry and continue arrive with the composer (screen 2c).
+    let mut buttons: Vec<AnyElement> = Vec::new();
+    if let Some(recovery) = recovery {
+        if let Some(turn_id) = recovery.turn_id.clone() {
+            let prompt = recovery.prompt.clone();
+            buttons.push(
+                Tooltip::text(
+                    SharedString::from(format!("{}-retry-tip", message.id)),
+                    recovery_button(
+                        format!("{}-retry", message.id),
+                        cx.t("conversation.message.retry"),
+                    )
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        view.retry(prompt.clone(), turn_id.clone(), window, cx)
+                    })),
+                    cx.t("conversation.message.retryHint"),
+                )
+                .into_any_element(),
+            );
+        }
+        let original = (!recovery.prompt.trim().is_empty()).then(|| recovery.prompt.clone());
+        buttons.push(
+            recovery_button(
+                format!("{}-continue", message.id),
+                cx.t("conversation.message.continue"),
+            )
+            .on_click(cx.listener(move |view, _, window, cx| {
+                view.continue_interrupted(original.clone(), window, cx)
+            }))
+            .into_any_element(),
+        );
+    }
     Some(
         notice
+            .flex_wrap()
             .border_color(colors.destructive.opacity(0.2))
             .bg(colors.destructive.opacity(0.045))
             .child(
@@ -252,6 +332,11 @@ fn incomplete_notice(message: &TimelineMessage, cx: &gpui::App) -> Option<AnyEle
                             .text_color(colors.muted_foreground)
                             .child(reason),
                     ),
+            )
+            .children(
+                buttons
+                    .into_iter()
+                    .map(|button| div().flex_shrink_0().child(button)),
             )
             .into_any_element(),
     )
@@ -412,7 +497,8 @@ pub(super) fn assistant_row(
         );
     }
     column.push(footer(view, data, message, cx));
-    if let Some(notice) = incomplete_notice(message, cx) {
+    let recovery = recovery_for(data, message);
+    if let Some(notice) = incomplete_notice(message, recovery, cx) {
         column.push(notice);
     }
     div()

@@ -79,7 +79,7 @@ fn open_view(
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
         crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
     });
-    cx.add_window_view(|_, cx| ConversationView::new(cx))
+    cx.add_window_view(ConversationView::new)
 }
 
 #[gpui::test]

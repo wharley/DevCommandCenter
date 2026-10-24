@@ -153,6 +153,50 @@ impl DesktopApi {
     }
 }
 
+impl DesktopApi {
+    /// `sendTurn`: the session keeps its provider and model, and the desktop
+    /// reuses the last approval level, like the phone's sends.
+    pub fn send_turn(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        retry_of_turn_id: Option<&str>,
+    ) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/sessions/{}/turns", encode(session_id)),
+            &json!({ "sessionId": session_id, "prompt": prompt, "retryOfTurnId": retry_of_turn_id }),
+        )
+        .map(|_| ())
+    }
+
+    /// Stops the running turn (the composer's stop button).
+    pub fn abort(&self, session_id: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/sessions/{}/abort", encode(session_id)),
+            &json!({ "sessionId": session_id }),
+        )
+        .map(|_| ())
+    }
+
+    /// Reopens an aborted session before retrying or continuing it.
+    pub fn resume(&self, session_id: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/sessions/{}/resume", encode(session_id)),
+            &json!({ "sessionId": session_id }),
+        )
+        .map(|_| ())
+    }
+
+    /// "Continuar" on a task stopped by its usage limit.
+    pub fn resume_after_usage_limit(&self, session_id: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/sessions/{}/usage-limit/resume", encode(session_id)),
+            &json!({}),
+        )
+        .map(|_| ())
+    }
+}
+
 fn error_message(value: &Value) -> Option<String> {
     value
         .get("error")

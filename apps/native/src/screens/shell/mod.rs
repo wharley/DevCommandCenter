@@ -56,7 +56,7 @@ impl Shell {
             )
         });
         let sidebar_events = cx.subscribe(&sidebar, Self::on_sidebar_event);
-        let conversation = cx.new(ConversationView::new);
+        let conversation = cx.new(|cx| ConversationView::new(window, cx));
         Self {
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
             prefs,
