@@ -2,7 +2,6 @@
 //! branches, a fake desktop for the creation.
 
 use std::collections::HashMap;
-use std::process::Command;
 
 use dcc_core::application::linked_task::LinkedFolders;
 use gpui::{TestAppContext, WindowAppearance};
@@ -15,22 +14,8 @@ use crate::theme::{Theme, ThemePreference};
 
 /// A checkout with `main` and `release`.
 fn checkout() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    let git = |args: &[&str]| {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(dir.path())
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@t")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@t")
-            .output()
-            .unwrap();
-        assert!(status.status.success(), "{args:?}");
-    };
-    git(&["init", "-q", "-b", "main"]);
-    git(&["commit", "-q", "--allow-empty", "-m", "first"]);
-    git(&["branch", "release"]);
+    let dir = crate::test_support::git_checkout(&[]);
+    crate::test_support::git(dir.path(), &["branch", "release"]);
     dir
 }
 

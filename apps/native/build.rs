@@ -13,13 +13,19 @@ fn main() {
     let mascots = manifest.join("../../packages/mascots/src/index.ts");
     let icons = manifest.join("assets/icons");
     let providers = manifest.join("assets/providers");
-    for path in [&mascots, &icons, &providers] {
+    let file_icons = manifest.join("assets/file-icons");
+    for path in [&mascots, &icons, &providers, &file_icons] {
         println!("cargo:rerun-if-changed={}", path.display());
     }
 
     fs::write(out.join("mascots.rs"), mascot_frames(&mascots)).unwrap();
     let tables = svg_table(&icons, "ICONS") + &svg_table(&providers, "PROVIDER_MARKS");
     fs::write(out.join("icons.rs"), tables).unwrap();
+    // The code column's Material icons (`scripts/gen-file-icons.mjs`).
+    let file_tables = svg_table(&file_icons.join("file"), "FILE_ICONS")
+        + &svg_table(&file_icons.join("folder"), "FOLDER_ICONS")
+        + &svg_table(&file_icons.join("folder-open"), "FOLDER_OPEN_ICONS");
+    fs::write(out.join("file_icons.rs"), file_tables).unwrap();
 }
 
 /// `MASCOT_FRAMES` as `&[(name, rest_rows, move_rows)]`, in file order (the

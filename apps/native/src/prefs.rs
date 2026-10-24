@@ -25,6 +25,10 @@ pub struct Prefs {
     /// "Em espera" and "Concluídos" open in the rail.
     pub waiting_open: bool,
     pub completed_open: bool,
+    /// The code column next to the sidebar (`dcc.codeColumnOpen`, closed by
+    /// default) and its list (`dcc.codeColumnTab`).
+    pub code_column_open: bool,
+    pub code_column_tab: crate::screens::code_column::CodeColumnTab,
 }
 
 impl Default for Prefs {
@@ -36,6 +40,8 @@ impl Default for Prefs {
             sidebar_collapsed: false,
             waiting_open: false,
             completed_open: false,
+            code_column_open: false,
+            code_column_tab: crate::screens::code_column::CodeColumnTab::Files,
         }
     }
 }

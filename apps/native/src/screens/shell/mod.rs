@@ -14,6 +14,7 @@ use gpui::{
 };
 
 use crate::prefs::{self, Prefs};
+use crate::screens::code_column::{CodeColumn, CodeColumnEvent, CodeColumnTab};
 use crate::screens::conversation::ConversationView;
 use crate::screens::new_task::{NewTaskEvent, NewTaskView};
 use crate::screens::open_project::{OpenProjectDialog, OpenProjectEvent, OpenRequest};
@@ -30,6 +31,21 @@ pub enum Surface {
     NewTask,
 }
 
+gpui::actions!(
+    dcc_shell,
+    [
+        /// ⌘⇧E: the code column on "Arquivos", or closed when it shows them.
+        ToggleCodeFiles,
+        /// ⌘⇧G: the same for "Mudanças".
+        ToggleCodeChanges
+    ]
+);
+
+/// The shell's own shortcuts (`isCodeColumnShortcut`, `isInspectorGitModeShortcut`).
+pub fn bind_keys(cx: &mut gpui::App) {
+    cx.bind_keys([gpui::KeyBinding::new("cmd-shift-e", ToggleCodeFiles, None)]);
+}
+
 /// Drag payload of the sidebar separator.
 #[derive(Clone, Copy)]
 struct SidebarResize;
@@ -41,6 +57,10 @@ pub struct Shell {
     sidebar: Entity<Sidebar>,
     conversation: Entity<ConversationView>,
     new_task: Entity<NewTaskView>,
+    code_column: Entity<CodeColumn>,
+    /// Holds the focus when no field does, so the shell's shortcuts still
+    /// reach it (with nothing focused GPUI only asks the window's root).
+    focus: gpui::FocusHandle,
     pub(crate) surface: Surface,
     /// The task the desktop just created: its composer takes the focus.
     focus_on_open: Option<String>,
@@ -52,6 +72,8 @@ pub struct Shell {
     _sidebar_events: Subscription,
     _sidebar_data: Subscription,
     _new_task_events: Subscription,
+    _code_column_events: Subscription,
+    _conversation_root: Subscription,
 }
 
 impl Shell {
@@ -93,6 +115,14 @@ impl Shell {
             });
         });
         let new_task_events = cx.subscribe_in(&new_task, window, Self::on_new_task_event);
+        let code_column = cx.new(|cx| CodeColumn::new(prefs.code_column_tab, cx));
+        let code_column_events = cx.subscribe_in(&code_column, window, Self::on_code_column_event);
+        // The column follows the open task's checkout.
+        let conversation_root = cx.observe(&conversation, |this, conversation, cx| {
+            let root = conversation.read(cx).workspace_path();
+            this.code_column
+                .update(cx, |column, cx| column.set_root(root, cx));
+        });
         Self {
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
             prefs,
@@ -100,6 +130,8 @@ impl Shell {
             sidebar,
             conversation,
             new_task,
+            code_column,
+            focus: cx.focus_handle(),
             surface: Surface::Conversation,
             focus_on_open: None,
             open_project: None,
@@ -108,6 +140,55 @@ impl Shell {
             _sidebar_events: sidebar_events,
             _sidebar_data: sidebar_data,
             _new_task_events: new_task_events,
+            _code_column_events: code_column_events,
+            _conversation_root: conversation_root,
+        }
+    }
+
+    fn on_code_column_event(
+        &mut self,
+        _: &Entity<CodeColumn>,
+        event: &CodeColumnEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            // The center's file tabs are screen 6; until then the pick is shown in the tree.
+            CodeColumnEvent::OpenFile(path) => {
+                let path = path.clone();
+                self.code_column
+                    .update(cx, |column, cx| column.reveal(Some(path), cx));
+            }
+            CodeColumnEvent::Mention(path) => {
+                let composer = self.conversation.read(cx).composer.clone();
+                composer.update(cx, |composer, cx| composer.mention_file(path, window, cx));
+            }
+            CodeColumnEvent::Close => self.set_code_column(false, None, cx),
+            CodeColumnEvent::TabChanged(tab) => self.set_code_column(true, Some(*tab), cx),
+        }
+    }
+
+    /// `setCodeColumnOpen` / `setCodeColumnTab`, kept with the layout.
+    fn set_code_column(&mut self, open: bool, tab: Option<CodeColumnTab>, cx: &mut Context<Self>) {
+        let tab = tab.unwrap_or(self.prefs.code_column_tab);
+        self.code_column
+            .update(cx, |column, cx| column.set_tab(tab, cx));
+        if self.prefs.code_column_open != open || self.prefs.code_column_tab != tab {
+            self.prefs.code_column_open = open;
+            self.prefs.code_column_tab = tab;
+            if let Err(error) = self.prefs.save(&self.prefs_path) {
+                eprintln!("[dcc-native] could not save the layout: {error}");
+            }
+        }
+        cx.notify();
+    }
+
+    /// `toggleCodeColumnTab`: shows one list, or closes when it already shows.
+    fn toggle_code_column(&mut self, tab: CodeColumnTab, cx: &mut Context<Self>) {
+        if self.prefs.code_column_open && self.prefs.code_column_tab == tab {
+            self.set_code_column(false, None, cx);
+        } else {
+            self.set_code_column(true, Some(tab), cx);
         }
     }
 
@@ -163,6 +244,13 @@ impl Shell {
             window,
             cx,
         );
+    }
+
+    /// `globalSurface === null && selectedLocalWorkspacePath && codeColumnOpen`.
+    fn code_column_shown(&self, cx: &gpui::App) -> bool {
+        self.prefs.code_column_open
+            && self.surface == Surface::Conversation
+            && self.code_column.read(cx).root.is_some()
     }
 
     /// A task the desktop just created opens once the list has it.
@@ -227,6 +315,11 @@ impl Shell {
                 self.show(Surface::Conversation, cx);
             }
             SidebarEvent::NewTask => self.show(Surface::NewTask, cx),
+            // `toggleCodeColumn`
+            SidebarEvent::ToggleCodeColumn => {
+                let open = !self.prefs.code_column_open;
+                self.set_code_column(open, None, cx);
+            }
             SidebarEvent::CloneProject => {
                 self.show(Surface::Conversation, cx);
                 self.open_project_dialog(
@@ -344,12 +437,16 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if window.focused(cx).is_none() {
+            window.focus(&self.focus, cx);
+        }
         let theme = cx.theme();
         let shell = cx.entity().downgrade();
 
         div()
             .id("shell")
+            .track_focus(&self.focus)
             .relative()
             .flex()
             .size_full()
@@ -365,6 +462,12 @@ impl Render for Shell {
                     this.resize_sidebar(event.event.position.x, cx)
                 }),
             )
+            .on_action(cx.listener(|this, _: &ToggleCodeFiles, _, cx| {
+                this.toggle_code_column(CodeColumnTab::Files, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleCodeChanges, _, cx| {
+                this.toggle_code_column(CodeColumnTab::Changes, cx)
+            }))
             .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _, cx| {
                 this.finish_sidebar_resize(event.position.x, cx)
             }))
@@ -379,6 +482,7 @@ impl Render for Shell {
                             .ok();
                     }),
             )
+            .children(self.code_column_shown(cx).then(|| self.code_column.clone()))
             .child(MainRegion::default().child(match self.surface {
                 // No task at all: `WorkspaceBootstrapState`.
                 Surface::Conversation if self.sidebar.read(cx).has_open_task() == Some(false) => {

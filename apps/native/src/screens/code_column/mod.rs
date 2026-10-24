@@ -1,0 +1,347 @@
+//! The code column next to the sidebar (`code-column.tsx`): "Arquivos" and
+//! "Mudanças" over the task's checkout. Lists only: a file picked here opens
+//! in the center of the workbench.
+
+mod tree;
+mod view;
+
+pub use tree::DraggedFile;
+#[cfg(test)]
+mod tests;
+
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
+
+use dcc_core::domain::workspace_git::WorkspaceGitStatusOutput;
+use gpui::{Context, EventEmitter, ListAlignment, ListState, Task, px};
+
+use crate::data::code_tree::{
+    CodeTreeNode, CodeTreeRow, TreeStatus, ancestor_folder_paths, build_code_tree,
+    file_set_signature, git_status, visible_rows,
+};
+
+/// `GIT_INSPECTOR_REFETCH_INTERVAL_MS`
+const GIT_EVERY: Duration = Duration::from_secs(10);
+
+/// `CodeColumnTab`
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodeColumnTab {
+    #[default]
+    Files,
+    Changes,
+}
+
+impl CodeColumnTab {
+    /// `CODE_COLUMN_WIDTH`: files are a narrow list; changes carry stats.
+    pub fn width(self) -> f32 {
+        match self {
+            Self::Files => 260.0,
+            Self::Changes => 340.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CodeColumnEvent {
+    /// A file to open in the center.
+    OpenFile(String),
+    /// "Mencionar no chat": `@path` in the composer.
+    Mention(String),
+    Close,
+    TabChanged(CodeColumnTab),
+}
+
+/// The checkout's files: tracked and new, then the ignored ones (dimmed).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Files {
+    pub paths: Vec<String>,
+    pub ignored: HashSet<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Loaded<T> {
+    Pending,
+    Ready(T),
+    Failed(String),
+}
+
+pub struct CodeColumn {
+    pub(crate) root: Option<String>,
+    pub(crate) tab: CodeColumnTab,
+    pub(crate) files: Loaded<Files>,
+    tree: Arc<CodeTreeNode>,
+    pub(crate) status: Option<WorkspaceGitStatusOutput>,
+    pub(crate) by_path: HashMap<String, TreeStatus>,
+    pub(crate) changed_folders: HashSet<String>,
+    file_set: Option<String>,
+    /// Open folders per checkout, kept while the app runs.
+    expanded: HashMap<String, HashSet<String>>,
+    pub(crate) rows: Vec<CodeTreeRow>,
+    pub(crate) list: ListState,
+    /// The file open in the center (revealed in the tree).
+    pub(crate) selected: Option<String>,
+    /// The row the arrow keys are on.
+    pub(crate) focused: Option<usize>,
+    pub(crate) focus: gpui::FocusHandle,
+    _files: Option<Task<()>>,
+    _status: Option<Task<()>>,
+}
+
+impl EventEmitter<CodeColumnEvent> for CodeColumn {}
+
+impl CodeColumn {
+    pub fn new(tab: CodeColumnTab, cx: &mut Context<Self>) -> Self {
+        // "Mudanças" arrives with its list (screen 5b): until then, files.
+        let _ = tab;
+        Self {
+            root: None,
+            tab: CodeColumnTab::Files,
+            files: Loaded::Pending,
+            tree: Arc::default(),
+            status: None,
+            by_path: HashMap::new(),
+            changed_folders: HashSet::new(),
+            file_set: None,
+            expanded: HashMap::new(),
+            rows: Vec::new(),
+            list: ListState::new(0, ListAlignment::Top, px(240.0)),
+            selected: None,
+            focused: None,
+            focus: cx.focus_handle(),
+            _files: None,
+            _status: None,
+        }
+    }
+
+    /// The task's checkout; another one starts over (its folders stay open).
+    pub fn set_root(&mut self, root: Option<String>, cx: &mut Context<Self>) {
+        let root = root
+            .map(|root| root.trim().to_string())
+            .filter(|root| !root.is_empty());
+        if root == self.root {
+            return;
+        }
+        self.root = root;
+        self.files = Loaded::Pending;
+        self.tree = Arc::default();
+        self.status = None;
+        self.by_path.clear();
+        self.changed_folders.clear();
+        self.file_set = None;
+        self.focused = None;
+        self.sync_rows();
+        self.load_files(cx);
+        self._status = Some(self.status_loop(cx));
+        cx.notify();
+    }
+
+    pub fn set_tab(&mut self, tab: CodeColumnTab, cx: &mut Context<Self>) {
+        if self.tab != tab {
+            self.tab = tab;
+            cx.emit(CodeColumnEvent::TabChanged(tab));
+            cx.notify();
+        }
+    }
+
+    /// The file open in the center: its folders open, its row in view.
+    pub fn reveal(&mut self, path: Option<String>, cx: &mut Context<Self>) {
+        if path == self.selected {
+            return;
+        }
+        self.selected = path.clone();
+        if let (Some(path), Some(root)) = (path, self.root.clone()) {
+            let open = self.expanded.entry(root).or_default();
+            open.extend(ancestor_folder_paths(&path));
+            self.sync_rows();
+            if let Some(index) = self.rows.iter().position(|row| row.path == path) {
+                self.list.scroll_to_reveal_item(index);
+            }
+        }
+        cx.notify();
+    }
+
+    /// "Mudanças" carries the count of changed files.
+    pub fn change_count(&self) -> usize {
+        self.status.as_ref().map_or(0, |status| {
+            status
+                .staged
+                .iter()
+                .chain(&status.unstaged)
+                .map(|entry| entry.path.as_str())
+                .collect::<HashSet<_>>()
+                .len()
+        })
+    }
+
+    fn open_folders(&self) -> HashSet<String> {
+        self.root
+            .as_ref()
+            .and_then(|root| self.expanded.get(root))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Splices the list only where the rows changed.
+    fn sync_rows(&mut self) {
+        let next = visible_rows(&self.tree, &self.open_folders());
+        if next == self.rows {
+            return;
+        }
+        let keep_start = self
+            .rows
+            .iter()
+            .zip(&next)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let keep_end = self.rows[keep_start..]
+            .iter()
+            .rev()
+            .zip(next[keep_start..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let removed = keep_start..self.rows.len() - keep_end;
+        let inserted = next.len() - keep_end - keep_start;
+        self.list.splice(removed, inserted);
+        self.rows = next;
+    }
+
+    pub(crate) fn toggle_folder(&mut self, path: &str, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let open = self.expanded.entry(root).or_default();
+        if !open.remove(path) {
+            open.insert(path.to_string());
+        }
+        self.sync_rows();
+        cx.notify();
+    }
+
+    pub(crate) fn set_folder_open(&mut self, path: &str, open: bool, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let folders = self.expanded.entry(root).or_default();
+        let changed = if open {
+            folders.insert(path.to_string())
+        } else {
+            folders.remove(path)
+        };
+        if changed {
+            self.sync_rows();
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn open_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        cx.emit(CodeColumnEvent::OpenFile(path.to_string()));
+    }
+
+    fn load_files(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        self._files = Some(cx.spawn(async move |this, cx| {
+            let path = root.clone();
+            let listed = cx
+                .background_executor()
+                .spawn(async move {
+                    let tracked = dcc_infra::workspace_git::git_tracked_files(&path)?;
+                    let ignored = dcc_infra::workspace_git::git_ignored_files(&path)?;
+                    Ok::<_, String>((tracked, ignored))
+                })
+                .await;
+            let _ = this.update(cx, |column, cx| {
+                if column.root.as_deref() != Some(root.as_str()) {
+                    return;
+                }
+                column.files = match listed {
+                    Ok((tracked, ignored)) => {
+                        // Ignored files (`.env`) show too, dimmed, as editors do.
+                        let ignored_set: HashSet<String> = ignored.iter().cloned().collect();
+                        let mut paths = tracked;
+                        paths.extend(ignored);
+                        column.tree = Arc::new(build_code_tree(&paths));
+                        Loaded::Ready(Files {
+                            paths,
+                            ignored: ignored_set,
+                        })
+                    }
+                    Err(error) => Loaded::Failed(error),
+                };
+                column.sync_rows();
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Git status every ten seconds; when a file appears or goes away the
+    /// file list is read again (an agent created or deleted something).
+    fn status_loop(&self, cx: &mut Context<Self>) -> Task<()> {
+        let root = self.root.clone();
+        cx.spawn(async move |this, cx| {
+            let Some(root) = root else {
+                return;
+            };
+            loop {
+                let path = root.clone();
+                let status = cx
+                    .background_executor()
+                    .spawn(
+                        async move { dcc_infra::workspace_git::read_workspace_git_status(&path) },
+                    )
+                    .await;
+                let alive = this.update(cx, |column, cx| {
+                    if column.root.as_deref() != Some(root.as_str()) {
+                        return;
+                    }
+                    if let Ok(status) = status {
+                        column.apply_status(status, cx);
+                    }
+                });
+                if alive.is_err() {
+                    return;
+                }
+                cx.background_executor().timer(GIT_EVERY).await;
+            }
+        })
+    }
+
+    fn apply_status(&mut self, status: WorkspaceGitStatusOutput, cx: &mut Context<Self>) {
+        let pairs = |entries: &[dcc_core::domain::workspace_git::WorkspaceGitChangeEntry]| {
+            entries
+                .iter()
+                .map(|entry| (entry.path.clone(), entry.status.clone()))
+                .collect::<Vec<_>>()
+        };
+        let (staged, unstaged) = (pairs(&status.staged), pairs(&status.unstaged));
+        let (by_path, changed) = git_status(
+            staged
+                .iter()
+                .map(|(path, status)| (path.as_str(), status.as_str())),
+            unstaged
+                .iter()
+                .map(|(path, status)| (path.as_str(), status.as_str())),
+        );
+        let signature = file_set_signature(
+            staged
+                .iter()
+                .chain(&unstaged)
+                .map(|(path, status)| (path.as_str(), status.as_str())),
+        );
+        if self
+            .file_set
+            .as_ref()
+            .is_some_and(|previous| *previous != signature)
+        {
+            self.load_files(cx);
+        }
+        self.file_set = Some(signature);
+        self.by_path = by_path;
+        self.changed_folders = changed;
+        self.status = Some(status);
+        cx.notify();
+    }
+}

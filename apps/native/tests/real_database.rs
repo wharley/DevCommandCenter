@@ -323,3 +323,28 @@ fn loads_task_conversations_on_a_database_copy() {
         assert!(first.same_as(&again) || first.running);
     }
 }
+
+#[test]
+#[ignore = "reads a real checkout; point DCC_TREE_ROOT at one"]
+fn builds_the_code_tree_of_a_real_checkout() {
+    use std::collections::HashSet;
+    let root = std::env::var("DCC_TREE_ROOT").expect("DCC_TREE_ROOT");
+    let started = Instant::now();
+    let mut paths = dcc_infra::workspace_git::git_tracked_files(&root).expect("tracked");
+    let ignored = dcc_infra::workspace_git::git_ignored_files(&root).expect("ignored");
+    let listed = started.elapsed();
+    paths.extend(ignored);
+    let started = Instant::now();
+    let tree = dcc_native::data::code_tree::build_code_tree(&paths);
+    let rows = dcc_native::data::code_tree::visible_rows(&tree, &HashSet::new());
+    let built = started.elapsed();
+    let started = Instant::now();
+    let status = dcc_infra::workspace_git::read_workspace_git_status(&root).expect("status");
+    println!(
+        "{} files, {} top rows · listed in {listed:?}, built in {built:?}, status in {:?} ({} changes)",
+        paths.len(),
+        rows.len(),
+        started.elapsed(),
+        status.staged.len() + status.unstaged.len()
+    );
+}

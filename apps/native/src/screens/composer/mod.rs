@@ -229,6 +229,20 @@ impl Composer {
         window.focus(&handle, cx);
     }
 
+    /// "Mencionar no chat" / a file dropped from the code column: `@path`
+    /// at the caret, then the field takes the focus.
+    pub fn mention_file(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.session.usable() {
+            return;
+        }
+        let chip = crate::ui::text_area::Chip::File(path.to_string());
+        self.input.update(cx, |input, cx| {
+            input.insert_chip(chip, None, cx);
+            input.insert(" ", cx);
+        });
+        self.focus(window, cx);
+    }
+
     /// Puts text in the field (the continuation prompt), replacing the draft.
     pub fn replace_draft(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         let parts = prompt::parts_of(text);

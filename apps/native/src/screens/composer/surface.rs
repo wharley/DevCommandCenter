@@ -239,6 +239,17 @@ pub(super) fn render(
                     div()
                         .id("composer")
                         .relative()
+                        .on_drop(cx.listener(
+                            |composer,
+                             file: &crate::screens::code_column::DraggedFile,
+                             window,
+                             cx| {
+                                composer.mention_file(&file.0, window, cx)
+                            },
+                        ))
+                        .drag_over::<crate::screens::code_column::DraggedFile>(
+                            move |style, _, _, _| style.border_color(drop_border),
+                        )
                         .on_drop(cx.listener(|composer, paths: &ExternalPaths, _, cx| {
                             composer.add_paths(paths.paths().to_vec(), cx)
                         }))

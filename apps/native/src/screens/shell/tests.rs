@@ -164,3 +164,27 @@ fn the_sidebar_opens_clone_and_open_branch(cx: &mut TestAppContext) {
         );
     });
 }
+
+#[gpui::test]
+fn cmd_shift_e_opens_and_closes_the_code_column(cx: &mut TestAppContext) {
+    let (shell, cx, dir) = open_shell(cx, Prefs::default());
+    cx.update(|_, cx| crate::screens::shell::bind_keys(cx));
+    // Keys reach the views painted in the last frame.
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    cx.simulate_keystrokes("cmd-shift-e");
+    shell.read_with(cx, |shell, _| assert!(shell.prefs.code_column_open));
+    assert!(
+        Prefs::load(&dir.path().join("native-ui.json")).code_column_open,
+        "saved with the layout"
+    );
+    cx.simulate_keystrokes("cmd-shift-e");
+    shell.read_with(cx, |shell, _| assert!(!shell.prefs.code_column_open));
+    // The sidebar's button toggles it too.
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| {
+        cx.emit(crate::screens::sidebar::SidebarEvent::ToggleCodeColumn)
+    });
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, _| assert!(shell.prefs.code_column_open));
+}

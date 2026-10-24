@@ -158,6 +158,13 @@ impl ConversationView {
         cx.notify();
     }
 
+    /// The open task's checkout (its worktree, else the project).
+    pub fn workspace_path(&self) -> Option<String> {
+        self.data
+            .as_ref()
+            .and_then(|data| data.workspace_path.clone())
+    }
+
     /// The next frame focuses the composer (a task just created).
     pub fn focus_composer_soon(&mut self, cx: &mut Context<Self>) {
         self.focus_composer = true;
