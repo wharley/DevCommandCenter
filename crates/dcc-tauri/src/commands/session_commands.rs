@@ -3158,7 +3158,9 @@ pub async fn apply_task_title(
     apply_task_title_to_state(&state, input).await
 }
 
-async fn apply_task_title_to_state(
+/// Names an automatically named task (and its first thread) without Tauri
+/// `State`, shared with the HTTP API. A task the person named is left alone.
+pub async fn apply_task_title_to_state(
     state: &SessionCommandState,
     input: ApplyTaskTitleInput,
 ) -> Result<ApplyTaskTitleOutput, String> {

@@ -650,6 +650,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         )
         .route("/api/v1/workspaces/create", post(create_task_handler))
         .route(
+            "/api/v1/sessions/:session_id/task-title",
+            post(apply_task_title_handler),
+        )
+        .route(
             "/api/v1/sessions/:session_id/queue",
             post(queue_turn_handler),
         )
@@ -1419,6 +1423,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/sessions/:session_id/objective/transition",
             "POST /api/v1/sessions/:session_id/steer",
             "POST /api/v1/workspaces/create",
+            "POST /api/v1/sessions/:session_id/task-title",
             "POST /api/v1/sessions/:session_id/queue",
             "PUT /api/v1/sessions/:session_id/queue/order",
             "POST /api/v1/sessions/:session_id/queue/dispatch-next",
@@ -2669,6 +2674,39 @@ async fn create_task_handler(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskTitleBody {
+    workspace_id: String,
+    title: String,
+}
+
+/// Names a task after its first prompt (`persistAutomaticTaskTitle`); a task
+/// the person named keeps its name (`applied: false`).
+async fn apply_task_title_handler(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<TaskTitleBody>,
+) -> Result<Json<Value>, HttpApiError> {
+    let titled = dcc_tauri::commands::session_commands::apply_task_title_to_state(
+        &backend.sessions,
+        dcc_tauri::commands::session_commands::ApplyTaskTitleInput {
+            workspace_id: body.workspace_id,
+            session_id,
+            title: body.title,
+        },
+    )
+    .await
+    .map_err(|error| {
+        if error.contains("cannot") || error.contains("does not belong") {
+            HttpApiError::bad_request(error)
+        } else {
+            classify_session_error(error)
+        }
+    })?;
+    Ok(Json(json!({ "applied": titled.applied })))
+}
+
 /// Guidance into the running turn (the composer's "Orientar agora").
 async fn steer_turn_handler(
     State(backend): State<Arc<HttpBackend>>,
@@ -3350,6 +3388,25 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn naming_a_task_checks_the_session_and_the_title() {
+        let fixture = embedded_fixture().await;
+        let uri = "/api/v1/sessions/http-respond/task-title";
+        let (status, body) =
+            post_json(&fixture.app, uri, json!({ "workspaceId": "workspace", "title": "   " })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        let (status, body) =
+            post_json(&fixture.app, uri, json!({ "workspaceId": "other", "title": "Corrigir" })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/sessions/missing/task-title",
+            json!({ "workspaceId": "workspace", "title": "Corrigir" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     }
 
     #[tokio::test(flavor = "current_thread")]
