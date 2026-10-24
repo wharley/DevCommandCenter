@@ -3,13 +3,10 @@
 //! in the center of the workbench.
 
 mod changes;
-mod changes_view;
 mod tree;
 mod view;
 
 pub use tree::DraggedFile;
-#[cfg(test)]
-mod changes_tests;
 #[cfg(test)]
 mod tests;
 
@@ -92,8 +89,15 @@ pub struct CodeColumn {
     /// The row the arrow keys are on.
     pub(crate) focused: Option<usize>,
     pub(crate) focus: gpui::FocusHandle,
+    /// The desktop to run git actions through (tests point it elsewhere).
+    pub(crate) endpoint: Option<crate::data::desktop_api::DesktopApi>,
+    /// The app's database (the task's base branch); tests use their own.
+    pub(crate) db_path: std::path::PathBuf,
     _files: Option<Task<()>>,
     _status: Option<Task<()>>,
+    _branch: Option<Task<()>>,
+    _git: Option<Task<()>>,
+    _scrollbar_fade: Option<Task<()>>,
 }
 
 impl EventEmitter<CodeColumnEvent> for CodeColumn {}
@@ -117,8 +121,13 @@ impl CodeColumn {
             selected: None,
             focused: None,
             focus: cx.focus_handle(),
+            endpoint: None,
+            db_path: crate::data::loader::database_path(),
             _files: None,
             _status: None,
+            _branch: None,
+            _git: None,
+            _scrollbar_fade: None,
         }
     }
 
@@ -150,6 +159,8 @@ impl CodeColumn {
         if self.tab != tab {
             self.tab = tab;
             cx.emit(CodeColumnEvent::TabChanged(tab));
+            // The branch is read while "Mudanças" shows.
+            self.read_branch(cx);
             cx.notify();
         }
     }
@@ -307,7 +318,10 @@ impl CodeColumn {
                         return;
                     }
                     match status {
-                        Ok(status) => column.apply_status(status, cx),
+                        Ok(status) => {
+                            column.apply_status(status, cx);
+                            column.read_branch(cx);
+                        }
                         Err(error) => {
                             column.status_error = Some(error);
                             cx.notify();

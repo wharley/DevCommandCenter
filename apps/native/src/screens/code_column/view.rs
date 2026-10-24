@@ -3,7 +3,7 @@
 
 use gpui::{Context, FontWeight, Render, SharedString, Window, div, prelude::*, px};
 
-use super::{CodeColumn, CodeColumnEvent, CodeColumnTab, changes_view, tree};
+use super::{CodeColumn, CodeColumnEvent, CodeColumnTab, changes, tree};
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
@@ -61,7 +61,7 @@ fn tab(
 }
 
 impl Render for CodeColumn {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
         let changes = self.change_count();
         let close_label = cx.t("codeColumn.close");
@@ -122,7 +122,7 @@ impl Render for CodeColumn {
             );
         let body = match self.tab {
             CodeColumnTab::Files => tree::files_tree(self, cx).into_any_element(),
-            CodeColumnTab::Changes => changes_view::changes(self, window, cx),
+            CodeColumnTab::Changes => changes::changes(self, cx),
         };
         div()
             .id("code-column")

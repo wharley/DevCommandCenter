@@ -65,6 +65,21 @@ impl Toaster {
             .map(|global| global.0.clone())
     }
 
+    /// The messages showing, for tests.
+    #[cfg(test)]
+    pub fn messages(cx: &App) -> Vec<String> {
+        Self::handle(cx)
+            .map(|toaster| {
+                toaster
+                    .read(cx)
+                    .toasts
+                    .iter()
+                    .map(|toast| toast.message.to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn error(message: impl Into<SharedString>, cx: &mut App) {
         Self::show(ToastKind::Error, message.into(), None, cx);
     }

@@ -20,6 +20,27 @@ const DEFAULT_PORT: u16 = 9876;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(800);
 const IO_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The changes list's git actions (`workspaceGitStageFile`…), run by the
+/// desktop so they wait for an agent's edit to the same checkout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GitAction {
+    Stage,
+    Unstage,
+    Discard,
+    StageAll,
+}
+
+impl GitAction {
+    fn route(self) -> &'static str {
+        match self {
+            Self::Stage => "/api/v1/git/stage-file",
+            Self::Unstage => "/api/v1/git/unstage-file",
+            Self::Discard => "/api/v1/git/discard-file",
+            Self::StageAll => "/api/v1/git/stage-all",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApiError {
     /// Nothing answers: the desktop is closed (or its local API is off).
@@ -417,6 +438,15 @@ impl DesktopApi {
     ) -> Result<CreatedTask, ApiError> {
         let value = self.post("/api/v1/workspaces", &json!(input))?;
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
+    /// A git action of the changes list on one file (or `.` for "stage all").
+    pub fn git_action(&self, action: GitAction, root: &str, path: &str) -> Result<(), ApiError> {
+        self.post(
+            action.route(),
+            &json!({ "workspaceRoot": root, "relativePath": path }),
+        )
+        .map(|_| ())
     }
 
     /// "Clonar": the repository cloned into `workspaceRoot`, with a task in it.

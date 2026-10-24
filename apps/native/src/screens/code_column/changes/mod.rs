@@ -1,33 +1,78 @@
-//! "Mudanças" (`InspectorChangesSection` on the working scope): the staged
-//! and unstaged files as cards, each opening on its own diff. The first two
-//! cards of a group load at once, the rest as they come near the viewport;
-//! a long review (more than 3 files) starts as a list of closed cards.
+//! "Mudanças" (`InspectorChangesSection`): what changed in the task's
+//! checkout, by scope — "Workspace" (staged and unstaged, with stage,
+//! unstage and discard) or "Branch" (the commits against the base) — as
+//! cards with their diff or as a tree. The first two cards of a group load
+//! at once, the rest near the viewport; a long review (more than 3 files)
+//! starts as a list of closed cards.
+
+mod actions;
+mod bar;
+mod card;
+mod load;
+#[cfg(test)]
+mod tests;
+mod tree;
+mod view;
+
+pub(crate) use view::changes;
+
+use std::collections::HashSet;
+use std::time::Instant;
 
 use dcc_core::domain::workspace_git::{
-    WorkspaceGitChangeEntry, WorkspaceGitPreviewScope, WorkspaceGitStatusOutput,
+    WorkspaceGitBranchDiffOutput, WorkspaceGitChangeEntry, WorkspaceGitPreviewScope,
+    WorkspaceGitStatusOutput,
 };
-use gpui::{AppContext, Bounds, Context, Entity, Pixels, ScrollHandle, Task, Window, px};
+use gpui::{Entity, ListAlignment, ListState, Task, px};
 
-use super::CodeColumn;
-use super::changes_view::ChangesRow;
+use super::Loaded;
 use crate::screens::diff_view::DiffView;
 
 /// `REVIEW_CARDS_OPEN_LIMIT`
 pub const CARDS_OPEN_LIMIT: usize = 3;
-/// The IntersectionObserver's `rootMargin: "700px 0px"`.
+/// The IntersectionObserver's `rootMargin: "700px 0px"`: the list draws this
+/// far past the viewport, and a card drawn loads its diff.
 const LOAD_MARGIN: f32 = 700.0;
+/// How long a file new to the branch shimmers (`ShinyFlash`).
+pub const FLASH: std::time::Duration = std::time::Duration::from_millis(3000);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `InspectorReviewScope` without "last turn" (screen 5h).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Scope {
+    Working,
+    Branch,
+}
+
+impl Scope {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::Branch => "branch",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChangeGroup {
     Staged,
     Unstaged,
+    /// On the branch, against its base.
+    Committed,
 }
 
 impl ChangeGroup {
-    fn scope(self) -> WorkspaceGitPreviewScope {
+    fn preview_scope(self) -> WorkspaceGitPreviewScope {
         match self {
             Self::Staged => WorkspaceGitPreviewScope::Staged,
             Self::Unstaged => WorkspaceGitPreviewScope::Unstaged,
+            Self::Committed => WorkspaceGitPreviewScope::Committed,
+        }
+    }
+
+    pub fn scope(self) -> Scope {
+        match self {
+            Self::Committed => Scope::Branch,
+            _ => Scope::Working,
         }
     }
 }
@@ -57,6 +102,14 @@ impl ChangeCard {
     pub fn eager(&self) -> bool {
         self.index < 2
     }
+
+    /// A conflict: no discard or stage from the list.
+    pub fn unmerged(&self) -> bool {
+        matches!(
+            self.entry.status.to_uppercase().as_str(),
+            "U" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD"
+        )
+    }
 }
 
 /// `summarizeInspectorChanges`
@@ -84,14 +137,60 @@ pub fn card_diff_height(insertions: u32, deletions: u32) -> f32 {
     (190.0 + changed * 18.0).clamp(190.0, 520.0)
 }
 
-#[derive(Default)]
+/// A child of the scrolling list, in order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ChangesRow {
+    Group(ChangeGroup),
+    Card(usize),
+    Folder {
+        group: ChangeGroup,
+        path: String,
+        name: String,
+        depth: usize,
+        open: bool,
+    },
+    File {
+        card: usize,
+        depth: usize,
+    },
+    /// "origin/main" over the branch's files.
+    BranchHeader,
+    Space(u8),
+    Empty,
+    EmptyBranch,
+}
+
 pub(crate) struct Changes {
+    /// Staged, unstaged, then the branch's, each in git's order.
     pub cards: Vec<ChangeCard>,
     pub staged_open: bool,
     pub unstaged_open: bool,
-    /// The header's "expand / collapse all", until the checkout changes.
-    pub all_open: Option<bool>,
-    pub scroll: ScrollHandle,
+    /// The header's "expand / collapse all", for one scope, until the
+    /// checkout changes.
+    pub all_open: Option<(Scope, bool)>,
+    /// The scope picked for this checkout (else the default).
+    pub picked: Option<Scope>,
+    pub tree: bool,
+    /// Folders closed in the tree (they start open).
+    pub closed: HashSet<(ChangeGroup, String)>,
+    pub branch: Loaded<WorkspaceGitBranchDiffOutput>,
+    /// Files new to the branch since the last read, and until when.
+    pub flashing: HashSet<String>,
+    pub flash_until: Option<Instant>,
+    /// The tree row under the pointer (its actions show).
+    pub hovered_file: Option<usize>,
+    /// A git action is running (`gitBusy`).
+    pub busy: bool,
+    /// "Reverter tudo" asks first.
+    pub confirm_revert: bool,
+    /// The rows on screen, virtual: only those near the viewport are drawn.
+    pub list: ListState,
+    /// The rows the list holds, and which of its cards were open when
+    /// measured.
+    shown: Vec<ChangesRow>,
+    measured: Vec<bool>,
+    /// When the list last moved (its scrollbar shows a moment).
+    pub scrolled_at: Option<Instant>,
     /// The theme the diffs were colored for.
     dark: bool,
 }
@@ -99,64 +198,237 @@ pub(crate) struct Changes {
 impl Changes {
     pub fn new() -> Self {
         Self {
+            cards: Vec::new(),
             staged_open: true,
             unstaged_open: true,
-            ..Self::default()
+            all_open: None,
+            picked: None,
+            tree: false,
+            closed: HashSet::new(),
+            branch: Loaded::Pending,
+            flashing: HashSet::new(),
+            flash_until: None,
+            hovered_file: None,
+            busy: false,
+            confirm_revert: false,
+            list: ListState::new(0, ListAlignment::Top, px(LOAD_MARGIN)),
+            shown: Vec::new(),
+            measured: Vec::new(),
+            scrolled_at: None,
+            dark: false,
         }
     }
 
+    /// Another checkout: its own lists, scope and "open all".
     pub fn reset(&mut self) {
         self.cards.clear();
         self.all_open = None;
-        self.scroll = ScrollHandle::new();
+        self.picked = None;
+        self.closed.clear();
+        self.branch = Loaded::Pending;
+        self.flashing.clear();
+        self.flash_until = None;
+        self.hovered_file = None;
+        self.busy = false;
+        self.confirm_revert = false;
+        self.list.reset(0);
+        self.shown.clear();
+        self.measured.clear();
+    }
+
+    pub fn entries(&self, scope: Scope) -> impl Iterator<Item = &WorkspaceGitChangeEntry> {
+        self.cards
+            .iter()
+            .filter(move |card| card.group.scope() == scope)
+            .map(|card| &card.entry)
+    }
+
+    pub fn has(&self, group: ChangeGroup) -> bool {
+        self.cards.iter().any(|card| card.group == group)
+    }
+
+    /// The files of the branch, once read (`null` while it reads or failed).
+    pub fn branch_count(&self) -> Option<usize> {
+        matches!(self.branch, Loaded::Ready(_)).then(|| self.entries(Scope::Branch).count())
+    }
+
+    /// `resolveInspectorReviewScope`: the one picked, else "Workspace" while
+    /// it has changes or the branch has none.
+    pub fn scope(&self) -> Scope {
+        self.picked.unwrap_or_else(|| {
+            let working = self.entries(Scope::Working).count();
+            let branch = self.branch_count().unwrap_or(0);
+            if working > 0 || branch == 0 {
+                Scope::Working
+            } else {
+                Scope::Branch
+            }
+        })
     }
 
     /// `reviewCardsStartOpen`, unless the header said otherwise.
-    pub fn cards_open(&self) -> bool {
-        self.all_open
-            .unwrap_or(self.cards.len() <= CARDS_OPEN_LIMIT)
+    pub fn cards_open(&self, scope: Scope) -> bool {
+        match self.all_open {
+            Some((picked, open)) if picked == scope => open,
+            _ => self.entries(scope).count() <= CARDS_OPEN_LIMIT,
+        }
     }
 
-    /// Cards follow the status: kept ones keep their state (a changed count
-    /// reads the diff again), new ones start as the list says.
-    pub fn sync(&mut self, status: &WorkspaceGitStatusOutput) {
-        let total = status.staged.len() + status.unstaged.len();
-        let start_open = self.all_open.unwrap_or(total <= CARDS_OPEN_LIMIT);
-        let mut previous = std::mem::take(&mut self.cards);
-        let groups = [
-            (ChangeGroup::Staged, &status.staged),
-            (ChangeGroup::Unstaged, &status.unstaged),
-        ];
-        for (group, entries) in groups {
-            for (index, entry) in entries.iter().enumerate() {
-                let card = match previous.iter().position(|card| card.same(group, entry)) {
-                    Some(at) => {
-                        let mut card = previous.swap_remove(at);
-                        if card.entry.insertions != entry.insertions
-                            || card.entry.deletions != entry.deletions
-                        {
-                            card.diff = CardDiff::Idle;
-                        }
-                        card.entry = entry.clone();
-                        card.index = index;
-                        card
-                    }
-                    None => ChangeCard {
-                        group,
-                        entry: entry.clone(),
-                        index,
-                        open: start_open,
-                        diff: CardDiff::Idle,
-                    },
-                };
-                self.cards.push(card);
+    /// Cards mount again (scope, tree or group shown anew): they start as
+    /// the list says, as a React card does; their diffs stay read.
+    pub fn remount(&mut self, groups: &[ChangeGroup]) {
+        for group in groups {
+            let open = self.cards_open(group.scope());
+            for card in self.cards.iter_mut().filter(|card| card.group == *group) {
+                card.open = open;
             }
         }
     }
 
-    pub fn set_all_open(&mut self, open: bool) {
-        self.all_open = Some(open);
-        for card in &mut self.cards {
+    /// One group's cards follow a new read: kept ones keep their state (a
+    /// changed count reads the diff again), new ones start as the list says.
+    fn sync_group(
+        &mut self,
+        previous: &mut Vec<ChangeCard>,
+        group: ChangeGroup,
+        entries: &[WorkspaceGitChangeEntry],
+        start_open: bool,
+        out: &mut Vec<ChangeCard>,
+    ) {
+        for (index, entry) in entries.iter().enumerate() {
+            let card = match previous.iter().position(|card| card.same(group, entry)) {
+                Some(at) => {
+                    let mut card = previous.swap_remove(at);
+                    if card.entry.insertions != entry.insertions
+                        || card.entry.deletions != entry.deletions
+                    {
+                        card.diff = CardDiff::Idle;
+                    }
+                    card.entry = entry.clone();
+                    card.index = index;
+                    card
+                }
+                None => ChangeCard {
+                    group,
+                    entry: entry.clone(),
+                    index,
+                    open: start_open,
+                    diff: CardDiff::Idle,
+                },
+            };
+            out.push(card);
+        }
+    }
+
+    fn rebuild(
+        &mut self,
+        staged: &[WorkspaceGitChangeEntry],
+        unstaged: &[WorkspaceGitChangeEntry],
+        committed: &[WorkspaceGitChangeEntry],
+        working_open: bool,
+        branch_open: bool,
+    ) {
+        let mut previous = std::mem::take(&mut self.cards);
+        let mut cards = Vec::with_capacity(staged.len() + unstaged.len() + committed.len());
+        self.sync_group(
+            &mut previous,
+            ChangeGroup::Staged,
+            staged,
+            working_open,
+            &mut cards,
+        );
+        self.sync_group(
+            &mut previous,
+            ChangeGroup::Unstaged,
+            unstaged,
+            working_open,
+            &mut cards,
+        );
+        self.sync_group(
+            &mut previous,
+            ChangeGroup::Committed,
+            committed,
+            branch_open,
+            &mut cards,
+        );
+        self.cards = cards;
+    }
+
+    fn group_entries(&self, group: ChangeGroup) -> Vec<WorkspaceGitChangeEntry> {
+        self.cards
+            .iter()
+            .filter(|card| card.group == group)
+            .map(|card| card.entry.clone())
+            .collect()
+    }
+
+    pub fn sync(&mut self, status: &WorkspaceGitStatusOutput) {
+        let total = status.staged.len() + status.unstaged.len();
+        let open = match self.all_open {
+            Some((Scope::Working, open)) => open,
+            _ => total <= CARDS_OPEN_LIMIT,
+        };
+        let committed = self.group_entries(ChangeGroup::Committed);
+        let branch_open = self.cards_open(Scope::Branch);
+        self.rebuild(
+            &status.staged,
+            &status.unstaged,
+            &committed,
+            open,
+            branch_open,
+        );
+    }
+
+    /// The branch read again: its cards follow, and files new to it shimmer.
+    pub fn sync_branch(&mut self, diff: WorkspaceGitBranchDiffOutput, now: Instant) {
+        let before: Option<HashSet<String>> = matches!(self.branch, Loaded::Ready(_)).then(|| {
+            self.entries(Scope::Branch)
+                .map(|entry| entry.path.clone())
+                .collect()
+        });
+        if let Some(before) = before {
+            let new: HashSet<String> = diff
+                .changes
+                .iter()
+                .filter(|entry| !before.contains(&entry.path))
+                .map(|entry| entry.path.clone())
+                .collect();
+            if !new.is_empty() {
+                self.flashing = new;
+                self.flash_until = Some(now + FLASH);
+            }
+        }
+        let open = match self.all_open {
+            Some((Scope::Branch, open)) => open,
+            _ => diff.changes.len() <= CARDS_OPEN_LIMIT,
+        };
+        let (staged, unstaged) = (
+            self.group_entries(ChangeGroup::Staged),
+            self.group_entries(ChangeGroup::Unstaged),
+        );
+        let working_open = self.cards_open(Scope::Working);
+        self.rebuild(&staged, &unstaged, &diff.changes, working_open, open);
+        self.branch = Loaded::Ready(diff);
+    }
+
+    pub fn is_flashing(&self, path: &str) -> bool {
+        self.flash_until.is_some_and(|until| Instant::now() < until) && self.flashing.contains(path)
+    }
+
+    pub fn base_branch(&self) -> Option<String> {
+        match &self.branch {
+            Loaded::Ready(diff) => diff.base_branch.clone(),
+            _ => None,
+        }
+    }
+
+    pub fn set_all_open(&mut self, scope: Scope, open: bool) {
+        self.all_open = Some((scope, open));
+        for card in self
+            .cards
+            .iter_mut()
+            .filter(|card| card.group.scope() == scope)
+        {
             card.open = open;
         }
     }
@@ -175,132 +447,120 @@ impl Changes {
         self.dark
     }
 
-    /// Open cards still to load: the eager ones, or near the viewport by
-    /// their bounds in the last frame (`child` maps a card to its row).
-    pub fn due(&self, child: impl Fn(usize) -> Option<usize>) -> Vec<usize> {
-        let viewport = self.scroll.bounds();
-        let near = Bounds {
-            origin: viewport.origin - gpui::point(px(0.0), px(LOAD_MARGIN)),
-            size: viewport.size + gpui::size(Pixels::ZERO, px(2.0 * LOAD_MARGIN)),
-        };
-        self.cards
-            .iter()
-            .enumerate()
-            .filter(|(_, card)| card.open && matches!(card.diff, CardDiff::Idle))
-            .filter(|(at, card)| {
-                card.eager()
-                    || child(*at)
-                        .and_then(|row| self.scroll.bounds_for_item(row))
-                        .is_some_and(|bounds| bounds.intersects(&near))
+    /// The list's rows for the scope shown: groups and their cards (or
+    /// tree), the branch's header and files, or the empty state.
+    pub fn rows(&self) -> Vec<ChangesRow> {
+        let mut rows = Vec::new();
+        match self.scope() {
+            Scope::Working => {
+                for (group, open) in [
+                    (ChangeGroup::Staged, self.staged_open),
+                    (ChangeGroup::Unstaged, self.unstaged_open),
+                ] {
+                    if !self.has(group) {
+                        continue;
+                    }
+                    rows.push(ChangesRow::Group(group));
+                    if open {
+                        self.group_rows(group, &mut rows);
+                    }
+                }
+                if rows.is_empty() {
+                    rows.push(ChangesRow::Empty);
+                }
+            }
+            Scope::Branch => {
+                let loading = matches!(self.branch, Loaded::Pending);
+                if !loading && !self.has(ChangeGroup::Committed) {
+                    rows.push(ChangesRow::EmptyBranch);
+                } else {
+                    rows.push(ChangesRow::BranchHeader);
+                    rows.push(ChangesRow::Space(4));
+                    self.group_rows(ChangeGroup::Committed, &mut rows);
+                    rows.push(ChangesRow::Space(8));
+                }
+            }
+        }
+        rows
+    }
+
+    fn group_rows(&self, group: ChangeGroup, rows: &mut Vec<ChangesRow>) {
+        if self.tree {
+            tree::rows(self, group, rows);
+            rows.push(ChangesRow::Space(8));
+        } else {
+            rows.extend(
+                self.cards
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, card)| card.group == group)
+                    .map(|(at, _)| ChangesRow::Card(at)),
+            );
+        }
+    }
+
+    /// The eager cards (the first two of a group) still to load.
+    pub fn due(&self, rows: &[ChangesRow]) -> Vec<usize> {
+        rows.iter()
+            .filter_map(|row| match row {
+                ChangesRow::Card(at) => Some(*at),
+                _ => None,
             })
-            .map(|(at, _)| at)
+            .filter(|at| self.waits(*at) && self.cards[*at].eager())
             .collect()
     }
 
-    pub fn has_waiting(&self) -> bool {
+    pub fn shown_row(&self, index: usize) -> Option<ChangesRow> {
+        self.shown.get(index).cloned()
+    }
+
+    /// Open, and its diff not read yet.
+    pub fn waits(&self, at: usize) -> bool {
         self.cards
+            .get(at)
+            .is_some_and(|card| card.open && matches!(card.diff, CardDiff::Idle))
+    }
+
+    /// The list follows the rows: only where they changed, so it keeps its
+    /// place; heights are measured again where a card opened or closed.
+    pub fn sync_list(&mut self) {
+        let next = self.rows();
+        if next != self.shown {
+            let keep_start = self
+                .shown
+                .iter()
+                .zip(&next)
+                .take_while(|(a, b)| a == b)
+                .count();
+            let keep_end = self.shown[keep_start..]
+                .iter()
+                .rev()
+                .zip(next[keep_start..].iter().rev())
+                .take_while(|(a, b)| a == b)
+                .count();
+            let removed = keep_start..self.shown.len() - keep_end;
+            self.list
+                .splice(removed, next.len() - keep_end - keep_start);
+            self.shown = next;
+        }
+        let opened: Vec<bool> = self
+            .shown
             .iter()
-            .any(|card| card.open && matches!(card.diff, CardDiff::Idle))
-    }
-}
-
-impl CodeColumn {
-    pub(crate) fn toggle_card(&mut self, at: usize, cx: &mut Context<Self>) {
-        if let Some(card) = self.changes.cards.get_mut(at) {
-            card.open = !card.open;
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn toggle_all_cards(&mut self, cx: &mut Context<Self>) {
-        let open = !self.changes.cards_open();
-        self.changes.set_all_open(open);
-        cx.notify();
-    }
-
-    pub(crate) fn toggle_group(&mut self, group: ChangeGroup, cx: &mut Context<Self>) {
-        match group {
-            ChangeGroup::Staged => self.changes.staged_open = !self.changes.staged_open,
-            ChangeGroup::Unstaged => self.changes.unstaged_open = !self.changes.unstaged_open,
-        }
-        cx.notify();
-    }
-
-    /// Starts the diffs that are due by the last frame's layout.
-    pub(crate) fn load_due_diffs(&mut self, cx: &mut Context<Self>) {
-        let rows = self.changes_rows();
-        let due = self
-            .changes
-            .due(|card| rows.iter().position(|row| *row == ChangesRow::Card(card)));
-        for at in due {
-            self.load_diff(at, cx);
-        }
-    }
-
-    /// Each frame of the list: what is due now, and once more after this
-    /// frame lays the cards out (a card's place is known only then).
-    pub(crate) fn load_diffs_in_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.load_due_diffs(cx);
-        if self.changes.has_waiting() {
-            let entity = cx.entity().downgrade();
-            window.on_next_frame(move |_, cx| {
-                let _ = entity.update(cx, |column, cx| column.load_due_diffs(cx));
-            });
-        }
-    }
-
-    fn load_diff(&mut self, at: usize, cx: &mut Context<Self>) {
-        let Some(root) = self.root.clone() else {
-            return;
-        };
-        let Some(card) = self.changes.cards.get(at) else {
-            return;
-        };
-        let (group, entry, dark) = (card.group, card.entry.clone(), self.changes.dark());
-        let task = cx.spawn(async move |this, cx| {
-            let (path, status) = (entry.path.clone(), entry.status.clone());
-            let read_root = root.clone();
-            let content = cx
-                .background_executor()
-                .spawn(async move {
-                    dcc_infra::workspace_file_preview::file_preview_content(
-                        &read_root,
-                        &path,
-                        &status,
-                        &group.scope(),
-                        None,
-                    )
-                })
-                .await;
-            let _ = this.update(cx, |column, cx| {
-                if column.root.as_deref() != Some(root.as_str()) {
-                    return;
-                }
-                let Some(card) = column
-                    .changes
-                    .cards
-                    .iter_mut()
-                    .find(|card| card.same(group, &entry))
-                else {
-                    return;
-                };
-                if !matches!(card.diff, CardDiff::Loading(_)) {
-                    return;
-                }
-                card.diff = match content {
-                    Ok((original, modified, _)) => {
-                        let path = entry.path.clone();
-                        CardDiff::Ready(
-                            cx.new(|cx| DiffView::new(path, original, modified, dark, cx)),
-                        )
-                    }
-                    Err(error) => CardDiff::Failed(error),
-                };
-                cx.notify();
-            });
-        });
-        if let Some(card) = self.changes.cards.get_mut(at) {
-            card.diff = CardDiff::Loading(task);
+            .map(|row| match row {
+                ChangesRow::Card(at) => self.cards[*at].open,
+                _ => false,
+            })
+            .collect();
+        if opened != self.measured {
+            for (row, _) in opened
+                .iter()
+                .zip(self.measured.iter().chain(std::iter::repeat(&false)))
+                .enumerate()
+                .filter(|(_, (now, before))| now != before)
+            {
+                self.list.remeasure_items(row..row + 1);
+            }
+            self.measured = opened;
         }
     }
 }

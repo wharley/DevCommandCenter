@@ -46,6 +46,25 @@ pub fn mix_oklab(a: Hsla, weight_a: f32, b: Hsla) -> Hsla {
     oklab_to_rgba(mixed).into()
 }
 
+/// CSS `color-mix(in srgb, a weight_a%, b)`: straight over the sRGB
+/// channels (premultiplied by alpha, as CSS mixes).
+pub fn mix_srgb(a: Hsla, weight_a: f32, b: Hsla) -> Hsla {
+    let (a, b) = (a.to_rgb(), b.to_rgb());
+    let t = weight_a.clamp(0.0, 1.0);
+    let alpha = a.a * t + b.a * (1.0 - t);
+    if alpha <= 0.0 {
+        return gpui::transparent_black();
+    }
+    let channel = |x: f32, y: f32| (x * a.a * t + y * b.a * (1.0 - t)) / alpha;
+    Rgba {
+        r: channel(a.r, b.r),
+        g: channel(a.g, b.g),
+        b: channel(a.b, b.b),
+        a: alpha,
+    }
+    .into()
+}
+
 fn oklch_to_oklab(l: f32, c: f32, h: f32, alpha: f32) -> Oklab {
     let radians = h.to_radians();
     Oklab {
