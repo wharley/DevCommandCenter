@@ -98,7 +98,10 @@ pub(super) fn review_strips(
                     Button::new(SharedString::from(format!("review-strip-action-{id}")))
                         .size(ButtonSize::Sm)
                         .on_click(cx.listener(move |_, _, _, cx| {
-                            cx.emit(ConversationEvent::ReviewDelegation(review.clone()))
+                            cx.emit(ConversationEvent::ReviewDelegation {
+                                id: review.clone(),
+                                path: None,
+                            })
                         }))
                         .child(
                             div()

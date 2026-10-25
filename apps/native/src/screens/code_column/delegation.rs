@@ -110,6 +110,33 @@ impl CodeColumn {
         }
     }
 
+    /// A file chip's diff (`openDelegationReview` with a path): the file as
+    /// the delegation's worktree has it, while that review is open.
+    pub fn delegation_file_request(
+        &self,
+        id: &str,
+        path: &str,
+    ) -> Option<crate::screens::stage::DiffRequest> {
+        let review = self
+            .delegation_review
+            .as_ref()
+            .filter(|review| review.delegation.id == id)?;
+        let path = path.trim();
+        if path.is_empty() {
+            return None;
+        }
+        Some(crate::screens::stage::DiffRequest {
+            root: review.delegation.worktree.clone(),
+            path: path.to_string(),
+            name: path.rsplit('/').next().unwrap_or(path).to_string(),
+            status: "M".into(),
+            scope: dcc_core::domain::workspace_git::WorkspaceGitPreviewScope::Unstaged,
+            base: None,
+            from_changes: true,
+            review: None,
+        })
+    }
+
     fn start_review(&mut self, delegation: Reviewable, from_child: bool, cx: &mut Context<Self>) {
         let parent_root = match &self.delegation_review {
             Some(review) => review.parent_root.clone(),

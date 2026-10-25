@@ -133,7 +133,8 @@ impl Shell {
             });
         });
         let new_task_events = cx.subscribe_in(&new_task, window, Self::on_new_task_event);
-        let conversation_events = cx.subscribe(&conversation, Self::on_conversation_event);
+        let conversation_events =
+            cx.subscribe_in(&conversation, window, Self::on_conversation_event);
         let code_column = cx.new(|cx| CodeColumn::new(prefs.code_column_tab, cx));
         let code_column_events = cx.subscribe_in(&code_column, window, Self::on_code_column_event);
         let stage = cx.new(Stage::new);
@@ -266,18 +267,32 @@ impl Shell {
         }
     }
 
-    /// `handleReviewDelegation`: "Mudanças" opens on the delegation's review.
+    /// `handleReviewDelegation`: "Mudanças" opens on the delegation's review;
+    /// from a file chip, that file's diff opens on the stage too.
     fn on_conversation_event(
         &mut self,
-        _: Entity<ConversationView>,
+        _: &Entity<ConversationView>,
         event: &crate::screens::conversation::ConversationEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
-            crate::screens::conversation::ConversationEvent::ReviewDelegation(id) => {
+            crate::screens::conversation::ConversationEvent::ReviewDelegation { id, path } => {
                 self.set_code_column(true, Some(CodeColumnTab::Changes), cx);
-                self.code_column
-                    .update(cx, |column, cx| column.review_delegation(id, cx));
+                let request = self.code_column.update(cx, |column, cx| {
+                    column.review_delegation(id, cx);
+                    path.as_deref()
+                        .and_then(|path| column.delegation_file_request(id, path))
+                });
+                if let Some(request) = request {
+                    let open = Some((request.scope.clone(), request.path.clone()));
+                    self.code_column.update(cx, |column, cx| {
+                        column.set_open_diff(open, cx);
+                        column.reveal(None, cx);
+                    });
+                    self.stage
+                        .update(cx, |stage, cx| stage.open_diff(request, window, cx));
+                }
             }
         }
     }

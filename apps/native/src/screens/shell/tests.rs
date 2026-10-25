@@ -327,3 +327,44 @@ fn code_from_the_stage_opens_the_card_and_goes_to_the_composer(cx: &mut TestAppC
         assert_eq!(composer.input.read(cx).text(), context_block(&annotation));
     });
 }
+
+#[gpui::test]
+fn a_delegation_file_chip_reviews_it_and_opens_the_files_diff(cx: &mut TestAppContext) {
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let worktree = crate::test_support::git_checkout(&[("main.rs", "fn main() {}\n")]);
+    std::fs::write(worktree.path().join("main.rs"), "fn main() { run(); }\n").unwrap();
+    let root = worktree.path().to_string_lossy().into_owned();
+    shell.update(cx, |shell, cx| {
+        let reviewable = crate::screens::code_column::Reviewable {
+            id: "d-1".into(),
+            provider_id: "codex".into(),
+            parent_session_id: "s-parent".into(),
+            child_session_id: Some("s-child".into()),
+            touched_files: 1,
+            worktree: root.clone(),
+        };
+        shell.code_column.update(cx, |column, cx| {
+            column.set_root(Some(root.clone()), cx);
+            column.set_reviews(Some("s-parent".into()), vec![reviewable], cx)
+        });
+        shell.conversation.update(cx, |_, cx| {
+            cx.emit(
+                crate::screens::conversation::ConversationEvent::ReviewDelegation {
+                    id: "d-1".into(),
+                    path: Some("main.rs".into()),
+                },
+            )
+        });
+    });
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, cx| {
+        let stage = shell.stage.read(cx);
+        let diff = stage.diff.as_ref().expect("the file's diff on the stage");
+        assert_eq!(diff.request.root, root);
+        assert_eq!(diff.request.path, "main.rs");
+        assert!(
+            shell.code_column.read(cx).delegation_review.is_some(),
+            "under review"
+        );
+    });
+}

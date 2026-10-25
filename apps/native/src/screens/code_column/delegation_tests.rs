@@ -196,3 +196,28 @@ fn the_childs_conversation_reviews_it_and_discarding_goes_back(cx: &mut TestAppC
     );
     let _ = setup.server.join();
 }
+
+#[gpui::test]
+fn a_file_chip_opens_its_diff_in_the_delegations_worktree(cx: &mut TestAppContext) {
+    use dcc_core::domain::workspace_git::WorkspaceGitPreviewScope;
+
+    let (column, cx, setup) = open(cx, Vec::new());
+    let reviewable = setup.reviewable();
+    column.update(cx, |column, cx| {
+        column.set_reviews(Some("s-parent".into()), vec![reviewable.clone()], cx);
+        // Not under review yet: no diff to open.
+        assert!(column.delegation_file_request("d-1", "main.rs").is_none());
+        column.review_delegation("d-1", cx);
+        let request = column
+            .delegation_file_request("d-1", " main.rs ")
+            .expect("the file's diff");
+        assert_eq!(request.root, reviewable.worktree);
+        assert_eq!(request.path, "main.rs");
+        assert_eq!(request.scope, WorkspaceGitPreviewScope::Unstaged);
+        assert_eq!(request.status, "M");
+        // Another delegation's chip, or an empty path, opens nothing.
+        assert!(column.delegation_file_request("d-2", "main.rs").is_none());
+        assert!(column.delegation_file_request("d-1", " ").is_none());
+    });
+    drop(setup);
+}

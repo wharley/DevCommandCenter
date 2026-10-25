@@ -54,7 +54,11 @@ type PacedProse = (paced::Paced, usize, Rc<Vec<Block>>);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConversationEvent {
     /// "Revisar mudanças" / "Revisar": a delegation's changes in the code column.
-    ReviewDelegation(String),
+    ReviewDelegation {
+        id: String,
+        /// A file chip: that file's diff opens on the stage too.
+        path: Option<String>,
+    },
 }
 
 impl gpui::EventEmitter<ConversationEvent> for ConversationView {}

@@ -301,7 +301,10 @@ pub(super) fn delegation_card(
             })
             .size(crate::ui::ButtonSize::Sm)
             .on_click(cx.listener(move |_, _, _, cx| {
-                cx.emit(super::ConversationEvent::ReviewDelegation(review.clone()))
+                cx.emit(super::ConversationEvent::ReviewDelegation {
+                    id: review.clone(),
+                    path: None,
+                })
             }))
             .child(
                 div()
@@ -335,6 +338,7 @@ pub(super) fn delegation_card(
                             // A chip opens the review while the edits wait for it.
                             let reviewable = status == DelegationStatus::ReviewPending;
                             let review = delegation.id.clone();
+                            let file = path.to_string();
                             let hover = (colors.border, colors.accent, colors.accent_foreground);
                             div()
                                 .id(SharedString::from(format!(
@@ -350,9 +354,10 @@ pub(super) fn delegation_card(
                                                 .text_color(hover.2)
                                         })
                                         .on_click(cx.listener(move |_, _, _, cx| {
-                                            cx.emit(super::ConversationEvent::ReviewDelegation(
-                                                review.clone(),
-                                            ))
+                                            cx.emit(super::ConversationEvent::ReviewDelegation {
+                                                id: review.clone(),
+                                                path: Some(file.clone()),
+                                            })
                                         }))
                                 })
                                 .flex()
