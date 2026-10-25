@@ -74,6 +74,8 @@ pub enum CodeColumnEvent {
     OpenSession(String),
     /// A change's diff on the stage.
     OpenDiff(crate::screens::stage::DiffRequest),
+    /// The merge conflict resolver, over the conversation.
+    OpenMergeResolver(crate::screens::merge::MergeResolverRequest),
     /// Lines picked in a card's diff, for the agent.
     Annotate(crate::screens::annotation::AnnotationRequest),
 }
@@ -479,6 +481,7 @@ impl CodeColumn {
         self.changes.sync(&status);
         self.status_error = None;
         self.status = Some(status);
+        self.follow_conflicts(cx);
         cx.notify();
     }
 }

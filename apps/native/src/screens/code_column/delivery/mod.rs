@@ -7,6 +7,7 @@
 //! status.
 
 mod actions;
+mod conflicts;
 mod dialogs;
 mod header;
 #[cfg(test)]
@@ -31,6 +32,8 @@ use crate::ui::text_area::TextArea;
 pub enum Confirm {
     Merge,
     SyncBase,
+    /// "Concluir merge" with the conflicts resolved outside the resolver.
+    CompleteMerge,
 }
 
 /// "Revisar mensagem do commit": the staged snapshot's message, editable.
@@ -60,6 +63,9 @@ pub(crate) struct Delivery {
     /// `.dcc.toml`'s delivery policy and its before-merge checks, read with
     /// the pull request (`workspaceProjectAutomationConfig`).
     pub policy: Option<(RecapDeliveryPolicy, i64)>,
+    /// The merge's conflict state, while git reports one (every 5s).
+    pub conflicts: Option<dcc_core::domain::merge_conflict::WorkspaceGitConflictStateOutput>,
+    pub _conflicts: Option<gpui::Task<()>>,
 }
 
 impl Delivery {
@@ -108,13 +114,11 @@ impl CodeColumn {
             .current_branch()
             .or_else(|| self.task_branch())
             .unwrap_or_default();
-        // The conflict state (and its "ready" check) arrives with the
-        // resolver, on the stage.
         resolve_commit_mode(
             &branch,
             self.status.as_ref(),
             self.delivery.pr.as_ref(),
-            false,
+            self.conflicts_ready(),
         )
     }
 

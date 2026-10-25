@@ -9,6 +9,8 @@ use crate::theme::{ActiveTheme, Appearance};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Variant {
     Default,
+    /// `bg-secondary text-secondary-foreground hover:bg-secondary/80`
+    Secondary,
     Ghost,
     Outline,
     Destructive,
@@ -150,6 +152,12 @@ impl RenderOnce for Button {
                 colors.primary_foreground,
                 None,
                 Some(colors.primary.opacity(0.8)),
+            ),
+            Variant::Secondary => (
+                Some(colors.secondary),
+                colors.secondary_foreground,
+                None,
+                Some(colors.secondary.opacity(0.8)),
             ),
             Variant::Ghost => (
                 None,

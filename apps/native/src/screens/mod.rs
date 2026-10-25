@@ -6,6 +6,7 @@ pub mod composer;
 pub mod conversation;
 pub mod diff_view;
 pub mod file_view;
+pub mod merge;
 pub mod new_task;
 pub mod open_project;
 pub mod shell;

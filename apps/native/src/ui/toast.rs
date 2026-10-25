@@ -121,6 +121,11 @@ impl Toaster {
         Self::show(ToastKind::Info, message.into(), None, cx);
     }
 
+    /// sonner's `toast.warning(message)`.
+    pub fn warning(message: impl Into<SharedString>, cx: &mut App) {
+        Self::show(ToastKind::Warning, message.into(), None, cx);
+    }
+
     /// sonner's `toast.warning(message, { description })`.
     pub fn warning_with(
         message: impl Into<SharedString>,

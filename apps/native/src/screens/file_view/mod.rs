@@ -176,6 +176,17 @@ impl FileView {
         cx.notify();
     }
 
+    /// Other text in place of all of it, as one step (the merge resolver's
+    /// accepted block or side); what is on disk stays the base.
+    pub fn replace_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.buffer.text() == text {
+            return;
+        }
+        let lines = self.buffer.line_count();
+        self.buffer.set_text(text);
+        self.edited(lines, 0, cx);
+    }
+
     /// "Recarregar do disco": the disk's text replaces the edit.
     pub fn take_disk(&mut self, disk: String, cx: &mut Context<Self>) {
         let lines = self.buffer.line_count();

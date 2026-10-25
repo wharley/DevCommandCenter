@@ -45,14 +45,14 @@ fn checks_failed(error: &ApiError) -> bool {
 }
 
 impl CodeColumn {
-    fn api(&self) -> Result<DesktopApi, ApiError> {
+    pub(super) fn api(&self) -> Result<DesktopApi, ApiError> {
         self.endpoint
             .clone()
             .or_else(DesktopApi::load)
             .ok_or(ApiError::DesktopClosed)
     }
 
-    fn task_id(&self) -> Option<String> {
+    pub(super) fn task_id(&self) -> Option<String> {
         self.delivery.task.as_ref().map(|task| task.id.0.clone())
     }
 
@@ -92,8 +92,11 @@ impl CodeColumn {
             }
             CommitMode::OpenPr | CommitMode::Fix => self.open_request(mode, cx),
             CommitMode::Push | CommitMode::CreatePr => self.run_step(mode, None, cx),
-            // The resolver (and the completion it leads to) is on the stage.
-            CommitMode::ResolveConflicts | CommitMode::CompleteMerge => {}
+            CommitMode::ResolveConflicts => self.open_merge_resolver(cx),
+            CommitMode::CompleteMerge => {
+                self.delivery.confirm = Some(Confirm::CompleteMerge);
+                self.settle_button(CommitButtonStatus::Done, cx);
+            }
             CommitMode::Merged | CommitMode::Closed => {}
         }
     }
@@ -321,6 +324,7 @@ impl CodeColumn {
         match self.delivery.confirm.take() {
             Some(Confirm::Merge) => self.merge(cx),
             Some(Confirm::SyncBase) => self.sync_base(cx),
+            Some(Confirm::CompleteMerge) => self.complete_merge(cx),
             None => {}
         }
         cx.notify();
@@ -495,7 +499,7 @@ impl CodeColumn {
     }
 }
 
-fn message_of(error: ApiError, cx: &App) -> String {
+pub(super) fn message_of(error: ApiError, cx: &App) -> String {
     match error {
         ApiError::DesktopClosed => cx.t("native.desktopClosed").to_string(),
         error => error.to_string(),

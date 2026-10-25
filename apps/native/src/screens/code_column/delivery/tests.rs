@@ -306,3 +306,137 @@ fn a_merged_task_with_its_own_worktree_completes_once(cx: &mut TestAppContext) {
     let paths: Vec<String> = requests(setup).into_iter().map(|(path, _)| path).collect();
     assert_eq!(paths, vec!["/api/v1/workspaces/w-1/delivery/complete"]);
 }
+
+/// A checkout on `feature` in the middle of merging `main`, `a.txt` conflicted.
+fn conflicted_checkout() -> tempfile::TempDir {
+    let repo = git_checkout(&[("a.txt", "one\n")]);
+    git(repo.path(), &["checkout", "-q", "-b", "feature"]);
+    std::fs::write(repo.path().join("a.txt"), "feature\n").unwrap();
+    git(repo.path(), &["commit", "-qam", "feature"]);
+    git(repo.path(), &["checkout", "-q", "main"]);
+    std::fs::write(repo.path().join("a.txt"), "main\n").unwrap();
+    git(repo.path(), &["commit", "-qam", "main"]);
+    git(repo.path(), &["checkout", "-q", "feature"]);
+    let _ = std::process::Command::new("git")
+        .args(["merge", "main"])
+        .current_dir(repo.path())
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .output();
+    repo
+}
+
+fn conflict_state(result: &str) -> String {
+    let side = |text: &str| {
+        serde_json::json!({
+            "exists": true, "binary": false, "truncated": false,
+            "byteCount": text.len(), "mode": "100644", "text": text,
+        })
+    };
+    serde_json::json!({
+        "operation": "merge", "currentBranch": "feature", "incomingRef": "main",
+        "conflicts": [{
+            "path": "a.txt", "kind": "both-modified",
+            "base": side("one\n"), "current": side("feature\n"), "incoming": side("main\n"),
+            "result": side(result),
+        }],
+    })
+    .to_string()
+}
+
+#[gpui::test]
+fn conflicts_open_the_resolver_until_their_results_are_clean(cx: &mut TestAppContext) {
+    let repo = conflicted_checkout();
+    let (column, cx, setup) = open(
+        cx,
+        repo.path(),
+        None,
+        vec![(
+            "/api/v1/git/conflict-state",
+            200,
+            conflict_state("<<<<<<< HEAD\nfeature\n=======\nmain\n>>>>>>> main\n"),
+        )],
+    );
+    column.read_with(cx, |column, _| {
+        assert!(column.delivery.conflicts.is_some(), "read with the status");
+        assert_eq!(column.commit_mode(), CommitMode::ResolveConflicts);
+    });
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = events.clone();
+    column.update(cx, |_, cx| {
+        cx.subscribe_self(move |_, event: &super::super::CodeColumnEvent, _| {
+            sink.borrow_mut().push(event.clone())
+        })
+        .detach()
+    });
+    let button = cx.debug_bounds("delivery-commit").unwrap();
+    cx.simulate_click(button.center(), Modifiers::none());
+    let opened = events.borrow().iter().find_map(|event| match event {
+        super::super::CodeColumnEvent::OpenMergeResolver(request) => Some(request.clone()),
+        _ => None,
+    });
+    let request = opened.expect("the resolver");
+    assert_eq!(request.root, repo.path().to_string_lossy());
+    assert_eq!(request.task_id.as_deref(), Some("w-1"));
+    let _ = requests(setup);
+}
+
+#[gpui::test]
+fn clean_results_complete_the_merge_once_confirmed(cx: &mut TestAppContext) {
+    let repo = conflicted_checkout();
+    let (column, cx, setup) = open(
+        cx,
+        repo.path(),
+        None,
+        vec![
+            ("/api/v1/git/conflict-state", 200, conflict_state("feature\nmain\n")),
+            ("/api/v1/git/conflict-state", 200, conflict_state("feature\nmain\n")),
+            ok("/api/v1/git/mark-conflict-resolved"),
+            (
+                "/api/v1/git/validation-config",
+                200,
+                r#"{"commands":[],"sourcePath":null,"timeoutSeconds":600,"configHash":null}"#
+                    .into(),
+            ),
+            (
+                "/api/v1/git/complete-merge",
+                200,
+                r#"{"completed":true,"validation":{"status":"not-configured","sourcePath":null,"steps":[]}}"#
+                    .into(),
+            ),
+        ],
+    );
+    column.read_with(cx, |column, _| {
+        assert_eq!(column.commit_mode(), CommitMode::CompleteMerge)
+    });
+    assert!(cx.debug_bounds("delivery-review-resolution").is_some());
+    let button = cx.debug_bounds("delivery-commit").unwrap();
+    cx.simulate_click(button.center(), Modifiers::none());
+    column.read_with(cx, |column, _| {
+        assert_eq!(column.delivery.confirm, Some(Confirm::CompleteMerge))
+    });
+    column.update(cx, |column, cx| column.run_confirmed(cx));
+    cx.run_until_parked();
+    assert!(
+        toasts(cx)
+            .iter()
+            .any(|toast| toast == "Merge concluído e enviado"),
+        "{:?}",
+        toasts(cx)
+    );
+    let calls = requests(setup);
+    let paths: Vec<&str> = calls.iter().map(|(path, _)| path.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            "/api/v1/git/conflict-state",
+            "/api/v1/git/conflict-state",
+            "/api/v1/git/mark-conflict-resolved",
+            "/api/v1/git/validation-config",
+            "/api/v1/git/complete-merge",
+        ]
+    );
+    assert_eq!(calls[2].1["relativePath"], "a.txt");
+}

@@ -368,3 +368,29 @@ fn a_delegation_file_chip_reviews_it_and_opens_the_files_diff(cx: &mut TestAppCo
         );
     });
 }
+
+#[gpui::test]
+fn the_merge_resolver_takes_the_conversations_place_until_closed(cx: &mut TestAppContext) {
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    shell.update(cx, |shell, cx| {
+        let request = crate::screens::merge::MergeResolverRequest {
+            root: "/tmp/checkout".into(),
+            task_id: Some("w-1".into()),
+            base_branch: None,
+            forge_login: None,
+            workspace_label: None,
+        };
+        shell.code_column.update(cx, |_, cx| {
+            cx.emit(crate::screens::code_column::CodeColumnEvent::OpenMergeResolver(request))
+        });
+    });
+    cx.run_until_parked();
+    let resolver = shell.read_with(cx, |shell, cx| {
+        assert!(!shell.code_column_shown(cx), "the column folds away");
+        shell.merge_resolver().expect("open")
+    });
+    resolver.update(cx, |_, cx| {
+        cx.emit(crate::screens::merge::MergeResolverEvent::Closed)
+    });
+    shell.read_with(cx, |shell, _| assert!(shell.merge_resolver().is_none()));
+}

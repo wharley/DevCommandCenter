@@ -16,7 +16,7 @@ use crate::i18n::{Args, Translate};
 use crate::theme::color::hex;
 use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
-use crate::ui::{Icon, Tracked, spinner};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tracked, spinner};
 
 /// `--workspace-pr-*-accent` (the same in both themes).
 pub(crate) fn pr_open() -> Hsla {
@@ -82,12 +82,7 @@ fn commit_button(
             &Args::default().with("requestLabel", label),
         )
     };
-    // The resolver and the merge's completion open on the stage (screen 6).
-    let waits_for_stage = matches!(
-        mode,
-        CommitMode::ResolveConflicts | CommitMode::CompleteMerge
-    );
-    let locked = matches!(mode, CommitMode::Merged | CommitMode::Closed) || waits_for_stage;
+    let locked = matches!(mode, CommitMode::Merged | CommitMode::Closed);
     let disabled = locked || status == CommitButtonStatus::Busy || column.delivery.busy;
     let (background, foreground, hover) = button_colors(mode, cx);
     let dark = cx.theme().appearance == Appearance::Dark;
@@ -134,6 +129,22 @@ fn commit_button(
         })
         .child(text)
         .into_any_element()
+}
+
+/// The outline icon button that opens the resolver on a ready merge.
+fn review_resolution(cx: &mut Context<CodeColumn>) -> AnyElement {
+    let label = cx.t("inspector.gitConfirmation.reviewResolution");
+    crate::ui::Tooltip::new(
+        "delivery-review-resolution-tip",
+        Button::new("delivery-review-resolution")
+            .variant(ButtonVariant::Outline)
+            .size(ButtonSize::IconSm)
+            .on_click(cx.listener(|column, _, _, cx| column.open_merge_resolver(cx)))
+            .child(Icon::new("file-diff").size(14.0)),
+        move |_, _| div().child(label.clone()).into_any_element(),
+    )
+    .side(crate::ui::tooltip::Side::Bottom)
+    .into_any_element()
 }
 
 /// "PR #12" with "Draft" when it is one; opens it in the browser.
@@ -284,6 +295,10 @@ pub(crate) fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyEl
                 .flex_shrink_0()
                 .items_center()
                 .gap(px(6.0))
+                // "Revisar resolução" (`onReviewConflictResolution`).
+                .when(mode == CommitMode::CompleteMerge, |row| {
+                    row.child(review_resolution(cx))
+                })
                 .when(show_button, |row| {
                     row.child(commit_button(column, mode, cx))
                 }),

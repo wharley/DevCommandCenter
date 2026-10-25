@@ -163,7 +163,7 @@ impl DesktopApi {
         }
     }
 
-    fn post(&self, path: &str, body: &Value) -> Result<Value, ApiError> {
+    pub(crate) fn post(&self, path: &str, body: &Value) -> Result<Value, ApiError> {
         self.request("POST", path, Some(body))
     }
 
@@ -521,7 +521,7 @@ impl DesktopApi {
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
     }
 
-    fn decoded<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
+    pub(crate) fn decoded<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
     }
 

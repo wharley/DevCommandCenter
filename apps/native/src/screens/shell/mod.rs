@@ -4,6 +4,7 @@
 mod annotation;
 mod bootstrap;
 pub mod layout;
+mod merge;
 mod regions;
 #[cfg(test)]
 mod tests;
@@ -79,6 +80,8 @@ pub struct Shell {
     bootstrap_provider: Option<(String, Option<String>)>,
     /// "Abrir projeto", while open.
     open_project: Option<(Entity<OpenProjectDialog>, Subscription)>,
+    /// The merge conflict resolver, while open.
+    merge: Option<(Entity<crate::screens::merge::MergeResolver>, Subscription)>,
     /// "Enviar trecho ao agente", while open.
     annotation: Option<(
         Entity<crate::screens::annotation::card::AnnotationCard>,
@@ -167,6 +170,7 @@ impl Shell {
             if root != this.stage_root {
                 this.stage_root = root.clone();
                 this.stage.update(cx, |stage, cx| stage.clear(cx));
+                this.merge = None;
                 this.code_column
                     .update(cx, |column, cx| column.set_open_diff(None, cx));
             }
@@ -192,6 +196,7 @@ impl Shell {
             surface: Surface::Conversation,
             focus_on_open: None,
             open_project: None,
+            merge: None,
             annotation: None,
             bootstrap_provider: None,
             _appearance: appearance,
@@ -321,6 +326,9 @@ impl Shell {
             CodeColumnEvent::Annotate(request) => {
                 self.open_annotation(request.clone(), false, window, cx)
             }
+            CodeColumnEvent::OpenMergeResolver(request) => {
+                self.open_merge_resolver(request.clone(), cx)
+            }
             CodeColumnEvent::OpenDiff(request) => {
                 let open = Some((request.scope.clone(), request.path.clone()));
                 self.code_column.update(cx, |column, cx| {
@@ -437,6 +445,7 @@ impl Shell {
     /// `globalSurface === null && selectedLocalWorkspacePath && codeColumnOpen`.
     fn code_column_shown(&self, cx: &gpui::App) -> bool {
         self.prefs.code_column_open
+            && self.merge.is_none()
             && self.surface == Surface::Conversation
             && self.code_column.read(cx).root.is_some()
     }
@@ -724,7 +733,10 @@ impl Render for Shell {
                 Surface::Conversation if self.sidebar.read(cx).has_open_task() == Some(false) => {
                     bootstrap::render(self, cx)
                 }
-                Surface::Conversation => self.conversation_with_stage(cx),
+                Surface::Conversation => match self.merge_resolver() {
+                    Some(resolver) => resolver.into_any_element(),
+                    None => self.conversation_with_stage(cx),
+                },
                 Surface::NewTask => self.new_task.clone().into_any_element(),
             }))
             .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))

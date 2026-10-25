@@ -145,6 +145,14 @@ fn confirm(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> Option<AnyEleme
             },
             cx.t("inspector.gitConfirmation.syncConfirm"),
         ),
+        Confirm::CompleteMerge => (
+            cx.t("inspector.gitConfirmation.completeMergeTitle"),
+            cx.t_with(
+                "inspector.gitConfirmation.completeMergeDescription",
+                &Args::count(column.conflicts_to_complete() as i64),
+            ),
+            cx.t("inspector.gitConfirmation.completeMergeConfirm"),
+        ),
     };
     let colors = cx.theme().colors.clone();
     // `DialogDescription className="text-[12px] leading-relaxed"`
