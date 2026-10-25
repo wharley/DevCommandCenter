@@ -62,6 +62,7 @@ mod delivery;
 mod forge;
 mod git_changes;
 mod mobile;
+mod turn_review;
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
     mobile::recover_interrupted_tasks(db_path)
@@ -697,6 +698,13 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/delegations/:delegation_id/discard",
             post(delegation_review::discard),
         )
+        .route(
+            "/api/v1/sessions/:session_id/last-turn-review",
+            post(turn_review::last_turn),
+        )
+        .route("/api/v1/turn-review/file-diff", post(turn_review::file_diff))
+        .route("/api/v1/guarded-undo/prepare", post(turn_review::prepare_undo))
+        .route("/api/v1/guarded-undo/execute", post(turn_review::execute_undo))
         .route(
             "/api/v1/sessions/:session_id/task-title",
             post(apply_task_title_handler),
@@ -5072,6 +5080,51 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_last_turn_review_and_guarded_undo_answer_without_a_capture() {
+        let fixture = embedded_fixture().await;
+        // No turn captured for the session: no review.
+        let (status, review) = post_json(
+            &fixture.app,
+            "/api/v1/sessions/s-none/last-turn-review",
+            json!({ "workspaceId": "w-none" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{review}");
+        assert_eq!(review, Value::Null);
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/sessions/s-none/last-turn-review",
+            json!({ "workspaceId": " " }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/turn-review/file-diff",
+            json!({ "snapshotId": "missing", "path": "a.rs" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/guarded-undo/prepare",
+            json!({ "snapshotId": "" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // A token no preparation gave runs nothing.
+        let (status, outcome) = post_json(
+            &fixture.app,
+            "/api/v1/guarded-undo/execute",
+            json!({ "previewToken": "not-a-token" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{outcome}");
+        assert_eq!(outcome["status"], "blocked");
+        assert_eq!(outcome["reasonCode"], "preview_consumed");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

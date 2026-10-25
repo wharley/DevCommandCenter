@@ -33,7 +33,7 @@ use dcc_core::{
         provider::McpOauthSupport,
         session::{
             QueuedTurn, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
-            SessionSearchResult, TurnId, TurnReviewFile, WorkspaceSessionSummary,
+            SessionSearchResult, TurnId, WorkspaceSessionSummary,
         },
         thread::Thread,
         usage::{SessionTurnUsage, UsageDashboard, UsageDashboardInput},
@@ -66,6 +66,10 @@ use crate::guarded_undo_runtime::{
     GuardedUndoPrepareResult,
 };
 use crate::state::{AnsweredProviderRequest, SessionCommandState};
+pub use dcc_core::domain::turn_review::{
+    ExecuteGuardedUndoOutput, GuardedUndoCaptureSummary, GuardedUndoOperationSummary,
+    GuardedUndoPreviewFile, PrepareGuardedUndoOutput, TurnReviewFileDiffOutput, TurnReviewSummary,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -788,98 +792,10 @@ impl LastTurnReviewInput {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnReviewSummary {
-    pub snapshot_id: String,
-    pub session_id: String,
-    pub turn_id: String,
-    pub workspace_id: String,
-    pub state: String,
-    pub compatibility: String,
-    pub base_fingerprint: Option<String>,
-    pub result_fingerprint: Option<String>,
-    pub files: Vec<TurnReviewFile>,
-    pub insertions: u32,
-    pub deletions: u32,
-    pub diff_truncated: bool,
-    pub excluded_preexisting_untracked_count: usize,
-    pub observed_validations: Vec<String>,
-    pub turn_outcome: Option<String>,
-    pub outcome_reason: Option<String>,
-    pub error: Option<String>,
-    pub completed_at: Option<String>,
-    pub guarded_undo: Option<GuardedUndoCaptureSummary>,
-    pub active_undo: Option<GuardedUndoOperationSummary>,
-}
-
-/// Content-free capture-v2 status associated with this review snapshot.
-/// Artifact locations, hashes, physical identities, paths, and bytes never
-/// cross the desktop contract.
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct GuardedUndoCaptureSummary {
-    pub state: String,
-    pub reason_code: Option<String>,
-    pub file_count: u32,
-    pub artifact_bytes: u64,
-    pub completed_at: Option<String>,
-    pub expires_at: Option<String>,
-}
-
-/// Content-free status for a nonterminal Guarded Undo operation. The opaque
-/// operation id is safe to display/use for diagnostics; recovery artifacts and
-/// target identities remain backend-only.
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct GuardedUndoOperationSummary {
-    pub status: String,
-    pub operation_id: String,
-    pub reason_code: Option<String>,
-}
-
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PrepareGuardedUndoInput {
     pub snapshot_id: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct GuardedUndoPreviewFile {
-    /// Display-only path. Execute accepts only the opaque preview token and
-    /// never trusts paths, hashes, or replacement bytes sent by the UI.
-    pub display_path: String,
-    pub size: u64,
-    pub binary: bool,
-    pub preview: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(
-    tag = "status",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase"
-)]
-pub enum PrepareGuardedUndoOutput {
-    Ready {
-        snapshot_id: String,
-        preview_token: String,
-        expires_at: String,
-        file_count: u32,
-        total_bytes: u64,
-        files: Vec<GuardedUndoPreviewFile>,
-        unrelated_paths_are_not_targets: bool,
-    },
-    Blocked {
-        snapshot_id: String,
-        reason_code: String,
-        details_available: bool,
-    },
-    Unavailable {
-        snapshot_id: String,
-        reason_code: String,
-    },
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
@@ -889,34 +805,17 @@ pub struct ExecuteGuardedUndoInput {
     pub confirmed: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(
-    tag = "status",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase"
-)]
-pub enum ExecuteGuardedUndoOutput {
-    Completed {
-        operation_id: Option<String>,
-        reason_code: Option<String>,
-    },
-    Blocked {
-        operation_id: Option<String>,
-        reason_code: Option<String>,
-    },
-    RolledBack {
-        operation_id: Option<String>,
-        reason_code: Option<String>,
-    },
-    RecoveryRequired {
-        operation_id: Option<String>,
-        reason_code: Option<String>,
-    },
-}
-
 #[tauri::command]
 pub async fn prepare_guarded_undo(
     state: State<'_, SessionCommandState>,
+    input: PrepareGuardedUndoInput,
+) -> Result<PrepareGuardedUndoOutput, String> {
+    prepare_guarded_undo_with_state(&state, input).await
+}
+
+/// `prepare_guarded_undo` for callers without a Tauri `State` (the HTTP API).
+pub async fn prepare_guarded_undo_with_state(
+    state: &SessionCommandState,
     input: PrepareGuardedUndoInput,
 ) -> Result<PrepareGuardedUndoOutput, String> {
     let snapshot_id = input.snapshot_id.trim().to_owned();
@@ -973,6 +872,14 @@ pub async fn prepare_guarded_undo(
 #[tauri::command]
 pub async fn execute_guarded_undo(
     state: State<'_, SessionCommandState>,
+    input: ExecuteGuardedUndoInput,
+) -> Result<ExecuteGuardedUndoOutput, String> {
+    execute_guarded_undo_with_state(&state, input).await
+}
+
+/// `execute_guarded_undo` for callers without a Tauri `State` (the HTTP API).
+pub async fn execute_guarded_undo_with_state(
+    state: &SessionCommandState,
     input: ExecuteGuardedUndoInput,
 ) -> Result<ExecuteGuardedUndoOutput, String> {
     let preview_token = input.preview_token.trim().to_owned();
@@ -1287,16 +1194,14 @@ pub async fn execute_conversation_rewind(
     })
 }
 
-impl From<InfraGuardedUndoCaptureSummary> for GuardedUndoCaptureSummary {
-    fn from(value: InfraGuardedUndoCaptureSummary) -> Self {
-        Self {
-            state: value.state,
-            reason_code: value.reason_code,
-            file_count: value.file_count,
-            artifact_bytes: value.artifact_bytes,
-            completed_at: value.completed_at,
-            expires_at: value.expires_at,
-        }
+fn capture_summary(value: InfraGuardedUndoCaptureSummary) -> GuardedUndoCaptureSummary {
+    GuardedUndoCaptureSummary {
+        state: value.state,
+        reason_code: value.reason_code,
+        file_count: value.file_count,
+        artifact_bytes: value.artifact_bytes,
+        completed_at: value.completed_at,
+        expires_at: value.expires_at,
     }
 }
 
@@ -1307,18 +1212,17 @@ pub struct TurnReviewFileDiffInput {
     pub path: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnReviewFileDiffOutput {
-    pub snapshot_id: String,
-    pub path: String,
-    pub diff: Option<String>,
-    pub preview_unavailable: bool,
-}
-
 #[tauri::command]
 pub async fn last_turn_review(
     state: State<'_, SessionCommandState>,
+    input: LastTurnReviewInput,
+) -> Result<Option<TurnReviewSummary>, String> {
+    last_turn_review_with_state(&state, input).await
+}
+
+/// `last_turn_review` for callers without a Tauri `State` (the HTTP API).
+pub async fn last_turn_review_with_state(
+    state: &SessionCommandState,
     input: LastTurnReviewInput,
 ) -> Result<Option<TurnReviewSummary>, String> {
     let session_id = SessionId(input.session_id.trim().to_string());
@@ -1344,7 +1248,7 @@ pub async fn last_turn_review(
     let guarded_undo = guarded_repo
         .get_guarded_undo_capture_summary(&change_set.snapshot_id)
         .map_err(|error| error.to_string())?
-        .map(GuardedUndoCaptureSummary::from);
+        .map(capture_summary);
     let active_undo = guarded_repo
         .get_active_guarded_undo_summary(&change_set.snapshot_id)
         .map_err(|error| error.to_string())?
@@ -1381,6 +1285,14 @@ pub async fn last_turn_review(
 #[tauri::command]
 pub async fn turn_review_file_diff(
     state: State<'_, SessionCommandState>,
+    input: TurnReviewFileDiffInput,
+) -> Result<TurnReviewFileDiffOutput, String> {
+    turn_review_file_diff_with_state(&state, input).await
+}
+
+/// `turn_review_file_diff` for callers without a Tauri `State` (the HTTP API).
+pub async fn turn_review_file_diff_with_state(
+    state: &SessionCommandState,
     input: TurnReviewFileDiffInput,
 ) -> Result<TurnReviewFileDiffOutput, String> {
     let snapshot_id = input.snapshot_id.trim();
