@@ -226,6 +226,87 @@ mod distance_tests {
     }
 }
 
+/// `Intl.RelativeTimeFormat(locale, { numeric: "auto" })` by the largest
+/// unit (`formatReviewTimestamp`): "agora", "há 5 minutos", "ontem".
+pub fn relative_time(at_ms: i64, now_ms: i64, english: bool) -> String {
+    let delta = (at_ms - now_ms) as f64 / 1000.0;
+    if delta.abs() < 45.0 {
+        return if english { "now" } else { "agora" }.to_string();
+    }
+    const UNITS: [(&str, f64); 6] = [
+        ("year", 31_557_600.0),
+        ("month", 2_629_800.0),
+        ("week", 604_800.0),
+        ("day", 86_400.0),
+        ("hour", 3_600.0),
+        ("minute", 60.0),
+    ];
+    let (unit, size) = UNITS
+        .iter()
+        .copied()
+        .find(|(_, size)| delta.abs() >= *size)
+        .unwrap_or(("minute", 60.0));
+    let value = (delta / size).round() as i64;
+    let words = |pt: (&str, &str), en: (&str, &str)| {
+        if english {
+            if value.abs() == 1 { en.0 } else { en.1 }
+        } else if value.abs() == 1 {
+            pt.0
+        } else {
+            pt.1
+        }
+        .to_string()
+    };
+    // `numeric: "auto"` names the nearest ones.
+    let named = match (unit, value) {
+        ("day", -1) => Some(("ontem", "yesterday")),
+        ("day", 1) => Some(("amanhã", "tomorrow")),
+        ("week", -1) => Some(("semana passada", "last week")),
+        ("week", 1) => Some(("próxima semana", "next week")),
+        ("month", -1) => Some(("mês passado", "last month")),
+        ("month", 1) => Some(("próximo mês", "next month")),
+        ("year", -1) => Some(("ano passado", "last year")),
+        ("year", 1) => Some(("próximo ano", "next year")),
+        _ => None,
+    };
+    if let Some((pt, en)) = named {
+        return if english { en } else { pt }.to_string();
+    }
+    let noun = match unit {
+        "year" => words(("ano", "anos"), ("year", "years")),
+        "month" => words(("mês", "meses"), ("month", "months")),
+        "week" => words(("semana", "semanas"), ("week", "weeks")),
+        "day" => words(("dia", "dias"), ("day", "days")),
+        "hour" => words(("hora", "horas"), ("hour", "hours")),
+        _ => words(("minuto", "minutos"), ("minute", "minutes")),
+    };
+    let count = value.abs();
+    match (english, value < 0) {
+        (false, true) => format!("há {count} {noun}"),
+        (false, false) => format!("em {count} {noun}"),
+        (true, true) => format!("{count} {noun} ago"),
+        (true, false) => format!("in {count} {noun}"),
+    }
+}
+
+#[cfg(test)]
+mod relative_tests {
+    use super::relative_time;
+
+    #[test]
+    fn reads_like_intl_relative_time() {
+        let now = 1_000_000_000_000;
+        let ago = |seconds: i64| relative_time(now - seconds * 1000, now, false);
+        assert_eq!(ago(10), "agora");
+        assert_eq!(ago(60), "há 1 minuto");
+        assert_eq!(ago(3 * 3600), "há 3 horas");
+        assert_eq!(ago(30 * 3600), "ontem");
+        assert_eq!(ago(3 * 86_400), "há 3 dias");
+        assert_eq!(ago(8 * 86_400), "semana passada");
+        assert_eq!(relative_time(now - 7_200_000, now, true), "2 hours ago");
+    }
+}
+
 /// `new Date(value).toLocaleString()` in pt-BR (`24/10/2026, 12:00:00`), or
 /// the value as it came when it is not a date.
 pub fn local_date_time(value: &str) -> String {

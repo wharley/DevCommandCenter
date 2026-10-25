@@ -11,6 +11,11 @@ use crate::screens::diff_view::DiffView;
 impl CodeColumn {
     /// A change's diff on the stage (`onOpenExpandedPreview`).
     pub(crate) fn open_change(&mut self, at: usize, cx: &mut Context<Self>) {
+        self.open_change_focused(at, false, cx)
+    }
+
+    /// The card's badge: the diff lands on the file's first open conversation.
+    pub(crate) fn open_change_focused(&mut self, at: usize, focus: bool, cx: &mut Context<Self>) {
         let (Some(root), Some(card)) = (self.root.clone(), self.changes.cards.get(at)) else {
             return;
         };
@@ -26,6 +31,7 @@ impl CodeColumn {
                 scope: card.group.preview_scope(),
                 base,
                 from_changes: true,
+                review: self.review_request(&card.entry.path, focus, None),
             },
         ));
     }
@@ -188,9 +194,13 @@ impl CodeColumn {
                         card.annotate = Some(cx.subscribe(
                             &view,
                             |_, _, event: &crate::screens::diff_view::DiffViewEvent, cx| {
-                                let crate::screens::diff_view::DiffViewEvent::Annotate(request) =
-                                    event;
-                                cx.emit(super::super::CodeColumnEvent::Annotate(request.clone()));
+                                if let crate::screens::diff_view::DiffViewEvent::Annotate(request) =
+                                    event
+                                {
+                                    cx.emit(super::super::CodeColumnEvent::Annotate(
+                                        request.clone(),
+                                    ));
+                                }
                             },
                         ));
                         CardDiff::Ready(view)

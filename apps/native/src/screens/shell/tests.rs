@@ -215,6 +215,7 @@ fn a_change_opened_from_the_column_goes_on_the_stage_and_back(cx: &mut TestAppCo
         scope: WorkspaceGitPreviewScope::Unstaged,
         base: None,
         from_changes: true,
+        review: None,
     };
     let column = shell.read_with(cx, |shell, _| shell.code_column.clone());
     column.update(cx, |_, cx| cx.emit(CodeColumnEvent::OpenDiff(request)));

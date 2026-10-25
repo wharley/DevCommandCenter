@@ -177,6 +177,7 @@ pub(super) fn card(column: &CodeColumn, at: usize, cx: &mut Context<CodeColumn>)
                 .children(crate::screens::code_column::review::review_badge(
                     column,
                     &entry.path,
+                    at,
                     cx,
                 ))
                 .child(

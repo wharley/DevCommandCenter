@@ -384,6 +384,17 @@ impl FileDiff {
     }
 
     /// The rows on screen with the runs opened so far.
+    /// The folded run still hiding line `number` (old or new side).
+    pub fn gap_holding(&self, old: bool, number: usize) -> Option<usize> {
+        let index = self.lines.iter().position(|line| {
+            let side = if old { line.old } else { line.new };
+            side == Some(number)
+        })?;
+        self.gaps.iter().position(|gap| {
+            gap.hidden() > 0 && (gap.start + gap.top..gap.end - gap.bottom).contains(&index)
+        })
+    }
+
     pub fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::with_capacity(self.lines.len());
         let mut index = 0;

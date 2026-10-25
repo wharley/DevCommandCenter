@@ -296,6 +296,9 @@ impl Render for Stage {
             .border_color(colors.border)
             .child(TabStrip::new("stage-tabs", &mut self.strip).children(tabs))
             .children(actions);
+        let drawer = (!self.chat_active)
+            .then(|| super::review_view::thread_drawer(self, window, cx))
+            .flatten();
         let body = self
             .diff
             .as_ref()
@@ -310,7 +313,14 @@ impl Render for Stage {
             .debug_selector(|| "stage".into())
             .key_context(CONTEXT)
             .track_focus(&self.focus)
-            .on_action(cx.listener(|stage, _: &ShowChat, _, cx| stage.show_chat(cx)))
+            // Esc closes the open conversation first.
+            .on_action(cx.listener(|stage, _: &ShowChat, _, cx| {
+                if stage.review().is_some_and(|review| review.active.is_some()) {
+                    stage.close_thread(cx)
+                } else {
+                    stage.show_chat(cx)
+                }
+            }))
             // Behind the Chat tab the files keep quiet.
             .on_action(cx.listener(|stage, _: &Save, _, cx| {
                 if !stage.chat_active {
@@ -327,6 +337,7 @@ impl Render for Stage {
             .text_color(colors.foreground)
             .font_weight(FontWeight::NORMAL)
             .child(strip)
+            .children(super::review_view::review_bar(self, cx))
             .child(
                 div()
                     .relative()
@@ -335,7 +346,8 @@ impl Render for Stage {
                     .min_h_0()
                     .bg(colors.background)
                     .when(self.chat_active, |body| body.invisible())
-                    .children(body),
+                    .children(body)
+                    .children(drawer),
             )
             .children(super::dialogs::dialogs(self, window, cx))
     }

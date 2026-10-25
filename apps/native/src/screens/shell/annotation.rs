@@ -31,6 +31,29 @@ impl Shell {
         cx.notify();
     }
 
+    /// A review conversation from the stage: sent as a turn, or into the
+    /// composer's draft (`handleSendReviewThreadToAgent`).
+    pub(super) fn thread_to_agent(
+        &mut self,
+        annotation: &dcc_core::domain::code_annotation::CodeAnnotation,
+        instruction: &str,
+        send: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = content(annotation, instruction);
+        let composer = self.conversation.read(cx).composer.clone();
+        if send {
+            let sent =
+                composer.update(cx, |composer, cx| composer.send_annotation(text, false, cx));
+            if !sent {
+                Toaster::error(cx.t("native.sendFailed"), cx);
+            }
+        } else {
+            composer.update(cx, |composer, cx| composer.append_text(&text, window, cx));
+        }
+    }
+
     fn on_annotation(
         &mut self,
         card: &Entity<AnnotationCard>,

@@ -36,8 +36,9 @@ fn open(
     let sink = seen.clone();
     cx.update(|_, cx| {
         cx.subscribe(&view, move |_, event: &DiffViewEvent, _| {
-            let DiffViewEvent::Annotate(request) = event;
-            sink.borrow_mut().push(request.clone());
+            if let DiffViewEvent::Annotate(request) = event {
+                sink.borrow_mut().push(request.clone());
+            }
         })
         .detach();
     });

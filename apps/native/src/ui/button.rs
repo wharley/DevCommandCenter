@@ -203,8 +203,16 @@ impl RenderOnce for Button {
         let disabled = self.disabled;
         let current_background = self.current.then_some(colors.accent);
 
+        // Tests find a button by its name.
+        let selector = match &self.id {
+            ElementId::Name(name) => Some(name.to_string()),
+            _ => None,
+        };
         div()
             .id(self.id)
+            .when_some(selector, |button, selector| {
+                button.debug_selector(move || selector.clone())
+            })
             .relative()
             .flex()
             .flex_shrink_0()

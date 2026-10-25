@@ -543,3 +543,93 @@ fn a_gitlab_pipeline_opens_a_jobs_log_and_runs_it_again(cx: &mut TestAppContext)
         (json!(77), json!(2))
     );
 }
+
+#[gpui::test]
+fn the_badge_a_listed_conversation_and_the_tree_open_the_stage_on_it(cx: &mut TestAppContext) {
+    use crate::screens::stage::DiffRequest;
+    use dcc_core::domain::workspace_git::{WorkspaceGitBranchDiffOutput, WorkspaceGitPreviewScope};
+
+    let comments = json!({
+        "provider": "github", "host": "github.com", "number": 12,
+        "comments": [
+            thread_comment("t-open", "src/a.rs", Some(3), false, false),
+            thread_comment("t-done", "src/a.rs", Some(9), true, false),
+            thread_comment("t-old", "src/b.rs", Some(4), false, true),
+        ],
+    });
+    let (column, cx, setup) = open_routed(
+        cx,
+        &[("src/a.rs", "um\n"), ("src/b.rs", "um\n")],
+        vec![
+            (
+                "/api/v1/forge/context",
+                200,
+                connected("ana", "ana").to_string(),
+            ),
+            ("/api/v1/forge/review-comments", 200, comments.to_string()),
+        ],
+    );
+    let opened = |setup: &Setup| -> Vec<DiffRequest> {
+        setup
+            .events
+            .borrow()
+            .iter()
+            .filter_map(|event| match event {
+                CodeColumnEvent::OpenDiff(request) => Some(request.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    // The card's badge: its diff, landing on the first open conversation.
+    let badge = cx.debug_bounds("review-badge-src/a.rs").unwrap();
+    cx.simulate_click(badge.center(), Modifiers::none());
+    let request = opened(&setup).pop().expect("the card's diff");
+    let review = request.review.expect("with its conversations");
+    assert_eq!(request.path, "src/a.rs");
+    assert!(review.focus && review.thread_id.is_none());
+    assert_eq!(review.comments.len(), 2, "only this file's");
+    assert_eq!(review.forge_login.as_deref(), Some("ana"));
+    // A listed conversation opens on itself: in the PR's diff when the
+    // branch's base is known, else in the local one.
+    let toggle = cx.debug_bounds("threads-toggle").unwrap();
+    cx.simulate_click(toggle.center(), Modifiers::none());
+    cx.run_until_parked();
+    let row = cx.debug_bounds("thread-open-t-old").unwrap();
+    cx.simulate_click(row.center(), Modifiers::none());
+    let request = opened(&setup).pop().unwrap();
+    let base = column.read_with(cx, |column, _| column.changes.base_branch());
+    assert_eq!(request.path, "src/b.rs");
+    assert_eq!(
+        request.scope,
+        if base.is_some() {
+            WorkspaceGitPreviewScope::Committed
+        } else {
+            WorkspaceGitPreviewScope::Unstaged
+        }
+    );
+    assert_eq!(request.base, base);
+    assert_eq!(request.review.unwrap().thread_id.as_deref(), Some("t-old"));
+    // With the base known, a tree file with conversations opens in the PR's
+    // diff; one without opens as a file.
+    column.update(cx, |column, cx| {
+        column.changes.branch = super::super::Loaded::Ready(WorkspaceGitBranchDiffOutput {
+            changes: Vec::new(),
+            base_branch: Some("main".into()),
+        });
+        column.open_file("src/a.rs", cx);
+        column.open_file("README.md", cx);
+    });
+    let request = opened(&setup).pop().unwrap();
+    assert_eq!(
+        (request.scope, request.base.as_deref()),
+        (WorkspaceGitPreviewScope::Committed, Some("main"))
+    );
+    assert!(
+        setup
+            .events
+            .borrow()
+            .iter()
+            .any(|event| *event == CodeColumnEvent::OpenFile("README.md".into()))
+    );
+    let _ = requests(setup.server);
+}

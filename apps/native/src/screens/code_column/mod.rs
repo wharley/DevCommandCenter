@@ -6,7 +6,7 @@ mod changes;
 mod delegation;
 mod delivery;
 mod recap;
-mod review;
+pub(crate) mod review;
 mod tree;
 mod turn;
 mod view;
@@ -347,7 +347,13 @@ impl CodeColumn {
         }
     }
 
+    /// A file from the tree; one with PR conversations opens in the pull
+    /// request's diff (`handleOpenCodeFileFromTree`).
     pub(crate) fn open_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        if let Some(request) = self.file_pr_diff(path) {
+            cx.emit(CodeColumnEvent::OpenDiff(request));
+            return;
+        }
         cx.emit(CodeColumnEvent::OpenFile(path.to_string()));
     }
 

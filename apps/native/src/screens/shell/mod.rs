@@ -249,6 +249,11 @@ impl Shell {
             StageEvent::Annotate(request) => {
                 self.open_annotation(request.clone(), true, window, cx)
             }
+            StageEvent::ThreadToAgent {
+                annotation,
+                instruction,
+                send,
+            } => self.thread_to_agent(annotation, instruction, *send, window, cx),
             StageEvent::Closed { to_changes } => {
                 self.code_column.update(cx, |column, cx| {
                     column.set_open_diff(None, cx);

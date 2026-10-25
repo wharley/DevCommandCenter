@@ -17,6 +17,7 @@ fn request(root: &std::path::Path) -> DiffRequest {
         scope: WorkspaceGitPreviewScope::Unstaged,
         base: None,
         from_changes: true,
+        review: None,
     }
 }
 

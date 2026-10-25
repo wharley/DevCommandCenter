@@ -4,6 +4,7 @@
 //! Pierre themes, and folded unchanged runs that open on click. The code
 //! column's change cards use it now; the center's diff tabs will too.
 
+mod marks;
 mod palette;
 mod pick;
 mod pick_view;
@@ -58,6 +59,10 @@ pub struct DiffView {
     source: Option<pick::Source>,
     /// Lines picked to send to the agent (off unless `annotatable`).
     pub(crate) picking: Option<pick::Picking>,
+    /// The pull request's conversations marked on the lines.
+    pub(crate) marks: Vec<dcc_core::domain::review_thread_detail::ReviewMark>,
+    /// A line to bring into view once the lines are in.
+    pub(crate) pending_reveal: Option<(dcc_core::domain::code_annotation::AnnotationSide, usize)>,
     _compute: Option<Task<()>>,
 }
 
@@ -97,6 +102,16 @@ impl DiffView {
         })
     }
 
+    /// Both whole texts, when the diff has them (not a patch).
+    pub fn texts(&self) -> Option<(String, String)> {
+        let source = self
+            .picking
+            .as_ref()
+            .map(|picking| &picking.source)
+            .or(self.source.as_ref())?;
+        Some((source.original.to_string(), source.modified.to_string()))
+    }
+
     /// Lines can be picked and sent to the agent (`onAnnotate`): a diff of
     /// both whole texts only, not a patch.
     pub fn annotatable(mut self) -> Self {
@@ -129,6 +144,8 @@ impl DiffView {
             seen_top: None,
             source,
             picking: None,
+            marks: Vec::new(),
+            pending_reveal: None,
             _compute: None,
         };
         view._compute = Some(cx.spawn(async move |this, cx| {
@@ -147,6 +164,7 @@ impl DiffView {
                 view.split_rows = split_rows(&computed.diff, &view.rows);
                 view.list.reset(view.shown_rows());
                 view.state = State::Ready(Box::new(computed));
+                view.take_pending_reveal(cx);
                 cx.notify();
             });
             if shown.is_err() {
@@ -170,6 +188,10 @@ impl DiffView {
             });
         }));
         view
+    }
+
+    pub(crate) fn palette(&self) -> DiffPalette {
+        DiffPalette::new(self.dark)
     }
 
     pub(crate) fn list_top(&self) -> (usize, gpui::Pixels) {
@@ -294,3 +316,7 @@ pub(crate) fn compute(path: &str, original: &str, modified: &str, dark: bool) ->
 #[cfg(test)]
 #[path = "pick_tests.rs"]
 mod pick_tests;
+
+#[cfg(test)]
+#[path = "marks_tests.rs"]
+mod marks_tests;

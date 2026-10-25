@@ -9,6 +9,8 @@
 mod dialogs;
 mod files;
 mod image;
+mod review;
+mod review_view;
 mod save;
 mod view;
 
@@ -30,6 +32,7 @@ actions!(stage, [ShowChat, Save]);
 const CONTEXT: &str = "Stage";
 
 pub fn bind_keys(cx: &mut gpui::App) {
+    review_view::bind_keys(cx);
     cx.bind_keys([
         gpui::KeyBinding::new("escape", ShowChat, Some(CONTEXT)),
         gpui::KeyBinding::new("cmd-s", Save, Some(CONTEXT)),
@@ -42,7 +45,7 @@ pub(crate) enum Discard {
     Tab(usize),
     All,
     /// A diff opening in place of the files.
-    ForDiff(DiffRequest),
+    ForDiff(Box<DiffRequest>),
 }
 
 /// The disk moved on under an edit (`ReconcileDialog`).
@@ -67,7 +70,11 @@ pub struct DiffRequest {
     pub base: Option<String>,
     /// Opened from "Mudanças" (`gitDiffExpanded`): closing goes back there.
     pub from_changes: bool,
+    /// The pull request's conversations on the file, when it has some.
+    pub review: Option<ReviewRequest>,
 }
+
+pub use review::ReviewRequest;
 
 pub(crate) enum DiffLoad {
     Loading(#[allow(dead_code)] Task<()>),
@@ -80,6 +87,7 @@ pub(crate) struct StageDiff {
     pub load: DiffLoad,
     /// The theme it was colored for.
     dark: bool,
+    pub(crate) review: Option<review::StageReview>,
     _annotate: Option<Subscription>,
 }
 
@@ -89,6 +97,12 @@ pub enum StageEvent {
     Closed { to_changes: bool },
     /// Code picked in the diff or a file, for the agent.
     Annotate(AnnotationRequest),
+    /// A review conversation for the agent: sent, or into the composer.
+    ThreadToAgent {
+        annotation: dcc_core::domain::code_annotation::CodeAnnotation,
+        instruction: String,
+        send: bool,
+    },
 }
 
 pub struct Stage {
@@ -109,6 +123,8 @@ pub struct Stage {
     pub(crate) focus_editor: bool,
     /// The desktop to save through (tests point it elsewhere).
     pub(crate) endpoint: Option<crate::data::desktop_api::DesktopApi>,
+    /// The database the branch's base is read from (tests use their own).
+    pub(crate) db_path: std::path::PathBuf,
     _save: Option<Task<()>>,
 }
 
@@ -134,6 +150,7 @@ impl Stage {
             reconcile: None,
             focus_editor: false,
             endpoint: None,
+            db_path: crate::data::loader::database_path(),
             _save: None,
         }
     }
@@ -162,7 +179,7 @@ impl Stage {
             .as_ref()
             .is_some_and(|tabs| tabs.files.iter().any(|file| file.is_dirty(cx)));
         if dirty {
-            self.discard = Some(Discard::ForDiff(request));
+            self.discard = Some(Discard::ForDiff(Box::new(request)));
             cx.notify();
             return;
         }
@@ -178,13 +195,46 @@ impl Stage {
         self.files = None;
         self.chat_active = false;
         let dark = cx.theme_dark();
-        self.load(request, dark, cx);
+        let review = request
+            .review
+            .clone()
+            .map(|source| self.new_review(source, window, cx));
+        self.load(request, dark, review, cx);
+        if self.review().is_some() {
+            self.follow_review(cx);
+        }
         window.focus(&self.focus, cx);
         cx.notify();
     }
 
-    fn load(&mut self, request: DiffRequest, dark: bool, cx: &mut Context<Self>) {
-        let read = request.clone();
+    /// Reads the diff again (the PR's or the local one), its review kept.
+    pub(crate) fn reload_diff(&mut self, cx: &mut Context<Self>) {
+        let Some(diff) = self.diff.take() else {
+            return;
+        };
+        let dark = cx.theme_dark();
+        self.load(diff.request, dark, diff.review, cx);
+        cx.notify();
+    }
+
+    fn load(
+        &mut self,
+        request: DiffRequest,
+        dark: bool,
+        review: Option<review::StageReview>,
+        cx: &mut Context<Self>,
+    ) {
+        self.diff = Some(StageDiff {
+            request: request.clone(),
+            load: DiffLoad::Loading(Task::ready(())),
+            dark,
+            review,
+            _annotate: None,
+        });
+        let Some((scope, status, base)) = self.content_params() else {
+            return;
+        };
+        let read = request;
         let task = cx.spawn(async move |this, cx| {
             let path = read.path.clone();
             let content = cx
@@ -193,9 +243,9 @@ impl Stage {
                     dcc_infra::workspace_file_preview::file_preview_content(
                         &read.root,
                         &read.path,
-                        &read.status,
-                        &read.scope,
-                        read.base.as_deref(),
+                        &status,
+                        &scope,
+                        base.as_deref(),
                     )
                 })
                 .await;
@@ -216,35 +266,36 @@ impl Stage {
                             }
                             .annotatable()
                         });
-                        diff._annotate = Some(cx.subscribe(
-                            &view,
-                            |_, _, event: &DiffViewEvent, cx| match event {
-                                DiffViewEvent::Annotate(request) => {
-                                    cx.emit(StageEvent::Annotate(request.clone()))
+                        diff._annotate =
+                            Some(cx.subscribe(&view, |stage, _, event: &DiffViewEvent, cx| {
+                                match event {
+                                    DiffViewEvent::Annotate(request) => {
+                                        cx.emit(StageEvent::Annotate(request.clone()))
+                                    }
+                                    // A callout opens its conversation where it is.
+                                    DiffViewEvent::OpenMark(id) => {
+                                        stage.open_thread(id.clone(), false, cx)
+                                    }
                                 }
-                            },
-                        ));
+                            }));
                         DiffLoad::Ready(view)
                     }
                     Err(error) => DiffLoad::Failed(error),
                 };
+                stage.review_changed(cx);
                 cx.notify();
             });
         });
-        self.diff = Some(StageDiff {
-            request,
-            load: DiffLoad::Loading(task),
-            dark,
-            _annotate: None,
-        });
+        if let Some(diff) = self.diff.as_mut() {
+            diff.load = DiffLoad::Loading(task);
+        }
     }
 
     /// A diff colored for the other theme is read again.
     pub(crate) fn follow_theme(&mut self, cx: &mut Context<Self>) {
         let dark = cx.theme_dark();
-        if let Some(diff) = self.diff.as_ref().filter(|diff| diff.dark != dark) {
-            let request = diff.request.clone();
-            self.load(request, dark, cx);
+        if self.diff.as_ref().is_some_and(|diff| diff.dark != dark) {
+            self.reload_diff(cx);
         }
     }
 
@@ -309,3 +360,7 @@ impl<T> ThemeDark for Context<'_, T> {
         self.theme().appearance == Appearance::Dark
     }
 }
+
+#[cfg(test)]
+#[path = "review_tests.rs"]
+mod review_tests;

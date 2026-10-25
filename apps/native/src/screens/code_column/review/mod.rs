@@ -8,6 +8,7 @@ mod failure;
 mod identity;
 mod picker;
 mod pipeline;
+mod stage;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -17,7 +18,7 @@ pub(crate) use failure::{failure_section, recovery_confirm};
 pub(crate) use identity::identity_chip;
 pub(crate) use pipeline::{pipeline_retry_confirm, pipeline_section};
 pub(crate) use state::review_section;
-pub(crate) use threads::{review_badge, threads_section};
+pub(crate) use threads::{first_line, review_badge, state_chip, threads_section};
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};

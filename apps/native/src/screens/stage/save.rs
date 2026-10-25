@@ -175,7 +175,7 @@ impl Stage {
         match self.discard.take() {
             Some(Discard::Tab(at)) => self.close_file(at, window, cx),
             Some(Discard::All) => self.close(cx),
-            Some(Discard::ForDiff(request)) => self.replace_with_diff(request, window, cx),
+            Some(Discard::ForDiff(request)) => self.replace_with_diff(*request, window, cx),
             None => {}
         }
         cx.notify();

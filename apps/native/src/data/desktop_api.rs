@@ -70,6 +70,18 @@ impl std::fmt::Display for ApiError {
 }
 
 /// How the turn runs, as the composer chose it; `None` leaves the session's.
+/// A reply on a pull request conversation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThreadReply {
+    pub root: String,
+    pub number: u32,
+    /// The conversation's root comment (GitHub replies to it).
+    pub comment_id: String,
+    pub thread_id: String,
+    pub body: String,
+    pub login: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TurnOptions {
     pub provider_id: Option<String>,
@@ -685,6 +697,45 @@ impl DesktopApi {
             "/api/v1/forge/review-comments",
             &json!({ "workspaceRoot": root, "branch": branch, "forgeLogin": login }),
         )?)
+    }
+
+    /// A reply on a review conversation, as the forge's signed-in account
+    /// (`pull_request_hub_reply_thread`).
+    pub fn reply_thread(&self, reply: &ThreadReply) -> Result<(), ApiError> {
+        self.post(
+            "/api/v1/forge/reply-thread",
+            &json!({
+                "repositoryRoot": reply.root,
+                "number": reply.number,
+                "commentId": reply.comment_id,
+                "threadId": reply.thread_id,
+                "body": reply.body,
+                "forgeLogin": reply.login,
+            }),
+        )
+        .map(|_| ())
+    }
+
+    /// Resolves (or reopens) a review conversation.
+    pub fn resolve_thread(
+        &self,
+        root: &str,
+        number: u32,
+        thread_id: &str,
+        resolved: bool,
+        login: Option<&str>,
+    ) -> Result<(), ApiError> {
+        self.post(
+            "/api/v1/forge/resolve-thread",
+            &json!({
+                "repositoryRoot": root,
+                "number": number,
+                "threadId": thread_id,
+                "resolved": resolved,
+                "forgeLogin": login,
+            }),
+        )
+        .map(|_| ())
     }
 
     /// The current commit's GitLab pipeline.

@@ -140,6 +140,7 @@ fn buffer_stripes(color: Hsla) -> impl IntoElement {
 /// the code scrolled sideways by `scroll`; `None` is a side left empty.
 #[allow(clippy::too_many_arguments)]
 fn line_cells(
+    view: &DiffView,
     computed: &Computed,
     index: Option<usize>,
     side: Side,
@@ -181,6 +182,11 @@ fn line_cells(
         Side::Old => true,
         Side::New => false,
         Side::Unified => line.kind == LineKind::Deletion,
+    };
+    let column = if old_side {
+        DiffColumn::Deletions
+    } else {
+        DiffColumn::Additions
     };
     let (spans, number) = if old_side {
         (
@@ -244,6 +250,14 @@ fn line_cells(
         .group_hover(group, move |style| style.bg(gutter_hover))
         .text_color(number_color)
         .children(number.map(|number| number.to_string()));
+    // `box-shadow: inset 3px 0 0` on a line a conversation is about.
+    let marked = number.is_some_and(|number| view.marked(column, number));
+    let bar = if old_side {
+        palette.deleted
+    } else {
+        palette.selection_base
+    };
+    let callouts = number.and_then(|number| view.callouts(column, number, number_width + 2.0, cx));
     let row = div().group(group).relative().flex().h(px(LINE)).w_full();
     let (number_cell, row) = match pick {
         Some(pick) => pick_listeners(number_cell, row, pick.point, cx),
@@ -265,6 +279,17 @@ fn line_cells(
                 .overflow_hidden()
                 .bg(line_bg)
                 .group_hover(group, move |style| style.bg(line_hover))
+                .when(marked, |code| {
+                    code.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .h_full()
+                            .w(px(3.0))
+                            .bg(bar),
+                    )
+                })
                 .children(mark.map(|(mark, color)| {
                     div()
                         .absolute()
@@ -285,6 +310,10 @@ fn line_cells(
                 ),
         )
         .children(plus)
+        .pipe(|row| match callouts {
+            Some(callouts) => div().flex().flex_col().w_full().child(row).child(callouts),
+            None => row,
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -300,6 +329,7 @@ fn line_row(
 ) -> AnyElement {
     let pick = view.pick_cell(view.unified_point(row));
     line_cells(
+        view,
         computed,
         Some(index),
         Side::Unified,
@@ -364,6 +394,7 @@ fn pair_row(
     let old_pick = view.pick_cell(view.split_point(row, DiffColumn::Deletions));
     let new_pick = view.pick_cell(view.split_point(row, DiffColumn::Additions));
     let old_cells = line_cells(
+        view,
         computed,
         old,
         Side::Old,
@@ -375,6 +406,7 @@ fn pair_row(
         cx,
     );
     let new_cells = line_cells(
+        view,
         computed,
         new,
         Side::New,

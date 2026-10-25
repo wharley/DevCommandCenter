@@ -211,6 +211,7 @@ pub(super) fn file_row(
         .children(crate::screens::code_column::review::review_badge(
             column,
             &entry.path,
+            at,
             cx,
         ))
         .child(

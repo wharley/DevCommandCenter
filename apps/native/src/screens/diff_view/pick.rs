@@ -87,6 +87,8 @@ impl Source {
 pub enum DiffViewEvent {
     /// Lines to send to the agent.
     Annotate(AnnotationRequest),
+    /// A pull request conversation's callout, by thread id.
+    OpenMark(String),
 }
 
 /// The pick state of an annotating diff.

@@ -65,7 +65,7 @@ fn threads_in_order(
         .collect()
 }
 
-fn first_line(body: &str) -> String {
+pub(crate) fn first_line(body: &str) -> String {
     body.lines()
         .map(str::trim)
         .find(|line| !line.is_empty())
@@ -74,7 +74,7 @@ fn first_line(body: &str) -> String {
 }
 
 /// `ReviewThreadStateChip`
-fn state_chip(state: ReviewThreadState, cx: &Context<CodeColumn>) -> AnyElement {
+pub(crate) fn state_chip(state: ReviewThreadState, cx: &gpui::App) -> AnyElement {
     let colors = cx.theme().colors.clone();
     let dark = cx.theme().appearance == Appearance::Dark;
     let (background, text, key) = match state {
@@ -154,9 +154,18 @@ fn thread_row(
                 }),
         )
         .child(
-            // Opening the conversation in the pull request's diff is the
-            // stage's (screen 6).
+            // The conversation opens on its line, in the pull request's diff.
             div()
+                .id(SharedString::from(format!("thread-open-{}", thread.id)))
+                .debug_selector({
+                    let id = thread.id.clone();
+                    move || format!("thread-open-{id}")
+                })
+                .cursor_pointer()
+                .on_click({
+                    let thread = thread.clone();
+                    cx.listener(move |column, _, _, cx| column.open_thread_on_stage(&thread, cx))
+                })
                 .flex()
                 .flex_1()
                 .min_w_0()
@@ -391,11 +400,13 @@ pub(crate) fn threads_section(
     )
 }
 
-/// `ReviewCommentBadge`: a file's conversations still open on the PR.
+/// `ReviewCommentBadge`: a file's conversations still open on the PR; it
+/// opens the card's diff on the first of them.
 pub(crate) fn review_badge(
     column: &CodeColumn,
     path: &str,
-    cx: &Context<CodeColumn>,
+    at: usize,
+    cx: &mut Context<CodeColumn>,
 ) -> Option<AnyElement> {
     let count = *column.review.open_by_path.get(path)?;
     let colors = cx.theme().colors.clone();
@@ -420,6 +431,11 @@ pub(crate) fn review_badge(
                 .font_weight(FontWeight::SEMIBOLD)
                 .font_features(tabular_nums())
                 .text_color(colors.primary)
+                .cursor_pointer()
+                .on_click(cx.listener(move |column, _, _, cx| {
+                    cx.stop_propagation();
+                    column.open_change_focused(at, true, cx)
+                }))
                 .child(Icon::new("message-square").size(10.0).stroke(2.0))
                 .child(count.to_string()),
             move |_, _| div().child(label.clone()).into_any_element(),
