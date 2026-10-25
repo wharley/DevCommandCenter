@@ -5,16 +5,20 @@
 //! column's change cards use it now; the center's diff tabs will too.
 
 mod palette;
+mod pick;
+mod pick_view;
 #[cfg(test)]
 mod tests;
 mod view;
 
-use gpui::{Context, ListAlignment, ListState, Task, px};
+use gpui::{Context, EventEmitter, ListAlignment, ListState, Task, px};
 
 use crate::data::diff::{DiffLine, FileDiff, LineKind, Row, SplitRow, split_rows};
 use crate::data::highlight::{Span, highlight};
 
 pub use palette::DiffPalette;
+pub use pick::DiffViewEvent;
+pub(crate) use pick_view::selected_colors;
 pub(crate) use view::styled_runs;
 
 /// `tab-size: 2`
@@ -50,8 +54,14 @@ pub struct DiffView {
     pub(crate) scroll_x_new: f32,
     /// Where the list stood after the last wheel event (or frame).
     pub(crate) seen_top: Option<(usize, gpui::Pixels)>,
+    /// Both whole texts, until `annotatable` turns picking on.
+    source: Option<pick::Source>,
+    /// Lines picked to send to the agent (off unless `annotatable`).
+    pub(crate) picking: Option<pick::Picking>,
     _compute: Option<Task<()>>,
 }
+
+impl EventEmitter<DiffViewEvent> for DiffView {}
 
 /// The colors of both sides, once the grammar went through them.
 struct Colors {
@@ -67,7 +77,10 @@ impl DiffView {
         dark: bool,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::start(path, dark, false, cx, move || lines(&original, &modified))
+        let source = pick::Source::new(&path, &original, &modified);
+        Self::start(path, dark, false, Some(source), cx, move || {
+            lines(&original, &modified)
+        })
     }
 
     /// The stage's view of a modified file: the old side beside the new.
@@ -78,18 +91,29 @@ impl DiffView {
         dark: bool,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::start(path, dark, true, cx, move || lines(&original, &modified))
+        let source = pick::Source::new(&path, &original, &modified);
+        Self::start(path, dark, true, Some(source), cx, move || {
+            lines(&original, &modified)
+        })
+    }
+
+    /// Lines can be picked and sent to the agent (`onAnnotate`): a diff of
+    /// both whole texts only, not a patch.
+    pub fn annotatable(mut self) -> Self {
+        self.picking = self.source.take().map(pick::Picking::new);
+        self
     }
 
     /// A captured patch (`WorkspacePatchDiff`): its hunks only.
     pub fn from_patch(path: String, patch: String, dark: bool, cx: &mut Context<Self>) -> Self {
-        Self::start(path, dark, false, cx, move || patch_lines(&patch))
+        Self::start(path, dark, false, None, cx, move || patch_lines(&patch))
     }
 
     fn start(
         path: String,
         dark: bool,
         split: bool,
+        source: Option<pick::Source>,
         cx: &mut Context<Self>,
         compute: impl FnOnce() -> (Computed, String, String) + Send + 'static,
     ) -> Self {
@@ -103,6 +127,8 @@ impl DiffView {
             scroll_x: 0.0,
             scroll_x_new: 0.0,
             seen_top: None,
+            source,
+            picking: None,
             _compute: None,
         };
         view._compute = Some(cx.spawn(async move |this, cx| {
@@ -166,6 +192,11 @@ impl DiffView {
             return;
         };
         computed.diff.expand(gap, all);
+        // The rows move: a pick would point at others.
+        if let Some(picking) = self.picking.as_mut() {
+            picking.pick = None;
+            picking.drag = None;
+        }
         let next = computed.diff.rows();
         let next_split = split_rows(&computed.diff, &next);
         fn first_changed<T: PartialEq>(old: &[T], new: &[T]) -> usize {
@@ -259,3 +290,7 @@ pub(crate) fn compute(path: &str, original: &str, modified: &str, dark: bool) ->
     computed.new_spans = highlight(&modified, path, dark, usize::MAX);
     computed
 }
+
+#[cfg(test)]
+#[path = "pick_tests.rs"]
+mod pick_tests;

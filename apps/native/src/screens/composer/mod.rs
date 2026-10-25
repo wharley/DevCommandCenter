@@ -4,6 +4,7 @@
 //! conversation while you move between tasks. Files go in as chips: the +
 //! menu, a pasted image, a drop, or `@arquivo`.
 
+mod annotation;
 mod attachments;
 mod context_rail;
 mod controls;
@@ -53,6 +54,8 @@ pub struct ComposerSession {
     pub project_id: Option<String>,
     /// No conversation yet: the first prompt starts one.
     pub start: Option<crate::data::conversation::ThreadStart>,
+    /// How another conversation of the task starts ("Nova sessão").
+    pub new_thread: Option<crate::data::conversation::ThreadStart>,
     /// Follow-ups waiting for the running turn (`project_turn_queue`).
     pub queue: std::sync::Arc<Vec<dcc_core::domain::session::QueuedTurn>>,
     /// The DCC's own objective (the toolbar's "Objetivo").
@@ -82,6 +85,8 @@ impl ComposerSession {
 pub enum ComposerEvent {
     /// A turn was sent or stopped: read the history again now.
     Refresh,
+    /// A conversation the composer just started elsewhere in the task.
+    OpenSession(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

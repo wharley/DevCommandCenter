@@ -196,21 +196,28 @@ impl Stage {
                         let line = file.focus_line.take();
                         let name = file.path.clone();
                         let view = cx.new(|cx| {
-                            let mut view = FileView::new(name, text, indentation, dark, cx);
+                            let mut view =
+                                FileView::new(name, text, indentation, dark, cx).annotatable();
                             view.focus(line, cx);
                             view
                         });
                         // The first edit pins a preview tab.
                         let edited_path = path.clone();
-                        file._edited =
-                            Some(cx.subscribe(&view, move |stage, _, _: &FileViewEvent, cx| {
+                        file._edited = Some(cx.subscribe(
+                            &view,
+                            move |stage, _, event: &FileViewEvent, cx| {
+                                if let FileViewEvent::Annotate(request) = event {
+                                    cx.emit(super::StageEvent::Annotate(request.clone()));
+                                    return;
+                                }
                                 if let Some(file) = stage.files.as_mut().and_then(|tabs| {
                                     tabs.files.iter_mut().find(|file| file.path == edited_path)
                                 }) {
                                     file.preview = false;
                                 }
                                 cx.notify();
-                            }));
+                            },
+                        ));
                         FileLoad::Text(view)
                     }
                     Err(error) => FileLoad::Failed(error),

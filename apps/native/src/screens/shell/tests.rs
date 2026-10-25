@@ -280,3 +280,49 @@ fn a_file_from_the_tree_or_a_conversation_link_opens_on_the_stage(cx: &mut TestA
         )
     });
 }
+
+#[gpui::test]
+fn code_from_the_stage_opens_the_card_and_goes_to_the_composer(cx: &mut TestAppContext) {
+    use dcc_core::domain::code_annotation::{AnnotationSide, CodeAnnotation, context_block};
+
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    cx.update(|_, cx| crate::screens::annotation::bind_keys(cx));
+    let annotation = CodeAnnotation {
+        path: "src/lib.rs".into(),
+        side: AnnotationSide::Modified,
+        start_line: 4,
+        end_line: 4,
+        snippet: "let x = 1;".into(),
+    };
+    shell.update(cx, |shell, cx| {
+        let composer = shell.conversation.read(cx).composer.clone();
+        composer.update(cx, |composer, cx| {
+            composer.set_session(
+                crate::screens::composer::ComposerSession {
+                    session_id: Some("a".into()),
+                    ..Default::default()
+                },
+                cx,
+            )
+        });
+        let request = crate::screens::annotation::AnnotationRequest {
+            annotation: annotation.clone(),
+            anchor: point(px(400.0), px(300.0)),
+        };
+        shell.stage.update(cx, |_, cx| {
+            cx.emit(crate::screens::stage::StageEvent::Annotate(request))
+        });
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("annotation-card").is_some(),
+        "the card opens"
+    );
+    let card = shell.read_with(cx, |shell, _| shell.annotation.as_ref().unwrap().0.clone());
+    card.update(cx, |card, cx| card.edit_in_composer(cx));
+    shell.read_with(cx, |shell, cx| {
+        assert!(shell.annotation.is_none(), "closed");
+        let composer = shell.conversation.read(cx).composer.read(cx);
+        assert_eq!(composer.input.read(cx).text(), context_block(&annotation));
+    });
+}

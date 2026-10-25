@@ -98,6 +98,7 @@ impl ConversationView {
                 &composer,
                 |view, _, event: &ComposerEvent, cx| match event {
                     ComposerEvent::Refresh => view.refresh_now(cx),
+                    ComposerEvent::OpenSession(session) => view.open_session(session.clone(), cx),
                 },
             );
         let list = ListState::new(0, ListAlignment::Bottom, px(800.0));
@@ -284,6 +285,7 @@ impl ConversationView {
             objective: next.objective.clone(),
             queue: next.queue.clone(),
             start: next.start.clone(),
+            new_thread: next.new_thread.clone(),
             project_id: next.project_id.clone(),
             auto_resume: next.auto_resume,
             context: next.context.clone(),

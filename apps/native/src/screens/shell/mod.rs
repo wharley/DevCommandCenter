@@ -1,6 +1,7 @@
 //! The window's frame: sidebar, resize separator and main area
 //! (`App.tsx` root `<main>`). Owns the layout and follows the OS theme.
 
+mod annotation;
 mod bootstrap;
 pub mod layout;
 mod regions;
@@ -78,6 +79,11 @@ pub struct Shell {
     bootstrap_provider: Option<(String, Option<String>)>,
     /// "Abrir projeto", while open.
     open_project: Option<(Entity<OpenProjectDialog>, Subscription)>,
+    /// "Enviar trecho ao agente", while open.
+    annotation: Option<(
+        Entity<crate::screens::annotation::card::AnnotationCard>,
+        Subscription,
+    )>,
     _appearance: Subscription,
     _sidebar_events: Subscription,
     _sidebar_data: Subscription,
@@ -131,7 +137,7 @@ impl Shell {
         let code_column = cx.new(|cx| CodeColumn::new(prefs.code_column_tab, cx));
         let code_column_events = cx.subscribe_in(&code_column, window, Self::on_code_column_event);
         let stage = cx.new(Stage::new);
-        let stage_events = cx.subscribe(&stage, Self::on_stage_event);
+        let stage_events = cx.subscribe_in(&stage, window, Self::on_stage_event);
         // A file link in the conversation opens on the stage.
         let links = cx.entity().downgrade();
         cx.set_global(crate::markdown::LinkHandler(std::rc::Rc::new(
@@ -185,6 +191,7 @@ impl Shell {
             surface: Surface::Conversation,
             focus_on_open: None,
             open_project: None,
+            annotation: None,
             bootstrap_provider: None,
             _appearance: appearance,
             _sidebar_events: sidebar_events,
@@ -231,8 +238,17 @@ impl Shell {
     }
 
     /// The stage's content closed: back to "Mudanças" when it came from there.
-    fn on_stage_event(&mut self, _: Entity<Stage>, event: &StageEvent, cx: &mut Context<Self>) {
+    fn on_stage_event(
+        &mut self,
+        _: &Entity<Stage>,
+        event: &StageEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match event {
+            StageEvent::Annotate(request) => {
+                self.open_annotation(request.clone(), true, window, cx)
+            }
             StageEvent::Closed { to_changes } => {
                 self.code_column.update(cx, |column, cx| {
                     column.set_open_diff(None, cx);
@@ -281,6 +297,9 @@ impl Shell {
                         stage.open_file(root, path, None, window, cx)
                     });
                 }
+            }
+            CodeColumnEvent::Annotate(request) => {
+                self.open_annotation(request.clone(), false, window, cx)
             }
             CodeColumnEvent::OpenDiff(request) => {
                 let open = Some((request.scope.clone(), request.path.clone()));
@@ -689,6 +708,7 @@ impl Render for Shell {
                 Surface::NewTask => self.new_task.clone().into_any_element(),
             }))
             .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))
+            .children(self.annotation.as_ref().map(|(card, _)| card.clone()))
             .children(Toaster::handle(cx))
     }
 }

@@ -17,10 +17,12 @@ mod tests;
 
 use dcc_core::domain::workspace_git::WorkspaceGitPreviewScope;
 use gpui::{
-    AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, Task, Window, actions,
+    AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, Subscription, Task, Window,
+    actions,
 };
 
-use crate::screens::diff_view::DiffView;
+use crate::screens::annotation::AnnotationRequest;
+use crate::screens::diff_view::{DiffView, DiffViewEvent};
 use crate::ui::tab_strip::TabStripState;
 
 actions!(stage, [ShowChat, Save]);
@@ -78,12 +80,15 @@ pub(crate) struct StageDiff {
     pub load: DiffLoad,
     /// The theme it was colored for.
     dark: bool,
+    _annotate: Option<Subscription>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StageEvent {
     /// The content closed; back to "Mudanças" when it was opened from there.
     Closed { to_changes: bool },
+    /// Code picked in the diff or a file, for the agent.
+    Annotate(AnnotationRequest),
 }
 
 pub struct Stage {
@@ -202,13 +207,25 @@ impl Stage {
                 diff.load = match content {
                     // `diffStyle: inline ? "unified" : "split"`: added, removed and
                     // new files read as one column, a modified one side by side.
-                    Ok((original, modified, inline)) => DiffLoad::Ready(cx.new(|cx| {
-                        if inline {
-                            DiffView::new(path.clone(), original, modified, dark, cx)
-                        } else {
-                            DiffView::side_by_side(path.clone(), original, modified, dark, cx)
-                        }
-                    })),
+                    Ok((original, modified, inline)) => {
+                        let view = cx.new(|cx| {
+                            if inline {
+                                DiffView::new(path.clone(), original, modified, dark, cx)
+                            } else {
+                                DiffView::side_by_side(path.clone(), original, modified, dark, cx)
+                            }
+                            .annotatable()
+                        });
+                        diff._annotate = Some(cx.subscribe(
+                            &view,
+                            |_, _, event: &DiffViewEvent, cx| match event {
+                                DiffViewEvent::Annotate(request) => {
+                                    cx.emit(StageEvent::Annotate(request.clone()))
+                                }
+                            },
+                        ));
+                        DiffLoad::Ready(view)
+                    }
                     Err(error) => DiffLoad::Failed(error),
                 };
                 cx.notify();
@@ -218,6 +235,7 @@ impl Stage {
             request,
             load: DiffLoad::Loading(task),
             dark,
+            _annotate: None,
         });
     }
 

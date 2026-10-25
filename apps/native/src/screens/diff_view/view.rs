@@ -4,12 +4,14 @@
 
 use std::ops::Range;
 
+use dcc_core::domain::code_annotation::DiffColumn;
 use gpui::{
     AnyElement, ClickEvent, ContentMask, Context, FontStyle, FontWeight, HighlightStyle, Hsla,
-    Path, Render, ScrollWheelEvent, SharedString, StyledText, Window, canvas, div, font, list,
-    point, prelude::*, px,
+    MouseButton, MouseUpEvent, Path, Render, ScrollWheelEvent, SharedString, StyledText, Window,
+    canvas, div, font, list, point, prelude::*, px,
 };
 
+use super::pick_view::{PickCell, pick_listeners, plus_button, selected_colors};
 use super::{Computed, DiffPalette, DiffView, State};
 use crate::data::diff::{GapPlace, LineKind, Row, SplitRow, unmodified_lines};
 use crate::data::highlight::Span;
@@ -136,6 +138,7 @@ fn buffer_stripes(color: Hsla) -> impl IntoElement {
 
 /// One side of a row: the number, the gutter's 2px edge, then `+`/`-` and
 /// the code scrolled sideways by `scroll`; `None` is a side left empty.
+#[allow(clippy::too_many_arguments)]
 fn line_cells(
     computed: &Computed,
     index: Option<usize>,
@@ -144,6 +147,8 @@ fn line_cells(
     cell: f32,
     number_width: f32,
     scroll: f32,
+    pick: Option<PickCell>,
+    cx: &mut Context<DiffView>,
 ) -> gpui::Div {
     let edge = div()
         .w(px(2.0))
@@ -203,10 +208,18 @@ fn line_cells(
             Some(("-", palette.deleted)),
         ),
     };
-    let (line_hover, gutter_hover) = match line.kind {
+    let (mut line_hover, mut gutter_hover) = match line.kind {
         LineKind::Context => (palette.hover, palette.hover),
         LineKind::Addition => (palette.added_line_hover, palette.added_gutter_hover),
         LineKind::Deletion => (palette.deleted_line_hover, palette.deleted_gutter_hover),
+    };
+    // A picked line keeps its selection color under the pointer.
+    let (line_bg, gutter_bg, number_color) = if pick.is_some_and(|pick| pick.selected) {
+        let (line, gutter, number) = selected_colors(palette, line_bg, gutter_bg);
+        (line_hover, gutter_hover) = (line, gutter);
+        (line, gutter, number)
+    } else {
+        (line_bg, gutter_bg, number_color)
     };
     let word = match line.kind {
         LineKind::Deletion => palette.deleted_word,
@@ -221,23 +234,26 @@ fn line_cells(
     let text = StyledText::new(SharedString::from(line.text.clone())).with_highlights(runs);
     let group = side.group();
     let left = -scroll;
-    div()
-        .group(group)
+    let number_cell = div()
         .flex()
-        .h(px(LINE))
-        .w_full()
-        .child(
-            div()
-                .flex()
-                .flex_shrink_0()
-                .justify_end()
-                .w(px(number_width))
-                .pr(px(cell))
-                .bg(gutter_bg)
-                .group_hover(group, move |style| style.bg(gutter_hover))
-                .text_color(number_color)
-                .children(number.map(|number| number.to_string())),
-        )
+        .flex_shrink_0()
+        .justify_end()
+        .w(px(number_width))
+        .pr(px(cell))
+        .bg(gutter_bg)
+        .group_hover(group, move |style| style.bg(gutter_hover))
+        .text_color(number_color)
+        .children(number.map(|number| number.to_string()));
+    let row = div().group(group).relative().flex().h(px(LINE)).w_full();
+    let (number_cell, row) = match pick {
+        Some(pick) => pick_listeners(number_cell, row, pick.point, cx),
+        None => (number_cell, row),
+    };
+    let plus = pick.and_then(|pick| {
+        pick.plus
+            .map(|pinned| plus_button(pick.point, pinned, group, number_width, cell, cx))
+    });
+    row.child(number_cell)
         // The gutter's `border-right: 2px solid var(--diffs-bg)`.
         .child(edge)
         .child(
@@ -268,16 +284,21 @@ fn line_cells(
                         .child(text),
                 ),
         )
+        .children(plus)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn line_row(
     view: &DiffView,
     computed: &Computed,
+    row: usize,
     index: usize,
     palette: &DiffPalette,
     cell: f32,
     number_width: f32,
+    cx: &mut Context<DiffView>,
 ) -> AnyElement {
+    let pick = view.pick_cell(view.unified_point(row));
     line_cells(
         computed,
         Some(index),
@@ -286,6 +307,8 @@ fn line_row(
         cell,
         number_width,
         view.scroll_x,
+        pick,
+        cx,
     )
     .into_any_element()
 }
@@ -296,6 +319,7 @@ fn line_row(
 fn pair_row(
     view: &DiffView,
     computed: &Computed,
+    row: usize,
     old: Option<usize>,
     new: Option<usize>,
     palette: &DiffPalette,
@@ -337,6 +361,8 @@ fn pair_row(
             )
             .child(cells)
     };
+    let old_pick = view.pick_cell(view.split_point(row, DiffColumn::Deletions));
+    let new_pick = view.pick_cell(view.split_point(row, DiffColumn::Additions));
     let old_cells = line_cells(
         computed,
         old,
@@ -345,6 +371,8 @@ fn pair_row(
         cell,
         number_width,
         view.scroll_x,
+        old_pick,
+        cx,
     );
     let new_cells = line_cells(
         computed,
@@ -354,6 +382,8 @@ fn pair_row(
         cell,
         number_width,
         view.scroll_x_new,
+        new_pick,
+        cx,
     );
     div()
         .flex()
@@ -512,6 +542,7 @@ impl Render for DiffView {
                                 Some(SplitRow::Pair { old, new }) => pair_row(
                                     view,
                                     computed,
+                                    index,
                                     old,
                                     new,
                                     &palette,
@@ -536,9 +567,16 @@ impl Render for DiffView {
                             };
                         }
                         match view.rows.get(index).cloned() {
-                            Some(Row::Line(line)) => {
-                                line_row(view, computed, line, &palette, cell, number_width)
-                            }
+                            Some(Row::Line(line)) => line_row(
+                                view,
+                                computed,
+                                index,
+                                line,
+                                &palette,
+                                cell,
+                                number_width,
+                                cx,
+                            ),
                             Some(Row::Separator { gap, hidden, place }) => {
                                 separator_row(Some(gap), hidden, place, false, &palette, cell, cx)
                             }
@@ -554,9 +592,12 @@ impl Render for DiffView {
             }
         };
         let longest = longest.0.max(longest.1);
+        let pill = super::pick_view::pill(self, cx);
+        let record = self.picking.as_ref().map(|picking| picking.bounds.clone());
         div()
             .id("diff-view")
             .debug_selector(|| "diff-view".into())
+            .relative()
             .size_full()
             .overflow_hidden()
             .bg(palette.background)
@@ -588,7 +629,23 @@ impl Render for DiffView {
                     view.seen_top = Some(top);
                 }),
             )
+            .when(self.picking(), |view| {
+                view.on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|view, _: &MouseUpEvent, _, cx| view.release(cx)),
+                )
+                .on_mouse_up_out(
+                    MouseButton::Left,
+                    cx.listener(|view, _: &MouseUpEvent, _, cx| view.release(cx)),
+                )
+            })
+            .children(record.map(|record| {
+                canvas(move |bounds, _, _| record.set(bounds), |_, _, _, _| {})
+                    .absolute()
+                    .inset_0()
+            }))
             .child(body)
+            .children(pill)
     }
 }
 

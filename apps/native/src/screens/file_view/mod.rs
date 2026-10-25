@@ -15,6 +15,7 @@ mod find_view;
 mod handler;
 mod keys;
 mod lines;
+mod pick;
 mod search;
 mod view;
 
@@ -47,10 +48,12 @@ const MAX_TOKENIZED: usize = 250_000;
 const RECOLOR_AFTER: Duration = Duration::from_millis(120);
 pub(crate) const LINE: f32 = 20.0;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum FileViewEvent {
     /// The text changed (the tab pins itself and shows unsaved).
     Edited,
+    /// Code picked for the agent.
+    Annotate(crate::screens::annotation::AnnotationRequest),
 }
 
 /// Where the text sits on screen, from the last frame (for the pointer
@@ -86,6 +89,8 @@ pub struct FileView {
     pub(crate) reveal: bool,
     /// The search panel, while open.
     pub(crate) search: Option<find::Search>,
+    /// Code can go to the agent from here (`annotatable`).
+    pub(crate) annotating: Option<pick::Annotating>,
     _colors: Option<Task<()>>,
     _blink: Option<Task<()>>,
 }
@@ -124,6 +129,7 @@ impl FileView {
             caret_moved: Instant::now(),
             reveal: false,
             search: None,
+            annotating: None,
             _colors: None,
             _blink: None,
         };
@@ -279,3 +285,7 @@ impl FileView {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "pick_tests.rs"]
+mod pick_tests;

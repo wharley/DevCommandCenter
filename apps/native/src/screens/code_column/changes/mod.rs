@@ -94,6 +94,8 @@ pub(crate) struct ChangeCard {
     pub index: usize,
     pub open: bool,
     pub diff: CardDiff,
+    /// Its diff's picked lines go to the agent.
+    pub annotate: Option<gpui::Subscription>,
 }
 
 impl ChangeCard {
@@ -320,6 +322,7 @@ impl Changes {
                     index,
                     open: start_open,
                     diff: CardDiff::Idle,
+                    annotate: None,
                 },
             };
             out.push(card);

@@ -18,6 +18,7 @@ fn color(rgba: u32) -> Hsla {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DiffPalette {
+    pub dark: bool,
     pub background: Hsla,
     pub foreground: Hsla,
     /// `--diffs-fg-number`: the foreground 65% into the background.
@@ -44,6 +45,8 @@ pub struct DiffPalette {
     pub deleted_line_hover: Hsla,
     pub added_gutter_hover: Hsla,
     pub deleted_gutter_hover: Hsla,
+    /// `--diffs-selection-base`: the theme's modified color.
+    pub selection_base: Hsla,
 }
 
 impl DiffPalette {
@@ -67,6 +70,8 @@ impl DiffPalette {
         let added_gutter = mix_lab(background, gutter, added);
         let deleted_gutter = mix_lab(background, gutter, deleted);
         Self {
+            dark,
+            selection_base: color(colors.modified),
             hover: mix_lab(background, hover, mixer),
             added_line_hover: mix_lab(added_line, hover, added),
             deleted_line_hover: mix_lab(deleted_line, hover, deleted),

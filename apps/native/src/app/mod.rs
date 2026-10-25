@@ -28,6 +28,7 @@ pub fn run() {
             crate::screens::shell::bind_keys(cx);
             crate::screens::stage::bind_keys(cx);
             crate::screens::file_view::bind_keys(cx);
+            crate::screens::annotation::bind_keys(cx);
             crate::ui::Toaster::init(cx);
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {

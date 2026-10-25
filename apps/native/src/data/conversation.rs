@@ -55,6 +55,9 @@ pub struct Conversation {
     pub queue: Arc<Vec<QueuedTurn>>,
     /// No conversation yet: the first prompt starts one.
     pub start: Option<ThreadStart>,
+    /// How another conversation of the task starts (a snippet sent to a
+    /// "Nova sessão"), whether or not it has one.
+    pub new_thread: Option<ThreadStart>,
     /// The task's project (`repository.projectId`).
     pub project_id: Option<String>,
     /// The DCC's own durable objective (the composer's "Objetivo").
@@ -401,11 +404,12 @@ pub fn load(
         conversation.branch = Some(branch);
         conversation.workspace_path = Some(path);
     }
+    conversation.new_thread = record
+        .as_ref()
+        .map(|record| thread_start(&workspaces, record))
+        .transpose()?;
     let Some(summary) = summary else {
-        conversation.start = record
-            .as_ref()
-            .map(|record| thread_start(&workspaces, record))
-            .transpose()?;
+        conversation.start = conversation.new_thread.clone();
         return Ok(conversation);
     };
     let activity = SessionActivityInput::from_summary(summary);

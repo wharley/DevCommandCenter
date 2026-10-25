@@ -45,6 +45,10 @@ pub struct Button {
     /// A text color of its own, at rest and on hover (`text-muted-foreground/60 hover:text-emerald-600`).
     text: Option<Hsla>,
     hover_text: Option<Hsla>,
+    /// A class of its own over the size (`h-7`, `text-[11px]`, `px-1.5`).
+    height: Option<f32>,
+    text_size: Option<f32>,
+    padding: Option<f32>,
     children: SmallVec<[AnyElement; 2]>,
     on_click: Option<ClickHandler>,
 }
@@ -60,6 +64,9 @@ impl Button {
             current: false,
             text: None,
             hover_text: None,
+            height: None,
+            text_size: None,
+            padding: None,
             children: SmallVec::new(),
             on_click: None,
         }
@@ -92,6 +99,23 @@ impl Button {
 
     pub fn hover_text_color(mut self, color: Hsla) -> Self {
         self.hover_text = Some(color);
+        self
+    }
+
+    /// `h-*` over the size's own.
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
+        self
+    }
+
+    pub fn text_size(mut self, size: f32) -> Self {
+        self.text_size = Some(size);
+        self
+    }
+
+    /// `px-*` over the size's own.
+    pub fn padding_x(mut self, padding: f32) -> Self {
+        self.padding = Some(padding);
         self
     }
 
@@ -172,6 +196,9 @@ impl RenderOnce for Button {
             Size::IconXs => (Some(24.0), 24.0, 0.0),
             Size::IconSm => (Some(28.0), 28.0, 0.0),
         };
+        let height = self.height.unwrap_or(height);
+        let padding = self.padding.unwrap_or(padding);
+        let text_size = self.text_size.unwrap_or(14.0);
         let on_click = self.on_click;
         let disabled = self.disabled;
         let current_background = self.current.then_some(colors.accent);
@@ -190,7 +217,7 @@ impl RenderOnce for Button {
             .rounded(theme.radius.lg)
             .border_1()
             .border_color(border.unwrap_or(gpui::transparent_black()))
-            .text_size(px(14.0))
+            .text_size(px(text_size))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(if self.current {
                 colors.foreground

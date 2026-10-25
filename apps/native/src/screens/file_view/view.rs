@@ -14,7 +14,7 @@ use gpui::{
 use super::buffer::expand_tabs;
 use super::{FileView, Geometry, LINE};
 use crate::data::highlight::{Span, editor_colors};
-use crate::screens::diff_view::{DiffPalette, styled_runs};
+use crate::screens::diff_view::{DiffPalette, selected_colors, styled_runs};
 
 /// The diff's font (`--diffs-font-family`).
 const FONT: &str = "Monaco";
@@ -62,7 +62,7 @@ struct RowStyle {
     caret_visible: bool,
 }
 
-fn row(view: &FileView, index: usize, style: &RowStyle) -> AnyElement {
+fn row(view: &FileView, index: usize, style: &RowStyle, cx: &mut Context<FileView>) -> AnyElement {
     let palette = &style.palette;
     let cell = style.cell;
     let raw = view.buffer.line(index);
@@ -117,6 +117,13 @@ fn row(view: &FileView, index: usize, style: &RowStyle) -> AnyElement {
                 .collect()
         })
         .unwrap_or_default();
+    // Lines the "+" is picking, toward the selection color.
+    let picked = view
+        .picked_lines()
+        .is_some_and(|lines| lines.contains(&index));
+    let (picked_line, picked_number, picked_fg) =
+        selected_colors(palette, palette.background, palette.background);
+    let plus = view.line_plus(index, GROUP, style.number_width, cell, cx);
     let brackets: Vec<f32> = style
         .brackets
         .into_iter()
@@ -126,6 +133,7 @@ fn row(view: &FileView, index: usize, style: &RowStyle) -> AnyElement {
         .collect();
     div()
         .group(GROUP)
+        .relative()
         .flex()
         .h(px(LINE))
         .w_full()
@@ -139,6 +147,12 @@ fn row(view: &FileView, index: usize, style: &RowStyle) -> AnyElement {
                 .bg(palette.background)
                 .text_color(palette.number)
                 .group_hover(GROUP, move |row| row.bg(hover))
+                .when(picked, |number| {
+                    number
+                        .bg(picked_number)
+                        .text_color(picked_fg)
+                        .group_hover(GROUP, move |row| row.bg(picked_number))
+                })
                 .child((index + 1).to_string()),
         )
         .child(
@@ -158,6 +172,10 @@ fn row(view: &FileView, index: usize, style: &RowStyle) -> AnyElement {
                 .when(active, |line| line.bg(style.line_highlight))
                 .when(!active, |line| {
                     line.group_hover(GROUP, move |row| row.bg(hover))
+                })
+                .when(picked, |line| {
+                    line.bg(picked_line)
+                        .group_hover(GROUP, move |row| row.bg(picked_line))
                 })
                 .children(matches.into_iter().map(|(from, to)| {
                     div()
@@ -208,6 +226,7 @@ fn row(view: &FileView, index: usize, style: &RowStyle) -> AnyElement {
                         .bg(style.caret)
                 })),
         )
+        .children(plus)
         .into_any_element()
 }
 
@@ -265,7 +284,7 @@ impl Render for FileView {
         });
         let entity = cx.entity();
         let rows = list(self.list.clone(), move |index, _, cx| {
-            row(entity.read(cx), index, &style)
+            entity.update(cx, |view, cx| row(view, index, &style, cx))
         })
         .size_full();
         let record = self.geometry.clone();
@@ -338,6 +357,11 @@ impl Render for FileView {
                 }),
             )
             .on_mouse_move(cx.listener(|view, event: &MouseMoveEvent, _, cx| {
+                if event.pressed_button == Some(MouseButton::Left) && view.picked_lines().is_some()
+                {
+                    view.drag_plus(event.position, cx);
+                    return;
+                }
                 if view.selecting && event.pressed_button == Some(MouseButton::Left) {
                     let offset = view.offset_at(event.position);
                     view.buffer.go(offset, true);
@@ -346,7 +370,19 @@ impl Render for FileView {
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|view, _: &MouseUpEvent, _, _| view.selecting = false),
+                cx.listener(|view, _: &MouseUpEvent, _, cx| {
+                    view.selecting = false;
+                    view.release_plus(cx);
+                    cx.notify();
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|view, _: &MouseUpEvent, _, cx| {
+                    view.selecting = false;
+                    view.release_plus(cx);
+                    cx.notify();
+                }),
             )
             .on_scroll_wheel(
                 cx.listener(move |view, event: &ScrollWheelEvent, window, cx| {
@@ -362,6 +398,7 @@ impl Render for FileView {
             .child(rows);
         // The search panel floats over the text, outside its keys.
         let panel = super::find_view::panel(self, cx);
+        let pill = self.selection_pill(number_width, cx);
         div()
             .relative()
             .size_full()
@@ -369,6 +406,7 @@ impl Render for FileView {
                 div().size_full().child(editor),
                 cx,
             ))
+            .children(pill)
             .children(panel)
     }
 }

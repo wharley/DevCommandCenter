@@ -182,9 +182,18 @@ impl CodeColumn {
                 card.diff = match content {
                     Ok((original, modified, _)) => {
                         let path = entry.path.clone();
-                        CardDiff::Ready(
-                            cx.new(|cx| DiffView::new(path, original, modified, dark, cx)),
-                        )
+                        let view = cx.new(|cx| {
+                            DiffView::new(path, original, modified, dark, cx).annotatable()
+                        });
+                        card.annotate = Some(cx.subscribe(
+                            &view,
+                            |_, _, event: &crate::screens::diff_view::DiffViewEvent, cx| {
+                                let crate::screens::diff_view::DiffViewEvent::Annotate(request) =
+                                    event;
+                                cx.emit(super::super::CodeColumnEvent::Annotate(request.clone()));
+                            },
+                        ));
+                        CardDiff::Ready(view)
                     }
                     Err(error) => CardDiff::Failed(error),
                 };

@@ -230,7 +230,7 @@ fn long_pastes_become_a_snippet_chip(cx: &mut TestAppContext) {
     });
 }
 
-fn catalog() -> Vec<dcc_core::domain::provider::ProviderDescriptor> {
+pub(super) fn catalog() -> Vec<dcc_core::domain::provider::ProviderDescriptor> {
     let mut providers = claude_only();
     let mut codex: dcc_core::domain::provider::ProviderDescriptor =
         serde_json::from_value(serde_json::to_value(&providers[0]).unwrap()).unwrap();

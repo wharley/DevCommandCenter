@@ -56,7 +56,7 @@ impl CodeColumnTab {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CodeColumnEvent {
     /// A file to open in the center.
     OpenFile(String),
@@ -74,6 +74,8 @@ pub enum CodeColumnEvent {
     OpenSession(String),
     /// A change's diff on the stage.
     OpenDiff(crate::screens::stage::DiffRequest),
+    /// Lines picked in a card's diff, for the agent.
+    Annotate(crate::screens::annotation::AnnotationRequest),
 }
 
 /// The checkout's files: tracked and new, then the ignored ones (dimmed).
