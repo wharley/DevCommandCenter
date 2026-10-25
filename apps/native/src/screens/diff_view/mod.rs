@@ -11,7 +11,7 @@ mod view;
 
 use gpui::{Context, ListAlignment, ListState, Task, px};
 
-use crate::data::diff::{DiffLine, FileDiff, LineKind, Row};
+use crate::data::diff::{DiffLine, FileDiff, LineKind, Row, SplitRow, split_rows};
 use crate::data::highlight::{Span, highlight};
 
 pub use palette::DiffPalette;
@@ -38,9 +38,15 @@ pub struct DiffView {
     pub(crate) dark: bool,
     pub(crate) state: State,
     pub(crate) rows: Vec<Row>,
+    /// Side by side (`diffStyle: "split"`): the rows paired, and the list
+    /// holds them instead.
+    pub(crate) split: bool,
+    pub(crate) split_rows: Vec<SplitRow>,
     pub(crate) list: ListState,
-    /// How far the lines are scrolled sideways (`overflow: scroll`).
+    /// How far the lines are scrolled sideways (`overflow: scroll`); side by
+    /// side, the old side's, and the new side's apart.
     pub(crate) scroll_x: f32,
+    pub(crate) scroll_x_new: f32,
     /// Where the list stood after the last wheel event (or frame).
     pub(crate) seen_top: Option<(usize, gpui::Pixels)>,
     _compute: Option<Task<()>>,
@@ -60,17 +66,29 @@ impl DiffView {
         dark: bool,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::start(path, dark, cx, move || lines(&original, &modified))
+        Self::start(path, dark, false, cx, move || lines(&original, &modified))
+    }
+
+    /// The stage's view of a modified file: the old side beside the new.
+    pub fn side_by_side(
+        path: String,
+        original: String,
+        modified: String,
+        dark: bool,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::start(path, dark, true, cx, move || lines(&original, &modified))
     }
 
     /// A captured patch (`WorkspacePatchDiff`): its hunks only.
     pub fn from_patch(path: String, patch: String, dark: bool, cx: &mut Context<Self>) -> Self {
-        Self::start(path, dark, cx, move || patch_lines(&patch))
+        Self::start(path, dark, false, cx, move || patch_lines(&patch))
     }
 
     fn start(
         path: String,
         dark: bool,
+        split: bool,
         cx: &mut Context<Self>,
         compute: impl FnOnce() -> (Computed, String, String) + Send + 'static,
     ) -> Self {
@@ -78,8 +96,11 @@ impl DiffView {
             dark,
             state: State::Loading,
             rows: Vec::new(),
+            split,
+            split_rows: Vec::new(),
             list: ListState::new(0, ListAlignment::Top, px(400.0)),
             scroll_x: 0.0,
+            scroll_x_new: 0.0,
             seen_top: None,
             _compute: None,
         };
@@ -88,10 +109,16 @@ impl DiffView {
                 .background_executor()
                 .spawn(async move { compute() })
                 .await;
-            let old_until = old_lines_to_color(&computed.diff);
+            // Side by side the old side shows its context too.
+            let old_until = if split {
+                usize::MAX
+            } else {
+                old_lines_to_color(&computed.diff)
+            };
             let shown = this.update(cx, |view, cx| {
                 view.rows = computed.diff.rows();
-                view.list.reset(view.rows.len());
+                view.split_rows = split_rows(&computed.diff, &view.rows);
+                view.list.reset(view.shown_rows());
                 view.state = State::Ready(Box::new(computed));
                 cx.notify();
             });
@@ -123,6 +150,15 @@ impl DiffView {
         (top.item_ix, top.offset_in_item)
     }
 
+    /// The rows the list holds.
+    pub(crate) fn shown_rows(&self) -> usize {
+        if self.split {
+            self.split_rows.len()
+        } else {
+            self.rows.len()
+        }
+    }
+
     /// A separator clicked: 20 more lines, or the whole run with Shift.
     pub(crate) fn expand(&mut self, gap: usize, all: bool, cx: &mut Context<Self>) {
         let State::Ready(computed) = &mut self.state else {
@@ -130,15 +166,26 @@ impl DiffView {
         };
         computed.diff.expand(gap, all);
         let next = computed.diff.rows();
-        let first_changed = self
-            .rows
-            .iter()
-            .zip(&next)
-            .take_while(|(a, b)| a == b)
-            .count();
-        let removed = first_changed..self.rows.len();
-        self.list.splice(removed, next.len() - first_changed);
+        let next_split = split_rows(&computed.diff, &next);
+        fn first_changed<T: PartialEq>(old: &[T], new: &[T]) -> usize {
+            old.iter().zip(new).take_while(|(a, b)| a == b).count()
+        }
+        let (kept, old_len, new_len) = if self.split {
+            (
+                first_changed(&self.split_rows, &next_split),
+                self.split_rows.len(),
+                next_split.len(),
+            )
+        } else {
+            (
+                first_changed(&self.rows, &next),
+                self.rows.len(),
+                next.len(),
+            )
+        };
+        self.list.splice(kept..old_len, new_len - kept);
         self.rows = next;
+        self.split_rows = next_split;
         cx.notify();
     }
 }

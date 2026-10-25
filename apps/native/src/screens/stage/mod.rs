@@ -3,7 +3,8 @@
 //! conversation stays mounted underneath; the Chat tab shrinks the stage to
 //! its strip, with the agent's work and an unread reply marked on it. Esc
 //! goes back to the Chat. For now the content is a change's diff, opened
-//! from "Mudanças" (`WorkspaceEditorSurface`).
+//! from "Mudanças" (`WorkspaceEditorSurface`), side by side for a
+//! modified file.
 
 mod view;
 
@@ -137,9 +138,15 @@ impl Stage {
                     return;
                 };
                 diff.load = match content {
-                    Ok((original, modified, _inline)) => DiffLoad::Ready(
-                        cx.new(|cx| DiffView::new(path.clone(), original, modified, dark, cx)),
-                    ),
+                    // `diffStyle: inline ? "unified" : "split"`: added, removed and
+                    // new files read as one column, a modified one side by side.
+                    Ok((original, modified, inline)) => DiffLoad::Ready(cx.new(|cx| {
+                        if inline {
+                            DiffView::new(path.clone(), original, modified, dark, cx)
+                        } else {
+                            DiffView::side_by_side(path.clone(), original, modified, dark, cx)
+                        }
+                    })),
                     Err(error) => DiffLoad::Failed(error),
                 };
                 cx.notify();

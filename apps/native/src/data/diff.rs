@@ -454,6 +454,88 @@ impl FileDiff {
     }
 }
 
+/// A row of the side-by-side view (`diffStyle: "split"`): a line on each
+/// side (the same one for context), or a side left empty where a change
+/// block is shorter on it, or a separator across both.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SplitRow {
+    Pair {
+        old: Option<usize>,
+        new: Option<usize>,
+    },
+    Separator {
+        gap: usize,
+        hidden: usize,
+        place: GapPlace,
+    },
+    Skipped {
+        skip: usize,
+        hidden: usize,
+        place: GapPlace,
+    },
+}
+
+/// `iterateOverDiff` in split: context on both sides; a change block puts
+/// its i-th removed line beside its i-th added one, as tall as its longer
+/// side.
+pub fn split_rows(diff: &FileDiff, rows: &[Row]) -> Vec<SplitRow> {
+    let mut split = Vec::with_capacity(rows.len());
+    let (mut deleted, mut added): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+    let flush = |split: &mut Vec<SplitRow>, deleted: &mut Vec<usize>, added: &mut Vec<usize>| {
+        for index in 0..deleted.len().max(added.len()) {
+            split.push(SplitRow::Pair {
+                old: deleted.get(index).copied(),
+                new: added.get(index).copied(),
+            });
+        }
+        deleted.clear();
+        added.clear();
+    };
+    for row in rows {
+        match row {
+            Row::Line(index) => match diff.lines[*index].kind {
+                LineKind::Deletion => {
+                    // A deletion after additions starts a new block.
+                    if !added.is_empty() {
+                        flush(&mut split, &mut deleted, &mut added);
+                    }
+                    deleted.push(*index);
+                }
+                LineKind::Addition => added.push(*index),
+                LineKind::Context => {
+                    flush(&mut split, &mut deleted, &mut added);
+                    split.push(SplitRow::Pair {
+                        old: Some(*index),
+                        new: Some(*index),
+                    });
+                }
+            },
+            Row::Separator { gap, hidden, place } => {
+                flush(&mut split, &mut deleted, &mut added);
+                split.push(SplitRow::Separator {
+                    gap: *gap,
+                    hidden: *hidden,
+                    place: *place,
+                });
+            }
+            Row::Skipped {
+                skip,
+                hidden,
+                place,
+            } => {
+                flush(&mut split, &mut deleted, &mut added);
+                split.push(SplitRow::Skipped {
+                    skip: *skip,
+                    hidden: *hidden,
+                    place: *place,
+                });
+            }
+        }
+    }
+    flush(&mut split, &mut deleted, &mut added);
+    split
+}
+
 /// `-12,3 +14,5 @@ …`: where a hunk starts on each side.
 fn hunk_starts(header: &str) -> Option<(usize, usize)> {
     let mut parts = header.split_whitespace();
@@ -490,6 +572,52 @@ index 1111111..2222222 100644
  done();
 \\ No newline at end of file
 ";
+
+    #[test]
+    fn side_by_side_pairs_a_change_block_and_keeps_context_on_both_sides() {
+        let original = "a\nb\nc\nd\n";
+        let modified = "a\nB\nX\nY\nd\n";
+        let diff = FileDiff::new(original, modified);
+        let split = split_rows(&diff, &diff.rows());
+        let sides: Vec<(Option<&str>, Option<&str>)> = split
+            .iter()
+            .map(|row| match row {
+                SplitRow::Pair { old, new } => (
+                    old.map(|index| diff.lines[index].text.as_str()),
+                    new.map(|index| diff.lines[index].text.as_str()),
+                ),
+                _ => (None, None),
+            })
+            .collect();
+        assert_eq!(
+            sides,
+            vec![
+                (Some("a"), Some("a")),
+                (Some("b"), Some("B")),
+                (Some("c"), Some("X")),
+                (None, Some("Y")),
+                (Some("d"), Some("d")),
+            ]
+        );
+    }
+
+    #[test]
+    fn side_by_side_keeps_the_separators_of_a_long_file() {
+        let original: String = (1..=60).map(|n| format!("line {n}\n")).collect();
+        let modified = original.replace("line 30\n", "line thirty\n");
+        let diff = FileDiff::new(&original, &modified);
+        let split = split_rows(&diff, &diff.rows());
+        let separators = split
+            .iter()
+            .filter(|row| matches!(row, SplitRow::Separator { .. }))
+            .count();
+        assert_eq!(separators, 2);
+        // One changed line: one pair with both sides.
+        assert!(split.contains(&SplitRow::Pair {
+            old: Some(29),
+            new: Some(30)
+        }));
+    }
 
     #[test]
     fn a_patch_keeps_its_hunks_and_tells_what_it_leaves_out() {

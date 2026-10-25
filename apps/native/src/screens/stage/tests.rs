@@ -109,3 +109,28 @@ fn a_missing_file_says_so(cx: &mut TestAppContext) {
         ));
     });
 }
+
+#[gpui::test]
+fn a_modified_file_reads_side_by_side_and_a_new_one_in_one_column(cx: &mut TestAppContext) {
+    let (stage, cx, repo, _) = open(cx);
+    let modified = request(repo.path());
+    stage.update_in(cx, |stage, window, cx| {
+        stage.open_diff(modified, window, cx)
+    });
+    cx.run_until_parked();
+    let split = |stage: &gpui::Entity<Stage>, cx: &mut gpui::VisualTestContext| {
+        stage.read_with(cx, |stage, cx| match &stage.diff.as_ref().unwrap().load {
+            DiffLoad::Ready(view) => view.read(cx).split,
+            _ => panic!("ready"),
+        })
+    };
+    assert!(split(&stage, cx), "modified: side by side");
+    std::fs::write(repo.path().join("new.rs"), "fn new() {}\n").unwrap();
+    let mut added = request(repo.path());
+    added.path = "new.rs".into();
+    added.name = "new.rs".into();
+    added.status = "?".into();
+    stage.update_in(cx, |stage, window, cx| stage.open_diff(added, window, cx));
+    cx.run_until_parked();
+    assert!(!split(&stage, cx), "new: one column");
+}

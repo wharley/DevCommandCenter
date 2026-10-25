@@ -5,12 +5,13 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, ClickEvent, Context, FontStyle, FontWeight, HighlightStyle, Hsla, Render,
-    ScrollWheelEvent, SharedString, StyledText, Window, div, font, list, prelude::*, px,
+    AnyElement, ClickEvent, ContentMask, Context, FontStyle, FontWeight, HighlightStyle, Hsla,
+    Path, Render, ScrollWheelEvent, SharedString, StyledText, Window, canvas, div, font, list,
+    point, prelude::*, px,
 };
 
 use super::{Computed, DiffPalette, DiffView, State};
-use crate::data::diff::{GapPlace, LineKind, Row, unmodified_lines};
+use crate::data::diff::{GapPlace, LineKind, Row, SplitRow, unmodified_lines};
 use crate::data::highlight::Span;
 use crate::ui::Icon;
 
@@ -87,24 +88,105 @@ pub(crate) fn number_width(computed: &Computed, cell: f32) -> f32 {
     (digits + 3.0) * cell
 }
 
-fn line_row(
-    view: &DiffView,
+/// Which side of the diff a cell shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Side {
+    /// The unified view: removed lines by their old number, the rest by the new.
+    Unified,
+    Old,
+    New,
+}
+
+impl Side {
+    fn group(self) -> &'static str {
+        match self {
+            Self::Unified => LINE_GROUP,
+            Self::Old => "diff-line-old",
+            Self::New => "diff-line-new",
+        }
+    }
+}
+
+/// `[data-content-buffer]`: a side left empty, striped at -45° every 8px
+/// (`repeating-linear-gradient`, 1.4px bands, the tile 5px in).
+fn buffer_stripes(color: Hsla) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            let (width, height) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+            let origin = bounds.origin;
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                let mut start = 11.0 - 8.0 * ((height + 11.0) / 8.0).ceil();
+                while start < width + height {
+                    let (a, b) = (start, start + 2.0);
+                    let at = |x: f32, y: f32| point(origin.x + px(x), origin.y + px(y));
+                    let mut band = Path::new(at(a, 0.0));
+                    band.line_to(at(b, 0.0));
+                    band.line_to(at(b - height, height));
+                    band.line_to(at(a - height, height));
+                    band.line_to(at(a, 0.0));
+                    window.paint_path(band, color);
+                    start += 8.0;
+                }
+            });
+        },
+    )
+    .size_full()
+}
+
+/// One side of a row: the number, the gutter's 2px edge, then `+`/`-` and
+/// the code scrolled sideways by `scroll`; `None` is a side left empty.
+fn line_cells(
     computed: &Computed,
-    index: usize,
+    index: Option<usize>,
+    side: Side,
     palette: &DiffPalette,
     cell: f32,
     number_width: f32,
-) -> AnyElement {
-    let line = &computed.diff.lines[index];
-    let (spans, number) = match line.kind {
-        LineKind::Deletion => (
+    scroll: f32,
+) -> gpui::Div {
+    let edge = div()
+        .w(px(2.0))
+        .flex_shrink_0()
+        .h_full()
+        .bg(palette.background);
+    let Some(line) = index.map(|index| &computed.diff.lines[index]) else {
+        return div()
+            .flex()
+            .h(px(LINE))
+            .w_full()
+            .child(
+                div()
+                    .w(px(number_width))
+                    .flex_shrink_0()
+                    .h_full()
+                    .bg(palette.context_gutter),
+            )
+            .child(edge)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .overflow_hidden()
+                    .child(buffer_stripes(palette.buffer)),
+            );
+    };
+    let old_side = match side {
+        Side::Old => true,
+        Side::New => false,
+        Side::Unified => line.kind == LineKind::Deletion,
+    };
+    let (spans, number) = if old_side {
+        (
             line.old.and_then(|old| computed.old_spans.get(old - 1)),
             line.old,
-        ),
-        _ => (
+        )
+    } else {
+        (
             line.new.and_then(|new| computed.new_spans.get(new - 1)),
             line.new,
-        ),
+        )
     };
     let (line_bg, gutter_bg, number_color, mark) = match line.kind {
         LineKind::Context => (palette.background, palette.background, palette.number, None),
@@ -137,9 +219,10 @@ fn line_row(
         word,
     );
     let text = StyledText::new(SharedString::from(line.text.clone())).with_highlights(runs);
-    let left = -view.scroll_x;
+    let group = side.group();
+    let left = -scroll;
     div()
-        .group(LINE_GROUP)
+        .group(group)
         .flex()
         .h(px(LINE))
         .w_full()
@@ -151,18 +234,12 @@ fn line_row(
                 .w(px(number_width))
                 .pr(px(cell))
                 .bg(gutter_bg)
-                .group_hover(LINE_GROUP, move |style| style.bg(gutter_hover))
+                .group_hover(group, move |style| style.bg(gutter_hover))
                 .text_color(number_color)
                 .children(number.map(|number| number.to_string())),
         )
         // The gutter's `border-right: 2px solid var(--diffs-bg)`.
-        .child(
-            div()
-                .w(px(2.0))
-                .flex_shrink_0()
-                .h_full()
-                .bg(palette.background),
-        )
+        .child(edge)
         .child(
             div()
                 .relative()
@@ -171,7 +248,7 @@ fn line_row(
                 .h_full()
                 .overflow_hidden()
                 .bg(line_bg)
-                .group_hover(LINE_GROUP, move |style| style.bg(line_hover))
+                .group_hover(group, move |style| style.bg(line_hover))
                 .children(mark.map(|(mark, color)| {
                     div()
                         .absolute()
@@ -191,17 +268,112 @@ fn line_row(
                         .child(text),
                 ),
         )
+}
+
+fn line_row(
+    view: &DiffView,
+    computed: &Computed,
+    index: usize,
+    palette: &DiffPalette,
+    cell: f32,
+    number_width: f32,
+) -> AnyElement {
+    line_cells(
+        computed,
+        Some(index),
+        Side::Unified,
+        palette,
+        cell,
+        number_width,
+        view.scroll_x,
+    )
+    .into_any_element()
+}
+
+/// Side by side (`grid-template-columns: 1fr 1fr`, a 1px `--diffs-bg` edge
+/// on each side of the middle): each side scrolls sideways on its own.
+#[allow(clippy::too_many_arguments)]
+fn pair_row(
+    view: &DiffView,
+    computed: &Computed,
+    old: Option<usize>,
+    new: Option<usize>,
+    palette: &DiffPalette,
+    cell: f32,
+    number_width: f32,
+    longest: (f32, f32),
+    cx: &mut Context<DiffView>,
+) -> AnyElement {
+    let half = |cells: gpui::Div, new_side: bool, cx: &mut Context<DiffView>| {
+        let limit = if new_side { longest.1 } else { longest.0 };
+        div()
+            .flex_1()
+            .min_w_0()
+            .overflow_hidden()
+            .map(|half| {
+                if new_side {
+                    half.border_l_1()
+                } else {
+                    half.border_r_1()
+                }
+            })
+            .border_color(palette.background)
+            .on_scroll_wheel(
+                cx.listener(move |view, event: &ScrollWheelEvent, window, cx| {
+                    let delta = event.delta.pixel_delta(window.line_height());
+                    let dx = f32::from(delta.x);
+                    if dx.abs() <= f32::from(delta.y).abs() {
+                        return;
+                    }
+                    let scroll = if new_side {
+                        &mut view.scroll_x_new
+                    } else {
+                        &mut view.scroll_x
+                    };
+                    *scroll = (*scroll - dx).clamp(0.0, limit.max(0.0));
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(cells)
+    };
+    let old_cells = line_cells(
+        computed,
+        old,
+        Side::Old,
+        palette,
+        cell,
+        number_width,
+        view.scroll_x,
+    );
+    let new_cells = line_cells(
+        computed,
+        new,
+        Side::New,
+        palette,
+        cell,
+        number_width,
+        view.scroll_x_new,
+    );
+    div()
+        .flex()
+        .w_full()
+        .child(half(old_cells, false, cx))
+        .child(half(new_cells, true, cx))
         .into_any_element()
 }
 
 /// `createSeparator`: the expand button (pointing up before the first
 /// change, both ways between two) and "N unmodified lines"; either opens
 /// 20 more lines, Shift the whole run. A patch's left-out lines (`gap` is
-/// `None`) only say how many: there is nothing to open.
+/// `None`) only say how many: there is nothing to open. Side by side the
+/// bar runs across both columns: the old side carries it, the new side's
+/// part is the bar's end.
 fn separator_row(
     gap: Option<usize>,
     hidden: usize,
     place: GapPlace,
+    split: bool,
     palette: &DiffPalette,
     cell: f32,
     cx: &mut Context<DiffView>,
@@ -256,12 +428,28 @@ fn separator_row(
             )
             .child(
                 text.id(("diff-unmodified", gap))
-                    .rounded_r(px(6.0))
+                    .when(!split, |text| text.rounded_r(px(6.0)))
                     .cursor_pointer()
                     .hover(|style| style.underline())
                     .on_click(on_click(gap)),
             ),
         None => div().flex().h(px(SEPARATOR)).child(text.rounded(px(6.0))),
+    };
+    let bar = if split {
+        div()
+            .flex()
+            .child(div().flex_1().min_w_0().child(bar))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(SEPARATOR))
+                    .ml(px(2.0))
+                    .rounded_r(px(6.0))
+                    .bg(palette.separator),
+            )
+    } else {
+        bar
     };
     // Padding instead of `margin-block`: the list measures an item's box.
     div()
@@ -283,6 +471,31 @@ impl Render for DiffView {
             .pipe(|id| window.text_system().advance(id, px(FONT_SIZE), '0').ok())
             .map(|size| f32::from(size.width))
             .unwrap_or(7.8);
+        // The longest line on each side (old, new), for the sideways scroll.
+        let longest = match &self.state {
+            State::Ready(computed) => {
+                let widest = |old: bool| {
+                    computed
+                        .diff
+                        .lines
+                        .iter()
+                        .filter(|line| {
+                            !self.split
+                                || if old {
+                                    line.old.is_some()
+                                } else {
+                                    line.new.is_some()
+                                }
+                        })
+                        .map(|line| line.text.chars().count())
+                        .max()
+                        .unwrap_or(0) as f32
+                        * cell
+                };
+                (widest(true), widest(false))
+            }
+            State::Loading => (0.0, 0.0),
+        };
         let body: AnyElement = match &self.state {
             State::Loading => div().size_full().into_any_element(),
             State::Ready(computed) => {
@@ -294,15 +507,43 @@ impl Render for DiffView {
                         let State::Ready(computed) = &view.state else {
                             return div().into_any_element();
                         };
+                        if view.split {
+                            return match view.split_rows.get(index).cloned() {
+                                Some(SplitRow::Pair { old, new }) => pair_row(
+                                    view,
+                                    computed,
+                                    old,
+                                    new,
+                                    &palette,
+                                    cell,
+                                    number_width,
+                                    longest,
+                                    cx,
+                                ),
+                                Some(SplitRow::Separator { gap, hidden, place }) => separator_row(
+                                    Some(gap),
+                                    hidden,
+                                    place,
+                                    true,
+                                    &palette,
+                                    cell,
+                                    cx,
+                                ),
+                                Some(SplitRow::Skipped { hidden, place, .. }) => {
+                                    separator_row(None, hidden, place, true, &palette, cell, cx)
+                                }
+                                None => div().into_any_element(),
+                            };
+                        }
                         match view.rows.get(index).cloned() {
                             Some(Row::Line(line)) => {
                                 line_row(view, computed, line, &palette, cell, number_width)
                             }
                             Some(Row::Separator { gap, hidden, place }) => {
-                                separator_row(Some(gap), hidden, place, &palette, cell, cx)
+                                separator_row(Some(gap), hidden, place, false, &palette, cell, cx)
                             }
                             Some(Row::Skipped { hidden, place, .. }) => {
-                                separator_row(None, hidden, place, &palette, cell, cx)
+                                separator_row(None, hidden, place, false, &palette, cell, cx)
                             }
                             None => div().into_any_element(),
                         }
@@ -312,17 +553,7 @@ impl Render for DiffView {
                 .into_any_element()
             }
         };
-        let longest = match &self.state {
-            State::Ready(computed) => computed
-                .diff
-                .lines
-                .iter()
-                .map(|line| line.text.chars().count())
-                .max()
-                .unwrap_or(0),
-            State::Loading => 0,
-        } as f32
-            * cell;
+        let longest = longest.0.max(longest.1);
         div()
             .id("diff-view")
             .debug_selector(|| "diff-view".into())
@@ -340,7 +571,8 @@ impl Render for DiffView {
                 cx.listener(move |view, event: &ScrollWheelEvent, window, cx| {
                     let delta = event.delta.pixel_delta(window.line_height());
                     let dx = f32::from(delta.x);
-                    if dx.abs() > f32::from(delta.y).abs() {
+                    // Side by side each side takes its own sideways wheel.
+                    if dx.abs() > f32::from(delta.y).abs() && !view.split {
                         view.scroll_x = (view.scroll_x - dx).clamp(0.0, longest.max(0.0));
                         cx.stop_propagation();
                         cx.notify();

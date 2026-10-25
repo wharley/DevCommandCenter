@@ -24,6 +24,10 @@ pub struct DiffPalette {
     pub number: Hsla,
     /// `--diffs-bg-separator`
     pub separator: Hsla,
+    /// `--diffs-bg-buffer`: the stripes of a side left empty.
+    pub buffer: Hsla,
+    /// `--diffs-bg-context-gutter`: the number column of an empty side.
+    pub context_gutter: Hsla,
     pub added: Hsla,
     pub deleted: Hsla,
     pub added_line: Hsla,
@@ -55,6 +59,9 @@ impl DiffPalette {
             (0.88, 0.91, 0.96, 0.15)
         };
         let hover = if dark { 0.91 } else { 0.97 };
+        // `--diffs-bg-context`, then its gutter toward the background.
+        let context = mix_lab(background, if dark { 0.925 } else { 0.985 }, mixer);
+        let context_gutter = mix_lab(context, if dark { 0.45 } else { 0.90 }, background);
         let added_line = mix_lab(background, line, added);
         let deleted_line = mix_lab(background, line, deleted);
         let added_gutter = mix_lab(background, gutter, added);
@@ -69,6 +76,8 @@ impl DiffPalette {
             foreground,
             number: mix_lab(foreground, 0.65, background),
             separator: mix_lab(background, separator, mixer),
+            buffer: mix_lab(background, 0.92, mixer),
+            context_gutter,
             added,
             deleted,
             added_line,
