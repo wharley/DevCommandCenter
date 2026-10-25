@@ -60,6 +60,20 @@ impl DiffView {
         dark: bool,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::start(path, dark, cx, move || lines(&original, &modified))
+    }
+
+    /// A captured patch (`WorkspacePatchDiff`): its hunks only.
+    pub fn from_patch(path: String, patch: String, dark: bool, cx: &mut Context<Self>) -> Self {
+        Self::start(path, dark, cx, move || patch_lines(&patch))
+    }
+
+    fn start(
+        path: String,
+        dark: bool,
+        cx: &mut Context<Self>,
+        compute: impl FnOnce() -> (Computed, String, String) + Send + 'static,
+    ) -> Self {
         let mut view = Self {
             dark,
             state: State::Loading,
@@ -72,7 +86,7 @@ impl DiffView {
         view._compute = Some(cx.spawn(async move |this, cx| {
             let (computed, original, modified) = cx
                 .background_executor()
-                .spawn(async move { lines(&original, &modified) })
+                .spawn(async move { compute() })
                 .await;
             let old_until = old_lines_to_color(&computed.diff);
             let shown = this.update(cx, |view, cx| {
@@ -134,6 +148,36 @@ impl DiffView {
 fn lines(original: &str, modified: &str) -> (Computed, String, String) {
     let (original, modified) = (original.replace('\t', TAB), modified.replace('\t', TAB));
     let diff = FileDiff::new(&original, &modified);
+    let last = |side: fn(&DiffLine) -> Option<usize>| diff.lines.iter().rev().find_map(side);
+    let last_number = last(|line| line.old)
+        .unwrap_or(0)
+        .max(last(|line| line.new).unwrap_or(0));
+    let computed = Computed {
+        diff,
+        old_spans: Vec::new(),
+        new_spans: Vec::new(),
+        last_number,
+    };
+    (computed, original, modified)
+}
+
+/// A patch's lines, and each side as the grammar reads it: the lines the
+/// patch has at their own numbers, the rest blank.
+fn patch_lines(patch: &str) -> (Computed, String, String) {
+    let diff = FileDiff::from_patch(&patch.replace('\t', TAB));
+    let side = |number: fn(&DiffLine) -> Option<usize>| {
+        let mut text: Vec<&str> = Vec::new();
+        for line in &diff.lines {
+            if let Some(at) = number(line) {
+                if text.len() < at {
+                    text.resize(at, "");
+                }
+                text[at - 1] = &line.text;
+            }
+        }
+        text.join("\n")
+    };
+    let (original, modified) = (side(|line| line.old), side(|line| line.new));
     let last = |side: fn(&DiffLine) -> Option<usize>| diff.lines.iter().rev().find_map(side);
     let last_number = last(|line| line.old)
         .unwrap_or(0)

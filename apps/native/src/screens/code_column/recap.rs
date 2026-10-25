@@ -30,7 +30,12 @@ impl CodeColumn {
         cx: &mut Context<Self>,
     ) {
         if (turn_running, pending_delegations) != (self.turn_running, self.pending_delegations) {
+            // A finished turn has a new review.
+            let finished = self.turn_running && !turn_running;
             self.turn_running = turn_running;
+            if finished {
+                self.read_last_turn(cx);
+            }
             self.pending_delegations = pending_delegations;
             cx.notify();
         }

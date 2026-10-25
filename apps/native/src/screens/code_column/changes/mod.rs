@@ -14,7 +14,7 @@ mod tests;
 mod tree;
 mod view;
 
-pub(crate) use view::changes;
+pub(crate) use view::{card_shadow, changes};
 
 use std::collections::HashSet;
 use std::time::Instant;
@@ -36,10 +36,12 @@ const LOAD_MARGIN: f32 = 700.0;
 /// How long a file new to the branch shimmers (`ShinyFlash`).
 pub const FLASH: std::time::Duration = std::time::Duration::from_millis(3000);
 
-/// `InspectorReviewScope` without "last turn" (screen 5h).
+/// `InspectorReviewScope`
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Scope {
     Working,
+    /// What the session's last turn changed (`turn::surface`).
+    LastTurn,
     Branch,
 }
 
@@ -47,6 +49,7 @@ impl Scope {
     pub fn key(self) -> &'static str {
         match self {
             Self::Working => "working",
+            Self::LastTurn => "last-turn",
             Self::Branch => "branch",
         }
     }
@@ -255,15 +258,18 @@ impl Changes {
     /// `resolveInspectorReviewScope`: the one picked, else "Workspace" while
     /// it has changes or the branch has none.
     pub fn scope(&self) -> Scope {
-        self.picked.unwrap_or_else(|| {
-            let working = self.entries(Scope::Working).count();
-            let branch = self.branch_count().unwrap_or(0);
-            if working > 0 || branch == 0 {
-                Scope::Working
-            } else {
-                Scope::Branch
-            }
-        })
+        self.picked.unwrap_or_else(|| self.default_scope())
+    }
+
+    /// `defaultInspectorChangesScope`
+    pub fn default_scope(&self) -> Scope {
+        let working = self.entries(Scope::Working).count();
+        let branch = self.branch_count().unwrap_or(0);
+        if working > 0 || branch == 0 {
+            Scope::Working
+        } else {
+            Scope::Branch
+        }
     }
 
     /// `reviewCardsStartOpen`, unless the header said otherwise.
@@ -469,6 +475,8 @@ impl Changes {
                     rows.push(ChangesRow::Empty);
                 }
             }
+            // The turn's own surface shows instead of the list.
+            Scope::LastTurn => {}
             Scope::Branch => {
                 let loading = matches!(self.branch, Loaded::Pending);
                 if !loading && !self.has(ChangeGroup::Committed) {

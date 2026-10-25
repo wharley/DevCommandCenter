@@ -76,6 +76,9 @@ impl CodeColumn {
         let session_changed = session != self.session_id;
         self.session_id = session;
         self.reviewables = found;
+        if session_changed {
+            self.read_last_turn(cx);
+        }
         let still_waiting = |review: &DelegationReview, reviewables: &[Reviewable]| {
             reviewables
                 .iter()

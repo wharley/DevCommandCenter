@@ -8,6 +8,7 @@ mod delivery;
 mod recap;
 mod review;
 mod tree;
+mod turn;
 mod view;
 
 pub use delegation::{Reviewable, reviewables};
@@ -18,6 +19,8 @@ mod delegation_tests;
 mod recap_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod turn_tests;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -107,6 +110,8 @@ pub struct CodeColumn {
     pub(crate) pending_delegations: usize,
     /// The recap's signals are open.
     pub(crate) recap_details: bool,
+    /// "Último turno": the session's last turn in this task.
+    pub(crate) turn: turn::LastTurn,
     pub(crate) by_path: HashMap<String, TreeStatus>,
     pub(crate) changed_folders: HashSet<String>,
     file_set: Option<String>,
@@ -159,6 +164,7 @@ impl CodeColumn {
             turn_running: false,
             pending_delegations: 0,
             recap_details: false,
+            turn: turn::LastTurn::default(),
             by_path: HashMap::new(),
             changed_folders: HashSet::new(),
             file_set: None,
@@ -234,6 +240,9 @@ impl CodeColumn {
             self.read_branch(cx);
             self.read_pull_request(cx);
             self.read_review(false, cx);
+            if tab == CodeColumnTab::Changes {
+                self.read_last_turn(cx);
+            }
             cx.notify();
         }
     }

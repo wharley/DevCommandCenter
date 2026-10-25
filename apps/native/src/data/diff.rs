@@ -47,6 +47,12 @@ pub enum Row {
         /// Where the run sits: before the first change, between, after the last.
         place: GapPlace,
     },
+    /// Lines a patch leaves out between its hunks: told, not openable.
+    Skipped {
+        skip: usize,
+        hidden: usize,
+        place: GapPlace,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +84,8 @@ impl Gap {
 pub struct FileDiff {
     pub lines: Vec<DiffLine>,
     pub gaps: Vec<Gap>,
+    /// A patch's left-out lines: (the line they come before, how many).
+    pub skipped: Vec<(usize, usize)>,
     pub insertions: usize,
     pub deletions: usize,
 }
@@ -296,6 +304,80 @@ impl FileDiff {
         Self {
             lines,
             gaps,
+            skipped: Vec::new(),
+            insertions,
+            deletions,
+        }
+    }
+
+    /// A captured unified patch (`parsePatchFiles`): only its hunks' lines,
+    /// with the lines it leaves out before and between them told.
+    pub fn from_patch(patch: &str) -> Self {
+        let (mut old, mut new) = (0usize, 0usize);
+        let mut lines = Vec::new();
+        let mut skipped = Vec::new();
+        let (mut insertions, mut deletions) = (0, 0);
+        let mut in_hunk = false;
+        for raw in patch.lines() {
+            if let Some(header) = raw.strip_prefix("@@ ") {
+                let Some((old_start, new_start)) = hunk_starts(header) else {
+                    in_hunk = false;
+                    continue;
+                };
+                let left_out = old_start.saturating_sub(old + 1);
+                if left_out > 0 {
+                    skipped.push((lines.len(), left_out));
+                }
+                old = old_start.saturating_sub(1);
+                new = new_start.saturating_sub(1);
+                in_hunk = true;
+                continue;
+            }
+            if !in_hunk {
+                continue;
+            }
+            let (kind, text) = match raw.as_bytes().first() {
+                Some(b' ') => (LineKind::Context, &raw[1..]),
+                Some(b'-') => (LineKind::Deletion, &raw[1..]),
+                Some(b'+') => (LineKind::Addition, &raw[1..]),
+                // "\ No newline at end of file"
+                Some(b'\\') => continue,
+                None => (LineKind::Context, ""),
+                _ => {
+                    in_hunk = false;
+                    continue;
+                }
+            };
+            let (old_number, new_number) = match kind {
+                LineKind::Context => {
+                    old += 1;
+                    new += 1;
+                    (Some(old), Some(new))
+                }
+                LineKind::Deletion => {
+                    old += 1;
+                    deletions += 1;
+                    (Some(old), None)
+                }
+                LineKind::Addition => {
+                    new += 1;
+                    insertions += 1;
+                    (None, Some(new))
+                }
+            };
+            lines.push(DiffLine {
+                kind,
+                old: old_number,
+                new: new_number,
+                text: text.to_string(),
+                emphasis: Vec::new(),
+            });
+        }
+        emphasize(&mut lines);
+        Self {
+            lines,
+            gaps: Vec::new(),
+            skipped,
             insertions,
             deletions,
         }
@@ -306,7 +388,20 @@ impl FileDiff {
         let mut rows = Vec::with_capacity(self.lines.len());
         let mut index = 0;
         let mut gaps = self.gaps.iter().enumerate().peekable();
+        let mut skipped = self.skipped.iter().enumerate().peekable();
         while index < self.lines.len() {
+            if let Some((skip, (_, hidden))) = skipped.next_if(|(_, (at, _))| *at == index) {
+                let place = if index == 0 {
+                    GapPlace::First
+                } else {
+                    GapPlace::Middle
+                };
+                rows.push(Row::Skipped {
+                    skip,
+                    hidden: *hidden,
+                    place,
+                });
+            }
             match gaps.peek() {
                 Some((gap_index, gap)) if gap.start == index => {
                     let (gap_index, gap) = (*gap_index, **gap);
@@ -359,6 +454,15 @@ impl FileDiff {
     }
 }
 
+/// `-12,3 +14,5 @@ …`: where a hunk starts on each side.
+fn hunk_starts(header: &str) -> Option<(usize, usize)> {
+    let mut parts = header.split_whitespace();
+    let start = |part: Option<&str>, sign: char| -> Option<usize> {
+        part?.strip_prefix(sign)?.split(',').next()?.parse().ok()
+    };
+    Some((start(parts.next(), '-')?, start(parts.next(), '+')?))
+}
+
 /// `"N unmodified lines"`, as the desktop's diff writes it.
 pub fn unmodified_lines(count: usize) -> String {
     format!(
@@ -370,6 +474,60 @@ pub fn unmodified_lines(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PATCH: &str = "diff --git a/src/lib.rs b/src/lib.rs
+index 1111111..2222222 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -10,3 +10,3 @@ fn main() {
+ let a = 1;
+-let b = 2;
++let b = 3;
+ let c = 4;
+@@ -40,2 +40,3 @@
+ end();
++more();
+ done();
+\\ No newline at end of file
+";
+
+    #[test]
+    fn a_patch_keeps_its_hunks_and_tells_what_it_leaves_out() {
+        let diff = FileDiff::from_patch(PATCH);
+        assert_eq!((diff.insertions, diff.deletions), (2, 1));
+        let numbers: Vec<(Option<usize>, Option<usize>)> =
+            diff.lines.iter().map(|line| (line.old, line.new)).collect();
+        assert_eq!(
+            numbers,
+            vec![
+                (Some(10), Some(10)),
+                (Some(11), None),
+                (None, Some(11)),
+                (Some(12), Some(12)),
+                (Some(40), Some(40)),
+                (None, Some(41)),
+                (Some(41), Some(42)),
+            ]
+        );
+        // 9 lines before the first hunk, 27 between the two.
+        let rows = diff.rows();
+        assert_eq!(
+            rows[0],
+            Row::Skipped {
+                skip: 0,
+                hidden: 9,
+                place: GapPlace::First
+            }
+        );
+        assert!(rows.contains(&Row::Skipped {
+            skip: 1,
+            hidden: 27,
+            place: GapPlace::Middle
+        }));
+        assert_eq!(rows.len(), diff.lines.len() + 2);
+        // The changed words of "let b = 2" → "let b = 3".
+        assert!(!diff.lines[1].emphasis.is_empty());
+    }
 
     fn numbered(count: usize) -> String {
         (1..=count).map(|n| format!("line {n}\n")).collect()
@@ -417,7 +575,7 @@ mod tests {
             .iter()
             .filter_map(|row| match row {
                 Row::Separator { hidden, place, .. } => Some((*hidden, *place)),
-                Row::Line(_) => None,
+                _ => None,
             })
             .collect();
         assert_eq!(

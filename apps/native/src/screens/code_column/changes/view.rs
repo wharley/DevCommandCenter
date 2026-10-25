@@ -46,7 +46,7 @@ pub(super) fn status_color(status: &str, cx: &Context<CodeColumn>) -> Hsla {
 }
 
 /// `--dcc-shadow-card`
-pub(super) fn card_shadow() -> Vec<BoxShadow> {
+pub(crate) fn card_shadow() -> Vec<BoxShadow> {
     let shadow = |y: f32, blur: f32, alpha: f32| BoxShadow {
         color: Hsla::black().opacity(alpha),
         offset: point(px(0.0), px(y)),
@@ -176,19 +176,23 @@ fn icon_button(
 fn scopes(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
     let colors = cx.theme().colors.clone();
     let edge = surface_edge(cx);
-    let active = column.changes.scope();
-    let counts = [
-        (
-            Scope::Working,
-            "laptop",
-            Some(column.changes.entries(Scope::Working).count()),
-        ),
-        (
-            Scope::Branch,
-            "git-compare-arrows",
-            column.changes.branch_count(),
-        ),
-    ];
+    let active = column.review_scope();
+    // `availableInspectorReviewScopes`: "Último turno" with a session.
+    let last_turn = column
+        .last_turn_context()
+        .map(|_| (Scope::LastTurn, "clock-3", column.turn.count()));
+    let counts = [(
+        Scope::Working,
+        "laptop",
+        Some(column.changes.entries(Scope::Working).count()),
+    )]
+    .into_iter()
+    .chain(last_turn)
+    .chain([(
+        Scope::Branch,
+        "git-compare-arrows",
+        column.changes.branch_count(),
+    )]);
     let buttons: Vec<AnyElement> = counts
         .into_iter()
         .map(|(scope, icon, count)| {
@@ -345,12 +349,29 @@ fn branch_context(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyEleme
 
 fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
     let colors = cx.theme().colors.clone();
-    let scope = column.changes.scope();
-    let summary = summarize(column.changes.entries(scope));
-    let counted = scope == Scope::Working || column.changes.branch_count().is_some();
-    let all_open = column.changes.cards_open(scope);
+    let scope = column.review_scope();
+    let last_turn = scope == Scope::LastTurn;
+    let summary = match column.turn.summary().filter(|_| last_turn) {
+        Some(review) => super::Summary {
+            files: review.files.len(),
+            insertions: review.insertions,
+            deletions: review.deletions,
+        },
+        None if last_turn => super::Summary::default(),
+        None => summarize(column.changes.entries(scope)),
+    };
+    let counted = match scope {
+        Scope::Working => true,
+        Scope::LastTurn => column.turn.count().is_some(),
+        Scope::Branch => column.changes.branch_count().is_some(),
+    };
+    let all_open = if last_turn {
+        column.turn.cards_open()
+    } else {
+        column.changes.cards_open(scope)
+    };
     let tree = column.changes.tree;
-    let toggle_cards = (summary.files > 1 && !tree).then(|| {
+    let toggle_cards = (summary.files > 1 && (last_turn || !tree)).then(|| {
         icon_button(
             "changes-toggle-all",
             if all_open {
@@ -367,17 +388,19 @@ fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
             cx,
         )
     });
-    let toggle_tree = icon_button(
-        "changes-toggle-tree",
-        if tree { "list" } else { "list-tree" },
-        cx.t(if tree {
-            "inspector.changes.listView"
-        } else {
-            "inspector.changes.treeView"
-        }),
-        |column, cx| column.toggle_changes_tree(cx),
-        cx,
-    );
+    let toggle_tree = (!last_turn).then(|| {
+        icon_button(
+            "changes-toggle-tree",
+            if tree { "list" } else { "list-tree" },
+            cx.t(if tree {
+                "inspector.changes.listView"
+            } else {
+                "inspector.changes.treeView"
+            }),
+            |column, cx| column.toggle_changes_tree(cx),
+            cx,
+        )
+    });
     div()
         .flex_shrink_0()
         .border_b_1()
@@ -416,7 +439,7 @@ fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
                     row.child(stats(summary.insertions, summary.deletions, true, cx))
                 })
                 .children(toggle_cards)
-                .child(toggle_tree),
+                .children(toggle_tree),
         )
         .child(scopes(column, cx))
         .when(scope == Scope::Branch, |header| {
@@ -687,10 +710,20 @@ pub(crate) fn changes(
             .child(spinner("changes-loading", 14.0))
             .child(cx.t("inspector.changes.loadingGit"))
             .into_any_element()
+    } else if column.review_scope() == Scope::LastTurn {
+        div()
+            .relative()
+            .flex()
+            .flex_1()
+            .min_h_0()
+            .flex_col()
+            .child(header(column, cx))
+            .child(crate::screens::code_column::turn::surface(column, cx))
+            .into_any_element()
     } else {
         column.changes.sync_list();
         column.load_eager_diffs(cx);
-        let working = column.changes.scope() == Scope::Working;
+        let working = column.review_scope() == Scope::Working;
         let has_any = column.changes.entries(Scope::Working).next().is_some();
         let weak = cx.entity().downgrade();
         column.changes.list.set_scroll_handler(move |_, _, cx| {
@@ -747,6 +780,9 @@ pub(crate) fn changes(
     ));
     dialogs.extend(crate::screens::code_column::review::pipeline_retry_confirm(
         column, cx,
+    ));
+    dialogs.extend(crate::screens::code_column::turn::dialogs(
+        column, window, cx,
     ));
     let delegations = crate::screens::code_column::delegation::delegation_rows(column, cx);
     // The pull request's sections (`grid gap-2 px-2 empty:hidden`).

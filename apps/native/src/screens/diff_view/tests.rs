@@ -20,7 +20,7 @@ fn separators(view: &DiffView) -> Vec<usize> {
         .iter()
         .filter_map(|row| match row {
             Row::Separator { hidden, .. } => Some(*hidden),
-            Row::Line(_) => None,
+            _ => None,
         })
         .collect()
 }

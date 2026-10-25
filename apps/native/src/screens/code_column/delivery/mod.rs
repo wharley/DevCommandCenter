@@ -155,12 +155,17 @@ impl CodeColumn {
                 if column.root.as_deref() != Some(root.as_str()) {
                     return;
                 }
+                let task_changed = column.delivery.task.as_ref().map(|task| &task.id)
+                    != task.as_ref().map(|task| &task.id);
                 column.delivery.task = task;
                 column.delivery.policy = policy;
                 if let Some(pr) = pr {
                     column.delivery.pr = Some(pr);
                 }
                 column.complete_if_merged(cx);
+                if task_changed {
+                    column.read_last_turn(cx);
+                }
                 cx.notify();
             });
         }));

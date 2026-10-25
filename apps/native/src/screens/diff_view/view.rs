@@ -196,9 +196,10 @@ fn line_row(
 
 /// `createSeparator`: the expand button (pointing up before the first
 /// change, both ways between two) and "N unmodified lines"; either opens
-/// 20 more lines, Shift the whole run.
+/// 20 more lines, Shift the whole run. A patch's left-out lines (`gap` is
+/// `None`) only say how many: there is nothing to open.
 fn separator_row(
-    gap: usize,
+    gap: Option<usize>,
     hidden: usize,
     place: GapPlace,
     palette: &DiffPalette,
@@ -213,59 +214,61 @@ fn separator_row(
         GapPlace::Last => ("diffs-expand", false),
     };
     let entity = cx.entity().downgrade();
-    let on_click = move || {
+    let on_click = move |gap: usize| {
         let entity = entity.clone();
         move |event: &ClickEvent, _: &mut Window, cx: &mut gpui::App| {
             let shift = event.modifiers().shift;
             let _ = entity.update(cx, |view, cx| view.expand(gap, shift, cx));
         }
     };
+    let text = div()
+        .flex()
+        .flex_1()
+        .min_w_0()
+        .items_center()
+        .bg(palette.separator)
+        .px(px(cell))
+        .text_color(number)
+        .child(div().truncate().child(unmodified_lines(hidden)));
+    let bar = match gap {
+        Some(gap) => div()
+            .flex()
+            .h(px(SEPARATOR))
+            .child(
+                div()
+                    .id(("diff-expand", gap))
+                    .debug_selector(move || format!("diff-expand-{gap}"))
+                    .flex()
+                    .w(px(32.0))
+                    .flex_shrink_0()
+                    .items_center()
+                    .justify_center()
+                    .rounded_l(px(6.0))
+                    .bg(palette.separator)
+                    .border_r_2()
+                    .border_color(palette.background)
+                    .text_color(number)
+                    .cursor_pointer()
+                    .hover(move |style| style.text_color(foreground))
+                    .on_click(on_click(gap))
+                    // `[data-expand-down] [data-icon] { transform: scaleY(-1) }`
+                    .child(Icon::new(icon).rotate(if flipped { 180.0 } else { 0.0 })),
+            )
+            .child(
+                text.id(("diff-unmodified", gap))
+                    .rounded_r(px(6.0))
+                    .cursor_pointer()
+                    .hover(|style| style.underline())
+                    .on_click(on_click(gap)),
+            ),
+        None => div().flex().h(px(SEPARATOR)).child(text.rounded(px(6.0))),
+    };
     // Padding instead of `margin-block`: the list measures an item's box.
     div()
         .when(place != GapPlace::First, |row| row.pt(px(GAP)))
         .when(place != GapPlace::Last, |row| row.pb(px(GAP)))
         .px(px(GAP))
-        .child(
-            div()
-                .flex()
-                .h(px(SEPARATOR))
-                .child(
-                    div()
-                        .id(("diff-expand", gap))
-                        .debug_selector(move || format!("diff-expand-{gap}"))
-                        .flex()
-                        .w(px(32.0))
-                        .flex_shrink_0()
-                        .items_center()
-                        .justify_center()
-                        .rounded_l(px(6.0))
-                        .bg(palette.separator)
-                        .border_r_2()
-                        .border_color(palette.background)
-                        .text_color(number)
-                        .cursor_pointer()
-                        .hover(move |style| style.text_color(foreground))
-                        .on_click(on_click())
-                        // `[data-expand-down] [data-icon] { transform: scaleY(-1) }`
-                        .child(Icon::new(icon).rotate(if flipped { 180.0 } else { 0.0 })),
-                )
-                .child(
-                    div()
-                        .id(("diff-unmodified", gap))
-                        .flex()
-                        .flex_1()
-                        .min_w_0()
-                        .items_center()
-                        .rounded_r(px(6.0))
-                        .bg(palette.separator)
-                        .px(px(cell))
-                        .text_color(number)
-                        .cursor_pointer()
-                        .hover(|style| style.underline())
-                        .on_click(on_click())
-                        .child(div().truncate().child(unmodified_lines(hidden))),
-                ),
-        )
+        .child(bar)
         .into_any_element()
 }
 
@@ -296,7 +299,10 @@ impl Render for DiffView {
                                 line_row(view, computed, line, &palette, cell, number_width)
                             }
                             Some(Row::Separator { gap, hidden, place }) => {
-                                separator_row(gap, hidden, place, &palette, cell, cx)
+                                separator_row(Some(gap), hidden, place, &palette, cell, cx)
+                            }
+                            Some(Row::Skipped { hidden, place, .. }) => {
+                                separator_row(None, hidden, place, &palette, cell, cx)
                             }
                             None => div().into_any_element(),
                         }

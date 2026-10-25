@@ -17,7 +17,10 @@ impl CodeColumn {
     }
 
     pub(crate) fn toggle_all_cards(&mut self, cx: &mut Context<Self>) {
-        let scope = self.changes.scope();
+        let scope = self.review_scope();
+        if scope == Scope::LastTurn {
+            return self.toggle_turn_cards(cx);
+        }
         let open = !self.changes.cards_open(scope);
         self.changes.set_all_open(scope, open);
         cx.notify();
@@ -37,10 +40,11 @@ impl CodeColumn {
     }
 
     pub(crate) fn set_scope(&mut self, scope: Scope, cx: &mut Context<Self>) {
-        if self.changes.scope() != scope {
+        if self.review_scope() != scope {
             self.changes.picked = Some(scope);
             let groups: &[ChangeGroup] = match scope {
                 Scope::Working => &[ChangeGroup::Staged, ChangeGroup::Unstaged],
+                Scope::LastTurn => &[],
                 Scope::Branch => &[ChangeGroup::Committed],
             };
             self.changes.remount(groups);

@@ -599,6 +599,54 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// What the session's last turn changed in this task (`last_turn_review`);
+    /// `None` before any turn was captured.
+    pub fn last_turn_review(
+        &self,
+        session_id: &str,
+        workspace_id: &str,
+        turn_id: Option<&str>,
+    ) -> Result<Option<dcc_core::domain::turn_review::TurnReviewSummary>, ApiError> {
+        Self::decoded(self.post(
+            &format!("/api/v1/sessions/{}/last-turn-review", encode(session_id)),
+            &json!({ "workspaceId": workspace_id, "turnId": turn_id }),
+        )?)
+    }
+
+    /// One file's patch in a turn's capture.
+    pub fn turn_review_file_diff(
+        &self,
+        snapshot_id: &str,
+        path: &str,
+    ) -> Result<dcc_core::domain::turn_review::TurnReviewFileDiffOutput, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/turn-review/file-diff",
+            &json!({ "snapshotId": snapshot_id, "path": path }),
+        )?)
+    }
+
+    /// Guarded Undo's read-only step: what it would put back, and its token.
+    pub fn prepare_guarded_undo(
+        &self,
+        snapshot_id: &str,
+    ) -> Result<dcc_core::domain::turn_review::PrepareGuardedUndoOutput, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/guarded-undo/prepare",
+            &json!({ "snapshotId": snapshot_id }),
+        )?)
+    }
+
+    /// Guarded Undo's restore, with a prepared preview's token.
+    pub fn execute_guarded_undo(
+        &self,
+        preview_token: &str,
+    ) -> Result<dcc_core::domain::turn_review::ExecuteGuardedUndoOutput, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/guarded-undo/execute",
+            &json!({ "previewToken": preview_token }),
+        )?)
+    }
+
     /// The pull request's review comments (`workspacePrReviewComments`).
     pub fn review_comments(
         &self,
