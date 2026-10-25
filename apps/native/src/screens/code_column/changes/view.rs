@@ -748,6 +748,7 @@ pub(crate) fn changes(
     dialogs.extend(crate::screens::code_column::review::pipeline_retry_confirm(
         column, cx,
     ));
+    let delegations = crate::screens::code_column::delegation::delegation_rows(column, cx);
     // The pull request's sections (`grid gap-2 px-2 empty:hidden`).
     let sections: Vec<AnyElement> =
         crate::screens::code_column::review::failure_section(column, cx)
@@ -782,6 +783,7 @@ pub(crate) fn changes(
                 .gap(px(8.0))
                 .overflow_hidden()
                 .children(toolbar)
+                .children(delegations)
                 .when(!sections.is_empty(), |area| {
                     area.child(
                         div()

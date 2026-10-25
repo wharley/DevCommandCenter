@@ -142,6 +142,19 @@ pub struct DelegationRecord {
     pub provider_id: String,
     pub model_id: Option<String>,
     pub child_session_id: Option<String>,
+    /// `mode === "implement"`: it edits files.
+    pub implement: bool,
+    pub parent_session_id: String,
+    /// The child's own folder (`workingDirectoryOverride`): an isolated
+    /// worktree waiting for review, when it has one.
+    pub worktree: Option<String>,
+}
+
+impl DelegationRecord {
+    /// An implementation whose worktree waits for the person (`review_pending`).
+    pub fn awaits_review(&self) -> bool {
+        self.implement && self.status == DelegationStatus::ReviewPending
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -190,6 +203,9 @@ impl DelegationRecord {
             provider_id: delegation.target_provider_id.0.clone(),
             model_id: delegation.target_model_id.clone(),
             child_session_id: delegation.child_session_id.as_ref().map(|id| id.0.clone()),
+            implement: delegation.mode == dcc_core::domain::delegation::DelegationMode::Implement,
+            parent_session_id: delegation.parent_session_id.0.clone(),
+            worktree: None,
         }
     }
 }
@@ -337,6 +353,15 @@ pub fn load(
             )
         })
         .collect();
+    for record in conversation.delegations.values_mut() {
+        record.worktree = record.child_session_id.as_ref().and_then(|child| {
+            summaries
+                .iter()
+                .find(|summary| &summary.session.id.0 == child)
+                .and_then(|summary| summary.session.working_directory_override.clone())
+                .filter(|path| !path.trim().is_empty())
+        });
+    }
     let wanted = wanted_session.and_then(|id| {
         summaries
             .iter()

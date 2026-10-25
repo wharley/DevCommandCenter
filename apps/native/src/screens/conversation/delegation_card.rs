@@ -287,6 +287,29 @@ pub(super) fn delegation_card(
     let touched = record
         .map(|record| record.touched_files.clone())
         .unwrap_or_default();
+    // "Revisar mudanças": the edits waiting for review, or what was touched.
+    let show_review = status == DelegationStatus::ReviewPending
+        || (!touched.is_empty() && status != DelegationStatus::Running);
+    let mut review_button = show_review.then(|| {
+        let review = delegation.id.clone();
+        let pending = status == DelegationStatus::ReviewPending;
+        Button::new(SharedString::from(format!("{}-review", message.id)))
+            .variant(if pending {
+                ButtonVariant::Default
+            } else {
+                ButtonVariant::Ghost
+            })
+            .size(crate::ui::ButtonSize::Sm)
+            .on_click(cx.listener(move |_, _, _, cx| {
+                cx.emit(super::ConversationEvent::ReviewDelegation(review.clone()))
+            }))
+            .child(
+                div()
+                    .text_size(px(11.5))
+                    .child(cx.t("delegation.card.reviewChanges")),
+            )
+            .into_any_element()
+    });
     let files = (!touched.is_empty()).then(|| {
         div()
             .mt(px(10.0))
@@ -307,33 +330,57 @@ pub(super) fn delegation_card(
                     .flex()
                     .flex_wrap()
                     .gap(px(4.0))
-                    .children(touched.iter().take(MAX_FILE_CHIPS).map(|path| {
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .max_w(px(224.0))
-                            .rounded(radius.md)
-                            .border_1()
-                            .border_color(colors.border.opacity(0.6))
-                            .bg(colors.muted.opacity(0.3))
-                            .px(px(6.0))
-                            .py(px(2.0))
-                            .font_family(mono.clone())
-                            .text_size(px(10.5))
-                            .text_color(colors.foreground.opacity(0.8))
-                            .child(
-                                Icon::new("file-code-corner")
-                                    .size(12.0)
-                                    .color(colors.muted_foreground),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .child(SharedString::from(basename(path).to_string())),
-                            )
-                    }))
+                    .children(touched.iter().take(MAX_FILE_CHIPS).enumerate().map(
+                        |(index, path)| {
+                            // A chip opens the review while the edits wait for it.
+                            let reviewable = status == DelegationStatus::ReviewPending;
+                            let review = delegation.id.clone();
+                            let hover = (colors.border, colors.accent, colors.accent_foreground);
+                            div()
+                                .id(SharedString::from(format!(
+                                    "{}-file-{index}",
+                                    delegation.id
+                                )))
+                                .when(reviewable, |chip| {
+                                    chip.cursor_pointer()
+                                        .hover(move |style| {
+                                            style
+                                                .border_color(hover.0)
+                                                .bg(hover.1)
+                                                .text_color(hover.2)
+                                        })
+                                        .on_click(cx.listener(move |_, _, _, cx| {
+                                            cx.emit(super::ConversationEvent::ReviewDelegation(
+                                                review.clone(),
+                                            ))
+                                        }))
+                                })
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .max_w(px(224.0))
+                                .rounded(radius.md)
+                                .border_1()
+                                .border_color(colors.border.opacity(0.6))
+                                .bg(colors.muted.opacity(0.3))
+                                .px(px(6.0))
+                                .py(px(2.0))
+                                .font_family(mono.clone())
+                                .text_size(px(10.5))
+                                .text_color(colors.foreground.opacity(0.8))
+                                .child(
+                                    Icon::new("file-code-corner")
+                                        .size(12.0)
+                                        .color(colors.muted_foreground),
+                                )
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .child(SharedString::from(basename(path).to_string())),
+                                )
+                        },
+                    ))
                     .when(touched.len() > MAX_FILE_CHIPS, |chips| {
                         chips.child(
                             div()
@@ -434,6 +481,13 @@ pub(super) fn delegation_card(
             }))
             .children(report)
             .children(files)
+            .when(child_session.is_none(), |card| {
+                card.children(
+                    review_button
+                        .take()
+                        .map(|button| div().mt(px(12.0)).flex().child(button)),
+                )
+            })
             .children(child_session.clone().map(|session| {
                 let label = if waiting {
                     cx.t("delegation.card.openToAnswer")
@@ -451,6 +505,7 @@ pub(super) fn delegation_card(
                     .flex_wrap()
                     .items_center()
                     .gap(px(6.0))
+                    .children(review_button.take())
                     .child(
                         Button::new(SharedString::from(format!("{}-open-child", message.id)))
                             .variant(if waiting {

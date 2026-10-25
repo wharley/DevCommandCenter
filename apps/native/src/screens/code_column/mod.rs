@@ -3,12 +3,16 @@
 //! in the center of the workbench.
 
 mod changes;
+mod delegation;
 mod delivery;
 mod review;
 mod tree;
 mod view;
 
+pub use delegation::{Reviewable, reviewables};
 pub use tree::DraggedFile;
+#[cfg(test)]
+mod delegation_tests;
 #[cfg(test)]
 mod tests;
 
@@ -60,6 +64,8 @@ pub enum CodeColumnEvent {
     },
     Close,
     TabChanged(CodeColumnTab),
+    /// Back to the parent's conversation after reviewing from the child's.
+    OpenSession(String),
 }
 
 /// The checkout's files: tracked and new, then the ignored ones (dimmed).
@@ -87,6 +93,11 @@ pub struct CodeColumn {
     pub(crate) changes: changes::Changes,
     pub(crate) delivery: delivery::Delivery,
     pub(crate) review: review::Review,
+    /// The open conversation and its delegations waiting for review, and
+    /// the one under review.
+    pub(crate) session_id: Option<String>,
+    pub(crate) reviewables: Vec<delegation::Reviewable>,
+    pub(crate) delegation_review: Option<delegation::DelegationReview>,
     pub(crate) by_path: HashMap<String, TreeStatus>,
     pub(crate) changed_folders: HashSet<String>,
     file_set: Option<String>,
@@ -116,6 +127,7 @@ pub struct CodeColumn {
     _reviewers: Option<Task<()>>,
     _job_log: Option<Task<()>>,
     _job_retry: Option<Task<()>>,
+    _delegation: Option<Task<()>>,
 }
 
 impl EventEmitter<CodeColumnEvent> for CodeColumn {}
@@ -132,6 +144,9 @@ impl CodeColumn {
             changes: changes::Changes::new(),
             delivery: delivery::Delivery::default(),
             review: review::Review::default(),
+            session_id: None,
+            reviewables: Vec::new(),
+            delegation_review: None,
             by_path: HashMap::new(),
             changed_folders: HashSet::new(),
             file_set: None,
@@ -156,11 +171,25 @@ impl CodeColumn {
             _reviewers: None,
             _job_log: None,
             _job_retry: None,
+            _delegation: None,
         }
     }
 
     /// The task's checkout; another one starts over (its folders stay open).
+    /// Under a delegation's review the task's own checkout is kept for later.
     pub fn set_root(&mut self, root: Option<String>, cx: &mut Context<Self>) {
+        let wanted = root.as_deref().map(str::trim);
+        if let Some(review) = &self.delegation_review {
+            if wanted == Some(review.parent_root.as_str()) {
+                return;
+            }
+            self.delegation_review = None;
+        }
+        self.switch_root(root, cx);
+    }
+
+    /// The folder the column reads.
+    pub(crate) fn switch_root(&mut self, root: Option<String>, cx: &mut Context<Self>) {
         let root = root
             .map(|root| root.trim().to_string())
             .filter(|root| !root.is_empty());

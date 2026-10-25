@@ -12,6 +12,7 @@ mod hover_actions;
 mod paced;
 mod permission_panel;
 mod requests;
+mod review_strip;
 mod system_rows;
 #[cfg(test)]
 mod tests;
@@ -48,6 +49,15 @@ const TRAIL_WIDTH: f32 = 864.0;
 
 /// A streaming text's reveal, the length last laid out and its blocks.
 type PacedProse = (paced::Paced, usize, Rc<Vec<Block>>);
+
+/// What the conversation asks of the rest of the window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConversationEvent {
+    /// "Revisar mudanças" / "Revisar": a delegation's changes in the code column.
+    ReviewDelegation(String),
+}
+
+impl gpui::EventEmitter<ConversationEvent> for ConversationView {}
 
 pub struct ConversationView {
     pub(crate) composer: Entity<Composer>,
@@ -159,6 +169,16 @@ impl ConversationView {
     }
 
     /// The open task's checkout (its worktree, else the project).
+    /// The conversation shown, once read.
+    pub fn data(&self) -> Option<&Conversation> {
+        self.data.as_deref()
+    }
+
+    /// The session shown (a child's when one is open).
+    pub fn shown_session(&self) -> Option<String> {
+        self.data.as_ref().and_then(|data| data.session_id.clone())
+    }
+
     pub fn workspace_path(&self) -> Option<String> {
         self.data
             .as_ref()
@@ -237,11 +257,17 @@ impl ConversationView {
         }
         let old_rows: &[TimelineMessage] = self.data.as_ref().map_or(&[], |data| &data.rows);
         let (span, count) = changed_span(old_rows, &next.rows);
+        let strips_changed = self.data.as_ref().map(|data| review_strip::waiting(data))
+            != Some(review_strip::waiting(&next));
         if self.data.is_none() {
             self.list.reset(next.rows.len() + 2);
         } else if span.start != span.end || count > 0 {
             // Items are [top spacer, rows…, bottom spacer].
             self.list.splice(span.start + 1..span.end + 1, count);
+        }
+        if strips_changed {
+            let end = next.rows.len() + 1;
+            self.list.remeasure_items(end..end + 1);
         }
         let session = ComposerSession {
             task_id: Some(next.task_id.clone()),
@@ -406,7 +432,13 @@ impl ConversationView {
             return div().h(px(24.0)).into_any_element();
         }
         let Some(message) = rows.get(index - 1) else {
-            return div().h(px(40.0)).into_any_element();
+            // The end: what waits for review, then the bottom room.
+            return div()
+                .flex()
+                .flex_col()
+                .children(review_strip::review_strips(self, &data, cx))
+                .child(div().h(px(40.0)))
+                .into_any_element();
         };
         let viewport = self.viewport_width;
         let content = row_element(self, &data, message, window, cx);

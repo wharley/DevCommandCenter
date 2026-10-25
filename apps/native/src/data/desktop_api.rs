@@ -577,6 +577,28 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// "Aplicar": the delegation's worktree onto the task's checkout, then
+    /// approved; the number of files applied.
+    pub fn apply_delegation(&self, id: &str, root: &str) -> Result<usize, ApiError> {
+        let value = self.post(
+            &format!("/api/v1/delegations/{}/apply", encode(id)),
+            &json!({ "workspaceRoot": root }),
+        )?;
+        Ok(value
+            .get("changedFiles")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len))
+    }
+
+    /// "Descartar": the worktree thrown away and the delegation cancelled.
+    pub fn discard_delegation(&self, id: &str, root: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/delegations/{}/discard", encode(id)),
+            &json!({ "workspaceRoot": root }),
+        )
+        .map(|_| ())
+    }
+
     /// The pull request's review comments (`workspacePrReviewComments`).
     pub fn review_comments(
         &self,

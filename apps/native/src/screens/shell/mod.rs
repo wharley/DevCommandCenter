@@ -75,6 +75,7 @@ pub struct Shell {
     _sidebar_events: Subscription,
     _sidebar_data: Subscription,
     _new_task_events: Subscription,
+    _conversation_events: Subscription,
     _code_column_events: Subscription,
     _conversation_root: Subscription,
 }
@@ -118,13 +119,22 @@ impl Shell {
             });
         });
         let new_task_events = cx.subscribe_in(&new_task, window, Self::on_new_task_event);
+        let conversation_events = cx.subscribe(&conversation, Self::on_conversation_event);
         let code_column = cx.new(|cx| CodeColumn::new(prefs.code_column_tab, cx));
         let code_column_events = cx.subscribe_in(&code_column, window, Self::on_code_column_event);
         // The column follows the open task's checkout.
         let conversation_root = cx.observe(&conversation, |this, conversation, cx| {
-            let root = conversation.read(cx).workspace_path();
-            this.code_column
-                .update(cx, |column, cx| column.set_root(root, cx));
+            let view = conversation.read(cx);
+            let root = view.workspace_path();
+            let session = view.shown_session();
+            let waiting = view
+                .data()
+                .map(crate::screens::code_column::reviewables)
+                .unwrap_or_default();
+            this.code_column.update(cx, |column, cx| {
+                column.set_root(root, cx);
+                column.set_reviews(session, waiting, cx);
+            });
         });
         Self {
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
@@ -143,8 +153,25 @@ impl Shell {
             _sidebar_events: sidebar_events,
             _sidebar_data: sidebar_data,
             _new_task_events: new_task_events,
+            _conversation_events: conversation_events,
             _code_column_events: code_column_events,
             _conversation_root: conversation_root,
+        }
+    }
+
+    /// `handleReviewDelegation`: "Mudanças" opens on the delegation's review.
+    fn on_conversation_event(
+        &mut self,
+        _: Entity<ConversationView>,
+        event: &crate::screens::conversation::ConversationEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            crate::screens::conversation::ConversationEvent::ReviewDelegation(id) => {
+                self.set_code_column(true, Some(CodeColumnTab::Changes), cx);
+                self.code_column
+                    .update(cx, |column, cx| column.review_delegation(id, cx));
+            }
         }
     }
 
@@ -173,6 +200,12 @@ impl Shell {
                 if sent {
                     crate::ui::Toaster::success(delivered.clone(), cx);
                 }
+            }
+            CodeColumnEvent::OpenSession(session) => {
+                let session = session.clone();
+                self.conversation.update(cx, |conversation, cx| {
+                    conversation.open_session(session, cx)
+                });
             }
             CodeColumnEvent::Close => self.set_code_column(false, None, cx),
             CodeColumnEvent::TabChanged(tab) => self.set_code_column(true, Some(*tab), cx),
