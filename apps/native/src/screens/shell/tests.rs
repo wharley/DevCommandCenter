@@ -198,3 +198,44 @@ fn cmd_shift_e_and_g_open_and_close_the_code_column(cx: &mut TestAppContext) {
     cx.run_until_parked();
     shell.read_with(cx, |shell, _| assert!(shell.prefs.code_column_open));
 }
+
+#[gpui::test]
+fn a_change_opened_from_the_column_goes_on_the_stage_and_back(cx: &mut TestAppContext) {
+    use crate::screens::code_column::CodeColumnEvent;
+    use crate::screens::stage::DiffRequest;
+    use dcc_core::domain::workspace_git::WorkspaceGitPreviewScope;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let repo = crate::test_support::git_checkout(&[("a.rs", "fn a() {}\n")]);
+    std::fs::write(repo.path().join("a.rs"), "fn a() { b(); }\n").unwrap();
+    let request = DiffRequest {
+        root: repo.path().to_string_lossy().into_owned(),
+        path: "a.rs".into(),
+        name: "a.rs".into(),
+        status: "M".into(),
+        scope: WorkspaceGitPreviewScope::Unstaged,
+        base: None,
+        from_changes: true,
+    };
+    let column = shell.read_with(cx, |shell, _| shell.code_column.clone());
+    column.update(cx, |_, cx| cx.emit(CodeColumnEvent::OpenDiff(request)));
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("stage").is_some(),
+        "the stage over the chat"
+    );
+    column.read_with(cx, |column, _| {
+        assert_eq!(
+            column.open_diff,
+            Some((WorkspaceGitPreviewScope::Unstaged, "a.rs".to_string()))
+        );
+    });
+    let stage = shell.read_with(cx, |shell, _| shell.stage.clone());
+    stage.update(cx, |stage, cx| stage.close(cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("stage").is_none());
+    shell.read_with(cx, |shell, _| {
+        assert!(shell.prefs.code_column_open);
+        assert_eq!(shell.prefs.code_column_tab, CodeColumnTab::Changes);
+    });
+    column.read_with(cx, |column, _| assert_eq!(column.open_diff, None));
+}

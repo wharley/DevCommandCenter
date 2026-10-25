@@ -10,6 +10,7 @@ pub mod menu;
 pub mod popover;
 mod resize_handle;
 pub mod scrollbar;
+pub mod tab_strip;
 mod text;
 pub mod text_area;
 pub mod text_input;

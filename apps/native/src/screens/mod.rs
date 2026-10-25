@@ -8,3 +8,4 @@ pub mod new_task;
 pub mod open_project;
 pub mod shell;
 pub mod sidebar;
+pub mod stage;

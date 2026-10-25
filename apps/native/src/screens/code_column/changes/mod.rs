@@ -64,7 +64,7 @@ pub enum ChangeGroup {
 }
 
 impl ChangeGroup {
-    fn preview_scope(self) -> WorkspaceGitPreviewScope {
+    pub(crate) fn preview_scope(self) -> WorkspaceGitPreviewScope {
         match self {
             Self::Staged => WorkspaceGitPreviewScope::Staged,
             Self::Unstaged => WorkspaceGitPreviewScope::Unstaged,

@@ -148,9 +148,26 @@ pub(super) fn file_row(
     let folder = super::view::dirname(&entry.path).to_string();
     let hover_bg = colors.accent.opacity(0.55);
     let actions = hovered.then(|| actions(column, at, cx)).flatten();
+    let selected = column
+        .open_diff
+        .as_ref()
+        .is_some_and(|(scope, path)| *scope == card.group.preview_scope() && *path == entry.path);
+    let primary = colors.primary;
     div()
         .id(("changes-file", at))
         .debug_selector(move || format!("changes-file-{at}"))
+        .cursor_pointer()
+        .on_click(cx.listener(move |column, _, _, cx| column.open_change(at, cx)))
+        // `bg-primary/[0.08] text-foreground shadow-[inset_2px_0_0_var(--primary)]`
+        .when(selected, |row| {
+            row.bg(primary.opacity(0.08)).shadow(vec![gpui::BoxShadow {
+                color: primary,
+                offset: gpui::point(px(2.0), px(0.0)),
+                blur_radius: px(0.0),
+                spread_radius: px(0.0),
+                inset: true,
+            }])
+        })
         .relative()
         .ml(px(TREE_INSET + 4.0))
         .mr(px(4.0))

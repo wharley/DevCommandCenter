@@ -21,6 +21,7 @@ use crate::screens::conversation::ConversationView;
 use crate::screens::new_task::{NewTaskEvent, NewTaskView};
 use crate::screens::open_project::{OpenProjectDialog, OpenProjectEvent, OpenRequest};
 use crate::screens::sidebar::{NavPage, Sidebar, SidebarEvent};
+use crate::screens::stage::{Stage, StageEvent};
 use crate::theme::{ActiveTheme, Theme};
 use crate::ui::{ResizeHandle, Toaster};
 use layout::ShellLayout;
@@ -63,6 +64,10 @@ pub struct Shell {
     conversation: Entity<ConversationView>,
     new_task: Entity<NewTaskView>,
     code_column: Entity<CodeColumn>,
+    /// The stage over the conversation (a change's diff, …).
+    stage: Entity<Stage>,
+    /// The task's checkout the stage's content belongs to.
+    stage_root: Option<String>,
     /// Holds the focus when no field does, so the shell's shortcuts still
     /// reach it (with nothing focused GPUI only asks the window's root).
     focus: gpui::FocusHandle,
@@ -80,6 +85,7 @@ pub struct Shell {
     _conversation_events: Subscription,
     _code_column_events: Subscription,
     _conversation_root: Subscription,
+    _stage_events: Subscription,
 }
 
 impl Shell {
@@ -124,6 +130,8 @@ impl Shell {
         let conversation_events = cx.subscribe(&conversation, Self::on_conversation_event);
         let code_column = cx.new(|cx| CodeColumn::new(prefs.code_column_tab, cx));
         let code_column_events = cx.subscribe_in(&code_column, window, Self::on_code_column_event);
+        let stage = cx.new(Stage::new);
+        let stage_events = cx.subscribe(&stage, Self::on_stage_event);
         // The column follows the open task's checkout.
         let conversation_root = cx.observe(&conversation, |this, conversation, cx| {
             let view = conversation.read(cx);
@@ -141,6 +149,15 @@ impl Shell {
                     .count();
                 (data.running, pending)
             });
+            // Another task: the stage starts empty; the agent's turn marks the Chat tab.
+            if root != this.stage_root {
+                this.stage_root = root.clone();
+                this.stage.update(cx, |stage, cx| stage.clear(cx));
+                this.code_column
+                    .update(cx, |column, cx| column.set_open_diff(None, cx));
+            }
+            this.stage
+                .update(cx, |stage, cx| stage.set_agent_working(running, cx));
             this.code_column.update(cx, |column, cx| {
                 column.set_root(root, cx);
                 column.set_reviews(session, waiting, cx);
@@ -155,6 +172,8 @@ impl Shell {
             conversation,
             new_task,
             code_column,
+            stage,
+            stage_root: None,
             focus: cx.focus_handle(),
             surface: Surface::Conversation,
             focus_on_open: None,
@@ -167,6 +186,20 @@ impl Shell {
             _conversation_events: conversation_events,
             _code_column_events: code_column_events,
             _conversation_root: conversation_root,
+            _stage_events: stage_events,
+        }
+    }
+
+    /// The stage's content closed: back to "Mudanças" when it came from there.
+    fn on_stage_event(&mut self, _: Entity<Stage>, event: &StageEvent, cx: &mut Context<Self>) {
+        match event {
+            StageEvent::Closed { to_changes } => {
+                self.code_column
+                    .update(cx, |column, cx| column.set_open_diff(None, cx));
+                if *to_changes {
+                    self.set_code_column(true, Some(CodeColumnTab::Changes), cx);
+                }
+            }
         }
     }
 
@@ -200,7 +233,17 @@ impl Shell {
                 self.code_column
                     .update(cx, |column, cx| column.reveal(Some(path), cx));
             }
+            CodeColumnEvent::OpenDiff(request) => {
+                let open = Some((request.scope.clone(), request.path.clone()));
+                self.code_column
+                    .update(cx, |column, cx| column.set_open_diff(open, cx));
+                let request = request.clone();
+                self.stage
+                    .update(cx, |stage, cx| stage.open_diff(request, window, cx));
+            }
             CodeColumnEvent::Mention(path) => {
+                // Mentioning a file is writing to the agent: the Chat comes forward.
+                self.stage.update(cx, |stage, cx| stage.show_chat(cx));
                 let composer = self.conversation.read(cx).composer.clone();
                 composer.update(cx, |composer, cx| composer.mention_file(path, window, cx));
             }
@@ -491,6 +534,54 @@ impl Shell {
     }
 }
 
+impl Shell {
+    /// The conversation, with the stage over it while it has content: the
+    /// conversation stays mounted below the strip, and the Chat tab shrinks
+    /// the stage to it.
+    fn conversation_with_stage(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let stage = self.stage.read(cx);
+        if !stage.has_content() {
+            return self.conversation.clone().into_any_element();
+        }
+        let chat = stage.chat_active();
+        div()
+            .relative()
+            .flex()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .flex_col()
+                    .min_h_0()
+                    .min_w_0()
+                    .pt(px(36.0))
+                    .child(self.conversation.clone()),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .flex()
+                    .flex_col()
+                    .map(|layer| {
+                        if chat {
+                            layer.h(px(36.0)).overflow_hidden()
+                        } else {
+                            layer.bottom_0()
+                        }
+                    })
+                    .child(self.stage.clone()),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if window.focused(cx).is_none() {
@@ -543,7 +634,7 @@ impl Render for Shell {
                 Surface::Conversation if self.sidebar.read(cx).has_open_task() == Some(false) => {
                     bootstrap::render(self, cx)
                 }
-                Surface::Conversation => self.conversation.clone().into_any_element(),
+                Surface::Conversation => self.conversation_with_stage(cx),
                 Surface::NewTask => self.new_task.clone().into_any_element(),
             }))
             .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))

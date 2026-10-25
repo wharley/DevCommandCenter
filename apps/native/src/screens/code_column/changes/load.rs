@@ -9,6 +9,42 @@ use super::{CardDiff, ChangeGroup, Scope};
 use crate::screens::diff_view::DiffView;
 
 impl CodeColumn {
+    /// A change's diff on the stage (`onOpenExpandedPreview`).
+    pub(crate) fn open_change(&mut self, at: usize, cx: &mut Context<Self>) {
+        let (Some(root), Some(card)) = (self.root.clone(), self.changes.cards.get(at)) else {
+            return;
+        };
+        let base = (card.group == ChangeGroup::Committed)
+            .then(|| self.changes.base_branch())
+            .flatten();
+        cx.emit(super::super::CodeColumnEvent::OpenDiff(
+            crate::screens::stage::DiffRequest {
+                root,
+                path: card.entry.path.clone(),
+                name: card.entry.name.clone(),
+                status: card.entry.status.clone(),
+                scope: card.group.preview_scope(),
+                base,
+                from_changes: true,
+            },
+        ));
+    }
+
+    /// The change on the stage, marked in the tree.
+    pub fn set_open_diff(
+        &mut self,
+        open: Option<(
+            dcc_core::domain::workspace_git::WorkspaceGitPreviewScope,
+            String,
+        )>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.open_diff != open {
+            self.open_diff = open;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn toggle_card(&mut self, at: usize, cx: &mut Context<Self>) {
         if let Some(card) = self.changes.cards.get_mut(at) {
             card.open = !card.open;

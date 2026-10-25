@@ -100,7 +100,16 @@ pub(super) fn card(column: &CodeColumn, at: usize, cx: &mut Context<CodeColumn>)
     let entry = &card.entry;
     let folder = dirname(&entry.path).to_string();
     let open = card.open;
-    let buttons = actions(column, at, cx);
+    let mut buttons = actions(column, at, cx);
+    // "Abrir diff ampliado": the diff on the stage.
+    buttons.push(row_button(
+        ("change-card-expand", at),
+        "expand",
+        false,
+        false,
+        cx.listener(move |column, _, _, cx| column.open_change(at, cx)),
+        cx,
+    ));
     let header = div()
         .flex()
         .min_h(px(44.0))

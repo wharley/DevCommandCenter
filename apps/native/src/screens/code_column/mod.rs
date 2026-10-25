@@ -72,6 +72,8 @@ pub enum CodeColumnEvent {
     TabChanged(CodeColumnTab),
     /// Back to the parent's conversation after reviewing from the child's.
     OpenSession(String),
+    /// A change's diff on the stage.
+    OpenDiff(crate::screens::stage::DiffRequest),
 }
 
 /// The checkout's files: tracked and new, then the ignored ones (dimmed).
@@ -112,6 +114,11 @@ pub struct CodeColumn {
     pub(crate) recap_details: bool,
     /// "Último turno": the session's last turn in this task.
     pub(crate) turn: turn::LastTurn,
+    /// The change shown on the stage (its row is marked).
+    pub(crate) open_diff: Option<(
+        dcc_core::domain::workspace_git::WorkspaceGitPreviewScope,
+        String,
+    )>,
     pub(crate) by_path: HashMap<String, TreeStatus>,
     pub(crate) changed_folders: HashSet<String>,
     file_set: Option<String>,
@@ -165,6 +172,7 @@ impl CodeColumn {
             pending_delegations: 0,
             recap_details: false,
             turn: turn::LastTurn::default(),
+            open_diff: None,
             by_path: HashMap::new(),
             changed_folders: HashSet::new(),
             file_set: None,

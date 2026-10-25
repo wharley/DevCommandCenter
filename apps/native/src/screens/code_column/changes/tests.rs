@@ -558,3 +558,62 @@ fn only_the_cards_near_the_viewport_read_their_diff(cx: &mut TestAppContext) {
         "far cards aren't drawn"
     );
 }
+
+#[gpui::test]
+fn a_card_and_a_tree_row_open_their_diff_on_the_stage(cx: &mut TestAppContext) {
+    use super::super::CodeColumnEvent;
+    use dcc_core::domain::workspace_git::WorkspaceGitPreviewScope;
+    let repo = git_checkout(&[("src/lib.rs", "a\n")]);
+    std::fs::write(repo.path().join("src/lib.rs"), "b\n").unwrap();
+    let root = repo.path().to_string_lossy().into_owned();
+    let (column, cx) = open(cx);
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = events.clone();
+    column.update(cx, |column, cx| {
+        cx.subscribe_self(move |_, event: &CodeColumnEvent, _| {
+            seen.borrow_mut().push(event.clone())
+        })
+        .detach();
+        column.set_root(Some(root.clone()), cx);
+    });
+    cx.run_until_parked();
+    cx.simulate_resize(size(px(340.0), px(900.0)));
+    cx.run_until_parked();
+    let expand = cx
+        .debug_bounds("change-card-expand-0")
+        .expect("Abrir diff ampliado");
+    cx.simulate_click(expand.center(), Modifiers::none());
+    let opened = |events: &[CodeColumnEvent]| -> Vec<(String, WorkspaceGitPreviewScope, bool)> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                CodeColumnEvent::OpenDiff(request) => Some((
+                    request.path.clone(),
+                    request.scope.clone(),
+                    request.from_changes,
+                )),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        opened(&events.borrow()),
+        vec![(
+            "src/lib.rs".into(),
+            WorkspaceGitPreviewScope::Unstaged,
+            true
+        )]
+    );
+    // In the tree the row opens it, and the one on the stage is marked.
+    column.update(cx, |column, cx| {
+        column.toggle_changes_tree(cx);
+        column.set_open_diff(
+            Some((WorkspaceGitPreviewScope::Unstaged, "src/lib.rs".into())),
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    let row = cx.debug_bounds("changes-file-0").expect("the tree row");
+    cx.simulate_click(row.center(), Modifiers::none());
+    assert_eq!(opened(&events.borrow()).len(), 2);
+}
