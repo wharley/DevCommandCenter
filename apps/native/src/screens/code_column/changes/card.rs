@@ -165,6 +165,11 @@ pub(super) fn card(column: &CodeColumn, at: usize, cx: &mut Context<CodeColumn>)
         )
         .child(
             stats(entry.insertions, entry.deletions, false, cx)
+                .children(crate::screens::code_column::review::review_badge(
+                    column,
+                    &entry.path,
+                    cx,
+                ))
                 .child(
                     div()
                         .min_w(px(16.0))

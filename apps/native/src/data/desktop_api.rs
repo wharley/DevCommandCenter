@@ -577,6 +577,58 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// The pull request's review comments (`workspacePrReviewComments`).
+    pub fn review_comments(
+        &self,
+        root: &str,
+        branch: Option<&str>,
+        login: Option<&str>,
+    ) -> Result<dcc_core::domain::review_threads::WorkspacePrReviewCommentsOutput, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/forge/review-comments",
+            &json!({ "workspaceRoot": root, "branch": branch, "forgeLogin": login }),
+        )?)
+    }
+
+    /// The current commit's GitLab pipeline.
+    pub fn pipeline(
+        &self,
+        root: &str,
+        login: Option<&str>,
+    ) -> Result<crate::data::forge::PipelineStatus, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/forge/pipeline",
+            &json!({ "workspaceRoot": root, "forgeLogin": login }),
+        )?)
+    }
+
+    pub fn pipeline_job_log(
+        &self,
+        root: &str,
+        pipeline: u64,
+        job: u64,
+        login: Option<&str>,
+    ) -> Result<crate::data::forge::JobLog, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/forge/pipeline-job-log",
+            &json!({ "workspaceRoot": root, "pipelineId": pipeline, "jobId": job, "forgeLogin": login }),
+        )?)
+    }
+
+    pub fn pipeline_job_retry(
+        &self,
+        root: &str,
+        pipeline: u64,
+        job: u64,
+        login: Option<&str>,
+    ) -> Result<(), ApiError> {
+        self.post(
+            "/api/v1/forge/pipeline-job-retry",
+            &json!({ "workspaceRoot": root, "pipelineId": pipeline, "jobId": job, "forgeLogin": login }),
+        )
+        .map(|_| ())
+    }
+
     /// The last delivery failure the desktop captured for this checkout.
     pub fn delivery_failure(
         &self,

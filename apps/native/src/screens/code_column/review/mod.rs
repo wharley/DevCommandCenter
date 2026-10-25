@@ -7,28 +7,57 @@
 mod failure;
 mod identity;
 mod picker;
+mod pipeline;
 mod state;
 #[cfg(test)]
 mod tests;
+mod threads;
 
 pub(crate) use failure::{failure_section, recovery_confirm};
 pub(crate) use identity::identity_chip;
+pub(crate) use pipeline::{pipeline_retry_confirm, pipeline_section};
 pub(crate) use state::review_section;
+pub(crate) use threads::{review_badge, threads_section};
 
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+
+use dcc_core::domain::review_threads::WorkspacePrReviewCommentsOutput;
 
 use gpui::{Context, Entity, SharedString, Task};
 
 use super::CodeColumn;
 use crate::data::desktop_api::{ApiError, DesktopApi};
 use crate::data::forge::{
-    DeliveryFailure, ForgeAccount, ForgeContext, ReviewState, ReviewerAction, ReviewerCandidate,
+    DeliveryFailure, ForgeAccount, ForgeContext, JobLog, Pipeline, ReviewState, ReviewerAction,
+    ReviewerCandidate,
 };
 use crate::i18n::{Args, Translate};
 use crate::ui::{TextInput, Toaster};
 
-/// `DELIVERY_FAILURE_REFETCH_INTERVAL_MS` / the review state's interval.
+/// `DELIVERY_FAILURE_REFETCH_INTERVAL_MS` / the review state's and the
+/// pipeline's interval.
 const EVERY: Duration = Duration::from_secs(15);
+/// `WORKSPACE_PR_REVIEW_COMMENTS_REFETCH_INTERVAL_MS`
+const COMMENTS_EVERY: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum PipelineLoad {
+    Pending,
+    Ready(Option<Box<Pipeline>>),
+    Failed,
+}
+
+/// Everything one read brings back.
+struct Read {
+    forge: Option<ForgeContext>,
+    account: Option<ForgeAccount>,
+    failure: Option<DeliveryFailure>,
+    state: Option<ReviewLoad>,
+    /// `None`: not read this time (kept); `Some(None)`: not shown.
+    comments: Option<Option<WorkspacePrReviewCommentsOutput>>,
+    pipeline: Option<PipelineLoad>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ReviewLoad {
@@ -61,7 +90,22 @@ pub(crate) struct Review {
     /// The reviewer whose request is changing, and how.
     pub changing: Option<(String, ReviewerAction)>,
     pub picker: Option<Picker>,
+    /// The pull request's review comments, and open conversations by file.
+    pub comments: Option<WorkspacePrReviewCommentsOutput>,
+    pub open_by_path: HashMap<String, usize>,
+    pub threads_open: bool,
+    /// Conversations picked for the agent, and the ones seen (a new open
+    /// one joins the pick; an unpick stays).
+    pub picked: HashSet<String>,
+    seen: HashSet<String>,
+    pub pipeline: Option<PipelineLoad>,
+    pub pipeline_open: bool,
+    pub active_job: Option<u64>,
+    pub job_log: Option<Result<JobLog, String>>,
+    pub retrying_job: Option<u64>,
+    pub confirm_job_retry: Option<(u64, String)>,
     read_at: Option<Instant>,
+    comments_at: Option<Instant>,
 }
 
 impl Review {
@@ -73,6 +117,45 @@ impl Review {
         self.forge
             .as_ref()
             .and_then(|forge| forge.effective_login.clone())
+    }
+
+    /// The conversations show on GitHub or GitLab with a pull request.
+    pub fn comments_enabled(&self, pr_number: Option<u32>) -> bool {
+        self.forge
+            .as_ref()
+            .is_some_and(|forge| matches!(forge.provider.as_deref(), Some("github" | "gitlab")))
+            && pr_number.is_some()
+    }
+
+    /// The pipeline shows on a connected GitLab.
+    pub fn pipeline_enabled(&self) -> bool {
+        self.forge
+            .as_ref()
+            .is_some_and(|forge| forge.connected() && forge.provider.as_deref() == Some("gitlab"))
+    }
+
+    fn take_comments(&mut self, comments: Option<WorkspacePrReviewCommentsOutput>) {
+        use dcc_core::domain::review_threads::{
+            ReviewThreadState, build_review_threads, count_open_review_threads,
+            review_comments_by_path, review_thread_state,
+        };
+        let all = comments
+            .as_ref()
+            .map(|output| output.comments.as_slice())
+            .unwrap_or_default();
+        self.open_by_path = review_comments_by_path(all)
+            .into_iter()
+            .map(|(path, comments)| (path, count_open_review_threads(&comments)))
+            .filter(|(_, count)| *count > 0)
+            .collect();
+        for thread in build_review_threads(all) {
+            if self.seen.insert(thread.id.clone())
+                && review_thread_state(&thread) != ReviewThreadState::Resolved
+            {
+                self.picked.insert(thread.id);
+            }
+        }
+        self.comments = comments;
     }
 
     /// The review state shows on a connected forge with a pull request.
@@ -112,6 +195,17 @@ impl CodeColumn {
         if self.review.review_enabled(pr_number) && self.review.state.is_none() {
             self.review.state = Some(ReviewLoad::Pending);
         }
+        if self.review.pipeline_enabled() && self.review.pipeline.is_none() {
+            self.review.pipeline = Some(PipelineLoad::Pending);
+        }
+        let read_comments = force
+            || self
+                .review
+                .comments_at
+                .is_none_or(|at| at.elapsed() >= COMMENTS_EVERY);
+        if read_comments {
+            self.review.comments_at = Some(Instant::now());
+        }
         self._review = Some(cx.spawn(async move |this, cx| {
             let path = root.clone();
             let read = cx
@@ -144,31 +238,58 @@ impl CodeColumn {
                     };
                     let failure = api.delivery_failure(&path).ok().flatten();
                     let connected = forge.as_ref().is_some_and(ForgeContext::connected);
+                    let forge_login = forge.as_ref().and_then(|f| f.effective_login.clone());
                     let state = (connected && pr_number.is_some()).then(|| {
-                        api.review_state(
-                            &path,
-                            branch.as_deref(),
-                            forge.as_ref().and_then(|f| f.effective_login.as_deref()),
-                        )
-                        .map_or(ReviewLoad::Failed, |state| {
-                            ReviewLoad::Ready(Box::new(state))
-                        })
+                        api.review_state(&path, branch.as_deref(), forge_login.as_deref())
+                            .map_or(ReviewLoad::Failed, |state| {
+                                ReviewLoad::Ready(Box::new(state))
+                            })
                     });
-                    Some((forge, account, failure, state))
+                    let provider = forge.as_ref().and_then(|forge| forge.provider.clone());
+                    let reviewed = matches!(provider.as_deref(), Some("github" | "gitlab"))
+                        && pr_number.is_some();
+                    let comments = if !reviewed {
+                        Some(None)
+                    } else if read_comments {
+                        api.review_comments(&path, branch.as_deref(), forge_login.as_deref())
+                            .ok()
+                            .map(Some)
+                    } else {
+                        None
+                    };
+                    let pipeline =
+                        (connected && provider.as_deref() == Some("gitlab")).then(|| {
+                            api.pipeline(&path, forge_login.as_deref())
+                                .map_or(PipelineLoad::Failed, |status| {
+                                    PipelineLoad::Ready(status.pipeline.map(Box::new))
+                                })
+                        });
+                    Some(Read {
+                        forge,
+                        account,
+                        failure,
+                        state,
+                        comments,
+                        pipeline,
+                    })
                 })
                 .await;
             let _ = this.update(cx, |column, cx| {
                 if column.root.as_deref() != Some(root.as_str()) {
                     return;
                 }
-                if let Some((forge, account, failure, state)) = read {
-                    column.review.accounts_read |= forge.as_ref().is_some_and(|forge| {
+                if let Some(read) = read {
+                    column.review.accounts_read |= read.forge.as_ref().is_some_and(|forge| {
                         forge.effective_login.is_some() || forge.bound_login.is_some()
                     });
-                    column.review.forge = forge;
-                    column.review.account = account;
-                    column.review.failure = failure;
-                    column.review.state = state;
+                    column.review.forge = read.forge;
+                    column.review.account = read.account;
+                    column.review.failure = read.failure;
+                    column.review.state = read.state;
+                    if let Some(comments) = read.comments {
+                        column.review.take_comments(comments);
+                    }
+                    column.review.pipeline = read.pipeline;
                 }
                 cx.notify();
             });

@@ -745,11 +745,20 @@ pub(crate) fn changes(
     dialogs.extend(crate::screens::code_column::review::recovery_confirm(
         column, cx,
     ));
+    dialogs.extend(crate::screens::code_column::review::pipeline_retry_confirm(
+        column, cx,
+    ));
     // The pull request's sections (`grid gap-2 px-2 empty:hidden`).
     let sections: Vec<AnyElement> =
         crate::screens::code_column::review::failure_section(column, cx)
             .into_iter()
             .chain(crate::screens::code_column::review::review_section(
+                column, cx,
+            ))
+            .chain(crate::screens::code_column::review::threads_section(
+                column, cx,
+            ))
+            .chain(crate::screens::code_column::review::pipeline_section(
                 column, cx,
             ))
             .collect();

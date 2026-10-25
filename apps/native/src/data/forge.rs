@@ -195,6 +195,83 @@ pub struct Recovered {
     pub refresh_pipeline: bool,
 }
 
+/// `WorkspacePipelineJob`
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PipelineJob {
+    pub id: u64,
+    pub name: String,
+    pub stage: String,
+    pub status: String,
+    pub duration: Option<f64>,
+    pub web_url: Option<String>,
+    pub allow_failure: bool,
+    pub retryable: bool,
+}
+
+/// `WorkspacePipeline`
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Pipeline {
+    pub id: u64,
+    pub sha: String,
+    pub ref_name: Option<String>,
+    pub status: String,
+    pub web_url: Option<String>,
+    pub duration: Option<f64>,
+    pub jobs: Vec<PipelineJob>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PipelineStatus {
+    pub pipeline: Option<Pipeline>,
+}
+
+/// `WorkspacePipelineJobLogOutput`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct JobLog {
+    pub content: String,
+    pub truncated: bool,
+}
+
+/// `pipelineTone`
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PipelineTone {
+    Success,
+    Danger,
+    Progress,
+    Waiting,
+    Muted,
+}
+
+pub fn pipeline_tone(status: &str) -> PipelineTone {
+    match status {
+        "success" => PipelineTone::Success,
+        "failed" => PipelineTone::Danger,
+        "running" | "pending" | "preparing" | "canceling" => PipelineTone::Progress,
+        "manual" | "scheduled" | "waiting_for_callback" | "waiting_for_resource" => {
+            PipelineTone::Waiting
+        }
+        _ => PipelineTone::Muted,
+    }
+}
+
+/// `formatDuration`: `42s`, `3m 5s`, `1h 2m`.
+pub fn format_duration(seconds: Option<f64>) -> Option<String> {
+    let seconds = seconds.filter(|seconds| seconds.is_finite())?;
+    if seconds < 60.0 {
+        return Some(format!("{}s", seconds.round().max(0.0) as i64));
+    }
+    let minutes = (seconds / 60.0).floor() as i64;
+    let rest = (seconds % 60.0).round() as i64;
+    if minutes < 60 {
+        return Some(format!("{minutes}m {rest}s"));
+    }
+    Some(format!("{}h {}m", minutes / 60, minutes % 60))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +329,16 @@ mod tests {
             others.iter().map(|c| c.login.as_str()).collect::<Vec<_>>(),
             vec!["bia"]
         );
+    }
+
+    #[test]
+    fn pipeline_durations_and_tones() {
+        assert_eq!(format_duration(Some(42.4)).as_deref(), Some("42s"));
+        assert_eq!(format_duration(Some(185.0)).as_deref(), Some("3m 5s"));
+        assert_eq!(format_duration(Some(3720.0)).as_deref(), Some("1h 2m"));
+        assert_eq!(format_duration(None), None);
+        assert_eq!(pipeline_tone("waiting_for_resource"), PipelineTone::Waiting);
+        assert_eq!(pipeline_tone("canceled"), PipelineTone::Muted);
     }
 
     #[test]

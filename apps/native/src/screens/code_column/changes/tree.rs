@@ -191,6 +191,11 @@ pub(super) fn file_row(
                 .when(hovered && actions.is_some(), |folder| folder.invisible())
                 .child(folder),
         )
+        .children(crate::screens::code_column::review::review_badge(
+            column,
+            &entry.path,
+            cx,
+        ))
         .child(
             div()
                 .flex()

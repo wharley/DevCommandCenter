@@ -114,6 +114,8 @@ pub struct CodeColumn {
     _review: Option<Task<()>>,
     _recovery: Option<Task<()>>,
     _reviewers: Option<Task<()>>,
+    _job_log: Option<Task<()>>,
+    _job_retry: Option<Task<()>>,
 }
 
 impl EventEmitter<CodeColumnEvent> for CodeColumn {}
@@ -152,6 +154,8 @@ impl CodeColumn {
             _review: None,
             _recovery: None,
             _reviewers: None,
+            _job_log: None,
+            _job_retry: None,
         }
     }
 
