@@ -4836,7 +4836,15 @@ pub async fn workspace_apply_delegation_worktree(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceApplyDelegationWorktreeInput,
 ) -> Result<WorkspaceApplyDelegationWorktreeOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_apply_delegation_worktree_with_state(&state, input).await
+}
+
+/// `workspace_apply_delegation_worktree` for callers without a Tauri `State`.
+pub async fn workspace_apply_delegation_worktree_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceApplyDelegationWorktreeInput,
+) -> Result<WorkspaceApplyDelegationWorktreeOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let requested_root = input.workspace_root.trim().to_string();
     if requested_root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -4848,7 +4856,7 @@ pub async fn workspace_apply_delegation_worktree(
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "delegation worktree journal entry was not found".to_string())?;
-    validate_delegation_operation_workspace_scope(state.inner(), &requested_root, &operation).await?;
+    validate_delegation_operation_workspace_scope(state, &requested_root, &operation).await?;
     if !matches!(
         operation.state,
         DelegationWorktreeOperationState::ReviewPending

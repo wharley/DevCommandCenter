@@ -57,6 +57,7 @@ use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
 mod attention;
+mod delegation_review;
 mod delivery;
 mod forge;
 mod git_changes;
@@ -688,6 +689,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/forge/pipeline", post(forge::pipeline))
         .route("/api/v1/forge/pipeline-job-log", post(forge::pipeline_job_log))
         .route("/api/v1/forge/pipeline-job-retry", post(forge::pipeline_job_retry))
+        .route(
+            "/api/v1/delegations/:delegation_id/apply",
+            post(delegation_review::apply),
+        )
+        .route(
+            "/api/v1/delegations/:delegation_id/discard",
+            post(delegation_review::discard),
+        )
         .route(
             "/api/v1/sessions/:session_id/task-title",
             post(apply_task_title_handler),
@@ -1482,6 +1491,8 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/forge/pipeline",
             "POST /api/v1/forge/pipeline-job-log",
             "POST /api/v1/forge/pipeline-job-retry",
+            "POST /api/v1/delegations/:delegation_id/apply",
+            "POST /api/v1/delegations/:delegation_id/discard",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
             "POST /api/v1/sessions/:session_id/queue",
@@ -5046,11 +5057,21 @@ mod tests {
             "/api/v1/git/delivery-failure",
             "/api/v1/forge/review-comments",
             "/api/v1/forge/pipeline",
+            "/api/v1/delegations/d-1/apply",
+            "/api/v1/delegations/d-1/discard",
         ] {
             let (status, _) =
                 post_json(&fixture.app, uri, json!({ "workspaceRoot": other.path() })).await;
             assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
         }
+        // A delegation that doesn't exist is not found, on the task's own checkout.
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/delegations/missing/apply",
+            json!({ "workspaceRoot": root }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
