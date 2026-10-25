@@ -5,8 +5,13 @@
 //! The MVP keeps context in memory; durable browser metadata and automation are
 //! separate follow-up features.
 
+// The URL policy lives in dcc-core, shared with the native app's Browser.
+pub use dcc_core::domain::browser::validate_browser_url;
+use dcc_core::domain::browser::{
+    sanitize_location_url as sanitize_browser_location_url,
+    select_open_url as select_browser_open_url, LOCATION_TTL_MS as BROWSER_LOCATION_TTL_MS,
+};
 use std::collections::{HashMap, VecDeque};
-use std::net::Ipv6Addr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -16,7 +21,7 @@ use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, WebviewBui
 use tauri::{AppHandle, Emitter, Manager, State, Webview, WebviewUrl, Wry};
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 use tokio::time::{timeout, Duration};
-use url::{Host, Url};
+use url::Url;
 
 #[cfg(not(target_os = "macos"))]
 use crate::browser_popups::browser_profile_data_dir;
@@ -32,9 +37,6 @@ use dcc_tauri::state::SessionCommandState;
 
 const BROWSER_LABEL: &str = "dcc-browser";
 static BROWSER_VIEW_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-const DEFAULT_URL: &str = "https://www.google.com/";
-const BROWSER_LOCATION_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
-const MAX_BROWSER_LOCATION_URL_CHARS: usize = 2_048;
 const MAX_BROWSER_LOCATION_CACHE_ENTRIES: usize = 256;
 const MAX_BROWSER_DIMENSION: f64 = 16_384.0;
 const MAX_BROWSER_CONTEXT_CHARS: usize = 6_000;
@@ -953,101 +955,11 @@ fn browser_audit_tool_for_action(action: &BrowserControlAction) -> BrowserAuditT
 /// Browser allowlist used both by commands and by the native navigation hook.
 /// HTTPS is allowed for normal human browsing; HTTP is restricted to local
 /// development servers. Credentials and unsupported schemes are rejected.
-pub fn validate_browser_url(raw: &str) -> Result<Url, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("browser URL cannot be empty".to_string());
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.starts_with("https:///") || lower.starts_with("http:///") {
-        return Err("browser URL must include a host".to_string());
-    }
-    let url = Url::parse(trimmed).map_err(|_| "browser URL is invalid".to_string())?;
-    if url.username() != "" || url.password().is_some() {
-        return Err("browser URLs cannot contain credentials".to_string());
-    }
-    match url.scheme().to_ascii_lowercase().as_str() {
-        "https" => {
-            match url.host_str() {
-                Some(host) if !host.is_empty() => {}
-                _ => return Err("HTTPS browser URL must include a host".to_string()),
-            }
-            Ok(url)
-        }
-        "http" => {
-            let host = url
-                .host()
-                .ok_or_else(|| "HTTP browser URL must include a host".to_string())?;
-            let local = match host {
-                Host::Domain(host) => matches!(
-                    host.to_ascii_lowercase().as_str(),
-                    "localhost" | "127.0.0.1"
-                ),
-                Host::Ipv4(host) => host.is_loopback(),
-                Host::Ipv6(host) => host == Ipv6Addr::LOCALHOST,
-            };
-            if local {
-                Ok(url)
-            } else {
-                Err("HTTP browser URLs are only allowed for localhost".to_string())
-            }
-        }
-        _ => Err("browser URL scheme must be HTTPS or local HTTP".to_string()),
-    }
-}
-
-/// Durable Browser locations retain navigation identity only. Query strings,
-/// fragments and credentials can carry secrets, so they never cross the
-/// runtime-to-SQLite boundary even when the live Browser currently has them.
-fn sanitize_browser_location_url(raw: &str) -> Option<String> {
-    if raw.is_empty()
-        || raw.chars().count() > MAX_BROWSER_LOCATION_URL_CHARS
-        || raw.chars().any(char::is_control)
-    {
-        return None;
-    }
-    let mut url = Url::parse(raw).ok()?;
-    url.set_username("").ok()?;
-    url.set_password(None).ok()?;
-    url.set_query(None);
-    url.set_fragment(None);
-    let safe_url = url.to_string();
-    if safe_url.chars().count() > MAX_BROWSER_LOCATION_URL_CHARS
-        || safe_url.chars().any(char::is_control)
-    {
-        return None;
-    }
-    validate_browser_url(&safe_url).ok()?;
-    Some(safe_url)
-}
-
 fn browser_location_now_ms() -> Option<i64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()
         .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-}
-
-/// Exact open precedence. Runtime context preserves the existing same-process
-/// behavior; durable state is considered only after an explicit restore opt-in.
-fn select_browser_open_url(
-    initial_url: Option<&str>,
-    runtime_url: Option<String>,
-    stored_url: Option<String>,
-    restore_last_url: bool,
-) -> Result<Url, String> {
-    if let Some(initial_url) = initial_url {
-        return validate_browser_url(initial_url);
-    }
-    if let Some(runtime_url) = runtime_url {
-        return validate_browser_url(&runtime_url);
-    }
-    if restore_last_url {
-        if let Some(stored_url) = stored_url.and_then(|url| sanitize_browser_location_url(&url)) {
-            return validate_browser_url(&stored_url);
-        }
-    }
-    validate_browser_url(DEFAULT_URL)
 }
 
 /// Best-effort durable persistence runs only after the page-load callback has
@@ -6037,7 +5949,7 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(defaulted.as_str(), super::DEFAULT_URL);
+        assert_eq!(defaulted.as_str(), dcc_core::domain::browser::DEFAULT_URL);
     }
 
     #[test]

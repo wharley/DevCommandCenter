@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod attention;
+pub mod browser;
 pub mod code_annotation;
 pub mod commit_mode;
 pub mod computer_use_conformance;
