@@ -48,6 +48,13 @@ fn mapped(spans: &[Span], map: &[usize]) -> Vec<Span> {
 struct RowStyle {
     palette: DiffPalette,
     selection: Hsla,
+    /// `[data-match-range]:not([data-focus])`
+    match_other: Hsla,
+    /// `[data-bracket-match-range]`
+    bracket_bg: Hsla,
+    bracket_border: Hsla,
+    /// The caret's bracket and its pair.
+    brackets: Option<(usize, usize)>,
     line_highlight: Hsla,
     caret: Hsla,
     cell: f32,
@@ -90,6 +97,33 @@ fn row(view: &FileView, index: usize, style: &RowStyle) -> AnyElement {
         .filter(|(from, to)| to > from);
     let caret = (style.caret_visible && caret_line).then(|| display_column(cursor));
     let left = cell - view.scroll_x;
+    // The panel's matches on this line (the current one is the selection).
+    let matches: Vec<(f32, f32)> = view
+        .search
+        .as_ref()
+        .map(|search| {
+            let first = search.matches.partition_point(|range| range.end < start);
+            search.matches[first..]
+                .iter()
+                .take_while(|range| range.start <= end)
+                .filter(|range| **range != selection)
+                .map(|range| {
+                    (
+                        display_column(range.start.max(start)),
+                        display_column(range.end.min(end)),
+                    )
+                })
+                .filter(|(from, to)| to > from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let brackets: Vec<f32> = style
+        .brackets
+        .into_iter()
+        .flat_map(|(open, close)| [open, close])
+        .filter(|at| (start..end).contains(at))
+        .map(display_column)
+        .collect();
     div()
         .group(GROUP)
         .flex()
@@ -125,6 +159,26 @@ fn row(view: &FileView, index: usize, style: &RowStyle) -> AnyElement {
                 .when(!active, |line| {
                     line.group_hover(GROUP, move |row| row.bg(hover))
                 })
+                .children(matches.into_iter().map(|(from, to)| {
+                    div()
+                        .absolute()
+                        .top_0()
+                        .h_full()
+                        .left(px(left + from * cell))
+                        .w(px((to - from) * cell))
+                        .bg(style.match_other)
+                }))
+                .children(brackets.into_iter().map(|column| {
+                    div()
+                        .absolute()
+                        .top_0()
+                        .h_full()
+                        .left(px(left + column * cell))
+                        .w(px(cell))
+                        .bg(style.bracket_bg)
+                        .border_b_1()
+                        .border_color(style.bracket_border)
+                }))
                 .children(selected.map(|(from, to)| {
                     div()
                         .absolute()
@@ -190,7 +244,17 @@ impl Render for FileView {
             .max()
             .unwrap_or(0) as f32
             * cell;
+        let brackets = super::search::bracket_pair(self.buffer.text(), self.buffer.cursor())
+            .filter(|_| self.buffer.selection.is_empty() && focused);
         let style = std::rc::Rc::new(RowStyle {
+            match_other: if self.dark {
+                color(0xff963266)
+            } else {
+                color(0xff963288)
+            },
+            bracket_bg: palette.foreground.opacity(0.05),
+            bracket_border: palette.foreground.opacity(0.6),
+            brackets,
             palette,
             selection: color(colors.selection),
             line_highlight: color(colors.line_highlight),
@@ -296,7 +360,16 @@ impl Render for FileView {
                 }),
             )
             .child(rows);
-        FileView::register_actions(div().size_full().child(editor), cx)
+        // The search panel floats over the text, outside its keys.
+        let panel = super::find_view::panel(self, cx);
+        div()
+            .relative()
+            .size_full()
+            .child(FileView::register_actions(
+                div().size_full().child(editor),
+                cx,
+            ))
+            .children(panel)
     }
 }
 

@@ -127,3 +127,71 @@ fn the_pointer_places_the_caret_and_selects(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("escape");
     view.read_with(cx, |view, _| assert!(view.buffer.selection.is_empty()));
 }
+
+fn summary(view: &gpui::Entity<FileView>, cx: &mut gpui::VisualTestContext) -> String {
+    view.read_with(cx, |view, _| {
+        view.search
+            .as_ref()
+            .map(|search| search.summary())
+            .unwrap_or_default()
+    })
+}
+
+#[gpui::test]
+fn find_opens_on_the_word_and_steps_through_its_matches(cx: &mut TestAppContext) {
+    cx.update(crate::ui::text_input::bind_keys);
+    let (view, cx) = open(cx, "let total = 1;\ntotal += total;\n", DEFAULT_INDENTATION);
+    view.update(cx, |view, _| view.buffer.go(5, false));
+    cx.simulate_keystrokes("cmd-f");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("search-panel").is_some());
+    assert_eq!(summary(&view, cx), "1 of 3");
+    view.read_with(cx, |view, _| assert_eq!(view.buffer.selection, 4..9));
+    // Enter and Shift+Enter in the field go around the matches.
+    cx.simulate_keystrokes("enter");
+    assert_eq!(summary(&view, cx), "2 of 3");
+    cx.simulate_keystrokes("shift-enter shift-enter");
+    assert_eq!(summary(&view, cx), "3 of 3");
+    // ⌘Z in the field never reaches the file.
+    cx.simulate_keystrokes("cmd-z");
+    assert_eq!(text(&view, cx), "let total = 1;\ntotal += total;\n");
+    // Typing another query finds again from the selection on: the one
+    // match sits before it, so none is current (as the Pierre editor).
+    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_input("+=");
+    assert_eq!(summary(&view, cx), "1 results");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(summary(&view, cx), "1 of 1");
+    cx.simulate_input("x");
+    assert_eq!(summary(&view, cx), "No results");
+    cx.simulate_keystrokes("escape");
+    view.read_with(cx, |view, _| assert!(view.search.is_none()));
+    let focused = view.update_in(cx, |view, window, _| view.focus.is_focused(window));
+    assert!(focused, "the text has the focus again");
+}
+
+#[gpui::test]
+fn replace_edits_the_current_match_and_replace_all_the_rest(cx: &mut TestAppContext) {
+    cx.update(crate::ui::text_input::bind_keys);
+    let (view, cx) = open(cx, "a1 a2 a3\n", DEFAULT_INDENTATION);
+    view.update(cx, |view, _| view.buffer.go(0, false));
+    cx.simulate_keystrokes("cmd-alt-f");
+    cx.run_until_parked();
+    // The word at the caret is "a1"; ask for a regex instead.
+    view.update(cx, |view, cx| {
+        let search = view.search.as_ref().unwrap();
+        let (query, replace) = (search.query.clone(), search.replace.clone());
+        query.update(cx, |input, cx| input.set_text(r"a(\d)", cx));
+        replace.update(cx, |input, cx| input.set_text("b$1", cx));
+        view.toggle_search_option(|search| &mut search.regex, cx);
+    });
+    assert_eq!(summary(&view, cx), "1 of 3");
+    let replace = cx.debug_bounds("search-replace").expect("Replace");
+    cx.simulate_click(replace.center(), Modifiers::none());
+    assert_eq!(text(&view, cx), "b1 a2 a3\n");
+    let all = cx.debug_bounds("search-replace-all").unwrap();
+    cx.simulate_click(all.center(), Modifiers::none());
+    assert_eq!(text(&view, cx), "b1 b2 b3\n");
+    assert_eq!(summary(&view, cx), "No results");
+    cx.simulate_keystrokes("cmd-z");
+}

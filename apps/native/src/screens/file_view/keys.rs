@@ -53,7 +53,7 @@ actions!(
 pub(crate) const CONTEXT: &str = "CodeEditor";
 
 /// Registers the editor's keys; call once at startup.
-pub fn bind_keys(cx: &mut App) {
+pub(crate) fn bind_keys(cx: &mut App) {
     let context = Some(CONTEXT);
     cx.bind_keys([
         KeyBinding::new("left", Left, context),
@@ -391,5 +391,19 @@ impl FileView {
                 let cursor = view.buffer.cursor();
                 view.go(cursor, false, cx)
             }))
+            .on_action(cx.listener(|view, _: &super::find::OpenFind, window, cx| {
+                view.open_search(super::find::FindMode::Find, window, cx)
+            }))
+            .on_action(
+                cx.listener(|view, _: &super::find::OpenReplace, window, cx| {
+                    view.open_search(super::find::FindMode::Replace, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|view, _: &super::find::FindNext, _, cx| view.step_match(false, cx)),
+            )
+            .on_action(
+                cx.listener(|view, _: &super::find::FindPrevious, _, cx| view.step_match(true, cx)),
+            )
     }
 }

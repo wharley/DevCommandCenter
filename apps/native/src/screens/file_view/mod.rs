@@ -8,15 +8,22 @@
 //! shows that line.
 
 mod buffer;
+mod find;
+mod find_view;
 mod handler;
 mod keys;
+mod search;
 mod view;
 
 #[cfg(test)]
 mod tests;
 
 pub use buffer::EditBuffer;
-pub use keys::bind_keys;
+/// Registers the editor's keys and its search panel's; call once at startup.
+pub fn bind_keys(cx: &mut gpui::App) {
+    keys::bind_keys(cx);
+    find::bind_keys(cx);
+}
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -73,6 +80,8 @@ pub struct FileView {
     pub(crate) caret_moved: Instant,
     /// Keep the caret in view at the next frame.
     pub(crate) reveal: bool,
+    /// The search panel, while open.
+    pub(crate) search: Option<find::Search>,
     _colors: Option<Task<()>>,
     _blink: Option<Task<()>>,
 }
@@ -110,6 +119,7 @@ impl FileView {
             selecting: false,
             caret_moved: Instant::now(),
             reveal: false,
+            search: None,
             _colors: None,
             _blink: None,
         };
@@ -223,6 +233,10 @@ impl FileView {
             self.list.scroll_to(top);
         }
         self.recolor(RECOLOR_AFTER, cx);
+        // The panel's matches follow the text (the selection stays).
+        if self.search.is_some() {
+            self.refresh_matches(false, cx);
+        }
         self.moved(cx);
         cx.emit(FileViewEvent::Edited);
     }

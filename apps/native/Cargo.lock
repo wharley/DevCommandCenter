@@ -1320,6 +1320,7 @@ dependencies = [
  "objc2-core-graphics",
  "pulldown-cmark",
  "raw-window-handle",
+ "regex",
  "resvg",
  "serde",
  "serde_json",
