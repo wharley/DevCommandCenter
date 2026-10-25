@@ -7,6 +7,7 @@ pub mod delegation;
 pub mod delivery_failure_prompt;
 pub mod delegation_apply;
 pub mod delegation_worktree;
+pub mod file_reference;
 pub mod forge;
 pub mod goal;
 pub mod guarded_undo;
