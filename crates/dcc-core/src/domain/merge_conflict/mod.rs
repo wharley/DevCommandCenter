@@ -2,6 +2,7 @@
 //! file, when a merge resolved outside the app can be completed from
 //! "Mudanças" (`isMergeConflictResolutionReady`), and the resolver's labels.
 
+pub mod agent;
 mod hunks;
 mod types;
 
