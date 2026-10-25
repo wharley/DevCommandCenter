@@ -12,7 +12,10 @@ use gpui::{
 };
 
 use super::Icon;
+
+mod row;
 use crate::theme::ActiveTheme;
+use row::{Label, row};
 
 pub type OnSelect = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -34,6 +37,10 @@ pub struct MenuItem {
     disabled: bool,
     /// `text-destructive focus:text-destructive`
     destructive: bool,
+    /// A quiet second line (`text-[11px] text-muted-foreground`).
+    detail: Option<SharedString>,
+    /// A mark at the right end (the current choice's ✓).
+    trailing: Option<SharedString>,
     on_select: OnSelect,
 }
 
@@ -47,8 +54,20 @@ impl MenuItem {
             icon: None,
             disabled: false,
             destructive: false,
+            detail: None,
+            trailing: None,
             on_select: Rc::new(on_select),
         }
+    }
+
+    pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn trailing(mut self, mark: impl Into<SharedString>) -> Self {
+        self.trailing = Some(mark.into());
+        self
     }
 
     pub fn icon(mut self, icon: Icon) -> Self {
@@ -379,7 +398,11 @@ fn panel(
                 index,
                 highlighted == Some(index),
                 item.icon,
-                item.label,
+                Label {
+                    text: item.label,
+                    detail: item.detail,
+                    trailing: item.trailing,
+                },
                 false,
                 item.disabled,
                 item.destructive,
@@ -399,7 +422,11 @@ fn panel(
                     index,
                     highlighted == Some(index) || open,
                     icon,
-                    label,
+                    Label {
+                        text: label,
+                        detail: None,
+                        trailing: None,
+                    },
                     true,
                     false,
                     false,
@@ -492,73 +519,5 @@ fn panel(
             });
         })
         .children(children)
-        .into_any_element()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn row(
-    root: &gpui::Entity<MenuState>,
-    state: &gpui::Entity<MenuState>,
-    index: usize,
-    highlighted: bool,
-    icon: Option<Icon>,
-    label: SharedString,
-    submenu: bool,
-    disabled: bool,
-    destructive: bool,
-    style: ItemStyle,
-    on_select: Option<OnSelect>,
-    cx: &App,
-) -> AnyElement {
-    let colors = &cx.theme().colors;
-    let radius = cx.theme().radius;
-    let hover_state = state.clone();
-    let click_state = state.clone();
-    let click_root = root.clone();
-    div()
-        .id(ElementId::NamedInteger("menu-item".into(), index as u64))
-        .flex()
-        .items_center()
-        .gap(px(style.gap))
-        .px(px(6.0))
-        .py(px(4.0))
-        .rounded(radius.md)
-        .text_size(px(style.text_size))
-        .line_height(px(20.0))
-        .when(highlighted, |row| {
-            row.bg(colors.accent).text_color(colors.accent_foreground)
-        })
-        .when(destructive, |row| row.text_color(colors.destructive))
-        .when(disabled, |row| row.opacity(0.5))
-        .when(!disabled, |row| {
-            row.cursor_pointer()
-                .on_hover(move |hovered, _, cx| {
-                    if *hovered {
-                        hover_state.update(cx, |state, cx| {
-                            state.highlighted = Some(index);
-                            state.open_submenu = submenu.then_some(index);
-                            cx.notify();
-                        });
-                    }
-                })
-                .on_click(move |_: &ClickEvent, window, cx| {
-                    cx.stop_propagation();
-                    match &on_select {
-                        Some(on_select) => {
-                            set_open(&click_root, false, None, window, cx);
-                            on_select(window, cx);
-                        }
-                        None => click_state.update(cx, |state, cx| {
-                            state.open_submenu = Some(index);
-                            cx.notify();
-                        }),
-                    }
-                })
-        })
-        .children(icon)
-        .child(label)
-        .when(submenu, |row| {
-            row.child(div().ml_auto().child(Icon::new("chevron-right")))
-        })
         .into_any_element()
 }

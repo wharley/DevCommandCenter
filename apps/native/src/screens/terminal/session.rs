@@ -83,6 +83,10 @@ fn commands(api: DesktopApi, pty_id: String) -> Sender<Command> {
 pub enum SessionEvent {
     /// The shell's PTY, once known (the dock routes the stream by it).
     Opened(String),
+    /// What the dock's bar shows from it changed (a local server found).
+    Changed,
+    /// "Enviar seleção ao agente" on its surface.
+    SendSelection,
 }
 
 pub struct TerminalSession {
@@ -114,6 +118,8 @@ pub struct TerminalSession {
     pub(super) hovered_link: Option<super::select::Link>,
     /// The size the shell was asked to start at.
     opened_at: (u16, u16),
+    /// Local servers seen in what it printed.
+    pub dev_servers: super::dev_server::DevServers,
     _open: Option<Task<()>>,
 }
 
@@ -150,6 +156,7 @@ impl TerminalSession {
             pressed_link: None,
             hovered_link: None,
             opened_at: (0, 0),
+            dev_servers: Default::default(),
             _open: None,
         };
         session.open(cx);
@@ -167,6 +174,11 @@ impl TerminalSession {
     /// `ensureTerminal`: the owner's shell at the emulator's size, with what
     /// it printed so far.
     pub(super) fn open(&mut self, cx: &mut Context<Self>) {
+        self.open_after(None, cx);
+    }
+
+    /// Opens the owner's shell, once `ended` (the one restarted) is gone.
+    fn open_after(&mut self, ended: Option<String>, cx: &mut Context<Self>) {
         let (cols, rows) = self.emulator.size();
         self.opened_at = (cols, rows);
         let spec = ShellSpec {
@@ -183,6 +195,9 @@ impl TerminalSession {
                 .background_executor()
                 .spawn(async move {
                     let api = api.ok_or(ApiError::DesktopClosed)?;
+                    if let Some(pty_id) = ended {
+                        api.kill_terminal(&pty_id)?;
+                    }
                     api.open_terminal(&owner_key, &spec)
                         .map(|opened| (api, opened))
                 })
@@ -198,17 +213,18 @@ impl TerminalSession {
         let (cols, rows) = self.emulator.size();
         // The screen starts over from what the shell printed.
         self.emulator = Emulator::new(cols, rows);
+        self.dev_servers = Default::default();
+        let mut found = false;
         let sender = commands(api, opened.pty_id.clone());
         if opened.chunks.is_empty() && !opened.existing {
             self.emulator
                 .feed(banner(&self.context, &self.spec).as_bytes());
         }
-        for chunk in &opened.chunks {
+        for chunk in opened.chunks.iter().chain(&self.early) {
             self.emulator.feed(chunk.as_bytes());
+            found |= self.dev_servers.feed(chunk);
         }
-        for chunk in std::mem::take(&mut self.early) {
-            self.emulator.feed(chunk.as_bytes());
-        }
+        self.early.clear();
         // `applyPendingResize`: the size it was drawn at, once it has a PTY.
         if opened.existing || (cols, rows) != self.opened_at {
             let _ = sender.send(Command::Resize(cols, rows));
@@ -222,6 +238,9 @@ impl TerminalSession {
         self.sender = Some(sender);
         self.answer();
         cx.emit(SessionEvent::Opened(opened.pty_id));
+        if found {
+            cx.emit(SessionEvent::Changed);
+        }
         cx.notify();
     }
 
@@ -239,6 +258,9 @@ impl TerminalSession {
             return;
         }
         self.emulator.feed(data.as_bytes());
+        if self.dev_servers.feed(data) {
+            cx.emit(SessionEvent::Changed);
+        }
         self.answer();
         cx.notify();
     }
@@ -300,8 +322,43 @@ impl TerminalSession {
     /// `clearTerminal`: the screen and scrollback, then `\f` for the prompt.
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.emulator.clear();
+        if !self.dev_servers.found.is_empty() {
+            self.dev_servers = Default::default();
+            cx.emit(SessionEvent::Changed);
+        }
         self.send(Command::Write("\x0c".into()));
         cx.notify();
+    }
+
+    /// `interruptTerminal`: ⌃C to what runs.
+    pub fn interrupt(&mut self) {
+        self.send(Command::Write("\x03".into()));
+    }
+
+    /// `restartTerminal`: this shell ends and a new one opens for the tab.
+    /// Returns the PTY that ends, for the dock to stop routing it.
+    pub fn restart(&mut self, cx: &mut Context<Self>) -> Option<String> {
+        let ended = self.pty_id.take();
+        self.sender = None;
+        let (cols, rows) = self.emulator.size();
+        self.emulator = Emulator::new(cols, rows);
+        self.activity = None;
+        self.dev_servers = Default::default();
+        self.early.clear();
+        self.open_after(ended.clone(), cx);
+        cx.emit(SessionEvent::Changed);
+        ended
+    }
+
+    /// Whether a program runs in it (`running` or `waiting`).
+    pub fn busy(&self) -> bool {
+        use crate::data::terminal_api::ActivityStatus;
+        self.activity.as_ref().is_some_and(|activity| {
+            matches!(
+                activity.status,
+                ActivityStatus::Running | ActivityStatus::Waiting
+            )
+        })
     }
 
     /// `disposeTerminal`: the shell ends with its tab.

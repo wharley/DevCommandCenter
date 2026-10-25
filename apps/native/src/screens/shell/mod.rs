@@ -731,7 +731,7 @@ impl Render for Shell {
             // Esc outside the terminal hides its dock (the drawer's window listener).
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" {
-                    this.terminal.update(cx, |dock, cx| dock.hide(cx));
+                    this.terminal.update(cx, |dock, cx| dock.step_back(cx));
                 }
             }))
             .on_action(cx.listener(|this, _: &ToggleCodeChanges, _, cx| {
@@ -762,7 +762,7 @@ impl Render for Shell {
                         Some(resolver) => resolver.into_any_element(),
                         None => self.conversation_with_stage(cx),
                     };
-                    self.with_terminal(content)
+                    self.with_terminal(content, cx)
                 }
                 Surface::NewTask => self.new_task.clone().into_any_element(),
             }))

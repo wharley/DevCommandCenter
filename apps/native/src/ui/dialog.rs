@@ -23,6 +23,8 @@ pub struct Dialog {
     padding: f32,
     gap: f32,
     close_button: bool,
+    /// What takes the focus when it opens (a field), instead of the card.
+    initial_focus: Option<FocusHandle>,
     on_close: OnClose,
     children: SmallVec<[AnyElement; 4]>,
 }
@@ -39,6 +41,7 @@ impl Dialog {
             padding: 16.0,
             gap: 16.0,
             close_button: true,
+            initial_focus: None,
             on_close: Rc::new(on_close),
             children: SmallVec::new(),
         }
@@ -65,6 +68,12 @@ impl Dialog {
     /// `gap-4` by default.
     pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
+        self
+    }
+
+    /// The field that takes the focus when it opens (`autoFocus`).
+    pub fn initial_focus(mut self, focus: FocusHandle) -> Self {
+        self.initial_focus = Some(focus);
         self
     }
 
@@ -105,10 +114,11 @@ fn dialog_shadow(ring: Hsla) -> Vec<BoxShadow> {
 
 impl RenderOnce for Dialog {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let initial = self.initial_focus.clone();
         let focus = window
             .use_keyed_state(self.id.clone(), cx, |window, cx| {
                 let handle: FocusHandle = cx.focus_handle();
-                window.focus(&handle, cx);
+                window.focus(initial.as_ref().unwrap_or(&handle), cx);
                 handle
             })
             .read(cx)

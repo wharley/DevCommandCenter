@@ -107,10 +107,34 @@ pub enum DockEvent {
     Hidden,
     /// A drag ended at this height.
     Resized(f32),
+    /// It took over the conversation's room, or gave it back.
+    Expanded(bool),
+    /// Output for the composer's draft (`pushDebugEvidence`).
+    SendToAgent(String),
+}
+
+/// What the dock was like on a task (`WorkspaceTerminalUiState`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct UiState {
+    open: bool,
+    expanded: bool,
+    kind: ScopeKind,
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            expanded: false,
+            kind: ScopeKind::Worktree,
+        }
+    }
 }
 
 pub struct TerminalDock {
     pub open: bool,
+    /// The dock takes the conversation's room (the chat hides).
+    pub expanded: bool,
     pub height: f32,
     /// The pointer y and height when a resize drag started.
     pub(super) drag: Option<(f32, f32)>,
@@ -118,8 +142,13 @@ pub struct TerminalDock {
     pub(super) place: Option<TerminalPlace>,
     pub(super) kind: ScopeKind,
     pub(super) sessions: HashMap<String, Entity<TerminalSession>>,
-    by_pty: HashMap<String, WeakEntity<TerminalSession>>,
-    api: Option<DesktopApi>,
+    pub(super) by_pty: HashMap<String, WeakEntity<TerminalSession>>,
+    pub(super) api: Option<DesktopApi>,
+    ui_states: HashMap<String, UiState>,
+    /// "Renomear terminal", while open.
+    pub(super) renaming: Option<super::dock_actions::Renaming>,
+    /// "Há um processo em execução": the tab and what runs in it.
+    pub(super) closing: Option<(String, String)>,
     _stream: Option<Task<()>>,
     _activity: Option<Task<()>>,
     _sessions: Vec<Subscription>,
@@ -131,6 +160,7 @@ impl TerminalDock {
     pub fn new(height: f32, tabs: TabStore, api: Option<DesktopApi>) -> Self {
         Self {
             open: false,
+            expanded: false,
             height,
             drag: None,
             tabs,
@@ -139,6 +169,9 @@ impl TerminalDock {
             sessions: HashMap::new(),
             by_pty: HashMap::new(),
             api,
+            ui_states: HashMap::new(),
+            renaming: None,
+            closing: None,
             _stream: None,
             _activity: None,
             _sessions: Vec::new(),
@@ -150,13 +183,33 @@ impl TerminalDock {
         if self.place == place {
             return;
         }
-        let task_changed = self.place.as_ref().map(|place| &place.workspace_id)
-            != place.as_ref().map(|place| &place.workspace_id);
+        let before = self.place.as_ref().map(|place| place.workspace_id.clone());
+        let after = place.as_ref().map(|place| place.workspace_id.clone());
         self.place = place;
-        if task_changed {
-            // Each task opens on its worktree; its dock starts closed.
-            self.kind = ScopeKind::Worktree;
-            self.open = false;
+        if before != after {
+            // Each task keeps its own dock: open or not, expanded, its scope.
+            if let Some(before) = before {
+                self.ui_states.insert(
+                    before,
+                    UiState {
+                        open: self.open,
+                        expanded: self.expanded,
+                        kind: self.kind,
+                    },
+                );
+            }
+            let state = after
+                .and_then(|after| self.ui_states.get(&after).copied())
+                .unwrap_or_default();
+            let was_expanded = self.expanded;
+            self.open = state.open;
+            self.expanded = state.expanded;
+            self.kind = state.kind;
+            self.renaming = None;
+            self.closing = None;
+            if was_expanded != self.expanded {
+                cx.emit(DockEvent::Expanded(self.expanded));
+            }
         }
         if self.open {
             self.show_active(cx);
@@ -201,6 +254,12 @@ impl TerminalDock {
             return;
         }
         self.open = false;
+        self.renaming = None;
+        self.closing = None;
+        if self.expanded {
+            self.expanded = false;
+            cx.emit(DockEvent::Expanded(false));
+        }
         cx.emit(DockEvent::Hidden);
         cx.notify();
     }
@@ -247,10 +306,12 @@ impl TerminalDock {
         let api = self.api.clone();
         let session = cx.new(|cx| TerminalSession::new(owner.clone(), spec, context, api, cx));
         self._sessions.push(
-            cx.subscribe(&session, |dock, session, event, _| match event {
+            cx.subscribe(&session, |dock, session, event, cx| match event {
                 SessionEvent::Opened(pty_id) => {
                     dock.by_pty.insert(pty_id.clone(), session.downgrade());
                 }
+                SessionEvent::Changed => cx.notify(),
+                SessionEvent::SendSelection => dock.send_to_agent(cx),
             }),
         );
         self.sessions.insert(owner, session.clone());

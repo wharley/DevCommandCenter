@@ -19,9 +19,11 @@ use gpui::{
 use super::emulator::{Row, Screen};
 use super::keys::{key_bytes, paste_bytes};
 use super::palette::TerminalPalette;
-use super::session::TerminalSession;
+use super::session::{SessionEvent, TerminalSession};
+use crate::i18n::Translate;
 use crate::theme::color::mix_oklab;
 use crate::theme::{ActiveTheme, Appearance, fonts};
+use crate::ui::{Button, ButtonSize, Icon};
 
 /// `fontSize: 12`, `lineHeight: 1.3`: xterm's cell is the font's height
 /// (1.3em in Geist Mono) times the line height, rounded down.
@@ -319,7 +321,26 @@ impl Render for TerminalSession {
         let origin = self.text_origin.clone();
         let input = (self.focus.clone(), cx.entity());
         let surface_border = colors.border.opacity(0.9);
+        // `hasTerminalSelection`: the selection can go to the agent.
+        let send = self.selection_text().is_some().then(|| {
+            div()
+                .absolute()
+                .top(px(8.0))
+                .right(px(8.0))
+                .occlude()
+                .rounded(px(8.0))
+                .shadow_lg()
+                .child(
+                    Button::new("terminal-send-selection")
+                        .size(ButtonSize::Sm)
+                        .height(32.0)
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(SessionEvent::SendSelection)))
+                        .child(Icon::new("sparkles").size(14.0))
+                        .child(cx.t("terminalDock.sendSelectionToAgent")),
+                )
+        });
         div()
+            .relative()
             .flex()
             .flex_1()
             .min_h_0()
@@ -418,6 +439,7 @@ impl Render for TerminalSession {
                     .children(link)
                     .children(caret),
             )
+            .children(send)
     }
 }
 

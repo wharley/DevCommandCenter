@@ -3,7 +3,7 @@
 //! tabs with their activity dot, `+`, hide) and the active tab's surface.
 
 use gpui::{
-    AnyElement, BoxShadow, Context, CursorStyle, DragMoveEvent, EmptyView, FontWeight, MouseButton,
+    AnyElement, BoxShadow, Context, CursorStyle, DragMoveEvent, EmptyView, MouseButton,
     MouseDownEvent, MouseUpEvent, Render, SharedString, Window, div, point, prelude::*, px,
 };
 
@@ -35,7 +35,7 @@ fn dot_color(status: ActivityStatus, cx: &gpui::App) -> gpui::Hsla {
     }
 }
 
-fn tip(id: &'static str, text: SharedString, child: impl IntoElement) -> AnyElement {
+pub(super) fn tip(id: &'static str, text: SharedString, child: impl IntoElement) -> AnyElement {
     Tooltip::new(id, child, move |_, _| {
         div().child(text.clone()).into_any_element()
     })
@@ -87,60 +87,6 @@ impl TerminalDock {
         )
     }
 
-    fn scope_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let scope = self.scope()?;
-        let colors = cx.theme().colors.clone();
-        let (label, icon, color) = match scope.kind {
-            ScopeKind::Worktree => (
-                cx.t("terminalDock.scopes.worktree"),
-                "shield-check",
-                tw::EMERALD_500.hsla(),
-            ),
-            ScopeKind::Project => (
-                cx.t("terminalDock.scopes.project"),
-                "triangle-alert",
-                tw::AMBER_500.hsla(),
-            ),
-        };
-        let mut text = format!("{label} · {}", scope.project_label);
-        if let Some(branch) = &scope.branch {
-            text.push_str(&format!(" · {branch}"));
-        }
-        Some(
-            Button::new("terminal-scope")
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::Sm)
-                .padding_x(8.0)
-                .text_size(12.0)
-                .text_color(colors.muted_foreground)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.0))
-                        .mr(px(4.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(Icon::new(icon).size(14.0).color(color))
-                        .child(div().max_w(px(288.0)).truncate().child(text))
-                        .child(
-                            div()
-                                .opacity(0.5)
-                                .child(Icon::new("chevron-down").size(12.0)),
-                        ),
-                )
-                .into_any_element(),
-        )
-        .map(|button| {
-            div()
-                .flex_shrink_0()
-                .mr(px(4.0))
-                .rounded(px(6.0))
-                .bg(colors.muted.opacity(0.3))
-                .child(button)
-                .into_any_element()
-        })
-    }
-
     fn tab_strip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let scope = self.scope()?;
         let colors = cx.theme().colors.clone();
@@ -178,6 +124,7 @@ impl TerminalDock {
                 let group: SharedString = format!("terminal-tab-{index}").into();
                 let id = tab.id.clone();
                 let close_id = tab.id.clone();
+                let rename_id = tab.id.clone();
                 let hover_bg = colors.muted.opacity(0.5);
                 let foreground = colors.foreground;
                 // `--dcc-elevation-1`
@@ -251,13 +198,20 @@ impl TerminalDock {
                             )
                             .child(div().truncate().child(title)),
                     )
-                    .child(icon_button("pencil", ("terminal-tab-rename", index)))
+                    .child(
+                        icon_button("pencil", ("terminal-tab-rename", index))
+                            .debug_selector(move || format!("terminal-tab-rename-{index}"))
+                            .on_click(cx.listener(move |dock, _, window, cx| {
+                                cx.stop_propagation();
+                                dock.start_rename(&rename_id, window, cx)
+                            })),
+                    )
                     .child(
                         icon_button("x", ("terminal-tab-close", index))
                             .debug_selector(move || format!("terminal-tab-close-{index}"))
                             .on_click(cx.listener(move |dock, _, _, cx| {
                                 cx.stop_propagation();
-                                dock.close_tab(&close_id, cx)
+                                dock.request_close(&close_id, cx)
                             })),
                     )
             });
@@ -325,9 +279,12 @@ impl TerminalDock {
                     .items_center()
                     .gap(px(4.0))
                     .overflow_x_scroll()
-                    .children(self.scope_button(cx))
+                    .children(self.scope_menu(cx))
                     .children(self.tab_strip(cx)),
             )
+            .children(self.server_button(cx))
+            .child(self.actions_menu(cx))
+            .child(self.expand_button(cx))
             .child(tip(
                 "terminal-hide-tip",
                 cx.t("terminalDock.hideHint"),
@@ -382,12 +339,18 @@ impl Render for TerminalDock {
             .debug_selector(|| "terminal-dock".into())
             .flex()
             .flex_col()
-            .flex_shrink_0()
-            .h(px(self.height))
             .min_w_0()
             .overflow_hidden()
-            .border_t_1()
-            .border_color(colors.border)
+            .map(|dock| {
+                if self.expanded {
+                    dock.flex_1().min_h_0()
+                } else {
+                    dock.flex_shrink_0()
+                        .h(px(self.height))
+                        .border_t_1()
+                        .border_color(colors.border)
+                }
+            })
             .bg(colors.card)
             .text_color(colors.card_foreground)
             .on_drag_move(
@@ -398,7 +361,7 @@ impl Render for TerminalDock {
             .capture_any_mouse_up(
                 cx.listener(|dock, _: &MouseUpEvent, _, cx| dock.finish_resize(cx)),
             )
-            .child(self.grip(cx))
+            .children((!self.expanded).then(|| self.grip(cx)))
             .child(
                 div()
                     .flex()
@@ -409,6 +372,8 @@ impl Render for TerminalDock {
                     .child(self.toolbar(cx))
                     .child(self.panel(cx)),
             )
+            .children(self.rename_dialog(window, cx))
+            .children(self.close_dialog(cx))
             .into_any_element()
     }
 }

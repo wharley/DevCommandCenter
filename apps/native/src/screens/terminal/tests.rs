@@ -13,7 +13,7 @@ use crate::data::terminal_api::TerminalEvent;
 use crate::test_support::fake_desktop_routes;
 use crate::theme::{Theme, ThemePreference};
 
-fn place() -> TerminalPlace {
+pub(super) fn place() -> TerminalPlace {
     TerminalPlace {
         workspace_id: "w-1".into(),
         project_id: Some("p-1".into()),
@@ -31,7 +31,10 @@ fn place() -> TerminalPlace {
     }
 }
 
-fn text_of(dock: &gpui::Entity<TerminalDock>, cx: &mut gpui::VisualTestContext) -> String {
+pub(super) fn text_of(
+    dock: &gpui::Entity<TerminalDock>,
+    cx: &mut gpui::VisualTestContext,
+) -> String {
     cx.update(|_, cx| {
         let session = dock.read(cx).active_session(cx).expect("a session");
         let session = session.read(cx);

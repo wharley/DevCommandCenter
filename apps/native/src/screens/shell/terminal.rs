@@ -77,13 +77,24 @@ impl Shell {
         &mut self,
         _: &Entity<TerminalDock>,
         event: &DockEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
             DockEvent::Hidden => self
                 .conversation
                 .update(cx, |conversation, cx| conversation.focus_composer_soon(cx)),
+            // The conversation hides under an expanded dock.
+            DockEvent::Expanded(_) => cx.notify(),
+            // `handleSendTerminalToAgent`: into the draft, then the dock hides.
+            DockEvent::SendToAgent(text) => {
+                let composer = self.conversation.read(cx).composer.clone();
+                let added =
+                    composer.update(cx, |composer, cx| composer.append_text(text, window, cx));
+                if added {
+                    self.terminal.update(cx, |dock, cx| dock.hide(cx));
+                }
+            }
             DockEvent::Resized(height) => {
                 let next = Prefs {
                     terminal_height: *height,
@@ -100,13 +111,16 @@ impl Shell {
     }
 
     /// The task's content over the dock, split like the desktop's workbench.
-    pub(super) fn with_terminal(&self, content: AnyElement) -> AnyElement {
+    pub(super) fn with_terminal(&self, content: AnyElement, cx: &gpui::App) -> AnyElement {
+        let dock = self.terminal.read(cx);
+        let chat_hidden = dock.open && dock.expanded;
         div()
             .flex()
             .flex_col()
             .flex_1()
             .min_h_0()
             .min_w_0()
+            // `chatHidden`: the conversation steps aside, still mounted.
             .child(
                 div()
                     .flex()
@@ -114,6 +128,7 @@ impl Shell {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
+                    .when(chat_hidden, |content| content.hidden())
                     .child(content),
             )
             .child(self.terminal.clone())

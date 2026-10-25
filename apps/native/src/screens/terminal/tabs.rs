@@ -196,6 +196,23 @@ impl TabStore {
         true
     }
 
+    /// `renameTerminal`: only the tab's name; a blank one is refused.
+    pub fn rename(&mut self, scope: &str, id: &str, title: &str) -> bool {
+        let title = title.trim();
+        if title.is_empty() {
+            return false;
+        }
+        let mut current = self.scope(scope);
+        let Some(tab) = current.tabs.iter_mut().find(|tab| tab.id == id) else {
+            return false;
+        };
+        if tab.title != title {
+            tab.title = title.to_string();
+            self.write(scope, current);
+        }
+        true
+    }
+
     /// A tab of a known id, for tests that route its owner key.
     #[cfg(test)]
     pub fn with_tab(mut self, scope: &str, id: &str) -> Self {
@@ -273,6 +290,17 @@ mod tests {
         store.remove("s", &a);
         assert_eq!(store.scope("s").active_id, None);
         assert!(!store.remove("s", "gone"));
+    }
+
+    #[test]
+    fn renaming_keeps_the_shell_and_refuses_blanks() {
+        let mut store = TabStore::default();
+        let id = store.add("s").unwrap();
+        assert!(!store.rename("s", &id, "   "));
+        assert!(store.rename("s", &id, "  dev server "));
+        assert_eq!(store.scope("s").tabs[0].title, "dev server");
+        assert_eq!(store.scope("s").tabs[0].id, id);
+        assert!(!store.rename("s", "gone", "x"));
     }
 
     #[test]
