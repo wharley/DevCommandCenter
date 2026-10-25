@@ -31,6 +31,7 @@ pub mod workspace;
 pub mod workspace_bundle;
 pub mod workspace_cleanup;
 pub mod workspace_git;
+pub mod workspace_recap;
 
 pub use computer_use_conformance::{
     ComputerUseConformanceCheck, ComputerUseConformanceEvidence,

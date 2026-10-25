@@ -74,7 +74,7 @@ export type WorkspaceRecapInput = {
 	/** CodeRabbit findings whose review still matches the current diff. */
 	pendingReviewFindingsCount: number;
 	codeRabbitReviewAvailable?: boolean;
-	/** Completed delegation results that still deserve human review. */
+	/** Delegations whose edits still wait on the person (`review_pending`). */
 	pendingDelegationResultsCount: number;
 	deliveryFailure?: {
 		operation: "fetch" | "pull" | "push" | "pipeline";

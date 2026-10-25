@@ -145,7 +145,7 @@ describe("buildWorkspaceRecap", () => {
 		expect(recap.action?.kind).toBe("review");
 	});
 
-	it("surfaces completed delegation results before committing", () => {
+	it("surfaces delegations waiting for review before committing", () => {
 		const recap = buildWorkspaceRecap(
 			input({
 				commitMode: "commit-and-push",

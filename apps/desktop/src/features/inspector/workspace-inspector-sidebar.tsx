@@ -2773,21 +2773,13 @@ export function WorkspaceInspectorSidebar({
 		const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
 		return { files, additions, deletions };
 	}, [gitStatusQuery.data]);
+	// Only edits still waiting on the person, as the sidebar counts them: a
+	// completed delegation was already read in its card.
 	const pendingDelegationResultsCount = useMemo(
 		() =>
-			(delegationsQuery.data ?? []).filter((delegation) => {
-				if (
-					delegation.status !== "completed" &&
-					delegation.status !== "review_pending"
-				) {
-					return false;
-				}
-				return Boolean(
-					delegation.resultSummary ||
-						delegation.diffSummary ||
-						(delegation.touchedFiles?.length ?? 0) > 0,
-				);
-			}).length,
+			(delegationsQuery.data ?? []).filter(
+				(delegation) => delegation.status === "review_pending",
+			).length,
 		[delegationsQuery.data],
 	);
 	const workspaceRecap = useMemo(
