@@ -97,6 +97,7 @@ impl CodeColumn {
                 .and_then(|pr| pr.base_branch.clone()),
             forge_login: self.review.login(),
             workspace_label,
+            agent: None,
         }));
     }
 

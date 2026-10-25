@@ -107,6 +107,7 @@ fn section(resolver: &MergeResolver, cx: &mut Context<MergeResolver>) -> AnyElem
             WorkspaceGitConflictSide::Incoming,
             cx,
         ))
+        .child(super::agent_view::resolve_button(resolver, cx))
         .child(
             Button::new("merge-delete-result")
                 .variant(ButtonVariant::Destructive)

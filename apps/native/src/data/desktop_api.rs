@@ -263,6 +263,26 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// `send_turn`, with the id of the turn it started.
+    pub fn send_turn_for_id(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        options: &TurnOptions,
+    ) -> Result<String, ApiError> {
+        let mut body = json!({ "sessionId": session_id, "prompt": prompt, "retryOfTurnId": null });
+        options.write_into(&mut body);
+        let value = self.post(
+            &format!("/api/v1/sessions/{}/turns", encode(session_id)),
+            &body,
+        )?;
+        value
+            .pointer("/turn/id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| ApiError::Failed("the desktop did not answer a turn".into()))
+    }
+
     /// The providers the desktop runs, as its own composer sees them (the
     /// phone's catalog: models, effort levels, approval modes, health).
     pub fn providers(&self) -> Result<Vec<ProviderDescriptor>, ApiError> {

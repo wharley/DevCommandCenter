@@ -248,6 +248,16 @@ fn read_events(
     }
 }
 
+/// A session's events from the database (the merge resolver follows its
+/// agent's turn with them).
+pub fn session_events(
+    db_path: &std::path::Path,
+    session_id: &str,
+) -> anyhow::Result<Vec<SessionEventRecord>> {
+    let sessions = SqliteSessionRepo::open_read_only(db_path)?;
+    read_events(&sessions, &SessionId(session_id.to_string()), 0)
+}
+
 /// What the first prompt of a task with no conversation starts it with.
 fn thread_start(
     workspaces: &SqliteWorkspaceRepo,

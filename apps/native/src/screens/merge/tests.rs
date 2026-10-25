@@ -18,10 +18,10 @@ use crate::data::desktop_api::DesktopApi;
 use crate::test_support::fake_desktop_routes;
 use crate::theme::{Theme, ThemePreference};
 
-const CONFLICTED: &str =
+pub(super) const CONFLICTED: &str =
     "before\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> origin/main\nafter\n";
 
-fn text(value: Option<&str>) -> WorkspaceGitConflictContent {
+pub(super) fn text(value: Option<&str>) -> WorkspaceGitConflictContent {
     WorkspaceGitConflictContent {
         exists: true,
         byte_count: value.map_or(0, str::len) as u64,
@@ -31,7 +31,7 @@ fn text(value: Option<&str>) -> WorkspaceGitConflictContent {
     }
 }
 
-fn source() -> WorkspaceGitConflictEntry {
+pub(super) fn source() -> WorkspaceGitConflictEntry {
     WorkspaceGitConflictEntry {
         path: "src/a.rs".into(),
         kind: WorkspaceGitConflictKind::BothModified,
@@ -64,7 +64,7 @@ fn image() -> WorkspaceGitConflictEntry {
     }
 }
 
-fn state(
+pub(super) fn state(
     operation: WorkspaceGitConflictOperation,
     conflicts: Vec<WorkspaceGitConflictEntry>,
 ) -> String {
@@ -77,7 +77,7 @@ fn state(
     .unwrap()
 }
 
-fn checks(commands: &[&str]) -> String {
+pub(super) fn checks(commands: &[&str]) -> String {
     json!({ "commands": commands, "sourcePath": null, "timeoutSeconds": 600, "configHash": "h1" })
         .to_string()
 }
@@ -107,6 +107,7 @@ fn open<'a>(
         base_branch: Some("main".into()),
         forge_login: Some("ana".into()),
         workspace_label: Some("Pagamentos".into()),
+        agent: None,
     };
     let (resolver, cx) = cx.add_window_view(move |_, cx| {
         MergeResolver::new(request, cx).with_endpoint(DesktopApi::new(port, "k"), cx)
@@ -124,7 +125,7 @@ fn open<'a>(
     (resolver, cx, events, server)
 }
 
-fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
+pub(super) fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
     cx.run_until_parked();
     let bounds = cx
         .debug_bounds(selector)

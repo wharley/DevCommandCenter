@@ -51,7 +51,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
 impl FileView {
     /// A command's edits as one undo step, its selection after them.
     pub(crate) fn apply_change(&mut self, change: Change, cx: &mut Context<Self>) {
-        if change.edits.is_empty() {
+        if change.edits.is_empty() || self.read_only {
             return;
         }
         let (range, text) = change.splice(self.buffer.text());

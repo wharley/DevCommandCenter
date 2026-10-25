@@ -159,6 +159,9 @@ impl FileView {
 
     /// Replaces the selection with `text` as typing does.
     pub(crate) fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         let (lines, line) = (
             self.buffer.line_count(),
             self.buffer.line_of(self.buffer.selection.start),
@@ -169,6 +172,9 @@ impl FileView {
     }
 
     fn delete(&mut self, to: impl Fn(&FileView) -> usize, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         let (lines, line) = (
             self.buffer.line_count(),
             self.buffer.line_of(self.buffer.selection.start),
@@ -185,6 +191,9 @@ impl FileView {
 
     /// Enter: the line's indentation (`lineBreakInsertion`).
     fn newline(&mut self, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         let selection = self.buffer.selection.clone();
         let (start_line, end_line) = (
             self.buffer.line_of(selection.start),
@@ -337,6 +346,9 @@ impl FileView {
                 }
             }))
             .on_action(cx.listener(|view, _: &Undo, _, cx| {
+                if view.read_only {
+                    return;
+                }
                 let lines = view.buffer.line_count();
                 if view.buffer.undo() {
                     let line = view.buffer.line_of(view.buffer.cursor());
@@ -344,6 +356,9 @@ impl FileView {
                 }
             }))
             .on_action(cx.listener(|view, _: &Redo, _, cx| {
+                if view.read_only {
+                    return;
+                }
                 let lines = view.buffer.line_count();
                 if view.buffer.redo() {
                     let line = view.buffer.line_of(view.buffer.cursor());

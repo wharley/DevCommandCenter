@@ -103,6 +103,9 @@ impl EntityInputHandler for FileView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only {
+            return;
+        }
         let range = range_utf16
             .as_ref()
             .map(|range| self.buffer.range_from_utf16(range));
@@ -139,6 +142,9 @@ impl EntityInputHandler for FileView {
         let range = range_utf16
             .as_ref()
             .map(|range| self.buffer.range_from_utf16(range));
+        if self.read_only {
+            return;
+        }
         let selected = new_selected_range_utf16.map(|selected| {
             utf16_to_utf8(new_text, selected.start)..utf16_to_utf8(new_text, selected.end)
         });

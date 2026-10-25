@@ -379,6 +379,7 @@ fn the_merge_resolver_takes_the_conversations_place_until_closed(cx: &mut TestAp
             base_branch: None,
             forge_login: None,
             workspace_label: None,
+            agent: None,
         };
         shell.code_column.update(cx, |_, cx| {
             cx.emit(crate::screens::code_column::CodeColumnEvent::OpenMergeResolver(request))

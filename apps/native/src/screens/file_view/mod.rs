@@ -91,6 +91,8 @@ pub struct FileView {
     pub(crate) search: Option<find::Search>,
     /// Code can go to the agent from here (`annotatable`).
     pub(crate) annotating: Option<pick::Annotating>,
+    /// Typing does nothing (`readOnly`, while the merge's agent works).
+    pub(crate) read_only: bool,
     _colors: Option<Task<()>>,
     _blink: Option<Task<()>>,
 }
@@ -130,6 +132,7 @@ impl FileView {
             reveal: false,
             search: None,
             annotating: None,
+            read_only: false,
             _colors: None,
             _blink: None,
         };
@@ -174,6 +177,14 @@ impl FileView {
     pub fn mark_saved(&mut self, text: String, cx: &mut Context<Self>) {
         self.base = text;
         cx.notify();
+    }
+
+    /// Typing, pasting, deleting and undo stop (or work again).
+    pub fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
+        if self.read_only != read_only {
+            self.read_only = read_only;
+            cx.notify();
+        }
     }
 
     /// Other text in place of all of it, as one step (the merge resolver's

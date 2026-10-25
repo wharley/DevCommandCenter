@@ -5,7 +5,7 @@
 use gpui::{AppContext, Context, Entity};
 
 use super::Shell;
-use crate::screens::merge::{MergeResolver, MergeResolverEvent, MergeResolverRequest};
+use crate::screens::merge::{AgentPick, MergeResolver, MergeResolverEvent, MergeResolverRequest};
 
 impl Shell {
     pub(super) fn open_merge_resolver(
@@ -13,6 +13,16 @@ impl Shell {
         request: MergeResolverRequest,
         cx: &mut Context<Self>,
     ) {
+        // The agent's conversation starts like the composer's would.
+        let composer = self.conversation.read(cx).composer.read(cx);
+        let agent = composer.session.new_thread.clone().and_then(|start| {
+            Some(AgentPick {
+                start,
+                provider_id: composer.selected_provider_id()?,
+                model: composer.selected_model_id(),
+            })
+        });
+        let request = MergeResolverRequest { agent, ..request };
         let resolver = cx.new(|cx| MergeResolver::new(request, cx));
         let events = cx.subscribe(&resolver, Self::on_merge_event);
         self.merge = Some((resolver, events));
@@ -33,6 +43,15 @@ impl Shell {
             MergeResolverEvent::StateChanged => {
                 self.code_column
                     .update(cx, |column, cx| column.refresh_git(cx));
+            }
+            // `handleOpenAgentSession`: the conversation, and the resolver closes.
+            MergeResolverEvent::OpenSession(session) => {
+                self.merge = None;
+                let session = session.clone();
+                self.conversation.update(cx, |conversation, cx| {
+                    conversation.open_session(session, cx)
+                });
+                cx.notify();
             }
         }
     }

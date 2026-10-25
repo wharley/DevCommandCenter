@@ -7,6 +7,8 @@
 //! resolved, the project's checks and "Concluir merge e enviar". Git runs on
 //! the desktop.
 
+mod agent;
+mod agent_view;
 mod blocks_view;
 mod completion_view;
 mod confirm;
@@ -17,9 +19,11 @@ mod view;
 mod workspace_view;
 
 #[cfg(test)]
+mod agent_tests;
+#[cfg(test)]
 mod tests;
 
-pub use request::MergeResolverRequest;
+pub use request::{AgentPick, MergeResolverRequest};
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -41,12 +45,27 @@ use crate::theme::ActiveTheme;
 /// `MERGE_DIFF_SIDE_BY_SIDE_MIN_WIDTH`
 const SIDE_BY_SIDE_MIN_WIDTH: f32 = 1_000.0;
 
+/// A session's events, by id.
+pub(crate) type EventsReader = std::sync::Arc<
+    dyn Fn(&str) -> Vec<dcc_core::domain::session::SessionEventRecord> + Send + Sync,
+>;
+
+/// The desktop's database, read directly.
+fn database_events() -> EventsReader {
+    let path = crate::data::loader::database_path();
+    std::sync::Arc::new(move |session| {
+        crate::data::conversation::session_events(&path, session).unwrap_or_default()
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum MergeResolverEvent {
     /// The resolver closed (`onClose`).
     Closed,
     /// Git moved: the code column reads its status again (`onStateChanged`).
     StateChanged,
+    /// "Ver sessão": the agent's conversation on screen (`onOpenAgentSession`).
+    OpenSession(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -74,6 +93,8 @@ pub(crate) enum Busy {
     Delete,
     Abort,
     Complete,
+    /// "Resolver arquivo com agente"
+    Agent,
 }
 
 /// A question before going on (the desktop's `window.confirm`).
@@ -87,6 +108,8 @@ pub(crate) enum Pending {
     DeleteResult,
     Abort,
     ValidationCommands,
+    /// "Ver sessão" over an unsaved result.
+    OpenAgentSession(String),
 }
 
 /// The open file: its entry, the result as edited, and how it is shown.
@@ -134,6 +157,12 @@ pub struct MergeResolver {
     pub(crate) pending: Option<Pending>,
     /// The result area's width last frame (side by side from 1000px).
     pub(crate) width: Rc<Cell<f32>>,
+    /// The agent's run on the open file, and the answer it left there.
+    pub(crate) agent: Option<agent::AgentRun>,
+    pub(crate) suggestion: Option<agent::AppliedSuggestion>,
+    /// How the agent's session events are read (the database; tests their own).
+    pub(crate) read_events: EventsReader,
+    pub(crate) _agent: Option<Task<()>>,
     pub(crate) _read: Option<Task<()>>,
     pub(crate) _action: Option<Task<()>>,
 }
@@ -153,6 +182,10 @@ impl MergeResolver {
             report: None,
             pending: None,
             width: Rc::new(Cell::new(0.0)),
+            agent: None,
+            suggestion: None,
+            read_events: database_events(),
+            _agent: None,
             _read: None,
             _action: None,
         };
@@ -238,6 +271,8 @@ impl MergeResolver {
                 cx.notify();
             }
         });
+        self.agent = None;
+        self.suggestion = None;
         self.open = Some(Open {
             initial_result: entry.result.text.clone(),
             initial_buffer: result.clone(),
@@ -312,6 +347,7 @@ impl MergeResolver {
         open.view = ResultView::Edit;
         open.compare = None;
         let editor = open.editor.clone();
+        self.suggestion = None;
         editor.update(cx, |editor, cx| editor.replace_text(&text, cx));
         cx.notify();
     }
@@ -375,8 +411,13 @@ impl MergeResolver {
 
     /// `requestClose`: not while something runs; an unsaved edit asks.
     pub(crate) fn request_close(&mut self, cx: &mut Context<Self>) {
-        if self.busy.is_some() {
-            crate::ui::Toaster::info(cx.t("mergeConflict.busy.operation"), cx);
+        if let Some(busy) = self.busy {
+            let key = if busy == Busy::Agent {
+                "mergeConflict.busy.agent"
+            } else {
+                "mergeConflict.busy.operation"
+            };
+            crate::ui::Toaster::info(cx.t(key), cx);
             return;
         }
         if self.open.as_ref().is_some_and(Open::dirty) {

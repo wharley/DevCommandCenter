@@ -200,6 +200,9 @@ impl FileView {
 
     /// "Replace": the current match (the next one first if none), as one edit.
     pub(crate) fn replace_current(&mut self, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         if self
             .search
             .as_ref()
@@ -236,6 +239,9 @@ impl FileView {
 
     /// "Replace All": every match, as one step.
     pub(crate) fn replace_all(&mut self, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         let Some(search) = self.search.as_ref() else {
             return;
         };

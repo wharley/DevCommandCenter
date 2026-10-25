@@ -234,6 +234,7 @@ pub(crate) fn blocks_panel(
             linear_color_stop(colors.muted.opacity(0.1), 1.0),
         ))
         .p(px(16.0))
-        .child(blocks);
+        .child(blocks)
+        .children(super::agent_view::agent_panels(resolver, cx));
     panel.into_any_element()
 }
