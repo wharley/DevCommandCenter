@@ -1749,6 +1749,9 @@ mod tests {
         assert!(!remote_path_allowed("/api/v1/auth/bearer/rotate"));
         assert!(!remote_path_allowed("/api/v1/remote/pairing/offers"));
         assert!(!remote_path_allowed("/api/v1/terminals/spawn"));
+        assert!(!remote_path_allowed("/api/v1/terminals/by-owner/terminal%3Ax"));
+        assert!(!remote_path_allowed("/api/v1/terminals/activity"));
+        assert!(!remote_path_allowed("/api/v1/terminals/events/stream"));
         assert!(!remote_path_allowed("/rpc"));
         assert!(!remote_path_allowed("/api/v1/../auth/devices"));
         assert!(!remote_path_allowed("http://elsewhere/api/v1/sessions"));

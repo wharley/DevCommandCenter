@@ -46,7 +46,9 @@ use dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar;
 use dev_command_center_tauri::daemon_client::{ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo};
 use dev_command_center_tauri::decision_provider_settings::DecisionProviderSettings;
 use dev_command_center_tauri::embedded_http::EmbeddedHttpServer;
-use dev_command_center_tauri::http_api::HttpBackend;
+use dev_command_center_tauri::http_api::{
+    publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals, HttpBackend,
+};
 use dev_command_center_tauri::http_config::HttpConfig;
 use dev_command_center_tauri::remote_connector::RemoteHub;
 use flate2::read::GzDecoder;
@@ -2291,6 +2293,10 @@ fn daemon_sweep_terminal_exits_internal(app: &AppHandle, state: &AppState) -> Re
                 "code": code
             }),
         );
+        publish_desktop_terminal_event(DesktopTerminalEvent::Exit {
+            pty_id: pty_id.clone(),
+            code: Some(code),
+        });
     }
 
     Ok(())
@@ -3904,6 +3910,7 @@ fn start_embedded_http_server(
     let backend = match HttpBackend::embedded(session_state) {
         Ok(backend) => backend
             .with_workspace_state(workspace_state)
+            .with_desktop_terminals(Arc::new(HttpTerminals(app.handle().clone())))
             .with_app(app.handle().clone()),
         Err(error) => {
             eprintln!("[DCC HTTP] not started: {error}");
@@ -3921,6 +3928,60 @@ fn start_embedded_http_server(
             Err(error) => eprintln!("[DCC HTTP] WARN: {error}; local HTTP API unavailable"),
         }
     });
+}
+
+/// The dock's PTYs for the native app, through the same commands the
+/// WebView calls.
+struct HttpTerminals(AppHandle);
+
+impl HttpTerminals {
+    fn state(&self) -> Result<State<'_, AppState>, String> {
+        self.0
+            .try_state::<AppState>()
+            .ok_or_else(|| "terminals not ready".to_string())
+    }
+}
+
+fn api_message(error: ApiError) -> String {
+    error.message
+}
+
+fn reply_ok(value: Value) -> bool {
+    value.get("ok").and_then(Value::as_bool).unwrap_or(false)
+}
+
+impl DesktopTerminals for HttpTerminals {
+    fn get_or_create(&self, owner_key: &str, options: Value) -> Result<Value, String> {
+        terminal_get_or_create(
+            self.state()?,
+            self.0.clone(),
+            owner_key.to_string(),
+            options,
+        )
+        .map_err(api_message)
+    }
+
+    fn write(&self, pty_id: &str, data: String) -> Result<bool, String> {
+        terminal_write(self.state()?, pty_id.to_string(), data)
+            .map(reply_ok)
+            .map_err(api_message)
+    }
+
+    fn resize(&self, pty_id: &str, cols: u16, rows: u16) -> Result<bool, String> {
+        terminal_resize(self.state()?, pty_id.to_string(), cols, rows)
+            .map(reply_ok)
+            .map_err(api_message)
+    }
+
+    fn kill(&self, pty_id: &str) -> Result<bool, String> {
+        terminal_kill(self.state()?, self.0.clone(), pty_id.to_string())
+            .map(reply_ok)
+            .map_err(api_message)
+    }
+
+    fn activity(&self) -> Result<Vec<Value>, String> {
+        terminal_list_activity(self.state()?).map_err(api_message)
+    }
 }
 
 struct RemoteHubState(Arc<RemoteHub>);
@@ -6247,6 +6308,10 @@ fn spawn_terminal_reader_thread(
                   "stream": "stdout"
                 }),
             );
+            publish_desktop_terminal_event(DesktopTerminalEvent::Output {
+                pty_id: pty_id.clone(),
+                data,
+            });
         };
 
         loop {
@@ -6560,6 +6625,10 @@ fn finalize_managed_terminal_removal(
             "terminal-exit",
             serde_json::json!({ "ptyId": pty_id, "code": -1 }),
         );
+        publish_desktop_terminal_event(DesktopTerminalEvent::Exit {
+            pty_id,
+            code: Some(-1),
+        });
     }
 }
 

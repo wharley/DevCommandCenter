@@ -64,7 +64,10 @@ mod forge;
 mod git_changes;
 mod git_conflicts;
 mod mobile;
+mod terminals;
 mod turn_review;
+
+pub use terminals::{publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals};
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
     mobile::recover_interrupted_tasks(db_path)
@@ -218,6 +221,8 @@ pub struct HttpBackend {
     // The runtime keeps only a weak reference to its buses.
     _bus: Arc<dyn EventBus>,
     terminals: bool,
+    /// Inside the desktop app: its own PTYs, for the native app's dock.
+    desktop_terminals: OnceLock<Arc<dyn DesktopTerminals>>,
     /// The relay connector serving this router, for the operator routes and
     /// to drop a revoked phone at once. Weak: the hub holds the router.
     remote: OnceLock<std::sync::Weak<RemoteHub>>,
@@ -227,8 +232,9 @@ pub struct HttpBackend {
 }
 
 impl HttpBackend {
-    /// Serves sessions the desktop app owns. Remote shells are left out: the
-    /// phone has no use for them yet and they are the riskiest route.
+    /// Serves sessions the desktop app owns. Free shells are left out; the
+    /// desktop's own terminals come with `with_desktop_terminals`, for local
+    /// clients only (the relay refuses `/api/v1/terminals/`).
     pub fn embedded(sessions: SessionCommandState) -> Result<Self, String> {
         let (events, _) = tokio::sync::broadcast::channel(256);
         let (attention, _) = tokio::sync::broadcast::channel(64);
@@ -246,6 +252,7 @@ impl HttpBackend {
             attention,
             _bus: bus,
             terminals: false,
+            desktop_terminals: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -269,6 +276,7 @@ impl HttpBackend {
             attention,
             _bus: bus,
             terminals: true,
+            desktop_terminals: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -279,6 +287,12 @@ impl HttpBackend {
     /// The desktop app the server runs in (task creation needs it).
     pub fn with_app(self, app: tauri::AppHandle) -> Self {
         let _ = self.app.set(app);
+        self
+    }
+
+    /// The desktop's PTYs, served under `/api/v1/terminals/` to local clients.
+    pub fn with_desktop_terminals(self, terminals: Arc<dyn DesktopTerminals>) -> Self {
+        let _ = self.desktop_terminals.set(terminals);
         self
     }
 
@@ -783,7 +797,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
     let protected_routes = if backend.terminals {
         protected_routes.merge(terminal_routes)
     } else {
-        protected_routes
+        protected_routes.merge(terminals::routes())
     }
     .route_layer(middleware::from_fn_with_state(
         config.clone(),
@@ -4065,6 +4079,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn embedded_backend_serves_no_remote_terminals() {
         let fixture = embedded_fixture().await;
+        // Only the headless server spawns free shells.
         let (status, _) = post_json(
             &fixture.app,
             "/api/v1/terminals/spawn",
@@ -4074,6 +4089,150 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
+    #[derive(Default)]
+    struct FakeTerminals {
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl DesktopTerminals for FakeTerminals {
+        fn get_or_create(&self, owner_key: &str, options: Value) -> Result<Value, String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("open {owner_key} {options}"));
+            Ok(json!({ "ptyId": "pty-1", "existing": false, "chunks": ["hi"] }))
+        }
+        fn write(&self, pty_id: &str, data: String) -> Result<bool, String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("write {pty_id} {data}"));
+            Ok(true)
+        }
+        fn resize(&self, pty_id: &str, cols: u16, rows: u16) -> Result<bool, String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("resize {pty_id} {cols}x{rows}"));
+            Ok(true)
+        }
+        fn kill(&self, pty_id: &str) -> Result<bool, String> {
+            self.calls.lock().unwrap().push(format!("kill {pty_id}"));
+            Ok(false)
+        }
+        fn activity(&self) -> Result<Vec<Value>, String> {
+            Ok(vec![json!({ "ptyId": "pty-1", "status": "idle" })])
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_desktop_terminals_stream_what_they_print() {
+        let fixture = embedded_fixture().await;
+        let mut body = open_stream(&fixture.app, "/api/v1/terminals/events/stream").await;
+        publish_desktop_terminal_event(DesktopTerminalEvent::Output {
+            pty_id: "pty-3".into(),
+            data: "hello".into(),
+        });
+        let seen = read_until(&mut body, "hello").await;
+        assert!(seen.contains("event: terminal-output"), "{seen}");
+        assert!(seen.contains(r#""ptyId":"pty-3""#), "{seen}");
+        publish_desktop_terminal_event(DesktopTerminalEvent::Exit {
+            pty_id: "pty-3".into(),
+            code: Some(0),
+        });
+        let seen = read_until(&mut body, "terminal-exit").await;
+        assert!(seen.contains(r#""code":0"#), "{seen}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_desktop_terminals_open_in_a_task_checkout() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        let fixture = embedded_fixture().await;
+        let fake = Arc::new(FakeTerminals::default());
+        let _ = fixture.backend.desktop_terminals.set(fake.clone());
+        let repo = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(repo.path())
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        dcc_core::ports::WorkspaceRepo::save_workspace(
+            &workspaces,
+            &Workspace {
+                id: WorkspaceId("w-term".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: None,
+                root_path: root.clone(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-25T00:00:00Z".to_string(),
+                updated_at: "2026-10-25T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/terminals/by-owner/terminal%3Aworktree%3Aw%3At1",
+            json!({ "cwd": root, "command": "/bin/zsh", "args": ["-l"], "cols": 90, "rows": 20 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["ptyId"], "pty-1");
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/terminals/pty-1/write",
+            json!({ "data": "ls\r" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, body) = post_json(
+            &fixture.app,
+            "/api/v1/terminals/pty-1/resize",
+            json!({ "cols": 100, "rows": 30 }),
+        )
+        .await;
+        assert_eq!(body["ok"], true);
+        let (_, body) = post_json(&fixture.app, "/api/v1/terminals/pty-1/kill", json!({})).await;
+        assert_eq!(body["ok"], false);
+        let (status, body) = get_json(&fixture.app, "/api/v1/terminals/activity").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["items"][0]["status"], "idle");
+        let calls = fake.calls.lock().unwrap().clone();
+        assert_eq!(calls.len(), 4, "{calls:?}");
+        assert!(
+            calls[0].starts_with("open terminal:worktree:w:t1 "),
+            "{}",
+            calls[0]
+        );
+        let options: Value = serde_json::from_str(calls[0].splitn(3, ' ').nth(2).unwrap()).unwrap();
+        assert_eq!(
+            options,
+            json!({
+                "cwd": root, "command": "/bin/zsh", "args": ["-l"], "cols": 90, "rows": 20,
+                "ptyOwnerKey": "terminal:worktree:w:t1",
+            })
+        );
+        assert_eq!(calls[1], "write pty-1 ls\r");
+        assert_eq!(calls[2], "resize pty-1 100x30");
+        assert_eq!(calls[3], "kill pty-1");
+        // A folder that is no task's checkout gets no shell.
+        let other = tempfile::tempdir().unwrap();
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/terminals/by-owner/x",
+            json!({ "cwd": other.path(), "command": "/bin/zsh" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(fake.calls.lock().unwrap().len(), 4);
+    }
     #[tokio::test(flavor = "current_thread")]
     async fn http_turn_preflight_rejects_unknown_provider_without_persisting_selection() {
         let root = tempfile::tempdir().expect("http state root");
