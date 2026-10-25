@@ -2,10 +2,12 @@
 //! over the conversation, in a tab strip whose first tab is the Chat. The
 //! conversation stays mounted underneath; the Chat tab shrinks the stage to
 //! its strip, with the agent's work and an unread reply marked on it. Esc
-//! goes back to the Chat. For now the content is a change's diff, opened
-//! from "Mudanças" (`WorkspaceEditorSurface`), side by side for a
-//! modified file.
+//! goes back to the Chat. The content is a change's diff, opened from
+//! "Mudanças" (`WorkspaceEditorSurface`, side by side for a modified file),
+//! or files in tabs (`FileTabsSurface`).
 
+mod files;
+mod image;
 mod view;
 
 #[cfg(test)]
@@ -62,6 +64,8 @@ pub enum StageEvent {
 
 pub struct Stage {
     pub(crate) diff: Option<StageDiff>,
+    /// Or the open files (one or the other: opening one replaces the other).
+    pub(crate) files: Option<files::FileTabs>,
     /// The Chat tab is in front (the stage shows only its strip).
     pub(crate) chat_active: bool,
     /// The agent finished while the content was in front.
@@ -83,6 +87,7 @@ impl Stage {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             diff: None,
+            files: None,
             chat_active: false,
             chat_unread: false,
             agent_working: false,
@@ -93,7 +98,7 @@ impl Stage {
 
     /// Something is on the stage.
     pub fn has_content(&self) -> bool {
-        self.diff.is_some()
+        self.diff.is_some() || self.files.is_some()
     }
 
     pub fn chat_active(&self) -> bool {
@@ -109,6 +114,7 @@ impl Stage {
 
     /// A new request brings the content forward (`stageRequestKey`).
     pub fn open_diff(&mut self, request: DiffRequest, window: &mut Window, cx: &mut Context<Self>) {
+        self.files = None;
         self.chat_active = false;
         let dark = cx.theme_dark();
         self.load(request, dark, cx);
@@ -170,20 +176,20 @@ impl Stage {
 
     /// The tab's X (`onCloseSurface`).
     pub fn close(&mut self, cx: &mut Context<Self>) {
-        let Some(diff) = self.diff.take() else {
-            return;
+        let to_changes = match (self.diff.take(), self.files.take()) {
+            (Some(diff), _) => diff.request.from_changes,
+            (None, Some(_)) => false,
+            (None, None) => return,
         };
         self.chat_active = false;
         self.chat_unread = false;
-        cx.emit(StageEvent::Closed {
-            to_changes: diff.request.from_changes,
-        });
+        cx.emit(StageEvent::Closed { to_changes });
         cx.notify();
     }
 
     /// Another task: the stage starts empty.
     pub fn clear(&mut self, cx: &mut Context<Self>) {
-        if self.diff.take().is_some() {
+        if self.diff.take().is_some() | self.files.take().is_some() {
             self.chat_active = false;
             self.chat_unread = false;
             cx.notify();

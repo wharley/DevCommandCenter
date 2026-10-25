@@ -29,7 +29,7 @@ smallvec = "1"
 unicode-segmentation = "1"
 # Project logos: decode an upload and write the 64px PNG DCC stores (both
 # already in the tree through GPUI).
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 resvg = "0.46"
 # Assistant and user messages are GitHub-flavoured markdown (Streamdown on the desktop).
 pulldown-cmark = { version = "0.13", default-features = false }

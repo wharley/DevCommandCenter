@@ -15,6 +15,7 @@ use crate::data::diff::{DiffLine, FileDiff, LineKind, Row, SplitRow, split_rows}
 use crate::data::highlight::{Span, highlight};
 
 pub use palette::DiffPalette;
+pub(crate) use view::styled_runs;
 
 /// `tab-size: 2`
 const TAB: &str = "  ";

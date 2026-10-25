@@ -82,14 +82,21 @@ fn inline_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
         links.iter().map(|(range, _)| range.clone()).collect();
     let targets: Vec<String> = links.into_iter().map(|(_, url)| url).collect();
     InteractiveText::new(id, text)
-        .on_click(ranges, move |index, _window, cx| {
-            let target = &targets[index];
-            // Web links open in the browser; file links wait for the editor screen.
+        .on_click(ranges, move |index, window, cx| {
+            let target = targets[index].clone();
+            // The app opens what it can (a task's file on the stage).
+            if let Some(handler) = cx
+                .try_global::<super::LinkHandler>()
+                .map(|global| global.0.clone())
+            {
+                handler(&target, window, cx);
+                return;
+            }
             if target.starts_with("http://")
                 || target.starts_with("https://")
                 || target.starts_with("mailto:")
             {
-                cx.open_url(target);
+                cx.open_url(&target);
             }
         })
         .into_any_element()

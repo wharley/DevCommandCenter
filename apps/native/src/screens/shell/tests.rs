@@ -239,3 +239,44 @@ fn a_change_opened_from_the_column_goes_on_the_stage_and_back(cx: &mut TestAppCo
     });
     column.read_with(cx, |column, _| assert_eq!(column.open_diff, None));
 }
+
+#[gpui::test]
+fn a_file_from_the_tree_or_a_conversation_link_opens_on_the_stage(cx: &mut TestAppContext) {
+    use crate::screens::code_column::CodeColumnEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let repo = crate::test_support::git_checkout(&[("src/a.rs", "fn a() {}\n"), ("b.rs", "b\n")]);
+    let root = repo.path().to_string_lossy().into_owned();
+    let column = shell.read_with(cx, |shell, _| shell.code_column.clone());
+    column.update(cx, |column, cx| column.set_root(Some(root.clone()), cx));
+    shell.update(cx, |shell, _| shell.stage_root = Some(root.clone()));
+    column.update(cx, |_, cx| {
+        cx.emit(CodeColumnEvent::OpenFile("b.rs".into()))
+    });
+    cx.run_until_parked();
+    let stage = shell.read_with(cx, |shell, _| shell.stage.clone());
+    stage.read_with(cx, |stage, _| {
+        let tabs = stage.files.as_ref().expect("the file on the stage");
+        assert_eq!(tabs.active().unwrap().path, "b.rs");
+    });
+    column.read_with(cx, |column, _| {
+        assert_eq!(column.selected.as_deref(), Some("b.rs"))
+    });
+    // A link in a message, inside the task's checkout, at a line.
+    let link = format!("{root}/src/a.rs:1");
+    shell.update_in(cx, |shell, window, cx| shell.open_link(&link, window, cx));
+    cx.run_until_parked();
+    stage.read_with(cx, |stage, _| {
+        let tabs = stage.files.as_ref().unwrap();
+        assert_eq!(tabs.active().unwrap().path, "src/a.rs");
+    });
+    // Outside the checkout nothing opens on the stage.
+    shell.update_in(cx, |shell, window, cx| {
+        shell.open_link("https://example.com", window, cx)
+    });
+    stage.read_with(cx, |stage, _| {
+        assert_eq!(
+            stage.files.as_ref().unwrap().active().unwrap().path,
+            "src/a.rs"
+        )
+    });
+}

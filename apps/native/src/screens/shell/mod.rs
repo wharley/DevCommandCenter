@@ -132,6 +132,13 @@ impl Shell {
         let code_column_events = cx.subscribe_in(&code_column, window, Self::on_code_column_event);
         let stage = cx.new(Stage::new);
         let stage_events = cx.subscribe(&stage, Self::on_stage_event);
+        // A file link in the conversation opens on the stage.
+        let links = cx.entity().downgrade();
+        cx.set_global(crate::markdown::LinkHandler(std::rc::Rc::new(
+            move |target, window, cx| {
+                let _ = links.update(cx, |shell, cx| shell.open_link(target, window, cx));
+            },
+        )));
         // The column follows the open task's checkout.
         let conversation_root = cx.observe(&conversation, |this, conversation, cx| {
             let view = conversation.read(cx);
@@ -190,12 +197,47 @@ impl Shell {
         }
     }
 
+    /// `handleLinkClick`: a file of the task opens on the stage at its line;
+    /// another local file opens with the system; web links in the browser.
+    fn open_link(&mut self, target: &str, window: &mut Window, cx: &mut Context<Self>) {
+        use dcc_core::domain::file_reference::{is_local_file_href, parse_file_reference};
+        let root = self.stage_root.clone();
+        if let Some(reference) = root
+            .as_deref()
+            .and_then(|root| parse_file_reference(target, root))
+        {
+            let root = root.unwrap_or_default();
+            let path = reference.path.clone();
+            self.code_column.update(cx, |column, cx| {
+                column.set_open_diff(None, cx);
+                column.reveal(Some(path), cx);
+            });
+            self.stage.update(cx, |stage, cx| {
+                stage.open_file(root, reference.path, reference.line, window, cx)
+            });
+            return;
+        }
+        if is_local_file_href(target) {
+            let path = target.trim().trim_start_matches("file://");
+            cx.open_with_system(std::path::Path::new(path));
+            return;
+        }
+        if target.starts_with("http://")
+            || target.starts_with("https://")
+            || target.starts_with("mailto:")
+        {
+            cx.open_url(target);
+        }
+    }
+
     /// The stage's content closed: back to "Mudanças" when it came from there.
     fn on_stage_event(&mut self, _: Entity<Stage>, event: &StageEvent, cx: &mut Context<Self>) {
         match event {
             StageEvent::Closed { to_changes } => {
-                self.code_column
-                    .update(cx, |column, cx| column.set_open_diff(None, cx));
+                self.code_column.update(cx, |column, cx| {
+                    column.set_open_diff(None, cx);
+                    column.reveal(None, cx);
+                });
                 if *to_changes {
                     self.set_code_column(true, Some(CodeColumnTab::Changes), cx);
                 }
@@ -227,16 +269,25 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         match event {
-            // The center's file tabs are screen 6; until then the pick is shown in the tree.
+            // A file picked in the tree opens on the stage, marked in the tree.
             CodeColumnEvent::OpenFile(path) => {
                 let path = path.clone();
-                self.code_column
-                    .update(cx, |column, cx| column.reveal(Some(path), cx));
+                self.code_column.update(cx, |column, cx| {
+                    column.set_open_diff(None, cx);
+                    column.reveal(Some(path.clone()), cx);
+                });
+                if let Some(root) = self.code_column.read(cx).root.clone() {
+                    self.stage.update(cx, |stage, cx| {
+                        stage.open_file(root, path, None, window, cx)
+                    });
+                }
             }
             CodeColumnEvent::OpenDiff(request) => {
                 let open = Some((request.scope.clone(), request.path.clone()));
-                self.code_column
-                    .update(cx, |column, cx| column.set_open_diff(open, cx));
+                self.code_column.update(cx, |column, cx| {
+                    column.set_open_diff(open, cx);
+                    column.reveal(None, cx);
+                });
                 let request = request.clone();
                 self.stage
                     .update(cx, |stage, cx| stage.open_diff(request, window, cx));

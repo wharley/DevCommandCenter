@@ -134,3 +134,142 @@ fn a_modified_file_reads_side_by_side_and_a_new_one_in_one_column(cx: &mut TestA
     cx.run_until_parked();
     assert!(!split(&stage, cx), "new: one column");
 }
+
+fn open_files(
+    cx: &mut TestAppContext,
+) -> (
+    gpui::Entity<Stage>,
+    &mut gpui::VisualTestContext,
+    tempfile::TempDir,
+    std::rc::Rc<std::cell::RefCell<Vec<StageEvent>>>,
+) {
+    let (stage, cx, repo, events) = open(cx);
+    std::fs::write(repo.path().join("a.rs"), "fn a() {}\n").unwrap();
+    std::fs::write(repo.path().join("b.rs"), "fn b() {}\n").unwrap();
+    std::fs::write(repo.path().join("c.rs"), "fn c() {}\n").unwrap();
+    (stage, cx, repo, events)
+}
+
+fn tab_names(stage: &gpui::Entity<Stage>, cx: &mut gpui::VisualTestContext) -> Vec<(String, bool)> {
+    stage.read_with(cx, |stage, _| {
+        stage
+            .files
+            .as_ref()
+            .map(|tabs| {
+                tabs.files
+                    .iter()
+                    .map(|file| (file.path.clone(), file.preview))
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
+#[gpui::test]
+fn files_open_as_previews_that_pin_and_close_to_a_neighbour(cx: &mut TestAppContext) {
+    let (stage, cx, repo, events) = open_files(cx);
+    let root = repo.path().to_string_lossy().into_owned();
+    let open = |stage: &gpui::Entity<Stage>, cx: &mut gpui::VisualTestContext, path: &str| {
+        let (root, path) = (root.clone(), path.to_string());
+        stage.update_in(cx, |stage, window, cx| {
+            stage.open_file(root, path, None, window, cx)
+        });
+        cx.run_until_parked();
+    };
+    open(&stage, cx, "a.rs");
+    stage.read_with(cx, |stage, _| {
+        let file = stage.files.as_ref().unwrap().active().unwrap();
+        assert!(matches!(file.load, Some(super::files::FileLoad::Text(_))));
+    });
+    assert!(cx.debug_bounds("file-view").is_some());
+    // The next preview takes the preview's place.
+    open(&stage, cx, "b.rs");
+    assert_eq!(tab_names(&stage, cx), vec![("b.rs".into(), true)]);
+    // A double-click pins it; the next file opens beside it.
+    let tab = cx.debug_bounds("stage-file-tab-0").unwrap();
+    cx.simulate_click(tab.center(), gpui::Modifiers::none());
+    cx.simulate_click(tab.center(), gpui::Modifiers::none());
+    stage.update(cx, |stage, cx| stage.pin_file(0, cx));
+    open(&stage, cx, "c.rs");
+    assert_eq!(
+        tab_names(&stage, cx),
+        vec![("b.rs".into(), false), ("c.rs".into(), true)]
+    );
+    // Only the active tab keeps its file read.
+    stage.read_with(cx, |stage, _| {
+        let tabs = stage.files.as_ref().unwrap();
+        assert_eq!(tabs.active, 1);
+        assert!(tabs.files[0].load.is_none());
+    });
+    // Closing the active tab brings its neighbour; the last closes the files.
+    stage.update_in(cx, |stage, window, cx| stage.close_file(1, window, cx));
+    cx.run_until_parked();
+    stage.read_with(cx, |stage, _| {
+        let tabs = stage.files.as_ref().unwrap();
+        assert_eq!(tabs.active().unwrap().path, "b.rs");
+        assert!(tabs.active().unwrap().load.is_some(), "read again");
+    });
+    stage.update_in(cx, |stage, window, cx| stage.close_file(0, window, cx));
+    stage.read_with(cx, |stage, _| assert!(!stage.has_content()));
+    assert_eq!(
+        events.borrow().as_slice(),
+        &[StageEvent::Closed { to_changes: false }]
+    );
+}
+
+#[gpui::test]
+fn an_image_shows_as_a_picture_and_a_missing_file_says_so(cx: &mut TestAppContext) {
+    let (stage, cx, repo, _) = open_files(cx);
+    let picture = image::RgbaImage::from_pixel(4, 3, image::Rgba([10, 20, 30, 255]));
+    picture.save(repo.path().join("shot.png")).unwrap();
+    let root = repo.path().to_string_lossy().into_owned();
+    let read_root = root.clone();
+    stage.update_in(cx, |stage, window, cx| {
+        stage.open_file(read_root, "shot.png".into(), None, window, cx)
+    });
+    cx.run_until_parked();
+    stage.read_with(cx, |stage, cx| {
+        let file = stage.files.as_ref().unwrap().active().unwrap();
+        let Some(super::files::FileLoad::Image(view)) = &file.load else {
+            panic!("an image tab");
+        };
+        assert!(matches!(
+            view.read(cx).picture,
+            super::image::Picture::Ready {
+                width: 4,
+                height: 3,
+                ..
+            }
+        ));
+    });
+    assert!(cx.debug_bounds("image-view-bar").is_some());
+    stage.update_in(cx, |stage, window, cx| {
+        stage.open_file(root, "gone.rs".into(), None, window, cx)
+    });
+    cx.run_until_parked();
+    stage.read_with(cx, |stage, _| {
+        let file = stage.files.as_ref().unwrap().active().unwrap();
+        assert!(matches!(file.load, Some(super::files::FileLoad::Failed(_))));
+    });
+}
+
+#[gpui::test]
+fn a_diff_replaces_the_files_and_a_file_replaces_the_diff(cx: &mut TestAppContext) {
+    let (stage, cx, repo, _) = open_files(cx);
+    let root = repo.path().to_string_lossy().into_owned();
+    stage.update_in(cx, |stage, window, cx| {
+        stage.open_file(root.clone(), "a.rs".into(), Some(1), window, cx)
+    });
+    cx.run_until_parked();
+    let diff = request(repo.path());
+    stage.update_in(cx, |stage, window, cx| stage.open_diff(diff, window, cx));
+    stage.read_with(cx, |stage, _| {
+        assert!(stage.files.is_none() && stage.diff.is_some())
+    });
+    stage.update_in(cx, |stage, window, cx| {
+        stage.open_file(root, "a.rs".into(), None, window, cx)
+    });
+    stage.read_with(cx, |stage, _| {
+        assert!(stage.diff.is_none() && stage.files.is_some())
+    });
+}

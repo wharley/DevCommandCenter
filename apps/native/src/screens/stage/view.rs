@@ -5,21 +5,29 @@ use gpui::{
     AnyElement, Context, FontWeight, IntoElement, Render, SharedString, Window, div, prelude::*, px,
 };
 
+use super::files::FileLoad;
 use super::{CONTEXT, DiffLoad, ShowChat, Stage};
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
 use crate::ui::tab_strip::TabStrip;
-use crate::ui::{Icon, spinner};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, spinner};
 
 /// `h-7 rounded-md px-2.5` with the active `bg-muted/60 shadow-sm`.
 fn tab_base(id: &'static str, active: bool, cx: &Context<Stage>) -> gpui::Stateful<gpui::Div> {
+    tab_base_named(id.into(), active, cx).debug_selector(move || id.to_string())
+}
+
+fn tab_base_named(
+    id: SharedString,
+    active: bool,
+    cx: &Context<Stage>,
+) -> gpui::Stateful<gpui::Div> {
     let colors = cx.theme().colors.clone();
     let hover = colors.muted.opacity(0.3);
     let foreground = colors.foreground;
     div()
         .id(id)
-        .debug_selector(move || id.to_string())
         .flex()
         .h(px(28.0))
         .flex_shrink_0()
@@ -118,17 +126,128 @@ fn centered(text: SharedString, color: gpui::Hsla) -> AnyElement {
         .into_any_element()
 }
 
+/// A file's tab (`Tab` in `FileTabsSurface`): the name (italic while a
+/// preview), the X on hover; a double-click pins it.
+fn file_tab(stage: &Stage, at: usize, cx: &mut Context<Stage>) -> Option<AnyElement> {
+    let tabs = stage.files.as_ref()?;
+    let file = tabs.files.get(at)?;
+    let colors = cx.theme().colors.clone();
+    let foreground = colors.foreground;
+    let active = tabs.active == at && !stage.chat_active;
+    let group = SharedString::from(format!("stage-file-tab-{at}"));
+    let selector = format!("stage-file-tab-{at}");
+    Some(
+        tab_base_named(
+            SharedString::from(format!("stage-file-tab-{at}")),
+            active,
+            cx,
+        )
+        .debug_selector(move || selector.clone())
+        .group(group.clone())
+        .max_w(px(170.0))
+        .px(px(8.0))
+        .on_click(
+            cx.listener(move |stage, event: &gpui::ClickEvent, window, cx| {
+                if event.click_count() == 2 {
+                    stage.pin_file(at, cx);
+                }
+                stage.activate_file(at, window, cx);
+            }),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .when(file.preview, |name| name.italic())
+                .child(file.name.clone()),
+        )
+        .child(
+            div()
+                .id(("stage-file-close", at))
+                .debug_selector(move || format!("stage-file-close-{at}"))
+                .flex_shrink_0()
+                .rounded(px(4.0))
+                .p(px(2.0))
+                .text_color(colors.muted_foreground)
+                .invisible()
+                .group_hover(group, |style| style.visible())
+                .hover(move |style| style.text_color(foreground))
+                .on_click(cx.listener(move |stage, _, window, cx| {
+                    cx.stop_propagation();
+                    stage.close_file(at, window, cx)
+                }))
+                .child(Icon::new("x").size(12.0).stroke(2.0)),
+        )
+        .into_any_element(),
+    )
+}
+
+/// "Salvar" (editing comes next) and "Fechar editor".
+fn file_actions(cx: &mut Context<Stage>) -> AnyElement {
+    div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .gap(px(4.0))
+        .pr(px(8.0))
+        .child(
+            Button::new("stage-file-save")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::Sm)
+                .muted()
+                .disabled(true)
+                .child(Icon::new("save").size(14.0).stroke(1.8))
+                .child(cx.t("fileSurface.save")),
+        )
+        .child(
+            div().debug_selector(|| "stage-files-close".into()).child(
+                Button::new("stage-files-close")
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::Sm)
+                    .muted()
+                    .on_click(cx.listener(|stage, _, _, cx| stage.close(cx)))
+                    .child(Icon::new("x").size(14.0).stroke(1.8)),
+            ),
+        )
+        .into_any_element()
+}
+
+fn file_body(stage: &Stage, cx: &mut Context<Stage>) -> Option<AnyElement> {
+    let colors = cx.theme().colors.clone();
+    let file = stage.files.as_ref()?.active()?;
+    Some(match &file.load {
+        Some(FileLoad::Text(view)) => view.clone().into_any_element(),
+        Some(FileLoad::Image(view)) => view.clone().into_any_element(),
+        Some(FileLoad::Failed(error)) => centered(error.clone().into(), colors.destructive),
+        Some(FileLoad::Loading(_)) | None => {
+            centered(cx.t("fileSurface.loading"), colors.muted_foreground)
+        }
+    })
+}
+
 impl Render for Stage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.follow_theme(cx);
+        self.follow_files_theme(cx);
         let colors = cx.theme().colors.clone();
-        let active = if self.chat_active { 0 } else { 1 };
-        self.strip
-            .reveal(active, if self.chat_active { "chat" } else { "diff" });
+        // The tab to keep in view: the Chat, the diff, or the active file.
+        let (active, key) = match (&self.files, self.chat_active) {
+            (_, true) => (0, SharedString::from("\u{0}chat")),
+            (Some(tabs), false) => (
+                tabs.active + 1,
+                tabs.active()
+                    .map_or_else(SharedString::default, |file| file.path.clone().into()),
+            ),
+            (None, false) => (1, SharedString::from("diff")),
+        };
+        self.strip.reveal(active, key);
+        let file_count = self.files.as_ref().map_or(0, |tabs| tabs.files.len());
         let tabs: Vec<AnyElement> = [Some(chat_tab(self, cx)), diff_tab(self, cx)]
             .into_iter()
             .flatten()
+            .chain((0..file_count).filter_map(|at| file_tab(self, at, cx)))
             .collect();
+        let actions = self.files.is_some().then(|| file_actions(cx));
         let strip = div()
             .flex()
             .h(px(36.0))
@@ -136,12 +255,17 @@ impl Render for Stage {
             .items_center()
             .border_b_1()
             .border_color(colors.border)
-            .child(TabStrip::new("stage-tabs", &mut self.strip).children(tabs));
-        let body = self.diff.as_ref().map(|diff| match &diff.load {
-            DiffLoad::Ready(view) => view.clone().into_any_element(),
-            DiffLoad::Failed(error) => centered(error.clone().into(), colors.destructive),
-            DiffLoad::Loading(_) => centered("Loading file...".into(), colors.muted_foreground),
-        });
+            .child(TabStrip::new("stage-tabs", &mut self.strip).children(tabs))
+            .children(actions);
+        let body = self
+            .diff
+            .as_ref()
+            .map(|diff| match &diff.load {
+                DiffLoad::Ready(view) => view.clone().into_any_element(),
+                DiffLoad::Failed(error) => centered(error.clone().into(), colors.destructive),
+                DiffLoad::Loading(_) => centered("Loading file...".into(), colors.muted_foreground),
+            })
+            .or_else(|| file_body(self, cx));
         div()
             .id("stage")
             .debug_selector(|| "stage".into())
