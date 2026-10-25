@@ -19,6 +19,7 @@ pub mod objective_form;
 pub mod project;
 pub mod provider;
 pub mod repository;
+pub mod review_threads;
 pub mod task_title;
 pub mod session;
 pub mod thread;

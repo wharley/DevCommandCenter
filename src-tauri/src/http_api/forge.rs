@@ -83,3 +83,38 @@ pub(super) async fn delivery_recovery(
         .await,
     )
 }
+
+pub(super) async fn review_comments(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<forge_commands::WorkspacePrReviewCommentsInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    git_changes::task_checkout(&backend, &input.workspace_root).await?;
+    reply(forge_commands::workspace_pr_review_comments_with_state(&backend.workspace, input).await)
+}
+
+pub(super) async fn pipeline(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<forge_commands::WorkspacePipelineStatusInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    git_changes::task_checkout(&backend, &input.workspace_root).await?;
+    reply(forge_commands::workspace_pipeline_status_with_state(&backend.workspace, input).await)
+}
+
+pub(super) async fn pipeline_job_log(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<forge_commands::WorkspacePipelineJobInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    git_changes::task_checkout(&backend, &input.workspace_root).await?;
+    reply(forge_commands::workspace_pipeline_job_log_with_state(&backend.workspace, input).await)
+}
+
+pub(super) async fn pipeline_job_retry(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<forge_commands::WorkspacePipelineJobInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    git_changes::task_checkout(&backend, &input.workspace_root).await?;
+    forge_commands::workspace_pipeline_job_retry_with_state(&backend.workspace, input)
+        .await
+        .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!({ "ok": true })))
+}

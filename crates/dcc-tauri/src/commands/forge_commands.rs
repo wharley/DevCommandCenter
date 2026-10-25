@@ -571,46 +571,9 @@ pub struct WorkspaceRequestReviewersOutput {
     pub removed: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacePrReviewCommentAuthor {
-    pub login: Option<String>,
-    pub avatar_url: Option<String>,
-    pub html_url: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacePrReviewComment {
-    pub id: String,
-    pub parent_id: Option<String>,
-    pub thread_id: String,
-    pub path: String,
-    pub body: String,
-    pub diff_hunk: Option<String>,
-    pub html_url: Option<String>,
-    pub side: Option<String>,
-    pub line: Option<i64>,
-    pub start_line: Option<i64>,
-    pub original_line: Option<i64>,
-    pub original_start_line: Option<i64>,
-    pub author: Option<WorkspacePrReviewCommentAuthor>,
-    pub created_at: Option<String>,
-    pub updated_at: Option<String>,
-    pub resolvable: Option<bool>,
-    pub resolved: Option<bool>,
-    pub outdated: Option<bool>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacePrReviewCommentsOutput {
-    pub provider: Option<String>,
-    pub host: Option<String>,
-    pub number: Option<u32>,
-    pub url: Option<String>,
-    pub comments: Vec<WorkspacePrReviewComment>,
-}
+pub use dcc_core::domain::review_threads::{
+    WorkspacePrReviewComment, WorkspacePrReviewCommentAuthor, WorkspacePrReviewCommentsOutput,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -3554,7 +3517,15 @@ pub async fn workspace_pr_review_comments(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspacePrReviewCommentsInput,
 ) -> Result<WorkspacePrReviewCommentsOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_pr_review_comments_with_state(&state, input).await
+}
+
+/// `workspace_pr_review_comments` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_pr_review_comments_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspacePrReviewCommentsInput,
+) -> Result<WorkspacePrReviewCommentsOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
 
     let root = input.workspace_root.trim();
     if root.is_empty() {
@@ -3582,7 +3553,7 @@ pub async fn workspace_pr_review_comments(
         });
     };
     let provider_key = forge_context::forge_provider_key(forge_context.provider).to_string();
-    let imported_source = imported_workspace_source(&state, root).await?;
+    let imported_source = imported_workspace_source(state, root).await?;
 
     let branch = match input
         .branch
@@ -4071,10 +4042,18 @@ pub async fn workspace_pipeline_job_log(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspacePipelineJobInput,
 ) -> Result<WorkspacePipelineJobLogOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_pipeline_job_log_with_state(&state, input).await
+}
+
+/// `workspace_pipeline_job_log` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_pipeline_job_log_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspacePipelineJobInput,
+) -> Result<WorkspacePipelineJobLogOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     let (forge_context, pipeline, jobs) = resolve_pipeline_action_context(
-        &state,
+        state,
         root,
         input.pipeline_id,
         input.forge_login.as_deref(),
@@ -4107,10 +4086,18 @@ pub async fn workspace_pipeline_job_retry(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspacePipelineJobInput,
 ) -> Result<(), String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_pipeline_job_retry_with_state(&state, input).await
+}
+
+/// `workspace_pipeline_job_retry` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_pipeline_job_retry_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspacePipelineJobInput,
+) -> Result<(), String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     let (forge_context, _, jobs) = resolve_pipeline_action_context(
-        &state,
+        state,
         root,
         input.pipeline_id,
         input.forge_login.as_deref(),

@@ -684,6 +684,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(forge::reviewer_candidates),
         )
         .route("/api/v1/forge/request-reviewers", post(forge::request_reviewers))
+        .route("/api/v1/forge/review-comments", post(forge::review_comments))
+        .route("/api/v1/forge/pipeline", post(forge::pipeline))
+        .route("/api/v1/forge/pipeline-job-log", post(forge::pipeline_job_log))
+        .route("/api/v1/forge/pipeline-job-retry", post(forge::pipeline_job_retry))
         .route(
             "/api/v1/sessions/:session_id/task-title",
             post(apply_task_title_handler),
@@ -1474,6 +1478,10 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/forge/review-state",
             "POST /api/v1/forge/reviewer-candidates",
             "POST /api/v1/forge/request-reviewers",
+            "POST /api/v1/forge/review-comments",
+            "POST /api/v1/forge/pipeline",
+            "POST /api/v1/forge/pipeline-job-log",
+            "POST /api/v1/forge/pipeline-job-retry",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
             "POST /api/v1/sessions/:session_id/queue",
@@ -5036,6 +5044,8 @@ mod tests {
             "/api/v1/forge/context",
             "/api/v1/forge/review-state",
             "/api/v1/git/delivery-failure",
+            "/api/v1/forge/review-comments",
+            "/api/v1/forge/pipeline",
         ] {
             let (status, _) =
                 post_json(&fixture.app, uri, json!({ "workspaceRoot": other.path() })).await;
