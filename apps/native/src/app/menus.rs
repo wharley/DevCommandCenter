@@ -1,11 +1,30 @@
 //! macOS menu bar and its shortcuts, matching the desktop's default
-//! application and Window menus. Edit arrives with the first text field.
+//! application, Edit and Window menus.
+//!
+//! Edit's items carry AppKit's own selectors (`copy:`, `paste:`…): GPUI's
+//! fields keep their own ⌘C/⌘V (their bindings win), and a page in the
+//! Browser — a native view GPUI does not see into — gets them through the
+//! responder chain, the only way WebKit takes them.
 
-use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
+use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, actions};
 
 actions!(
     dcc_app,
-    [Quit, Hide, HideOthers, ShowAll, Minimize, Zoom, CloseWindow]
+    [
+        Quit,
+        Hide,
+        HideOthers,
+        ShowAll,
+        Minimize,
+        Zoom,
+        CloseWindow,
+        EditUndo,
+        EditRedo,
+        EditCut,
+        EditCopy,
+        EditPaste,
+        EditSelectAll
+    ]
 );
 
 pub const APP_NAME: &str = "Dev Command Center";
@@ -25,6 +44,14 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("alt-cmd-h", HideOthers, None),
         KeyBinding::new("cmd-m", Minimize, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
+        // The menu shows these keys; nothing in GPUI handles the actions,
+        // so a key no field takes goes on to the focused native view.
+        KeyBinding::new("cmd-z", EditUndo, None),
+        KeyBinding::new("cmd-shift-z", EditRedo, None),
+        KeyBinding::new("cmd-x", EditCut, None),
+        KeyBinding::new("cmd-c", EditCopy, None),
+        KeyBinding::new("cmd-v", EditPaste, None),
+        KeyBinding::new("cmd-a", EditSelectAll, None),
     ]);
 
     cx.set_menus([
@@ -36,6 +63,15 @@ pub fn install(cx: &mut App) {
             MenuItem::action("Show All", ShowAll),
             MenuItem::separator(),
             MenuItem::action(format!("Quit {APP_NAME}"), Quit),
+        ]),
+        Menu::new("Edit").items([
+            MenuItem::os_action("Undo", EditUndo, OsAction::Undo),
+            MenuItem::os_action("Redo", EditRedo, OsAction::Redo),
+            MenuItem::separator(),
+            MenuItem::os_action("Cut", EditCut, OsAction::Cut),
+            MenuItem::os_action("Copy", EditCopy, OsAction::Copy),
+            MenuItem::os_action("Paste", EditPaste, OsAction::Paste),
+            MenuItem::os_action("Select All", EditSelectAll, OsAction::SelectAll),
         ]),
         Menu::new("Window").items([
             MenuItem::action("Minimize", Minimize),

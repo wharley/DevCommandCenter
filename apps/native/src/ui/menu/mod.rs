@@ -462,6 +462,7 @@ fn panel(
     }
     div()
         .id("menu-panel")
+        .relative()
         .when_some(focus, |panel, focus| panel.track_focus(&focus))
         .min_w(px(min_width))
         .p(px(4.0))
@@ -519,5 +520,6 @@ fn panel(
             });
         })
         .children(children)
+        .child(crate::ui::occlusion::marker())
         .into_any_element()
 }

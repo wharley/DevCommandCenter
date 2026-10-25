@@ -1,0 +1,183 @@
+//! The page itself: the system's engine as a child view of the GPUI window
+//! (`wry`, what the Tauri app's Browser is built on), with the desktop's
+//! policy — only HTTPS or local HTTP, no background throttling, a
+//! Browser-only data store — and what it reports back (loading, the URL,
+//! the title). Tests drive a fake page instead: the headless GPUI window
+//! has no native view to host one.
+
+use std::rc::Rc;
+
+use dcc_core::domain::browser::validate_browser_url;
+use futures::channel::mpsc::UnboundedSender;
+use gpui::{Bounds, Pixels};
+
+/// What the page tells the surface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PageEvent {
+    /// A navigation started (`PageLoadEvent::Started`).
+    Loading(String),
+    /// The page finished loading at this URL.
+    Loaded(String),
+    Title(String),
+}
+
+/// What the surface asks of its page.
+pub trait Page {
+    fn load_url(&self, url: &str);
+    fn reload(&self);
+    /// Window-relative, logical pixels.
+    fn set_bounds(&self, bounds: Bounds<Pixels>);
+    fn set_visible(&self, visible: bool);
+    /// The URL shown now (a single-page app moves it without a load).
+    fn url(&self) -> Option<String>;
+    /// The keyboard back to the GPUI window.
+    fn blur(&self);
+}
+
+/// A Browser-only WebKit store (macOS 14+), apart from anything else in
+/// the app; every Browser view of the native app shares its logins.
+#[cfg(target_os = "macos")]
+const DATA_STORE_IDENTIFIER: [u8; 16] = [
+    0x3d, 0xc1, 0x8e, 0x52, 0x07, 0x6a, 0x4f, 0x19, 0x9b, 0x2e, 0xd4, 0x61, 0xa8, 0x35, 0x7c, 0x0f,
+];
+
+/// `named_browser_store_is_available`: `dataStoreForIdentifier` is macOS 14+.
+#[cfg(target_os = "macos")]
+fn named_store_available() -> bool {
+    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        std::process::Command::new("/usr/bin/sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .and_then(|version| version.trim().split('.').next()?.parse::<u32>().ok())
+            .is_some_and(|major| major >= 14)
+    })
+}
+
+pub struct WryPage(Rc<wry::WebView>);
+
+impl WryPage {
+    /// The page as a child of `window`, opening on `url` (already checked).
+    pub fn new(
+        window: &gpui::Window,
+        url: &str,
+        events: UnboundedSender<PageEvent>,
+    ) -> Result<Self, String> {
+        let loads = events.clone();
+        let titles = events;
+        let builder = wry::WebViewBuilder::new()
+            .with_url(url)
+            .with_visible(false)
+            .with_background_throttling(wry::BackgroundThrottlingPolicy::Disabled)
+            // `on_navigation`: anything else is cancelled, like the desktop.
+            .with_navigation_handler(|url| validate_browser_url(&url).is_ok())
+            // Sign-in windows come with the popups (8b).
+            .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
+            .with_on_page_load_handler(move |event, url| {
+                let _ = loads.unbounded_send(match event {
+                    wry::PageLoadEvent::Started => PageEvent::Loading(url),
+                    wry::PageLoadEvent::Finished => PageEvent::Loaded(url),
+                });
+            })
+            .with_document_title_changed_handler(move |title| {
+                let _ = titles.unbounded_send(PageEvent::Title(title));
+            });
+        #[cfg(target_os = "macos")]
+        let builder = {
+            use wry::WebViewBuilderExtDarwin;
+            if named_store_available() {
+                builder.with_data_store_identifier(DATA_STORE_IDENTIFIER)
+            } else {
+                builder.with_incognito(true)
+            }
+        };
+        #[cfg(not(target_os = "macos"))]
+        let builder = {
+            let profile = crate::prefs::native_file("browser-profile");
+            std::fs::create_dir_all(&profile).map_err(|error| error.to_string())?;
+            let context = Box::leak(Box::new(wry::WebContext::new(Some(profile))));
+            builder.with_web_context(context)
+        };
+        builder
+            .build_as_child(window)
+            .map(|webview| Self(Rc::new(webview)))
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn rect(bounds: Bounds<Pixels>) -> wry::Rect {
+    wry::Rect {
+        position: wry::dpi::Position::Logical(wry::dpi::LogicalPosition::new(
+            f32::from(bounds.origin.x).into(),
+            f32::from(bounds.origin.y).into(),
+        )),
+        size: wry::dpi::Size::Logical(wry::dpi::LogicalSize::new(
+            f32::from(bounds.size.width).max(1.0).into(),
+            f32::from(bounds.size.height).max(1.0).into(),
+        )),
+    }
+}
+
+impl Page for WryPage {
+    fn load_url(&self, url: &str) {
+        let _ = self.0.load_url(url);
+    }
+
+    fn reload(&self) {
+        let _ = self.0.reload();
+    }
+
+    fn set_bounds(&self, bounds: Bounds<Pixels>) {
+        let _ = self.0.set_bounds(rect(bounds));
+    }
+
+    fn set_visible(&self, visible: bool) {
+        if !visible {
+            let _ = self.0.focus_parent();
+        }
+        let _ = self.0.set_visible(visible);
+    }
+
+    fn url(&self) -> Option<String> {
+        self.0.url().ok()
+    }
+
+    fn blur(&self) {
+        let _ = self.0.focus_parent();
+    }
+}
+
+/// A page that only records what it is asked, for headless tests.
+#[cfg(test)]
+#[derive(Default)]
+pub struct FakePage {
+    pub calls: std::cell::RefCell<Vec<String>>,
+    pub url: std::cell::RefCell<Option<String>>,
+}
+
+#[cfg(test)]
+impl Page for FakePage {
+    fn load_url(&self, url: &str) {
+        self.calls.borrow_mut().push(format!("load {url}"));
+        *self.url.borrow_mut() = Some(url.to_string());
+    }
+
+    fn reload(&self) {
+        self.calls.borrow_mut().push("reload".into());
+    }
+
+    fn set_bounds(&self, _: Bounds<Pixels>) {}
+
+    fn set_visible(&self, visible: bool) {
+        self.calls.borrow_mut().push(format!("visible {visible}"));
+    }
+
+    fn url(&self) -> Option<String> {
+        self.url.borrow().clone()
+    }
+
+    fn blur(&self) {}
+}

@@ -181,7 +181,9 @@ impl RenderOnce for Dialog {
                         .flex()
                         .items_center()
                         .justify_center()
+                        .relative()
                         .bg(Hsla::black().opacity(0.15))
+                        .child(super::occlusion::marker())
                         .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
                             if !busy {
                                 on_backdrop(window, cx);

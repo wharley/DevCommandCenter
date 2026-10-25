@@ -3,6 +3,7 @@
 
 mod annotation;
 mod bootstrap;
+mod browser;
 pub mod layout;
 mod merge;
 mod regions;
@@ -99,6 +100,8 @@ pub struct Shell {
     _code_column_events: Subscription,
     _conversation_root: Subscription,
     _stage_events: Subscription,
+    /// The Browser beside the conversation (screen 8).
+    browser: browser::BrowserState,
     /// The terminal dock under the conversation (screen 7).
     pub(crate) terminal: Entity<crate::screens::terminal::TerminalDock>,
     _terminal_events: Subscription,
@@ -185,6 +188,8 @@ impl Shell {
             }
             this.stage
                 .update(cx, |stage, cx| stage.set_agent_working(running, cx));
+            let task_id = place.as_ref().map(|place| place.workspace_id.clone());
+            this.browser_task_changed(task_id.as_deref(), cx);
             this.terminal
                 .update(cx, |dock, cx| dock.set_place(place, cx));
             this.code_column.update(cx, |column, cx| {
@@ -196,6 +201,7 @@ impl Shell {
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
         Self {
+            browser: browser::BrowserState::new(),
             terminal,
             _terminal_events: terminal_events,
             _terminal_counts: terminal_counts,
@@ -747,8 +753,14 @@ impl Render for Shell {
                 this.toggle_code_column(CodeColumnTab::Changes, cx)
             }))
             .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _, cx| {
-                this.finish_sidebar_resize(event.position.x, cx)
+                this.finish_sidebar_resize(event.position.x, cx);
+                this.finish_browser_resize(cx);
             }))
+            .on_drag_move(cx.listener(
+                |this, event: &DragMoveEvent<browser::BrowserResize>, window, cx| {
+                    this.resize_browser(f32::from(event.event.position.x), window, cx)
+                },
+            ))
             .child(SidebarRegion::new(self.layout.sidebar_rail_width()).child(self.sidebar.clone()))
             .child(
                 ResizeHandle::new("sidebar-resize", SidebarResize)
@@ -771,9 +783,13 @@ impl Render for Shell {
                         Some(resolver) => resolver.into_any_element(),
                         None => self.conversation_with_stage(cx),
                     };
+                    let content = self.with_browser(content, window, cx);
                     self.with_terminal(content, cx)
                 }
-                Surface::NewTask => self.new_task.clone().into_any_element(),
+                Surface::NewTask => {
+                    self.hide_browser_page(cx);
+                    self.new_task.clone().into_any_element()
+                }
             }))
             .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))
             .children(self.annotation.as_ref().map(|(card, _)| card.clone()))

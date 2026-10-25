@@ -75,6 +75,7 @@ fn open_with<'a>(
                 DockEvent::Resized(height) => format!("resized {height}"),
                 DockEvent::Expanded(expanded) => format!("expanded {expanded}"),
                 DockEvent::SendToAgent(text) => format!("agent {text}"),
+                DockEvent::OpenServer(url) => format!("server {url}"),
             })
         })
         .detach();

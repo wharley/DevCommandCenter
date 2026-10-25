@@ -130,7 +130,9 @@ impl TerminalDock {
             .size(ButtonSize::Sm)
             .padding_x(8.0)
             .text_size(12.0)
-            .on_click(move |_, _, cx| cx.open_url(&url))
+            .on_click(cx.listener(move |_, _, _, cx| {
+                cx.emit(super::dock::DockEvent::OpenServer(url.clone()))
+            }))
             .child(
                 div()
                     .flex()

@@ -125,6 +125,7 @@ impl RenderOnce for Popover {
             let card = div()
                 .id("popover-content")
                 .occlude()
+                .relative()
                 .flex()
                 .flex_col()
                 .w(px(self.width))
@@ -145,7 +146,8 @@ impl RenderOnce for Popover {
                         escape(false, window, cx);
                     }
                 })
-                .child((self.content)(window, cx));
+                .child((self.content)(window, cx))
+                .child(super::occlusion::marker());
             let (spot, anchor, offset) = match (self.side, self.align) {
                 (PopoverSide::Bottom, PopoverAlign::Start) => {
                     (div().left_0().bottom_0(), Anchor::TopLeft, self.side_offset)

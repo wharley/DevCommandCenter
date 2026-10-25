@@ -7,6 +7,7 @@ mod feedback;
 mod icon;
 mod kbd;
 pub mod menu;
+pub mod occlusion;
 pub mod popover;
 mod resize_handle;
 pub mod scrollbar;

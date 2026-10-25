@@ -111,6 +111,8 @@ pub enum DockEvent {
     Expanded(bool),
     /// Output for the composer's draft (`pushDebugEvidence`).
     SendToAgent(String),
+    /// "Abrir localhost:…": the local server in the Browser.
+    OpenServer(String),
 }
 
 /// What the dock was like on a task (`WorkspaceTerminalUiState`).

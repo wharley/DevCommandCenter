@@ -101,6 +101,7 @@ impl Shell {
             DockEvent::Hidden => self
                 .conversation
                 .update(cx, |conversation, cx| conversation.focus_composer_soon(cx)),
+            DockEvent::OpenServer(url) => self.open_browser(Some(url.clone()), window, cx),
             // The conversation hides under an expanded dock.
             DockEvent::Expanded(_) => cx.notify(),
             // `handleSendTerminalToAgent`: into the draft, then the dock hides.
@@ -130,7 +131,9 @@ impl Shell {
     /// The task's content over the dock, split like the desktop's workbench.
     pub(super) fn with_terminal(&self, content: AnyElement, cx: &gpui::App) -> AnyElement {
         let dock = self.terminal.read(cx);
-        let chat_hidden = dock.open && dock.expanded;
+        // The Browser and the dock share the workbench: the Browser wins.
+        let docked = !self.browser_open();
+        let chat_hidden = docked && dock.open && dock.expanded;
         div()
             .flex()
             .flex_col()
@@ -148,7 +151,7 @@ impl Shell {
                     .when(chat_hidden, |content| content.hidden())
                     .child(content),
             )
-            .child(self.terminal.clone())
+            .children(docked.then(|| self.terminal.clone()))
             .into_any_element()
     }
 }
