@@ -282,6 +282,26 @@ impl EditBuffer {
         self.last_typing = typing.then_some(now);
     }
 
+    /// Replaces `range` with `text` as a step of its own, then selects
+    /// `selection` (a command's edit: undo puts the old selection back,
+    /// redo this one).
+    pub fn replace_selecting(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        selection: Range<usize>,
+        reversed: bool,
+    ) {
+        self.last_typing = None;
+        self.replace(Some(range), text);
+        self.last_typing = None;
+        self.selection = self.clamp(selection.start)..self.clamp(selection.end);
+        self.reversed = reversed && !self.selection.is_empty();
+        if let Some(step) = self.undo.last_mut() {
+            step.after = self.selection.clone();
+        }
+    }
+
     /// IME composition: the text stays marked until committed; the whole
     /// composition is one undo step.
     pub fn replace_and_mark(

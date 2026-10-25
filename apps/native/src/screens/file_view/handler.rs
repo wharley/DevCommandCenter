@@ -106,6 +106,17 @@ impl EntityInputHandler for FileView {
         let range = range_utf16
             .as_ref()
             .map(|range| self.buffer.range_from_utf16(range));
+        // A bracket or quote typed over the selection wraps it.
+        let over_selection = self.buffer.marked.is_none()
+            && range
+                .as_ref()
+                .is_none_or(|range| *range == self.buffer.selection);
+        if over_selection {
+            let doc = super::lines::Doc::new(self.buffer.text());
+            if let Some(change) = super::lines::surround(&doc, &self.buffer.selection, new_text) {
+                return self.apply_change(change, cx);
+            }
+        }
         let lines = self.buffer.line_count();
         let line = self.buffer.line_of(
             range

@@ -8,10 +8,13 @@
 //! shows that line.
 
 mod buffer;
+mod commands;
+mod comments;
 mod find;
 mod find_view;
 mod handler;
 mod keys;
+mod lines;
 mod search;
 mod view;
 
@@ -22,6 +25,7 @@ pub use buffer::EditBuffer;
 /// Registers the editor's keys and its search panel's; call once at startup.
 pub fn bind_keys(cx: &mut gpui::App) {
     keys::bind_keys(cx);
+    commands::bind_keys(cx);
     find::bind_keys(cx);
 }
 

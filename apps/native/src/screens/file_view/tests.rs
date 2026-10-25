@@ -89,9 +89,10 @@ fn tab_types_the_projects_indent_and_shifts_selected_lines(cx: &mut TestAppConte
     let (view, cx) = open(cx, "a\nb\n", tabs);
     cx.simulate_keystrokes("tab");
     assert_eq!(text(&view, cx), "\ta\nb\n");
-    // Both lines selected: each one level in, then out again.
+    // Both lines selected: each one level in as it starts (the Pierre
+    // editor's block indent), then out again.
     cx.simulate_keystrokes("cmd-a tab");
-    assert_eq!(text(&view, cx), "\t\ta\n\tb\n");
+    assert_eq!(text(&view, cx), "\t\ta\n    b\n");
     cx.simulate_keystrokes("shift-tab");
     assert_eq!(text(&view, cx), "\ta\nb\n");
     // A tab is drawn to its stop.
@@ -194,4 +195,46 @@ fn replace_edits_the_current_match_and_replace_all_the_rest(cx: &mut TestAppCont
     assert_eq!(text(&view, cx), "b1 b2 b3\n");
     assert_eq!(summary(&view, cx), "No results");
     cx.simulate_keystrokes("cmd-z");
+}
+
+#[gpui::test]
+fn the_line_keys_move_copy_comment_and_wrap(cx: &mut TestAppContext) {
+    let (view, cx) = open(cx, "let a = 1;\nlet b = 2;\n", DEFAULT_INDENTATION);
+    // ⌥↓ moves the first line down, the caret with it; ⌘Z puts it back.
+    view.update(cx, |view, _| view.buffer.go(4, false));
+    cx.simulate_keystrokes("alt-down");
+    assert_eq!(text(&view, cx), "let b = 2;\nlet a = 1;\n");
+    view.read_with(cx, |view, _| assert_eq!(view.buffer.cursor(), 15));
+    cx.simulate_keystrokes("cmd-z");
+    assert_eq!(text(&view, cx), "let a = 1;\nlet b = 2;\n");
+    // ⇧⌥↓ copies it, the caret on the lower copy.
+    view.update(cx, |view, _| view.buffer.go(4, false));
+    cx.simulate_keystrokes("shift-alt-down");
+    assert_eq!(text(&view, cx), "let a = 1;\nlet a = 1;\nlet b = 2;\n");
+    view.read_with(cx, |view, _| assert_eq!(view.buffer.cursor(), 15));
+    // ⌘/ comments the line; again takes it off.
+    cx.simulate_keystrokes("cmd-/");
+    assert_eq!(text(&view, cx), "let a = 1;\n// let a = 1;\nlet b = 2;\n");
+    cx.simulate_keystrokes("cmd-/");
+    assert_eq!(text(&view, cx), "let a = 1;\nlet a = 1;\nlet b = 2;\n");
+    // ⌃K cuts to the line's end, ⌘Enter opens a line under it.
+    cx.simulate_keystrokes("ctrl-k");
+    assert_eq!(text(&view, cx), "let a = 1;\nlet \nlet b = 2;\n");
+    cx.simulate_keystrokes("cmd-enter");
+    assert_eq!(text(&view, cx), "let a = 1;\nlet \n\nlet b = 2;\n");
+    // ⌘D takes the word at the caret; "(" typed over it wraps it.
+    view.update(cx, |view, _| view.buffer.go(1, false));
+    cx.simulate_keystrokes("cmd-d");
+    view.read_with(cx, |view, _| assert_eq!(view.buffer.selected_text(), "let"));
+    cx.simulate_input("(");
+    assert_eq!(text(&view, cx), "(let) a = 1;\nlet \n\nlet b = 2;\n");
+    view.read_with(cx, |view, _| assert_eq!(view.buffer.selected_text(), "let"));
+    // ⇧⌥A puts a block comment around the selection.
+    cx.simulate_keystrokes("shift-alt-a");
+    assert_eq!(text(&view, cx), "(/* let */) a = 1;\nlet \n\nlet b = 2;\n");
+    // ⌘] and ⌘[ shift the caret's line.
+    cx.simulate_keystrokes("cmd-] cmd-]");
+    assert!(text(&view, cx).starts_with("    (/* let */)"));
+    cx.simulate_keystrokes("cmd-[");
+    assert!(text(&view, cx).starts_with("  (/* let */)"));
 }

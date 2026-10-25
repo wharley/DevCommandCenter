@@ -8,6 +8,7 @@ use gpui::{App, ClipboardItem, Context, InteractiveElement, KeyBinding, Window, 
 
 use super::FileView;
 use super::buffer::{column_of, offset_at_column};
+use super::lines::{indent_lines, tab_over_selection};
 
 actions!(
     code_editor,
@@ -76,6 +77,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-right", SelectLineEnd, context),
         KeyBinding::new("cmd-up", DocumentStart, context),
         KeyBinding::new("cmd-down", DocumentEnd, context),
+        KeyBinding::new("cmd-home", DocumentStart, context),
+        KeyBinding::new("cmd-end", DocumentEnd, context),
+        KeyBinding::new("cmd-shift-home", SelectDocumentStart, context),
+        KeyBinding::new("cmd-shift-end", SelectDocumentEnd, context),
         KeyBinding::new("cmd-shift-up", SelectDocumentStart, context),
         KeyBinding::new("cmd-shift-down", SelectDocumentEnd, context),
         KeyBinding::new("cmd-a", SelectAll, context),
@@ -207,74 +212,31 @@ impl FileView {
         self.edited(lines, start_line, cx);
     }
 
-    /// The selected lines (all of the caret's line when nothing is selected).
-    fn selected_lines(&self) -> std::ops::Range<usize> {
-        let selection = &self.buffer.selection;
-        let first = self.buffer.line_of(selection.start);
-        let mut last = self.buffer.line_of(selection.end);
-        if last > first && selection.end == self.buffer.line_start(last) {
-            last -= 1;
-        }
-        first..last + 1
-    }
-
-    /// Tab: the project's indent at the caret; with a selection, each of
-    /// its lines one level in.
+    /// Tab: the project's indent at the caret; over a selection on one
+    /// line, a tab or spaces as the line starts; over several lines, each
+    /// one level in (the Pierre editor's own `indent`).
     fn indent(&mut self, cx: &mut Context<Self>) {
-        let unit = indent_unit(self.indentation);
-        if self.buffer.selection.is_empty() {
-            return self.insert(&unit, cx);
+        let selection = self.buffer.selection.clone();
+        if selection.is_empty() {
+            return self.insert(&indent_unit(self.indentation), cx);
         }
-        let lines = self.selected_lines();
-        self.shift_lines(lines, |line| format!("{unit}{line}"), cx);
+        let size = self.indentation.size.max(1);
+        if self.buffer.line_of(selection.start) == self.buffer.line_of(selection.end) {
+            return self.run_rule(|doc, sel, _| Some(tab_over_selection(doc, sel, size)), cx);
+        }
+        self.run_rule(
+            |doc, sel, reversed| indent_lines(doc, sel, reversed, size, false),
+            cx,
+        );
     }
 
     /// Shift+Tab: each selected line one level out.
     fn outdent(&mut self, cx: &mut Context<Self>) {
         let size = self.indentation.size.max(1);
-        let lines = self.selected_lines();
-        self.shift_lines(
-            lines,
-            move |line| {
-                if let Some(rest) = line.strip_prefix('\t') {
-                    return rest.to_string();
-                }
-                let spaces = line.len() - line.trim_start_matches(' ').len();
-                line[spaces.min(size)..].to_string()
-            },
+        self.run_rule(
+            |doc, sel, reversed| indent_lines(doc, sel, reversed, size, true),
             cx,
         );
-    }
-
-    /// Rewrites whole lines as one step, keeping them selected.
-    fn shift_lines(
-        &mut self,
-        lines: std::ops::Range<usize>,
-        change: impl Fn(&str) -> String,
-        cx: &mut Context<Self>,
-    ) {
-        let start = self.buffer.line_start(lines.start);
-        let end_line = lines.end - 1;
-        let end = self.buffer.line_start(end_line) + self.buffer.line(end_line).len();
-        let original = self.buffer.text()[start..end].to_string();
-        let changed: Vec<String> = original
-            .split('\n')
-            .map(|line| {
-                let (body, cr) = match line.strip_suffix('\r') {
-                    Some(body) => (body, "\r"),
-                    None => (line, ""),
-                };
-                format!("{}{cr}", change(body))
-            })
-            .collect();
-        let replacement = changed.join("\n");
-        if replacement == original {
-            return;
-        }
-        let count = self.buffer.line_count();
-        self.buffer.replace(Some(start..end), &replacement);
-        self.buffer.select(start..start + replacement.len());
-        self.edited(count, lines.start, cx);
     }
 
     fn copy(&mut self, cx: &mut Context<Self>) {
@@ -285,7 +247,8 @@ impl FileView {
     }
 
     pub(crate) fn register_actions(div: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
-        div.key_context(CONTEXT)
+        Self::register_line_commands(div, cx)
+            .key_context(CONTEXT)
             .on_action(cx.listener(|view, _: &Left, _, cx| view.step(false, false, cx)))
             .on_action(cx.listener(|view, _: &Right, _, cx| view.step(true, false, cx)))
             .on_action(cx.listener(|view, _: &SelectLeft, _, cx| view.step(false, true, cx)))
