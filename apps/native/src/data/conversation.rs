@@ -39,6 +39,12 @@ pub struct Conversation {
     /// The task's checkout (`worktreePath ?? rootPath`): mentions list its
     /// files and attachments inside it go relative.
     pub workspace_path: Option<String>,
+    /// The project's checkout and the task's worktree, apart (the terminal
+    /// dock's two scopes).
+    pub root_path: Option<String>,
+    pub worktree_path: Option<String>,
+    /// The branch the task was made from (`workspace.baseBranch`).
+    pub base_branch: Option<String>,
     /// The task's name and branch (`source.headBranch ?? baseBranch`), for
     /// a provider handoff.
     pub workspace_name: Option<String>,
@@ -413,6 +419,9 @@ pub fn load(
         conversation.project_id = Some(record.project_id.0.clone());
         conversation.branch = Some(branch);
         conversation.workspace_path = Some(path);
+        conversation.root_path = Some(record.root_path.clone());
+        conversation.worktree_path = record.worktree_path.clone();
+        conversation.base_branch = Some(record.base_branch.clone());
     }
     conversation.new_thread = record
         .as_ref()
@@ -507,6 +516,9 @@ impl Conversation {
             && self.waiting == other.waiting
             && self.aborted == other.aborted
             && self.workspace_path == other.workspace_path
+            && self.root_path == other.root_path
+            && self.worktree_path == other.worktree_path
+            && self.base_branch == other.base_branch
             && self.delegations == other.delegations
             && self.children == other.children
             && self.turn_tokens == other.turn_tokens

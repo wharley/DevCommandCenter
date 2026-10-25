@@ -6,6 +6,7 @@ mod bootstrap;
 pub mod layout;
 mod merge;
 mod regions;
+mod terminal;
 #[cfg(test)]
 mod tests;
 
@@ -42,7 +43,9 @@ gpui::actions!(
         /// ⌘⇧E: the code column on "Arquivos", or closed when it shows them.
         ToggleCodeFiles,
         /// ⌘⇧G: the same for "Mudanças".
-        ToggleCodeChanges
+        ToggleCodeChanges,
+        /// ⌘J: the terminal dock (`isToggleTerminalShortcut`).
+        ToggleTerminal
     ]
 );
 
@@ -51,6 +54,7 @@ pub fn bind_keys(cx: &mut gpui::App) {
     cx.bind_keys([
         gpui::KeyBinding::new("cmd-shift-e", ToggleCodeFiles, None),
         gpui::KeyBinding::new("cmd-shift-g", ToggleCodeChanges, None),
+        gpui::KeyBinding::new("cmd-j", ToggleTerminal, None),
     ]);
 }
 
@@ -95,6 +99,9 @@ pub struct Shell {
     _code_column_events: Subscription,
     _conversation_root: Subscription,
     _stage_events: Subscription,
+    /// The terminal dock under the conversation (screen 7).
+    pub(crate) terminal: Entity<crate::screens::terminal::TerminalDock>,
+    _terminal_events: Subscription,
 }
 
 impl Shell {
@@ -152,6 +159,7 @@ impl Shell {
         // The column follows the open task's checkout.
         let conversation_root = cx.observe(&conversation, |this, conversation, cx| {
             let view = conversation.read(cx);
+            let place = terminal::place_of(view, cx);
             let root = view.workspace_path();
             let session = view.shown_session();
             let waiting = view
@@ -176,13 +184,18 @@ impl Shell {
             }
             this.stage
                 .update(cx, |stage, cx| stage.set_agent_working(running, cx));
+            this.terminal
+                .update(cx, |dock, cx| dock.set_place(place, cx));
             this.code_column.update(cx, |column, cx| {
                 column.set_root(root, cx);
                 column.set_reviews(session, waiting, cx);
                 column.set_conversation_state(running, pending, cx);
             });
         });
+        let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         Self {
+            terminal,
+            _terminal_events: terminal_events,
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
             prefs,
             prefs_path,
@@ -710,6 +723,17 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &ToggleCodeFiles, _, cx| {
                 this.toggle_code_column(CodeColumnTab::Files, cx)
             }))
+            .on_action(
+                cx.listener(|this, _: &ToggleTerminal, window, cx| {
+                    this.toggle_terminal(window, cx)
+                }),
+            )
+            // Esc outside the terminal hides its dock (the drawer's window listener).
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" {
+                    this.terminal.update(cx, |dock, cx| dock.hide(cx));
+                }
+            }))
             .on_action(cx.listener(|this, _: &ToggleCodeChanges, _, cx| {
                 this.toggle_code_column(CodeColumnTab::Changes, cx)
             }))
@@ -733,10 +757,13 @@ impl Render for Shell {
                 Surface::Conversation if self.sidebar.read(cx).has_open_task() == Some(false) => {
                     bootstrap::render(self, cx)
                 }
-                Surface::Conversation => match self.merge_resolver() {
-                    Some(resolver) => resolver.into_any_element(),
-                    None => self.conversation_with_stage(cx),
-                },
+                Surface::Conversation => {
+                    let content = match self.merge_resolver() {
+                        Some(resolver) => resolver.into_any_element(),
+                        None => self.conversation_with_stage(cx),
+                    };
+                    self.with_terminal(content)
+                }
                 Surface::NewTask => self.new_task.clone().into_any_element(),
             }))
             .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))

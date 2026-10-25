@@ -29,6 +29,8 @@ pub struct Prefs {
     /// default) and its list (`dcc.codeColumnTab`).
     pub code_column_open: bool,
     pub code_column_tab: crate::screens::code_column::CodeColumnTab,
+    /// The terminal dock's height (`dcc-workbench-terminal-dock-height-v1`).
+    pub terminal_height: f32,
 }
 
 impl Default for Prefs {
@@ -42,6 +44,7 @@ impl Default for Prefs {
             completed_open: false,
             code_column_open: false,
             code_column_tab: crate::screens::code_column::CodeColumnTab::Files,
+            terminal_height: crate::screens::terminal::dock::DEFAULT_HEIGHT,
         }
     }
 }

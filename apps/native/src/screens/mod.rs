@@ -12,3 +12,4 @@ pub mod open_project;
 pub mod shell;
 pub mod sidebar;
 pub mod stage;
+pub mod terminal;

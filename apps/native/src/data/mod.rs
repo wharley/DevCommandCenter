@@ -33,4 +33,5 @@ pub mod seen;
 pub mod setup_report;
 pub mod snooze;
 pub mod tasks;
+pub mod terminal_api;
 pub mod time;

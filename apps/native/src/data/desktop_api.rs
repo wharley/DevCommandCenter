@@ -167,8 +167,66 @@ impl DesktopApi {
         self.request("POST", path, Some(body))
     }
 
-    fn get(&self, path: &str) -> Result<Value, ApiError> {
+    pub(crate) fn get(&self, path: &str) -> Result<Value, ApiError> {
         self.request("GET", path, None)
+    }
+
+    /// A long-lived `GET` (server-sent events): the response's body, past
+    /// its head, and whether it comes chunked. `read_timeout` bounds the
+    /// wait between two reads (the server's keep-alive is every 15s).
+    pub(crate) fn open_stream(
+        &self,
+        path: &str,
+        read_timeout: Duration,
+    ) -> Result<(std::io::BufReader<TcpStream>, bool), ApiError> {
+        use std::io::BufRead;
+        let address = SocketAddr::from(([127, 0, 0, 1], self.port));
+        let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
+            .map_err(|_| ApiError::DesktopClosed)?;
+        stream.set_read_timeout(Some(read_timeout)).ok();
+        stream.set_write_timeout(Some(IO_TIMEOUT)).ok();
+        let request = format!(
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-API-Key: {key}\r\nAccept: text/event-stream\r\nConnection: close\r\n\r\n",
+            port = self.port,
+            key = self.api_key,
+        );
+        stream
+            .write_all(request.as_bytes())
+            .map_err(|error| ApiError::Failed(error.to_string()))?;
+        let mut reader = std::io::BufReader::new(stream);
+        let mut status = 0u16;
+        let mut chunked = false;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let read = reader
+                .read_line(&mut line)
+                .map_err(|error| ApiError::Failed(error.to_string()))?;
+            if read == 0 {
+                return Err(ApiError::Failed("invalid response".into()));
+            }
+            let trimmed = line.trim_end();
+            if trimmed.is_empty() {
+                break;
+            }
+            if status == 0 {
+                status = trimmed
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|code| code.parse().ok())
+                    .ok_or_else(|| ApiError::Failed("invalid response".into()))?;
+            } else {
+                let lower = trimmed.to_ascii_lowercase();
+                if lower.starts_with("transfer-encoding:") && lower.contains("chunked") {
+                    chunked = true;
+                }
+            }
+        }
+        match status {
+            200..=299 => Ok((reader, chunked)),
+            401 | 403 => Err(ApiError::Unauthorized),
+            _ => Err(ApiError::Failed(format!("HTTP {status}"))),
+        }
     }
 
     fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, ApiError> {
@@ -969,7 +1027,7 @@ fn error_message(value: &Value) -> Option<String> {
 }
 
 /// Path segment escaping for ids (they are UUIDs; anything else is escaped).
-fn encode(segment: &str) -> String {
+pub(crate) fn encode(segment: &str) -> String {
     segment
         .bytes()
         .map(|byte| match byte {
