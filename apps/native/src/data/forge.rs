@@ -70,6 +70,7 @@ pub struct ReviewState {
     pub has_conflicts: Option<bool>,
     pub behind_by: Option<u32>,
     pub discussions_resolved: Option<bool>,
+    pub draft: Option<bool>,
 }
 
 /// `WorkspaceReviewerCandidate`

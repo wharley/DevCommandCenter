@@ -20,6 +20,8 @@ pub enum Size {
     Default,
     /// `h-7 px-2.5`
     Sm,
+    /// `h-6 px-2`
+    Xs,
     /// `size-8`
     Icon,
     /// `size-6`
@@ -165,6 +167,7 @@ impl RenderOnce for Button {
         let (width, height, padding) = match self.size {
             Size::Default => (None, 32.0, 12.0),
             Size::Sm => (None, 28.0, 10.0),
+            Size::Xs => (None, 24.0, 8.0),
             Size::Icon => (Some(32.0), 32.0, 0.0),
             Size::IconXs => (Some(24.0), 24.0, 0.0),
             Size::IconSm => (Some(28.0), 28.0, 0.0),

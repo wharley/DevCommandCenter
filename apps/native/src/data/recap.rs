@@ -1,13 +1,14 @@
 //! What a task row says about its git and pull request, one to one with the
 //! desktop's `resolveCommitMode` (`WorkspaceCommitButton.logic.ts`), the part
-//! of `buildWorkspaceRecap` the rail feeds (no review, pipeline or policy
-//! inputs) and `buildWorkspaceRailMeta` / `railNextActionKey`.
+//! of `buildWorkspaceRecap` the rail feeds (dcc-core's, without review,
+//! pipeline or policy inputs) and `buildWorkspaceRailMeta` / `railNextActionKey`.
 
 use std::collections::HashSet;
 
 use dcc_core::domain::workspace_git::{WorkspaceGitStatusOutput, WorkspacePrStatusOutput};
 
 pub use dcc_core::domain::commit_mode::CommitMode;
+use dcc_core::domain::workspace_recap::{RecapParam, WorkspaceRecapInput, build_workspace_recap};
 
 /// `resolveCommitMode` as the rail reads it: without the conflict state
 /// (the Rust status has no `conflictResolutionReady`).
@@ -19,20 +20,12 @@ pub fn resolve_commit_mode(
     dcc_core::domain::commit_mode::resolve_commit_mode(branch, git, pr, false)
 }
 
-/// `WorkspaceRecapTone`: graded by value, only `Attention` spends chroma.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecapTone {
-    Neutral,
-    Working,
-    Attention,
-    Ready,
-    Done,
-}
+pub use dcc_core::domain::workspace_recap::RecapTone;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Recap {
     /// Under `inspector.recap.messages` / `sidebar.nextAction`.
-    pub message_key: &'static str,
+    pub message_key: String,
     pub count: i64,
     pub additions: i64,
     pub deletions: i64,
@@ -88,67 +81,43 @@ pub fn build_recap(input: &RecapInput) -> Option<Recap> {
         .git
         .and_then(|git| git.current_branch.as_deref())
         .unwrap_or(input.branch);
-    let mode = resolve_commit_mode(branch, input.git, input.pr);
     let (files, additions, deletions) = diff_totals(input.git);
-    let conflicts = input.git.map_or(0, |git| i64::from(git.conflict_count));
     let label = request_label(input.pr);
-    let number = input.pr.and_then(|pr| pr.number);
-    let pr_state = input
-        .pr
-        .and_then(|pr| pr.state.as_deref())
-        .map(str::to_lowercase);
-    let recap = |message_key, count, tone| Recap {
-        message_key,
-        count,
+    let recap = build_workspace_recap(&WorkspaceRecapInput {
+        turn_running: input.turn_running,
+        changed_files_count: files as i64,
         additions,
         deletions,
-        pr: number.map_or_else(|| label.to_string(), |number| format!("{label} #{number}")),
+        ahead_of_remote_count: input
+            .git
+            .map_or(0, |git| i64::from(git.ahead_of_remote_count)),
+        conflict_count: input.git.map_or(0, |git| i64::from(git.conflict_count)),
+        committed_vs_base_count: input.committed_vs_base as i64,
+        pr_number: input.pr.and_then(|pr| pr.number),
+        pr_state: input.pr.and_then(|pr| pr.state.clone()),
         request_label: label,
-        tone,
-    };
-
-    let recap = if mode == CommitMode::CompleteMerge {
-        recap("conflictResolutionReady", conflicts, RecapTone::Ready)
-    } else if mode == CommitMode::ResolveConflicts || conflicts > 0 {
-        recap("conflicts", conflicts.max(1), RecapTone::Attention)
-    } else if mode == CommitMode::Merged {
-        recap("merged", 0, RecapTone::Done)
-    } else if mode == CommitMode::Closed
-        || (mode == CommitMode::OpenPr && pr_state.as_deref() == Some("closed"))
-    {
-        recap("closed", 0, RecapTone::Neutral)
-    } else if input.turn_running {
-        let key = if files > 0 { "working" } else { "workingClean" };
-        recap(key, files as i64, RecapTone::Working)
-    } else if input.pending_delegations > 0 {
-        recap(
-            "delegationResults",
-            input.pending_delegations as i64,
-            RecapTone::Attention,
-        )
-    } else {
-        match mode {
-            CommitMode::CommitAndPush => recap("changes", files as i64, RecapTone::Neutral),
-            CommitMode::Push => recap(
-                "ahead",
-                i64::from(input.git.map_or(0, |git| git.ahead_of_remote_count)),
-                RecapTone::Neutral,
-            ),
-            CommitMode::Fix => recap("checksFailing", 0, RecapTone::Attention),
-            CommitMode::Merge => recap("mergeReady", 0, RecapTone::Ready),
-            CommitMode::OpenPr => recap("prOpen", 0, RecapTone::Neutral),
-            CommitMode::CreatePr if input.committed_vs_base > 0 => recap(
-                "readyForPr",
-                input.committed_vs_base as i64,
-                RecapTone::Ready,
-            ),
-            _ => recap("clean", 0, RecapTone::Neutral),
-        }
-    };
+        pending_delegation_results_count: input.pending_delegations as i64,
+        ..WorkspaceRecapInput::new(resolve_commit_mode(branch, input.git, input.pr))
+    });
     if !input.has_activity && recap.message_key == "clean" {
         return None;
     }
-    Some(recap)
+    let count = match recap.params.get("count") {
+        Some(RecapParam::Number(count)) => *count,
+        _ => 0,
+    };
+    Some(Recap {
+        message_key: recap.message_key,
+        count,
+        additions,
+        deletions,
+        pr: input
+            .pr
+            .and_then(|pr| pr.number)
+            .map_or_else(|| label.to_string(), |number| format!("{label} #{number}")),
+        request_label: label,
+        tone: recap.tone,
+    })
 }
 
 /// `railNextActionKey`: the row stays quiet where the state or meta line

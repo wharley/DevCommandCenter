@@ -763,9 +763,10 @@ pub(crate) fn changes(
                 column, cx,
             ))
             .collect();
+    let recap = crate::screens::code_column::recap::recap_strip(column, cx);
     // The git section (`border-b border-border/60`): the delivery header,
     // the sync bar, then the review under its `border-t`.
-    div()
+    let section = div()
         .flex()
         .flex_1()
         .min_h_0()
@@ -809,7 +810,15 @@ pub(crate) fn changes(
                         .children(updating),
                 ),
         )
-        .children(dialogs)
+        .children(dialogs);
+    // The recap strip sits over it, like under the inspector's mode switch.
+    div()
+        .flex()
+        .flex_1()
+        .min_h_0()
+        .flex_col()
+        .children(recap)
+        .child(section)
         .into_any_element()
 }
 

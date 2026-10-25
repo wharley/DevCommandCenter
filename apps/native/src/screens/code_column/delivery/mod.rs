@@ -20,6 +20,7 @@ pub(crate) use toolbar::toolbar;
 use dcc_core::domain::commit_mode::{CommitButtonStatus, CommitMode, resolve_commit_mode};
 use dcc_core::domain::workspace::Workspace;
 use dcc_core::domain::workspace_git::WorkspacePrStatusOutput;
+use dcc_core::domain::workspace_recap::RecapDeliveryPolicy;
 use gpui::{Context, Entity};
 
 use super::CodeColumn;
@@ -56,6 +57,9 @@ pub(crate) struct Delivery {
     pub preview: Option<Preview>,
     /// The task completed after its merge, once.
     pub completed: Option<String>,
+    /// `.dcc.toml`'s delivery policy and its before-merge checks, read with
+    /// the pull request (`workspaceProjectAutomationConfig`).
+    pub policy: Option<(RecapDeliveryPolicy, i64)>,
 }
 
 impl Delivery {
@@ -126,7 +130,7 @@ impl CodeColumn {
         let (db_path, branch) = (self.db_path.clone(), self.current_branch());
         self._pull_request = Some(cx.spawn(async move |this, cx| {
             let path = root.clone();
-            let (task, pr) = cx
+            let (task, pr, policy) = cx
                 .background_executor()
                 // Straight on the background executor: the forge's context
                 // blocks on its own futures inside, which a `block_on`
@@ -144,7 +148,7 @@ impl CodeColumn {
                     )
                     .await
                     .ok();
-                    (task, pr)
+                    (task, pr, delivery_policy(&path))
                 })
                 .await;
             let _ = this.update(cx, |column, cx| {
@@ -152,6 +156,7 @@ impl CodeColumn {
                     return;
                 }
                 column.delivery.task = task;
+                column.delivery.policy = policy;
                 if let Some(pr) = pr {
                     column.delivery.pr = Some(pr);
                 }
@@ -160,4 +165,21 @@ impl CodeColumn {
             });
         }));
     }
+}
+
+/// The project's delivery rules; none without a readable `.dcc.toml`.
+fn delivery_policy(root: &str) -> Option<(RecapDeliveryPolicy, i64)> {
+    let config =
+        dcc_infra::git::read_workspace_automation_config(std::path::Path::new(root)).ok()??;
+    let policy = config.delivery_policy;
+    Some((
+        RecapDeliveryPolicy {
+            minimum_approvals: i64::from(policy.minimum_approvals),
+            require_pipeline: policy.require_pipeline,
+            require_resolved_discussions: policy.require_resolved_discussions,
+            require_current_base: policy.require_current_base,
+            require_before_merge_checks: policy.require_before_merge_checks,
+        },
+        config.before_merge.len() as i64,
+    ))
 }

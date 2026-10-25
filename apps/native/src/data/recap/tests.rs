@@ -59,7 +59,7 @@ fn input<'a>(
     }
 }
 
-fn key(recap: Option<Recap>) -> Option<&'static str> {
+fn key(recap: Option<Recap>) -> Option<String> {
     recap.map(|recap| recap.message_key)
 }
 
@@ -68,7 +68,7 @@ fn an_open_pr_with_clean_checks_is_ready_to_merge() {
     let status = git(&[], 0);
     let open = pr(886, "OPEN", Some("CLEAN"));
     assert_eq!(
-        key(build_recap(&input(Some(&status), Some(&open)))),
+        key(build_recap(&input(Some(&status), Some(&open)))).as_deref(),
         Some("mergeReady")
     );
     assert_eq!(
@@ -81,7 +81,7 @@ fn an_open_pr_with_clean_checks_is_ready_to_merge() {
 fn uncommitted_work_waits_for_a_commit() {
     let status = git(&[("a.rs", 30, 2), ("b.rs", 8, 4)], 0);
     let recap = build_recap(&input(Some(&status), None)).unwrap();
-    assert_eq!((recap.message_key, recap.count), ("changes", 2));
+    assert_eq!((recap.message_key.as_str(), recap.count), ("changes", 2));
     let meta = build_meta("dcc/task", Some(&status), None).unwrap();
     assert_eq!(
         (meta.additions, meta.deletions, meta.pr_number),
@@ -94,12 +94,12 @@ fn failing_checks_and_pushes_are_spotted() {
     let status = git(&[], 0);
     let failing = pr(12, "open", Some("UNSTABLE"));
     assert_eq!(
-        key(build_recap(&input(Some(&status), Some(&failing)))),
+        key(build_recap(&input(Some(&status), Some(&failing)))).as_deref(),
         Some("checksFailing")
     );
     let ahead = git(&[], 3);
     let recap = build_recap(&input(Some(&ahead), None)).unwrap();
-    assert_eq!((recap.message_key, recap.count), ("ahead", 3));
+    assert_eq!((recap.message_key.as_str(), recap.count), ("ahead", 3));
 }
 
 #[test]
@@ -107,7 +107,7 @@ fn a_running_turn_is_the_agents_line_not_a_next_action() {
     let status = git(&[("a.rs", 1, 0)], 0);
     let mut running = input(Some(&status), None);
     running.turn_running = true;
-    assert_eq!(key(build_recap(&running)), Some("working"));
+    assert_eq!(key(build_recap(&running)).as_deref(), Some("working"));
     assert_eq!(next_action_key("working"), None);
 }
 
@@ -118,7 +118,7 @@ fn committed_work_without_a_pr_is_ready_for_one() {
     ready.committed_vs_base = 4;
     let recap = build_recap(&ready).unwrap();
     assert_eq!(
-        (recap.message_key, recap.count, recap.request_label),
+        (recap.message_key.as_str(), recap.count, recap.request_label),
         ("readyForPr", 4, "PR")
     );
 }

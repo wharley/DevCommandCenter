@@ -112,7 +112,7 @@ pub fn status(row: &RowContext, cx: &App) -> Option<AnyElement> {
 
     // Between turns the next step says more than "Completed".
     let next_action = recap.and_then(|recap| {
-        let key = next_action_key(recap.message_key)?;
+        let key = next_action_key(&recap.message_key)?;
         let args = recap_args(recap);
         let message = cx.t_with(
             &format!("inspector.recap.messages.{}", recap.message_key),

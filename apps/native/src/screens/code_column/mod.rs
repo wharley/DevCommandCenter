@@ -5,6 +5,7 @@
 mod changes;
 mod delegation;
 mod delivery;
+mod recap;
 mod review;
 mod tree;
 mod view;
@@ -13,6 +14,8 @@ pub use delegation::{Reviewable, reviewables};
 pub use tree::DraggedFile;
 #[cfg(test)]
 mod delegation_tests;
+#[cfg(test)]
+mod recap_tests;
 #[cfg(test)]
 mod tests;
 
@@ -98,6 +101,12 @@ pub struct CodeColumn {
     pub(crate) session_id: Option<String>,
     pub(crate) reviewables: Vec<delegation::Reviewable>,
     pub(crate) delegation_review: Option<delegation::DelegationReview>,
+    /// The open conversation's turn is running, and the task's delegations
+    /// whose edits wait on the person (the recap's inputs).
+    pub(crate) turn_running: bool,
+    pub(crate) pending_delegations: usize,
+    /// The recap's signals are open.
+    pub(crate) recap_details: bool,
     pub(crate) by_path: HashMap<String, TreeStatus>,
     pub(crate) changed_folders: HashSet<String>,
     file_set: Option<String>,
@@ -147,6 +156,9 @@ impl CodeColumn {
             session_id: None,
             reviewables: Vec::new(),
             delegation_review: None,
+            turn_running: false,
+            pending_delegations: 0,
+            recap_details: false,
             by_path: HashMap::new(),
             changed_folders: HashSet::new(),
             file_set: None,

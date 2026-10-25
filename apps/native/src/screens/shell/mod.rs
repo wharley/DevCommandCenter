@@ -9,6 +9,8 @@ mod tests;
 
 use std::path::PathBuf;
 
+use dcc_core::domain::delegation::DelegationStatus;
+
 use gpui::{
     Context, DragMoveEvent, Entity, MouseUpEvent, Pixels, Subscription, Window, div, prelude::*, px,
 };
@@ -131,9 +133,18 @@ impl Shell {
                 .data()
                 .map(crate::screens::code_column::reviewables)
                 .unwrap_or_default();
+            let (running, pending) = view.data().map_or((false, 0), |data| {
+                let pending = data
+                    .delegations
+                    .values()
+                    .filter(|record| record.status == DelegationStatus::ReviewPending)
+                    .count();
+                (data.running, pending)
+            });
             this.code_column.update(cx, |column, cx| {
                 column.set_root(root, cx);
                 column.set_reviews(session, waiting, cx);
+                column.set_conversation_state(running, pending, cx);
             });
         });
         Self {
