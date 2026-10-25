@@ -62,6 +62,7 @@ mod delivery;
 mod files;
 mod forge;
 mod git_changes;
+mod git_conflicts;
 mod mobile;
 mod turn_review;
 
@@ -678,6 +679,15 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/git/unstage-file", post(git_changes::unstage_file))
         .route("/api/v1/git/discard-file", post(git_changes::discard_file))
         .route("/api/v1/git/stage-all", post(git_changes::stage_all))
+        .route("/api/v1/git/conflict-state", post(git_conflicts::conflict_state))
+        .route("/api/v1/git/accept-conflict", post(git_conflicts::accept_conflict))
+        .route(
+            "/api/v1/git/mark-conflict-resolved",
+            post(git_conflicts::mark_conflict_resolved),
+        )
+        .route("/api/v1/git/abort-merge", post(git_conflicts::abort_merge))
+        .route("/api/v1/git/validation-config", post(git_conflicts::validation_config))
+        .route("/api/v1/git/complete-merge", post(git_conflicts::complete_merge))
         .route("/api/v1/git/delivery-failure", post(forge::delivery_failure))
         .route("/api/v1/git/delivery-recovery", post(forge::delivery_recovery))
         .route("/api/v1/forge/context", post(forge::context))
@@ -1492,6 +1502,12 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/git/unstage-file",
             "POST /api/v1/git/discard-file",
             "POST /api/v1/git/stage-all",
+            "POST /api/v1/git/conflict-state",
+            "POST /api/v1/git/accept-conflict",
+            "POST /api/v1/git/mark-conflict-resolved",
+            "POST /api/v1/git/abort-merge",
+            "POST /api/v1/git/validation-config",
+            "POST /api/v1/git/complete-merge",
             "POST /api/v1/git/delivery-failure",
             "POST /api/v1/git/delivery-recovery",
             "POST /api/v1/forge/context",
@@ -5076,6 +5092,125 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_merge_conflict_is_read_resolved_and_aborted_for_a_task_only() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        let fixture = embedded_fixture().await;
+        let base = tempfile::tempdir().expect("git dir");
+        let repo = std::fs::canonicalize(base.path()).unwrap().to_path_buf();
+        git(&repo, &["init", "-b", "main"]);
+        git(&repo, &["config", "user.email", "t@t"]);
+        git(&repo, &["config", "user.name", "t"]);
+        std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-qm", "first"]);
+        git(&repo, &["checkout", "-qb", "feature"]);
+        std::fs::write(repo.join("a.txt"), "feature\n").unwrap();
+        git(&repo, &["commit", "-qam", "feature"]);
+        git(&repo, &["checkout", "-q", "main"]);
+        std::fs::write(repo.join("a.txt"), "main\n").unwrap();
+        git(&repo, &["commit", "-qam", "main"]);
+        git(&repo, &["checkout", "-q", "feature"]);
+        let _ = std::process::Command::new("git")
+            .args(["merge", "main"])
+            .current_dir(&repo)
+            .output();
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        dcc_core::ports::WorkspaceRepo::save_workspace(
+            &workspaces,
+            &Workspace {
+                id: WorkspaceId("w-merge".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: None,
+                root_path: repo.to_string_lossy().to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-24T00:00:00Z".to_string(),
+                updated_at: "2026-10-24T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let root = repo.to_string_lossy().to_string();
+        let (status, state) = post_json(
+            &fixture.app,
+            "/api/v1/git/conflict-state",
+            json!({ "workspaceRoot": root }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{state}");
+        assert_eq!(state["operation"], "merge");
+        assert_eq!(state["conflicts"][0]["path"], "a.txt");
+        assert_eq!(state["conflicts"][0]["kind"], "both-modified");
+        let (status, config) = post_json(
+            &fixture.app,
+            "/api/v1/git/validation-config",
+            json!({ "workspaceRoot": root }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{config}");
+        assert_eq!(config["commands"], json!([]));
+        // The current side taken: no conflict left.
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/git/accept-conflict",
+            json!({ "workspaceRoot": root, "relativePath": "a.txt", "side": "current" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (_, state) = post_json(
+            &fixture.app,
+            "/api/v1/git/conflict-state",
+            json!({ "workspaceRoot": root }),
+        )
+        .await;
+        assert_eq!(state["conflicts"], json!([]));
+        // Marking a path that is no conflict is refused; the merge aborts.
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/git/mark-conflict-resolved",
+            json!({ "workspaceRoot": root, "relativePath": "a.txt" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/git/abort-merge",
+            json!({ "workspaceRoot": root }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(std::fs::read_to_string(repo.join("a.txt")).unwrap(), "feature\n");
+        // A folder that is no task's checkout is refused.
+        let other = tempfile::tempdir().unwrap();
+        for (uri, body) in [
+            ("/api/v1/git/conflict-state", json!({ "workspaceRoot": other.path() })),
+            ("/api/v1/git/validation-config", json!({ "workspaceRoot": other.path() })),
+            ("/api/v1/git/abort-merge", json!({ "workspaceRoot": other.path() })),
+            (
+                "/api/v1/git/accept-conflict",
+                json!({ "workspaceRoot": other.path(), "relativePath": "a.txt", "side": "current" }),
+            ),
+            (
+                "/api/v1/git/mark-conflict-resolved",
+                json!({ "workspaceRoot": other.path(), "relativePath": "a.txt" }),
+            ),
+            (
+                "/api/v1/git/complete-merge",
+                json!({ "workspaceRoot": other.path(), "validationCommands": [] }),
+            ),
+        ] {
+            let (status, _) = post_json(&fixture.app, uri, body).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

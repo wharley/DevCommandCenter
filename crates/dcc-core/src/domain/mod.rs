@@ -15,6 +15,7 @@ pub mod guarded_undo;
 pub mod indentation;
 pub mod idea;
 pub mod mcp;
+pub mod merge_conflict;
 pub mod mcp_conformance;
 pub mod model_registry;
 pub mod objective;

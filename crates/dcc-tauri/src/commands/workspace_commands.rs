@@ -747,6 +747,13 @@ pub struct WorkspaceChangeRequestContextOutput {
     pub request_label: String,
 }
 
+pub use dcc_core::domain::merge_conflict::{
+    WorkspaceGitCompleteMergeOutput, WorkspaceGitConflictContent, WorkspaceGitConflictEntry,
+    WorkspaceGitConflictKind, WorkspaceGitConflictOperation, WorkspaceGitConflictSide,
+    WorkspaceGitConflictStateOutput, WorkspaceGitValidationConfigOutput,
+    WorkspaceGitValidationReport, WorkspaceGitValidationStatus, WorkspaceGitValidationStep,
+};
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitCompleteMergeInput {
@@ -754,43 +761,6 @@ pub struct WorkspaceGitCompleteMergeInput {
     pub forge_login: Option<String>,
     pub validation_config_hash: Option<String>,
     pub validation_commands: Vec<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "kebab-case")]
-pub enum WorkspaceGitValidationStatus {
-    NotConfigured,
-    Passed,
-    Failed,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitValidationStep {
-    pub command: String,
-    pub success: bool,
-    pub exit_code: Option<i32>,
-    pub output: String,
-    pub timed_out: bool,
-    pub duration_ms: u64,
-    pub truncated: bool,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitValidationReport {
-    pub status: WorkspaceGitValidationStatus,
-    pub source_path: Option<String>,
-    pub steps: Vec<WorkspaceGitValidationStep>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitValidationConfigOutput {
-    pub commands: Vec<String>,
-    pub source_path: Option<String>,
-    pub timeout_seconds: u64,
-    pub config_hash: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -863,13 +833,6 @@ pub struct WorkspaceRunProjectTasksOutput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitCompleteMergeOutput {
-    pub completed: bool,
-    pub validation: WorkspaceGitValidationReport,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitSyncBaseInput {
     pub workspace_root: String,
     pub base_branch: Option<String>,
@@ -890,66 +853,6 @@ pub struct WorkspaceGitSyncBaseOutput {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitConflictStateInput {
     pub workspace_root: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "kebab-case")]
-pub enum WorkspaceGitConflictOperation {
-    None,
-    Merge,
-    Rebase,
-    CherryPick,
-    Revert,
-    Unknown,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "kebab-case")]
-pub enum WorkspaceGitConflictKind {
-    BothModified,
-    BothAdded,
-    DeletedByCurrent,
-    DeletedByIncoming,
-    BothDeleted,
-    Other,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitConflictContent {
-    pub exists: bool,
-    pub binary: bool,
-    pub truncated: bool,
-    pub byte_count: u64,
-    pub mode: Option<String>,
-    pub text: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitConflictEntry {
-    pub path: String,
-    pub kind: WorkspaceGitConflictKind,
-    pub base: WorkspaceGitConflictContent,
-    pub current: WorkspaceGitConflictContent,
-    pub incoming: WorkspaceGitConflictContent,
-    pub result: WorkspaceGitConflictContent,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGitConflictStateOutput {
-    pub operation: WorkspaceGitConflictOperation,
-    pub current_branch: Option<String>,
-    pub incoming_ref: Option<String>,
-    pub conflicts: Vec<WorkspaceGitConflictEntry>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum WorkspaceGitConflictSide {
-    Current,
-    Incoming,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1540,6 +1443,14 @@ pub async fn workspace_git_conflict_state(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitConflictStateInput,
 ) -> Result<WorkspaceGitConflictStateOutput, String> {
+    workspace_git_conflict_state_with_state(&state, input).await
+}
+
+/// `workspace_git_conflict_state` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_conflict_state_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<WorkspaceGitConflictStateOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
@@ -1569,6 +1480,14 @@ fn require_merge_conflict_entry(root: &str, path: &str) -> Result<UnmergedIndexE
 #[tauri::command]
 pub async fn workspace_git_accept_conflict(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitAcceptConflictInput,
+) -> Result<(), String> {
+    workspace_git_accept_conflict_with_state(&state, input).await
+}
+
+/// `workspace_git_accept_conflict` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_accept_conflict_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceGitAcceptConflictInput,
 ) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
@@ -1630,6 +1549,14 @@ pub async fn workspace_git_mark_conflict_resolved(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitMarkConflictResolvedInput,
 ) -> Result<(), String> {
+    workspace_git_mark_conflict_resolved_with_state(&state, input).await
+}
+
+/// `workspace_git_mark_conflict_resolved` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_mark_conflict_resolved_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitMarkConflictResolvedInput,
+) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
@@ -1679,6 +1606,14 @@ pub async fn workspace_git_abort_merge(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceGitConflictStateInput,
 ) -> Result<(), String> {
+    workspace_git_abort_merge_with_state(&state, input).await
+}
+
+/// `workspace_git_abort_merge` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_abort_merge_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<(), String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
@@ -1711,6 +1646,14 @@ fn workspace_git_abort_merge_inner(root: &str) -> Result<(), String> {
 #[tauri::command]
 pub async fn workspace_git_validation_config(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitConflictStateInput,
+) -> Result<WorkspaceGitValidationConfigOutput, String> {
+    workspace_git_validation_config_with_state(&state, input).await
+}
+
+/// `workspace_git_validation_config` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_validation_config_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceGitConflictStateInput,
 ) -> Result<WorkspaceGitValidationConfigOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
@@ -2212,6 +2155,14 @@ fn run_workspace_project_tasks_inner(
 #[tauri::command]
 pub async fn workspace_git_complete_merge(
     state: State<'_, WorkspaceCommandState>,
+    input: WorkspaceGitCompleteMergeInput,
+) -> Result<WorkspaceGitCompleteMergeOutput, String> {
+    workspace_git_complete_merge_with_state(&state, input).await
+}
+
+/// `workspace_git_complete_merge` for callers without a Tauri `State` (the HTTP API).
+pub async fn workspace_git_complete_merge_with_state(
+    state: &WorkspaceCommandState,
     input: WorkspaceGitCompleteMergeInput,
 ) -> Result<WorkspaceGitCompleteMergeOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;

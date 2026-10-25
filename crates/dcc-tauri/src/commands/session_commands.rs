@@ -3719,7 +3719,7 @@ mod tests {
 
     #[test]
     fn guarded_undo_summary_contract_excludes_artifact_identifiers() {
-        let summary = GuardedUndoCaptureSummary::from(InfraGuardedUndoCaptureSummary {
+        let summary = capture_summary(InfraGuardedUndoCaptureSummary {
             state: "eligible".to_owned(),
             reason_code: None,
             file_count: 2,
