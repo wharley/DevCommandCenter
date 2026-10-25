@@ -59,6 +59,7 @@ use uuid::Uuid;
 mod attention;
 mod delegation_review;
 mod delivery;
+mod files;
 mod forge;
 mod git_changes;
 mod mobile;
@@ -672,6 +673,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/workspace-bundles",
             post(create_workspace_bundle_handler),
         )
+        .route("/api/v1/files/write", post(files::write))
         .route("/api/v1/git/stage-file", post(git_changes::stage_file))
         .route("/api/v1/git/unstage-file", post(git_changes::unstage_file))
         .route("/api/v1/git/discard-file", post(git_changes::discard_file))
@@ -5011,6 +5013,64 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         let (status, _) = post_json(&fixture.app, "/api/v1/git/discard-file", file("../x")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_task_file_saves_only_when_the_disk_still_matches() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        let fixture = embedded_fixture().await;
+        let base = tempfile::tempdir().expect("git dir");
+        let repo = std::fs::canonicalize(base.path()).unwrap().to_path_buf();
+        git(&repo, &["init", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "um\n").unwrap();
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        dcc_core::ports::WorkspaceRepo::save_workspace(
+            &workspaces,
+            &Workspace {
+                id: WorkspaceId("w-file".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: None,
+                root_path: repo.to_string_lossy().to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-25T00:00:00Z".to_string(),
+                updated_at: "2026-10-25T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let root = repo.to_string_lossy().to_string();
+        let write = |content: &str, expected: Option<&str>| {
+            json!({
+                "workspaceRoot": root, "relativePath": "a.txt",
+                "content": content, "expectedPrevious": expected,
+            })
+        };
+        let (status, saved) =
+            post_json(&fixture.app, "/api/v1/files/write", write("dois\n", Some("um\n"))).await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["conflicted"], false);
+        assert_eq!(std::fs::read_to_string(repo.join("a.txt")).unwrap(), "dois\n");
+        // The disk moved on (an agent): nothing is written, the disk comes back.
+        let (_, conflict) =
+            post_json(&fixture.app, "/api/v1/files/write", write("tres\n", Some("um\n"))).await;
+        assert_eq!(conflict["conflicted"], true);
+        assert_eq!(conflict["diskContent"], "dois\n");
+        assert_eq!(std::fs::read_to_string(repo.join("a.txt")).unwrap(), "dois\n");
+        let other = tempfile::tempdir().unwrap();
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/files/write",
+            json!({ "workspaceRoot": other.path(), "relativePath": "a.txt", "content": "x", "expectedPrevious": null }),
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 

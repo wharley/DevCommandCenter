@@ -7202,7 +7202,15 @@ pub async fn write_workspace_file(
     state: State<'_, WorkspaceCommandState>,
     input: WriteWorkspaceFileInput,
 ) -> Result<WriteWorkspaceFileOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    write_workspace_file_with_state(&state, input).await
+}
+
+/// `write_workspace_file` for callers without a Tauri `State` (the HTTP API).
+pub async fn write_workspace_file_with_state(
+    state: &WorkspaceCommandState,
+    input: WriteWorkspaceFileInput,
+) -> Result<WriteWorkspaceFileOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
 
     let root = input.workspace_root.trim();
     if root.is_empty() {

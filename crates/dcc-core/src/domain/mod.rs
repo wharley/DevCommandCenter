@@ -11,6 +11,7 @@ pub mod file_reference;
 pub mod forge;
 pub mod goal;
 pub mod guarded_undo;
+pub mod indentation;
 pub mod idea;
 pub mod mcp;
 pub mod mcp_conformance;
