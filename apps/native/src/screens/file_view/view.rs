@@ -1,33 +1,95 @@
 //! The rows: the number (`padding-inline: 1ch` past a 2ch start, at least
-//! 3 digits) and its 2px edge, then the code at 1ch, 20px a line.
+//! 3 digits) and its 2px edge, then the code at 1ch, 20px a line, with the
+//! active line, the selection and the caret over it. The pointer places
+//! the caret, drags a selection, double-clicks a word, triple-clicks a line.
+
+use std::time::Duration;
 
 use gpui::{
-    AnyElement, Context, Render, ScrollWheelEvent, SharedString, StyledText, Window, div, font,
+    AnyElement, Context, ElementInputHandler, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Render, ScrollWheelEvent, SharedString, StyledText, Window, canvas, div, font,
     list, prelude::*, px,
 };
 
-use super::FileView;
+use super::buffer::expand_tabs;
+use super::{FileView, Geometry, LINE};
+use crate::data::highlight::{Span, editor_colors};
 use crate::screens::diff_view::{DiffPalette, styled_runs};
 
 /// The diff's font (`--diffs-font-family`).
 const FONT: &str = "Monaco";
 const FONT_SIZE: f32 = 13.0;
-const LINE: f32 = 20.0;
-const GAP: f32 = 8.0;
+/// `padding-top: var(--diffs-gap-block)`
+pub(crate) const TOP: f32 = 8.0;
 const GROUP: &str = "file-line";
 
-fn row(
-    view: &FileView,
-    index: usize,
-    palette: &DiffPalette,
+fn color(rgba: u32) -> Hsla {
+    gpui::Rgba {
+        r: ((rgba >> 24) & 0xff) as f32 / 255.0,
+        g: ((rgba >> 16) & 0xff) as f32 / 255.0,
+        b: ((rgba >> 8) & 0xff) as f32 / 255.0,
+        a: (rgba & 0xff) as f32 / 255.0,
+    }
+    .into()
+}
+
+/// The line's colors moved to where its bytes land once tabs are spelled out.
+fn mapped(spans: &[Span], map: &[usize]) -> Vec<Span> {
+    let at = |offset: usize| map[offset.min(map.len() - 1)];
+    spans
+        .iter()
+        .map(|span| Span {
+            range: at(span.range.start)..at(span.range.end),
+            ..span.clone()
+        })
+        .collect()
+}
+
+struct RowStyle {
+    palette: DiffPalette,
+    selection: Hsla,
+    line_highlight: Hsla,
+    caret: Hsla,
     cell: f32,
     number_width: f32,
-) -> AnyElement {
-    let text = view.lines.get(index).cloned().unwrap_or_default();
-    let spans = view.spans.get(index).map(Vec::as_slice).unwrap_or_default();
-    let runs = styled_runs(text.len(), spans, &[], palette.added_word);
-    let styled = StyledText::new(SharedString::from(text)).with_highlights(runs);
+    caret_visible: bool,
+}
+
+fn row(view: &FileView, index: usize, style: &RowStyle) -> AnyElement {
+    let palette = &style.palette;
+    let cell = style.cell;
+    let raw = view.buffer.line(index);
+    let (display, map) = expand_tabs(raw, view.indentation.size);
+    let spans = view
+        .spans
+        .get(index)
+        .map(|spans| mapped(spans, &map))
+        .unwrap_or_default();
+    let runs = styled_runs(display.len(), &spans, &[], palette.added_word);
+    let styled = StyledText::new(SharedString::from(display.clone())).with_highlights(runs);
     let hover = palette.hover;
+    let start = view.buffer.line_start(index);
+    let end = start + raw.len();
+    let cursor = view.buffer.cursor();
+    let selection = view.buffer.selection.clone();
+    let caret_line = view.buffer.line_of(cursor) == index;
+    let active = caret_line && selection.is_empty();
+    let display_column = |offset: usize| {
+        let byte = offset.saturating_sub(start).min(raw.len());
+        display[..map[byte]].chars().count() as f32
+    };
+    // The part of the selection on this line, one cell past its end when
+    // the selection goes on to the next line.
+    let selected = (!selection.is_empty() && selection.start <= end && selection.end >= start)
+        .then(|| {
+            let from = display_column(selection.start.max(start));
+            let to = display_column(selection.end.min(end));
+            let past = if selection.end > end { 1.0 } else { 0.0 };
+            (from, to + past)
+        })
+        .filter(|(from, to)| to > from);
+    let caret = (style.caret_visible && caret_line).then(|| display_column(cursor));
+    let left = cell - view.scroll_x;
     div()
         .group(GROUP)
         .flex()
@@ -38,11 +100,11 @@ fn row(
                 .flex()
                 .flex_shrink_0()
                 .justify_end()
-                .w(px(number_width))
+                .w(px(style.number_width))
                 .pr(px(cell))
                 .bg(palette.background)
                 .text_color(palette.number)
-                .group_hover(GROUP, move |style| style.bg(hover))
+                .group_hover(GROUP, move |row| row.bg(hover))
                 .child((index + 1).to_string()),
         )
         .child(
@@ -59,16 +121,38 @@ fn row(
                 .min_w_0()
                 .h_full()
                 .overflow_hidden()
-                .group_hover(GROUP, move |style| style.bg(hover))
+                .when(active, |line| line.bg(style.line_highlight))
+                .when(!active, |line| {
+                    line.group_hover(GROUP, move |row| row.bg(hover))
+                })
+                .children(selected.map(|(from, to)| {
+                    div()
+                        .absolute()
+                        .top_0()
+                        .h_full()
+                        .left(px(left + from * cell))
+                        .w(px((to - from) * cell))
+                        .bg(style.selection)
+                }))
                 .child(
                     div()
                         .absolute()
                         .top_0()
-                        .left(px(cell - view.scroll_x))
+                        .left(px(left))
                         .whitespace_nowrap()
                         .text_color(palette.foreground)
                         .child(styled),
-                ),
+                )
+                .children(caret.map(|column| {
+                    div()
+                        .debug_selector(|| "file-caret".into())
+                        .absolute()
+                        .top_0()
+                        .h_full()
+                        .left(px(left + column * cell))
+                        .w(px(2.0))
+                        .bg(style.caret)
+                })),
         )
         .into_any_element()
 }
@@ -76,6 +160,7 @@ fn row(
 impl Render for FileView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = DiffPalette::new(self.dark);
+        let colors = editor_colors(self.dark);
         let mono = font(FONT);
         let cell = window
             .text_system()
@@ -83,34 +168,122 @@ impl Render for FileView {
             .pipe(|id| window.text_system().advance(id, px(FONT_SIZE), '0').ok())
             .map(|size| f32::from(size.width))
             .unwrap_or(7.8);
-        let digits = self.lines.len().max(1).to_string().len().max(3) as f32;
+        let digits = self.buffer.line_count().max(1).to_string().len().max(3) as f32;
         let number_width = (digits + 3.0) * cell;
-        let longest = self
-            .lines
-            .iter()
-            .map(|line| line.chars().count())
+        let geometry = self.geometry.get();
+        if self.reveal && geometry.bounds.size.height > px(0.0) {
+            let text_width = f32::from(geometry.bounds.size.width) - number_width - 2.0 - cell;
+            self.reveal_caret(
+                f32::from(geometry.bounds.size.height) - TOP,
+                text_width,
+                cell,
+            );
+            self.reveal = false;
+        }
+        let focused = self.focus.is_focused(window);
+        let elapsed = self.caret_moved.elapsed();
+        let still = Duration::from_millis(800);
+        let caret_visible =
+            focused && (elapsed < still || (elapsed - still).as_millis() % 1200 < 600);
+        let longest = (0..self.buffer.line_count())
+            .map(|line| self.buffer.line(line).chars().count())
             .max()
             .unwrap_or(0) as f32
             * cell;
+        let style = std::rc::Rc::new(RowStyle {
+            palette,
+            selection: color(colors.selection),
+            line_highlight: color(colors.line_highlight),
+            caret: color(colors.cursor),
+            cell,
+            number_width,
+            caret_visible,
+        });
         let entity = cx.entity();
         let rows = list(self.list.clone(), move |index, _, cx| {
-            entity.update(cx, |view, _| {
-                let palette = DiffPalette::new(view.dark);
-                row(view, index, &palette, cell, number_width)
-            })
+            row(entity.read(cx), index, &style)
         })
         .size_full();
-        div()
+        let record = self.geometry.clone();
+        let text_left = number_width + 2.0 + cell;
+        let input = (focused, self.focus.clone(), cx.entity());
+        let editor = div()
             .id("file-view")
             .debug_selector(|| "file-view".into())
+            .track_focus(&self.focus)
+            .relative()
             .size_full()
             .overflow_hidden()
+            .cursor_text()
             .bg(palette.background)
             .text_color(palette.foreground)
             .font_family(FONT)
             .text_size(px(FONT_SIZE))
             .line_height(px(LINE))
-            .pt(px(GAP))
+            .pt(px(TOP))
+            .child(
+                canvas(
+                    move |bounds, _, _| {
+                        record.set(Geometry {
+                            bounds,
+                            text_left,
+                            cell,
+                        })
+                    },
+                    move |bounds, _, window, cx| {
+                        let (focused, focus, entity) = input;
+                        if focused {
+                            window.handle_input(
+                                &focus,
+                                ElementInputHandler::new(bounds, entity),
+                                cx,
+                            );
+                        }
+                    },
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|view, event: &MouseDownEvent, window, cx| {
+                    window.focus(&view.focus, cx);
+                    let offset = view.offset_at(event.position);
+                    match event.click_count {
+                        2 => {
+                            let word = view.buffer.word_at(offset);
+                            view.buffer.select(word);
+                        }
+                        count if count >= 3 => {
+                            let line = view.buffer.line_of(offset);
+                            let start = view.buffer.line_start(line);
+                            let end = if line + 1 >= view.buffer.line_count() {
+                                view.buffer.text().len()
+                            } else {
+                                view.buffer.line_start(line + 1)
+                            };
+                            view.buffer.select(start..end);
+                        }
+                        _ => {
+                            view.buffer.go(offset, event.modifiers.shift);
+                            view.selecting = true;
+                        }
+                    }
+                    view.goal_column = None;
+                    view.moved(cx);
+                }),
+            )
+            .on_mouse_move(cx.listener(|view, event: &MouseMoveEvent, _, cx| {
+                if view.selecting && event.pressed_button == Some(MouseButton::Left) {
+                    let offset = view.offset_at(event.position);
+                    view.buffer.go(offset, true);
+                    view.moved(cx);
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|view, _: &MouseUpEvent, _, _| view.selecting = false),
+            )
             .on_scroll_wheel(
                 cx.listener(move |view, event: &ScrollWheelEvent, window, cx| {
                     let delta = event.delta.pixel_delta(window.line_height());
@@ -122,7 +295,8 @@ impl Render for FileView {
                     }
                 }),
             )
-            .child(rows)
+            .child(rows);
+        FileView::register_actions(div().size_full().child(editor), cx)
     }
 }
 

@@ -8,7 +8,7 @@ use gpui::{AppContext, Context, Entity, Task, Window};
 
 use super::image::{ImageView, is_viewable_image};
 use super::{Stage, ThemeDark};
-use crate::screens::file_view::FileView;
+use crate::screens::file_view::{FileView, FileViewEvent};
 
 pub(crate) enum FileLoad {
     Loading(#[allow(dead_code)] Task<()>),
@@ -24,6 +24,16 @@ pub(crate) struct OpenFile {
     pub preview: bool,
     pub focus_line: Option<u32>,
     pub load: Option<FileLoad>,
+    /// "Salvar" running.
+    pub saving: bool,
+    _edited: Option<gpui::Subscription>,
+}
+
+impl OpenFile {
+    /// Unsaved changes in its editor.
+    pub fn is_dirty(&self, cx: &gpui::App) -> bool {
+        matches!(&self.load, Some(FileLoad::Text(view)) if view.read(cx).is_dirty())
+    }
 }
 
 pub(crate) struct FileTabs {
@@ -82,6 +92,8 @@ impl Stage {
                     preview: true,
                     focus_line: line,
                     load: None,
+                    saving: false,
+                    _edited: None,
                 });
                 tabs.files.len() - 1
             }
@@ -97,10 +109,19 @@ impl Stage {
         if at >= tabs.files.len() {
             return;
         }
+        // A clean tab leaving lets its file go; an unsaved one stays
+        // (`shouldKeepFileSurfaceMounted`).
+        let leaving_dirty = tabs
+            .files
+            .get(tabs.active)
+            .is_some_and(|file| file.is_dirty(cx));
+        let tabs = self.files.as_mut().expect("tabs");
         if tabs.active != at
+            && !leaving_dirty
             && let Some(leaving) = tabs.files.get_mut(tabs.active)
         {
             leaving.load = None;
+            leaving._edited = None;
         }
         tabs.active = at;
         self.chat_active = false;
@@ -143,10 +164,22 @@ impl Stage {
             let text = cx
                 .background_executor()
                 .spawn(async move {
-                    let relative =
-                        dcc_infra::workspace_file_preview::validate_git_relative_path(&read_path)?;
-                    dcc_infra::workspace_file_preview::read_worktree_file_text(&root, &relative)?
-                        .ok_or_else(|| "file not found".to_string())
+                    use dcc_infra::workspace_file_preview::{
+                        read_worktree_file_text, validate_git_relative_path,
+                    };
+                    let relative = validate_git_relative_path(&read_path)?;
+                    let text = read_worktree_file_text(&root, &relative)?
+                        .ok_or_else(|| "file not found".to_string())?;
+                    // `useFileIndentation`: the project's rule, then the file's own.
+                    let config = read_worktree_file_text(&root, ".editorconfig")
+                        .ok()
+                        .flatten();
+                    let indentation = dcc_core::domain::indentation::resolve_file_indentation(
+                        config.as_deref(),
+                        &relative,
+                        &text,
+                    );
+                    Ok::<_, String>((text, indentation))
                 })
                 .await;
             let _ = this.update(cx, |stage, cx| {
@@ -159,17 +192,30 @@ impl Stage {
                     return;
                 };
                 file.load = Some(match text {
-                    Ok(text) => {
+                    Ok((text, indentation)) => {
                         let line = file.focus_line.take();
                         let name = file.path.clone();
-                        FileLoad::Text(cx.new(|cx| {
-                            let mut view = FileView::new(name, text, dark, cx);
+                        let view = cx.new(|cx| {
+                            let mut view = FileView::new(name, text, indentation, dark, cx);
                             view.focus(line, cx);
                             view
-                        }))
+                        });
+                        // The first edit pins a preview tab.
+                        let edited_path = path.clone();
+                        file._edited =
+                            Some(cx.subscribe(&view, move |stage, _, _: &FileViewEvent, cx| {
+                                if let Some(file) = stage.files.as_mut().and_then(|tabs| {
+                                    tabs.files.iter_mut().find(|file| file.path == edited_path)
+                                }) {
+                                    file.preview = false;
+                                }
+                                cx.notify();
+                            }));
+                        FileLoad::Text(view)
                     }
                     Err(error) => FileLoad::Failed(error),
                 });
+                stage.focus_editor = true;
                 cx.notify();
             });
         });
@@ -184,7 +230,41 @@ impl Stage {
         }
     }
 
-    /// A tab's X: its neighbour comes forward; the last one closes the files.
+    /// A tab's X: an unsaved one asks first (`discardConfirm`).
+    pub(crate) fn request_close_file(
+        &mut self,
+        at: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let dirty = self
+            .files
+            .as_ref()
+            .and_then(|tabs| tabs.files.get(at))
+            .is_some_and(|file| file.is_dirty(cx));
+        if dirty {
+            self.discard = Some(super::Discard::Tab(at));
+            cx.notify();
+            return;
+        }
+        self.close_file(at, window, cx);
+    }
+
+    /// "Fechar editor": with anything unsaved, asks first.
+    pub(crate) fn request_close_files(&mut self, cx: &mut Context<Self>) {
+        let dirty = self
+            .files
+            .as_ref()
+            .is_some_and(|tabs| tabs.files.iter().any(|file| file.is_dirty(cx)));
+        if dirty {
+            self.discard = Some(super::Discard::All);
+            cx.notify();
+            return;
+        }
+        self.close(cx);
+    }
+
+    /// The tab closes: its neighbour comes forward; the last one closes the files.
     pub(crate) fn close_file(&mut self, at: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tabs) = self.files.as_mut() else {
             return;
@@ -207,27 +287,22 @@ impl Stage {
         cx.notify();
     }
 
-    /// The files' theme followed: a file colored for the other theme is read again.
+    /// The files follow the theme (an edit in progress stays).
     pub(crate) fn follow_files_theme(&mut self, cx: &mut Context<Self>) {
         let dark = cx.theme_dark();
-        let stale = self
+        let views: Vec<Entity<FileView>> = self
             .files
-            .as_ref()
-            .and_then(FileTabs::active)
-            .and_then(|file| match &file.load {
-                Some(FileLoad::Text(view)) => Some(view.read(cx).dark != dark),
+            .iter()
+            .flat_map(|tabs| tabs.files.iter())
+            .filter_map(|file| match &file.load {
+                Some(FileLoad::Text(view)) => Some(view.clone()),
                 _ => None,
             })
-            .unwrap_or(false);
-        if stale {
-            if let Some(file) = self
-                .files
-                .as_mut()
-                .and_then(|tabs| tabs.files.get_mut(tabs.active))
-            {
-                file.load = None;
+            .collect();
+        for view in views {
+            if view.read(cx).dark != dark {
+                view.update(cx, |view, cx| view.set_dark(dark, cx));
             }
-            self.load_active_file(cx);
         }
     }
 }

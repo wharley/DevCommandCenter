@@ -6,8 +6,10 @@
 //! "Mudanças" (`WorkspaceEditorSurface`, side by side for a modified file),
 //! or files in tabs (`FileTabsSurface`).
 
+mod dialogs;
 mod files;
 mod image;
+mod save;
 mod view;
 
 #[cfg(test)]
@@ -21,12 +23,34 @@ use gpui::{
 use crate::screens::diff_view::DiffView;
 use crate::ui::tab_strip::TabStripState;
 
-actions!(stage, [ShowChat]);
+actions!(stage, [ShowChat, Save]);
 
 const CONTEXT: &str = "Stage";
 
 pub fn bind_keys(cx: &mut gpui::App) {
-    cx.bind_keys([gpui::KeyBinding::new("escape", ShowChat, Some(CONTEXT))]);
+    cx.bind_keys([
+        gpui::KeyBinding::new("escape", ShowChat, Some(CONTEXT)),
+        gpui::KeyBinding::new("cmd-s", Save, Some(CONTEXT)),
+    ]);
+}
+
+/// What an unsaved-changes question is about.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Discard {
+    Tab(usize),
+    All,
+    /// A diff opening in place of the files.
+    ForDiff(DiffRequest),
+}
+
+/// The disk moved on under an edit (`ReconcileDialog`).
+pub(crate) struct Reconcile {
+    pub path: String,
+    pub name: String,
+    pub disk: String,
+    pub mine: String,
+    pub view: Entity<crate::screens::file_view::FileView>,
+    pub diff: Entity<DiffView>,
 }
 
 /// A change to show (`WorkspaceGitPreviewSelection`).
@@ -73,6 +97,14 @@ pub struct Stage {
     pub(crate) agent_working: bool,
     pub(crate) strip: TabStripState,
     focus: FocusHandle,
+    /// "Descartar alterações não salvas?" waiting for an answer.
+    pub(crate) discard: Option<Discard>,
+    pub(crate) reconcile: Option<Reconcile>,
+    /// The editor takes the focus at the next frame (a file just read).
+    pub(crate) focus_editor: bool,
+    /// The desktop to save through (tests point it elsewhere).
+    pub(crate) endpoint: Option<crate::data::desktop_api::DesktopApi>,
+    _save: Option<Task<()>>,
 }
 
 impl EventEmitter<StageEvent> for Stage {}
@@ -93,6 +125,11 @@ impl Stage {
             agent_working: false,
             strip: TabStripState::default(),
             focus: cx.focus_handle(),
+            discard: None,
+            reconcile: None,
+            focus_editor: false,
+            endpoint: None,
+            _save: None,
         }
     }
 
@@ -114,6 +151,25 @@ impl Stage {
 
     /// A new request brings the content forward (`stageRequestKey`).
     pub fn open_diff(&mut self, request: DiffRequest, window: &mut Window, cx: &mut Context<Self>) {
+        // Unsaved files ask before the diff takes their place.
+        let dirty = self
+            .files
+            .as_ref()
+            .is_some_and(|tabs| tabs.files.iter().any(|file| file.is_dirty(cx)));
+        if dirty {
+            self.discard = Some(Discard::ForDiff(request));
+            cx.notify();
+            return;
+        }
+        self.replace_with_diff(request, window, cx);
+    }
+
+    pub(crate) fn replace_with_diff(
+        &mut self,
+        request: DiffRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.files = None;
         self.chat_active = false;
         let dark = cx.theme_dark();

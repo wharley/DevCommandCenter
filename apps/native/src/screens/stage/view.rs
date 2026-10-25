@@ -2,11 +2,12 @@
 //! `ScrollableTabStrip`) over the content.
 
 use gpui::{
-    AnyElement, Context, FontWeight, IntoElement, Render, SharedString, Window, div, prelude::*, px,
+    AnyElement, Context, Focusable, FontWeight, IntoElement, Render, SharedString, Window, div,
+    prelude::*, px,
 };
 
 use super::files::FileLoad;
-use super::{CONTEXT, DiffLoad, ShowChat, Stage};
+use super::{CONTEXT, DiffLoad, Save, ShowChat, Stage};
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
@@ -126,11 +127,13 @@ fn centered(text: SharedString, color: gpui::Hsla) -> AnyElement {
         .into_any_element()
 }
 
-/// A file's tab (`Tab` in `FileTabsSurface`): the name (italic while a
-/// preview), the X on hover; a double-click pins it.
+/// A file's tab (`Tab` in `FileTabsSurface`): the unsaved dot, the name
+/// (italic while a preview), the X on hover (always when unsaved); a
+/// double-click pins it.
 fn file_tab(stage: &Stage, at: usize, cx: &mut Context<Stage>) -> Option<AnyElement> {
     let tabs = stage.files.as_ref()?;
     let file = tabs.files.get(at)?;
+    let dirty = file.is_dirty(cx);
     let colors = cx.theme().colors.clone();
     let foreground = colors.foreground;
     let active = tabs.active == at && !stage.chat_active;
@@ -154,6 +157,16 @@ fn file_tab(stage: &Stage, at: usize, cx: &mut Context<Stage>) -> Option<AnyElem
                 stage.activate_file(at, window, cx);
             }),
         )
+        .when(dirty, |tab| {
+            tab.child(
+                div()
+                    .debug_selector(move || format!("stage-file-unsaved-{at}"))
+                    .size(px(6.0))
+                    .flex_shrink_0()
+                    .rounded_full()
+                    .bg(colors.primary),
+            )
+        })
         .child(
             div()
                 .min_w_0()
@@ -169,12 +182,15 @@ fn file_tab(stage: &Stage, at: usize, cx: &mut Context<Stage>) -> Option<AnyElem
                 .rounded(px(4.0))
                 .p(px(2.0))
                 .text_color(colors.muted_foreground)
-                .invisible()
-                .group_hover(group, |style| style.visible())
+                .when(!dirty, |close| {
+                    close
+                        .invisible()
+                        .group_hover(group, |style| style.visible())
+                })
                 .hover(move |style| style.text_color(foreground))
                 .on_click(cx.listener(move |stage, _, window, cx| {
                     cx.stop_propagation();
-                    stage.close_file(at, window, cx)
+                    stage.request_close_file(at, window, cx)
                 }))
                 .child(Icon::new("x").size(12.0).stroke(2.0)),
         )
@@ -182,8 +198,11 @@ fn file_tab(stage: &Stage, at: usize, cx: &mut Context<Stage>) -> Option<AnyElem
     )
 }
 
-/// "Salvar" (editing comes next) and "Fechar editor".
-fn file_actions(cx: &mut Context<Stage>) -> AnyElement {
+/// "Salvar" (with something unsaved) and "Fechar editor".
+fn file_actions(stage: &Stage, cx: &mut Context<Stage>) -> AnyElement {
+    let active = stage.files.as_ref().and_then(|tabs| tabs.active());
+    let saving = active.is_some_and(|file| file.saving);
+    let dirty = active.is_some_and(|file| file.is_dirty(cx));
     div()
         .flex()
         .flex_shrink_0()
@@ -191,13 +210,20 @@ fn file_actions(cx: &mut Context<Stage>) -> AnyElement {
         .gap(px(4.0))
         .pr(px(8.0))
         .child(
-            Button::new("stage-file-save")
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::Sm)
-                .muted()
-                .disabled(true)
-                .child(Icon::new("save").size(14.0).stroke(1.8))
-                .child(cx.t("fileSurface.save")),
+            div().debug_selector(|| "stage-file-save".into()).child(
+                Button::new("stage-file-save")
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::Sm)
+                    .muted()
+                    .disabled(!dirty || saving)
+                    .on_click(cx.listener(|stage, _, _, cx| stage.save(cx)))
+                    .child(if saving {
+                        spinner("stage-file-saving", 14.0).into_any_element()
+                    } else {
+                        Icon::new("save").size(14.0).stroke(1.8).into_any_element()
+                    })
+                    .child(cx.t("fileSurface.save")),
+            ),
         )
         .child(
             div().debug_selector(|| "stage-files-close".into()).child(
@@ -205,7 +231,7 @@ fn file_actions(cx: &mut Context<Stage>) -> AnyElement {
                     .variant(ButtonVariant::Ghost)
                     .size(ButtonSize::Sm)
                     .muted()
-                    .on_click(cx.listener(|stage, _, _, cx| stage.close(cx)))
+                    .on_click(cx.listener(|stage, _, _, cx| stage.request_close_files(cx)))
                     .child(Icon::new("x").size(14.0).stroke(1.8)),
             ),
         )
@@ -226,7 +252,20 @@ fn file_body(stage: &Stage, cx: &mut Context<Stage>) -> Option<AnyElement> {
 }
 
 impl Render for Stage {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A file just read takes the focus (`reveal`).
+        if self.focus_editor
+            && let Some(Some(FileLoad::Text(view))) = self
+                .files
+                .as_ref()
+                .and_then(|tabs| tabs.active())
+                .map(|file| &file.load)
+        {
+            self.focus_editor = false;
+            if !self.chat_active {
+                window.focus(&view.focus_handle(cx), cx);
+            }
+        }
         self.follow_theme(cx);
         self.follow_files_theme(cx);
         let colors = cx.theme().colors.clone();
@@ -247,7 +286,7 @@ impl Render for Stage {
             .flatten()
             .chain((0..file_count).filter_map(|at| file_tab(self, at, cx)))
             .collect();
-        let actions = self.files.is_some().then(|| file_actions(cx));
+        let actions = self.files.is_some().then(|| file_actions(self, cx));
         let strip = div()
             .flex()
             .h(px(36.0))
@@ -272,6 +311,12 @@ impl Render for Stage {
             .key_context(CONTEXT)
             .track_focus(&self.focus)
             .on_action(cx.listener(|stage, _: &ShowChat, _, cx| stage.show_chat(cx)))
+            // Behind the Chat tab the files keep quiet.
+            .on_action(cx.listener(|stage, _: &Save, _, cx| {
+                if !stage.chat_active {
+                    stage.save(cx)
+                }
+            }))
             .flex()
             .flex_col()
             .size_full()
@@ -292,5 +337,6 @@ impl Render for Stage {
                     .when(self.chat_active, |body| body.invisible())
                     .children(body),
             )
+            .children(super::dialogs::dialogs(self, window, cx))
     }
 }

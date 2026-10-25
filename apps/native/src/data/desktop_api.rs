@@ -599,6 +599,33 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// Saves a task's file: only when the disk still has `expected` (the
+    /// compare-and-swap of `write_workspace_file`); otherwise the disk's
+    /// text comes back and nothing is written.
+    pub fn write_file(
+        &self,
+        root: &str,
+        path: &str,
+        content: &str,
+        expected: Option<&str>,
+    ) -> Result<Result<(), String>, ApiError> {
+        let value = self.post(
+            "/api/v1/files/write",
+            &json!({
+                "workspaceRoot": root, "relativePath": path,
+                "content": content, "expectedPrevious": expected,
+            }),
+        )?;
+        if value.get("conflicted").and_then(Value::as_bool) == Some(true) {
+            let disk = value
+                .get("diskContent")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            return Ok(Err(disk.to_string()));
+        }
+        Ok(Ok(()))
+    }
+
     /// What the session's last turn changed in this task (`last_turn_review`);
     /// `None` before any turn was captured.
     pub fn last_turn_review(

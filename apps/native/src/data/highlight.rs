@@ -128,6 +128,11 @@ pub struct EditorColors {
     pub added: u32,
     pub deleted: u32,
     pub modified: u32,
+    /// The editor's `editor.selectionBackground`, `editor.lineHighlightBackground`
+    /// and `editorCursor.foreground`.
+    pub selection: u32,
+    pub line_highlight: u32,
+    pub cursor: u32,
 }
 
 fn editor_colors_from_json(source: &str) -> EditorColors {
@@ -140,6 +145,9 @@ fn editor_colors_from_json(source: &str) -> EditorColors {
     };
     EditorColors {
         background: color(&["editor.background"], 0xffffffff),
+        selection: color(&["editor.selectionBackground"], 0x009fff2e),
+        line_highlight: color(&["editor.lineHighlightBackground"], 0x00000000),
+        cursor: color(&["editorCursor.foreground"], 0x009fffff),
         foreground: color(&["editor.foreground"], 0x000000ff),
         added: color(
             &[

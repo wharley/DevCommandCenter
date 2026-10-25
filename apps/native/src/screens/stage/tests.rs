@@ -273,3 +273,159 @@ fn a_diff_replaces_the_files_and_a_file_replaces_the_diff(cx: &mut TestAppContex
         assert!(stage.diff.is_none() && stage.files.is_some())
     });
 }
+
+fn edit(stage: &gpui::Entity<Stage>, cx: &mut gpui::VisualTestContext, text: &str) {
+    let view = stage.read_with(cx, |stage, _| {
+        match &stage.files.as_ref().unwrap().active().unwrap().load {
+            Some(super::files::FileLoad::Text(view)) => view.clone(),
+            _ => panic!("an editor"),
+        }
+    });
+    view.update(cx, |view, cx| view.insert(text, cx));
+    cx.run_until_parked();
+}
+
+fn requests(server: std::thread::JoinHandle<Vec<(String, String)>>) -> Vec<serde_json::Value> {
+    server
+        .join()
+        .unwrap()
+        .into_iter()
+        .map(|(_, body)| serde_json::from_str(&body).unwrap())
+        .collect()
+}
+
+#[gpui::test]
+fn an_edit_pins_the_tab_and_saving_writes_through_the_desktop(cx: &mut TestAppContext) {
+    let (stage, cx, repo, _) = open_files(cx);
+    cx.update(|_, cx| {
+        crate::ui::Toaster::init(cx);
+        crate::screens::file_view::bind_keys(cx);
+    });
+    let (port, server) = crate::test_support::fake_desktop_routes(vec![(
+        "/api/v1/files/write",
+        200,
+        r#"{"bytesWritten":12,"conflicted":false,"diskContent":null}"#.to_string(),
+    )]);
+    stage.update(cx, |stage, _| {
+        stage.endpoint = Some(crate::data::desktop_api::DesktopApi::new(port, "k"))
+    });
+    let root = repo.path().to_string_lossy().into_owned();
+    stage.update_in(cx, |stage, window, cx| {
+        stage.open_file(root, "a.rs".into(), None, window, cx)
+    });
+    cx.run_until_parked();
+    edit(&stage, cx, "// ");
+    assert!(cx.debug_bounds("stage-file-unsaved-0").is_some());
+    assert_eq!(
+        tab_names(&stage, cx),
+        vec![("a.rs".into(), false)],
+        "pinned"
+    );
+    cx.dispatch_action(super::Save);
+    cx.run_until_parked();
+    stage.read_with(cx, |stage, cx| {
+        let file = stage.files.as_ref().unwrap().active().unwrap();
+        assert!(!file.is_dirty(cx), "saved");
+    });
+    let toasts = cx.update(|_, cx| crate::ui::Toaster::messages(cx));
+    assert!(
+        toasts.iter().any(|toast| toast == "a.rs salvo"),
+        "{toasts:?}"
+    );
+    let body = &requests(server)[0];
+    assert_eq!(body["relativePath"], "a.rs");
+    assert_eq!(body["content"], "// fn a() {}\n");
+    assert_eq!(body["expectedPrevious"], "fn a() {}\n");
+}
+
+#[gpui::test]
+fn a_disk_that_moved_on_asks_how_to_reconcile(cx: &mut TestAppContext) {
+    let (stage, cx, repo, _) = open_files(cx);
+    cx.update(|_, cx| crate::ui::Toaster::init(cx));
+    let (port, server) = crate::test_support::fake_desktop_routes(vec![
+        (
+            "/api/v1/files/write",
+            200,
+            r#"{"bytesWritten":0,"conflicted":true,"diskContent":"fn agent() {}\n"}"#.to_string(),
+        ),
+        (
+            "/api/v1/files/write",
+            200,
+            r#"{"bytesWritten":12,"conflicted":false,"diskContent":null}"#.to_string(),
+        ),
+    ]);
+    stage.update(cx, |stage, _| {
+        stage.endpoint = Some(crate::data::desktop_api::DesktopApi::new(port, "k"))
+    });
+    let root = repo.path().to_string_lossy().into_owned();
+    stage.update_in(cx, |stage, window, cx| {
+        stage.open_file(root, "a.rs".into(), None, window, cx)
+    });
+    cx.run_until_parked();
+    edit(&stage, cx, "// ");
+    stage.update(cx, |stage, cx| stage.save(cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("reconcile-dialog").is_some());
+    stage.read_with(cx, |stage, _| {
+        let reconcile = stage.reconcile.as_ref().unwrap();
+        assert_eq!(reconcile.disk, "fn agent() {}\n");
+    });
+    // "Sobrescrever com a minha" writes past the guard.
+    stage.update(cx, |stage, cx| stage.overwrite(cx));
+    cx.run_until_parked();
+    stage.read_with(cx, |stage, cx| {
+        assert!(stage.reconcile.is_none());
+        assert!(!stage.files.as_ref().unwrap().active().unwrap().is_dirty(cx));
+    });
+    let bodies = requests(server);
+    assert_eq!(bodies[1]["expectedPrevious"], serde_json::Value::Null);
+}
+
+#[gpui::test]
+fn taking_the_disk_replaces_the_edit_and_an_unsaved_tab_asks_before_closing(
+    cx: &mut TestAppContext,
+) {
+    let (stage, cx, repo, events) = open_files(cx);
+    cx.update(|_, cx| crate::ui::Toaster::init(cx));
+    let (port, _server) = crate::test_support::fake_desktop_routes(vec![(
+        "/api/v1/files/write",
+        200,
+        r#"{"bytesWritten":0,"conflicted":true,"diskContent":"disk\n"}"#.to_string(),
+    )]);
+    stage.update(cx, |stage, _| {
+        stage.endpoint = Some(crate::data::desktop_api::DesktopApi::new(port, "k"))
+    });
+    let root = repo.path().to_string_lossy().into_owned();
+    stage.update_in(cx, |stage, window, cx| {
+        stage.open_file(root, "a.rs".into(), None, window, cx)
+    });
+    cx.run_until_parked();
+    edit(&stage, cx, "x");
+    stage.update(cx, |stage, cx| stage.save(cx));
+    cx.run_until_parked();
+    stage.update(cx, |stage, cx| stage.take_disk(cx));
+    stage.read_with(cx, |stage, cx| {
+        let file = stage.files.as_ref().unwrap().active().unwrap();
+        let Some(super::files::FileLoad::Text(view)) = &file.load else {
+            panic!("an editor")
+        };
+        assert_eq!(view.read(cx).text(), "disk\n");
+        assert!(!file.is_dirty(cx));
+    });
+    // An unsaved tab asks before it goes; the answer closes it.
+    edit(&stage, cx, "y");
+    stage.update_in(cx, |stage, window, cx| {
+        stage.request_close_file(0, window, cx)
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("discard-confirm").is_some());
+    stage.read_with(cx, |stage, _| assert!(stage.has_content()));
+    let confirm = cx.debug_bounds("discard-confirm").unwrap();
+    cx.simulate_click(confirm.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    stage.read_with(cx, |stage, _| assert!(!stage.has_content()));
+    assert_eq!(
+        events.borrow().last(),
+        Some(&StageEvent::Closed { to_changes: false })
+    );
+}
