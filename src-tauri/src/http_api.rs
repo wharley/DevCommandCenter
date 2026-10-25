@@ -689,6 +689,8 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         )
         .route("/api/v1/forge/request-reviewers", post(forge::request_reviewers))
         .route("/api/v1/forge/review-comments", post(forge::review_comments))
+        .route("/api/v1/forge/reply-thread", post(forge::reply_thread))
+        .route("/api/v1/forge/resolve-thread", post(forge::resolve_thread))
         .route("/api/v1/forge/pipeline", post(forge::pipeline))
         .route("/api/v1/forge/pipeline-job-log", post(forge::pipeline_job_log))
         .route("/api/v1/forge/pipeline-job-retry", post(forge::pipeline_job_retry))
@@ -1498,6 +1500,8 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/forge/reviewer-candidates",
             "POST /api/v1/forge/request-reviewers",
             "POST /api/v1/forge/review-comments",
+            "POST /api/v1/forge/reply-thread",
+            "POST /api/v1/forge/resolve-thread",
             "POST /api/v1/forge/pipeline",
             "POST /api/v1/forge/pipeline-job-log",
             "POST /api/v1/forge/pipeline-job-retry",
@@ -5130,6 +5134,19 @@ mod tests {
         ] {
             let (status, _) =
                 post_json(&fixture.app, uri, json!({ "workspaceRoot": other.path() })).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+        }
+        // Replying to and resolving a conversation, too.
+        let thread = json!({
+            "repositoryRoot": other.path(),
+            "number": 1,
+            "commentId": "1",
+            "threadId": "t-1",
+            "body": "ok",
+            "resolved": true,
+        });
+        for uri in ["/api/v1/forge/reply-thread", "/api/v1/forge/resolve-thread"] {
+            let (status, _) = post_json(&fixture.app, uri, thread.clone()).await;
             assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
         }
         // A delegation that doesn't exist is not found, on the task's own checkout.

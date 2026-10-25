@@ -1,7 +1,8 @@
 //! The review's forge reads and actions for the native app: the checkout's
 //! forge context and accounts (who commits and pushes), the pull request's
-//! review state, reviewer candidates and requests, and the last delivery
-//! failure with its recovery. They run the desktop's own commands (the
+//! review state, reviewer candidates and requests, replying to and
+//! resolving its conversations, and the last delivery failure with its
+//! recovery. They run the desktop's own commands (the
 //! failure lives in this process); a checkout must be a task's.
 use super::*;
 use dcc_tauri::commands::forge_commands::{
@@ -117,4 +118,22 @@ pub(super) async fn pipeline_job_retry(
         .await
         .map_err(HttpApiError::bad_request)?;
     Ok(Json(json!({ "ok": true })))
+}
+
+pub(super) async fn reply_thread(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<forge_commands::PullRequestHubThreadReplyInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    git_changes::task_checkout(&backend, &input.repository_root).await?;
+    reply(forge_commands::pull_request_hub_reply_thread_with_state(&backend.workspace, input).await)
+}
+
+pub(super) async fn resolve_thread(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<forge_commands::PullRequestHubThreadResolveInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    git_changes::task_checkout(&backend, &input.repository_root).await?;
+    reply(
+        forge_commands::pull_request_hub_resolve_thread_with_state(&backend.workspace, input).await,
+    )
 }

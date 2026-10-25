@@ -2301,6 +2301,14 @@ pub async fn pull_request_hub_reply_thread(
     state: State<'_, WorkspaceCommandState>,
     input: PullRequestHubThreadReplyInput,
 ) -> Result<PullRequestHubThreadReplyOutput, String> {
+    pull_request_hub_reply_thread_with_state(&state, input).await
+}
+
+/// `pull_request_hub_reply_thread` for callers without a Tauri `State` (the HTTP API).
+pub async fn pull_request_hub_reply_thread_with_state(
+    state: &WorkspaceCommandState,
+    input: PullRequestHubThreadReplyInput,
+) -> Result<PullRequestHubThreadReplyOutput, String> {
     let body = input.body.trim();
     if body.is_empty() {
         return Err("Reply cannot be empty.".to_string());
@@ -2353,6 +2361,14 @@ pub async fn pull_request_hub_reply_thread(
 #[tauri::command]
 pub async fn pull_request_hub_resolve_thread(
     state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubThreadResolveInput,
+) -> Result<PullRequestHubThreadResolveOutput, String> {
+    pull_request_hub_resolve_thread_with_state(&state, input).await
+}
+
+/// `pull_request_hub_resolve_thread` for callers without a Tauri `State` (the HTTP API).
+pub async fn pull_request_hub_resolve_thread_with_state(
+    state: &WorkspaceCommandState,
     input: PullRequestHubThreadResolveInput,
 ) -> Result<PullRequestHubThreadResolveOutput, String> {
     let root = input.repository_root.trim();
