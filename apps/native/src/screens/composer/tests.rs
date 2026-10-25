@@ -882,3 +882,49 @@ fn a_named_task_keeps_its_name(cx: &mut TestAppContext) {
     assert_eq!(start["providerId"], "codex");
     assert_eq!(start["title"], "Pagamentos");
 }
+
+#[gpui::test]
+fn the_setup_warning_opens_the_terminal(cx: &mut TestAppContext) {
+    use dcc_core::domain::workspace::{WorkspaceSetupReport, WorkspaceSetupStatus};
+    let (composer, cx) = open(cx);
+    let opened = std::rc::Rc::new(std::cell::Cell::new(false));
+    let sink = opened.clone();
+    composer.update(cx, |composer, cx| {
+        composer.set_session(
+            ComposerSession {
+                context: Some(crate::data::conversation::ExecutionContext {
+                    project_label: Some("Pagamentos".into()),
+                    project_icon: None,
+                    project_color: None,
+                    project_seed: None,
+                    base_branch: Some("main".into()),
+                    current_branch: None,
+                    isolated: true,
+                    setup_report: Some(WorkspaceSetupReport {
+                        status: WorkspaceSetupStatus::Failed,
+                        steps: vec![],
+                        message: Some("yarn install failed".into()),
+                    }),
+                }),
+                ..session("a")
+            },
+            cx,
+        );
+        cx.subscribe(
+            &cx.entity(),
+            move |_, _, event: &super::ComposerEvent, _| {
+                if matches!(event, super::ComposerEvent::OpenTerminal) {
+                    sink.set(true);
+                }
+            },
+        )
+        .detach();
+    });
+    cx.run_until_parked();
+    let button = cx
+        .debug_bounds("setup-open-terminal")
+        .expect("the warning's button");
+    cx.simulate_click(button.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert!(opened.get());
+}

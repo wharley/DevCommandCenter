@@ -87,6 +87,8 @@ pub enum ComposerEvent {
     Refresh,
     /// A conversation the composer just started elsewhere in the task.
     OpenSession(String),
+    /// "Abrir terminal" on the setup warning.
+    OpenTerminal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

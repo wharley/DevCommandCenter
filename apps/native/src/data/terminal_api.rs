@@ -77,6 +77,36 @@ pub struct TerminalActivity {
     /// The process in front (`npm run dev`), while one runs.
     #[serde(default)]
     pub process_label: Option<String>,
+    /// Who opened it (`terminal:<scope>:<tab>`, the desktop's or ours).
+    #[serde(default)]
+    pub pty_owner_key: Option<String>,
+}
+
+impl TerminalActivity {
+    /// `countActiveTerminalStatuses`: a program runs or waits in it.
+    pub fn active(&self) -> bool {
+        matches!(
+            self.status,
+            ActivityStatus::Running | ActivityStatus::Waiting
+        )
+    }
+
+    /// A shell of one of these tasks' worktrees (`worktree:<id>:…`).
+    pub fn of_tasks(&self, task_ids: &[String]) -> bool {
+        self.pty_owner_key.as_deref().is_some_and(|owner| {
+            task_ids
+                .iter()
+                .any(|id| owner.starts_with(&format!("terminal:worktree:{id}:")))
+        })
+    }
+}
+
+/// `useWorkspaceActiveTerminalCount`, over every shell the desktop holds.
+pub fn active_count(items: &[TerminalActivity], task_ids: &[String]) -> usize {
+    items
+        .iter()
+        .filter(|item| item.active() && item.of_tasks(task_ids))
+        .count()
 }
 
 /// One message of the event stream.
@@ -186,6 +216,18 @@ impl DesktopApi {
                     .collect()
             })
             .unwrap_or_default())
+    }
+
+    /// `terminateWorkspaceTerminals`: every shell of these tasks' worktrees
+    /// ends, idle ones too. Returns how many did.
+    pub fn end_task_terminals(&self, task_ids: &[String]) -> Result<usize, ApiError> {
+        let mut ended = 0;
+        for item in self.terminal_activity()? {
+            if item.of_tasks(task_ids) && self.kill_terminal(&item.pty_id)? {
+                ended += 1;
+            }
+        }
+        Ok(ended)
     }
 
     /// Every terminal's output and end, until the desktop closes.
@@ -423,6 +465,57 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_task_counts_the_programs_running_in_its_worktrees() {
+        let item = |owner: &str, status: ActivityStatus| TerminalActivity {
+            pty_id: owner.into(),
+            status,
+            process_label: None,
+            pty_owner_key: Some(owner.into()),
+        };
+        let items = [
+            item("terminal:worktree:w-1:t1", ActivityStatus::Running),
+            item("terminal:worktree:w-1:t2", ActivityStatus::Idle),
+            item("terminal:worktree:w-10:t1", ActivityStatus::Running),
+            item("terminal:worktree:m-2:t1", ActivityStatus::Waiting),
+            item("terminal:p-1:t1", ActivityStatus::Running),
+        ];
+        assert_eq!(active_count(&items, &["w-1".into()]), 1);
+        assert_eq!(active_count(&items, &["w-1".into(), "m-2".into()]), 2);
+        assert_eq!(
+            active_count(&items, &["p-1".into()]),
+            0,
+            "project shells stay"
+        );
+    }
+
+    #[test]
+    fn ending_a_tasks_terminals_kills_each_of_its_shells() {
+        let activity = json!({ "items": [
+            { "ptyId": "pty-1", "ptyOwnerKey": "terminal:worktree:w-1:t1", "status": "idle" },
+            { "ptyId": "pty-2", "ptyOwnerKey": "terminal:worktree:w-2:t1", "status": "running" },
+            { "ptyId": "pty-3", "ptyOwnerKey": "terminal:worktree:w-1:t2", "status": "running" },
+        ]});
+        let (port, server) = crate::test_support::fake_desktop_routes(vec![
+            ("/api/v1/terminals/activity", 200, activity.to_string()),
+            (
+                "/api/v1/terminals/pty-1/kill",
+                200,
+                json!({ "ok": true }).to_string(),
+            ),
+            (
+                "/api/v1/terminals/pty-3/kill",
+                200,
+                json!({ "ok": true }).to_string(),
+            ),
+        ]);
+        let ended = DesktopApi::new(port, "k")
+            .end_task_terminals(&["w-1".into()])
+            .unwrap();
+        assert_eq!(ended, 2);
+        assert_eq!(server.join().unwrap().len(), 3);
     }
 
     #[test]

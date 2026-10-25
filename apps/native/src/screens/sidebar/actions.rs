@@ -76,8 +76,27 @@ impl Sidebar {
         .detach();
     }
 
-    /// Restore, complete or put on hold, with the row's spinner.
+    /// Restore, complete or put on hold, with the row's spinner. Programs
+    /// still running in the task's terminals are asked about first
+    /// (`requestWorkspaceTerminalLifecycle`).
     pub(super) fn run_row_action(
+        &mut self,
+        task_id: &str,
+        pending: PendingAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pending.contains_key(task_id) {
+            return;
+        }
+        let count = self.active_terminals(task_id);
+        if pending != PendingAction::Restore && count > 0 {
+            return self.ask_terminal_lifecycle(task_id, pending, count, cx);
+        }
+        self.perform_row_action(task_id, pending, window, cx);
+    }
+
+    pub(super) fn perform_row_action(
         &mut self,
         task_id: &str,
         pending: PendingAction,

@@ -6,6 +6,7 @@ mod cleanup;
 mod delete_task;
 mod project_edit;
 mod remove_project;
+mod terminal_lifecycle;
 
 use gpui::{AnyElement, App, Context, Window, div, prelude::*, px};
 
@@ -19,12 +20,14 @@ pub use cleanup::CleanupDialog;
 pub use delete_task::DeleteTaskDialog;
 pub use project_edit::ProjectEditDialog;
 pub use remove_project::RemoveProjectDialog;
+pub use terminal_lifecycle::TerminalLifecycleDialog;
 
 pub enum SidebarDialog {
     DeleteTask(DeleteTaskDialog),
     RemoveProject(RemoveProjectDialog),
     Cleanup(CleanupDialog),
     EditProject(Box<ProjectEditDialog>),
+    TerminalLifecycle(TerminalLifecycleDialog),
 }
 
 impl Sidebar {
@@ -96,5 +99,6 @@ pub fn render(
         SidebarDialog::RemoveProject(dialog) => remove_project::render(dialog, cx),
         SidebarDialog::Cleanup(dialog) => cleanup::render(sidebar, dialog, window, cx),
         SidebarDialog::EditProject(dialog) => project_edit::render(sidebar, dialog, window, cx),
+        SidebarDialog::TerminalLifecycle(dialog) => terminal_lifecycle::render(dialog, cx),
     })
 }

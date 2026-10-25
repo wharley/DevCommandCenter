@@ -20,9 +20,26 @@ pub(super) fn new_dock(
     let parent = f32::from(window.viewport_size().height);
     let height = clamp_height(prefs.terminal_height, parent);
     let tabs = TabStore::load(&TabStore::default_path());
-    let dock = cx.new(|_| TerminalDock::new(height, tabs, DesktopApi::load()));
+    let dock = cx.new(|cx| {
+        let mut dock = TerminalDock::new(height, tabs, DesktopApi::load());
+        dock.follow_activity(cx);
+        dock
+    });
     let events = cx.subscribe_in(&dock, window, Shell::on_terminal_event);
     (dock, events)
+}
+
+/// The rail counts what runs in each task's shells.
+pub(super) fn follow_terminals(
+    dock: &Entity<TerminalDock>,
+    cx: &mut Context<Shell>,
+) -> Subscription {
+    cx.observe(dock, |shell, dock, cx| {
+        let terminals = dock.read(cx).activity.clone();
+        shell
+            .sidebar
+            .update(cx, |sidebar, cx| sidebar.set_terminals(terminals, cx));
+    })
 }
 
 /// The open task's terminal scopes and what a new shell's banner says.

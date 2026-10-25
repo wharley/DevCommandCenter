@@ -102,6 +102,7 @@ pub struct Shell {
     /// The terminal dock under the conversation (screen 7).
     pub(crate) terminal: Entity<crate::screens::terminal::TerminalDock>,
     _terminal_events: Subscription,
+    _terminal_counts: Subscription,
 }
 
 impl Shell {
@@ -193,9 +194,11 @@ impl Shell {
             });
         });
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
+        let terminal_counts = terminal::follow_terminals(&terminal, cx);
         Self {
             terminal,
             _terminal_events: terminal_events,
+            _terminal_counts: terminal_counts,
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
             prefs,
             prefs_path,
@@ -295,6 +298,12 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         match event {
+            // `openPreferredTerminal`: the worktree, else the project.
+            crate::screens::conversation::ConversationEvent::OpenTerminal => {
+                self.terminal.update(cx, |dock, cx| {
+                    dock.show(crate::screens::terminal::ScopeKind::Worktree, window, cx)
+                });
+            }
             crate::screens::conversation::ConversationEvent::ReviewDelegation { id, path } => {
                 self.set_code_column(true, Some(CodeColumnTab::Changes), cx);
                 let request = self.code_column.update(cx, |column, cx| {

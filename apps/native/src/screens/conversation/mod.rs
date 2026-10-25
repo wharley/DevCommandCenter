@@ -59,6 +59,8 @@ pub enum ConversationEvent {
         /// A file chip: that file's diff opens on the stage too.
         path: Option<String>,
     },
+    /// The task's terminal dock, on its worktree.
+    OpenTerminal,
 }
 
 impl gpui::EventEmitter<ConversationEvent> for ConversationView {}
@@ -103,6 +105,7 @@ impl ConversationView {
                 |view, _, event: &ComposerEvent, cx| match event {
                     ComposerEvent::Refresh => view.refresh_now(cx),
                     ComposerEvent::OpenSession(session) => view.open_session(session.clone(), cx),
+                    ComposerEvent::OpenTerminal => cx.emit(ConversationEvent::OpenTerminal),
                 },
             );
         let list = ListState::new(0, ListAlignment::Bottom, px(800.0));

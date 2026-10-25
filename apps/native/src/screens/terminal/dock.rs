@@ -144,6 +144,8 @@ pub struct TerminalDock {
     pub(super) sessions: HashMap<String, Entity<TerminalSession>>,
     pub(super) by_pty: HashMap<String, WeakEntity<TerminalSession>>,
     pub(super) api: Option<DesktopApi>,
+    /// Every shell the desktop holds, as last read.
+    pub activity: std::rc::Rc<Vec<crate::data::terminal_api::TerminalActivity>>,
     ui_states: HashMap<String, UiState>,
     /// "Renomear terminal", while open.
     pub(super) renaming: Option<super::dock_actions::Renaming>,
@@ -170,6 +172,7 @@ impl TerminalDock {
             by_pty: HashMap::new(),
             api,
             ui_states: HashMap::new(),
+            activity: Default::default(),
             renaming: None,
             closing: None,
             _stream: None,
@@ -426,43 +429,61 @@ impl TerminalDock {
         }
     }
 
-    /// `refreshTerminalActivity` every 2 seconds while a shell runs.
-    fn follow_activity(&mut self, cx: &mut Context<Self>) {
+    /// `refreshTerminalActivity` every 2 seconds: every shell the desktop
+    /// holds, ours and its own (the rail counts what runs in each task).
+    pub fn follow_activity(&mut self, cx: &mut Context<Self>) {
         let Some(api) = self.api.clone() else {
             return;
         };
+        if self._activity.is_some() {
+            return;
+        }
         self._activity = Some(cx.spawn(async move |this, cx| {
             loop {
-                cx.background_executor().timer(ACTIVITY_EVERY).await;
-                let Ok(any) = this.update(cx, |dock, _| !dock.by_pty.is_empty()) else {
-                    return;
-                };
-                if !any {
-                    continue;
-                }
                 let api = api.clone();
                 let Ok(items) = cx
                     .background_executor()
                     .spawn(async move { api.terminal_activity() })
                     .await
                 else {
+                    // The desktop closed: its shells went with it.
+                    let alive = this.update(cx, |dock, cx| {
+                        if !dock.activity.is_empty() {
+                            dock.activity = Default::default();
+                            cx.notify();
+                        }
+                    });
+                    if alive.is_err() {
+                        return;
+                    }
+                    cx.background_executor().timer(ACTIVITY_EVERY).await;
                     continue;
                 };
                 let alive = this.update(cx, |dock, cx| {
+                    if *dock.activity != items {
+                        dock.activity = std::rc::Rc::new(items.clone());
+                        cx.notify();
+                    }
+                    // The tabs' dots and names are drawn by the dock.
+                    let mut changed = false;
                     for session in dock.sessions.values() {
                         session.update(cx, |session, cx| {
                             let item = session
                                 .pty_id()
                                 .and_then(|pty| items.iter().find(|item| item.pty_id == pty))
                                 .cloned();
+                            changed |= session.activity != item;
                             session.set_activity(item, cx);
                         });
                     }
-                    cx.notify();
+                    if changed {
+                        cx.notify();
+                    }
                 });
                 if alive.is_err() {
                     return;
                 }
+                cx.background_executor().timer(ACTIVITY_EVERY).await;
             }
         }));
     }

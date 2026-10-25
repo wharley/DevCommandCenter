@@ -59,6 +59,7 @@ pub fn render(
     let chips = git.meta.as_ref().map(|meta| meta_chips::render(meta, cx));
     let member_count = task.member_workspace_ids.len();
     let pinned = task.pinned_at.is_some();
+    let terminals = sidebar.active_terminals(task_id);
 
     let pending = sidebar.pending.contains_key(task_id);
     let actions = row_actions::render(sidebar, task, cx);
@@ -133,6 +134,9 @@ pub fn render(
                     .rotate(-12.0)
                     .color(muted.opacity(0.65)),
             )
+        })
+        .when(terminals > 0, |line| {
+            line.child(terminal_badge(task_id, terminals, cx))
         });
 
     let detail_line = div()
@@ -358,6 +362,46 @@ pub fn initials(label: &str) -> String {
     } else {
         letters
     }
+}
+
+/// The sky pill of programs running in the task's terminals.
+fn terminal_badge(task_id: &str, count: usize, cx: &App) -> gpui::AnyElement {
+    let dark = cx.theme().appearance == crate::theme::Appearance::Dark;
+    let text = crate::i18n::Translate::t_with(
+        cx,
+        "sidebar.activeTerminals",
+        &crate::i18n::Args::count(count as i64),
+    );
+    let badge = div()
+        .debug_selector(|| "sidebar-active-terminals".into())
+        .ml_auto()
+        .flex()
+        .h(px(16.0))
+        .flex_shrink_0()
+        .items_center()
+        .gap(px(4.0))
+        .rounded_full()
+        .bg(crate::theme::tailwind::SKY_500.alpha(0.12))
+        .px(px(6.0))
+        .text_size(px(9.5))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .font_features(tabular_nums())
+        .text_color(
+            if dark {
+                crate::theme::tailwind::SKY_300
+            } else {
+                crate::theme::tailwind::SKY_700
+            }
+            .hsla(),
+        )
+        .child(Icon::new("square-terminal").size(10.0))
+        .child(count.to_string());
+    Tooltip::new(
+        SharedString::from(format!("sidebar-terminals-{task_id}")),
+        badge,
+        move |_, _| div().child(text.clone()).into_any_element(),
+    )
+    .into_any_element()
 }
 
 #[cfg(test)]

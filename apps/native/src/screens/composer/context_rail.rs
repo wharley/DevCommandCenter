@@ -4,7 +4,7 @@
 
 use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*, px};
 
-use super::Composer;
+use super::{Composer, ComposerEvent};
 use crate::data::conversation::ExecutionContext;
 use crate::i18n::{Args, Translate};
 use crate::project::{GlyphSize, ProjectGlyph};
@@ -140,7 +140,6 @@ pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> O
         let detail = detail
             .map(SharedString::from)
             .unwrap_or_else(|| cx.t("composer.executionDock.setup.commandFailed"));
-        // Opening the terminal arrives with the terminal dock (screen 7).
         div()
             .flex()
             .min_w_0()
@@ -178,7 +177,10 @@ pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> O
                     ),
             )
             .child(
+                // `onOpenTerminal`: the dock on the worktree.
                 div()
+                    .id("setup-open-terminal")
+                    .debug_selector(|| "setup-open-terminal".into())
                     .flex()
                     .h(px(24.0))
                     .flex_shrink_0()
@@ -186,6 +188,8 @@ pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> O
                     .gap(px(4.0))
                     .rounded(px(6.0))
                     .bg(tw::AMBER_500.alpha(0.15))
+                    .hover(|style| style.bg(tw::AMBER_500.alpha(0.25)))
+                    .cursor_pointer()
                     .px(px(8.0))
                     .text_size(px(10.0))
                     .font_weight(FontWeight::MEDIUM)
@@ -194,7 +198,7 @@ pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> O
                     } else {
                         tw::AMBER_700.hsla()
                     })
-                    .opacity(0.5)
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ComposerEvent::OpenTerminal)))
                     .child(Icon::new("terminal").size(12.0))
                     .child(cx.t("workbench.terminal.open")),
             )

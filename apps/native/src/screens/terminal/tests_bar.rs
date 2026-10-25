@@ -106,6 +106,7 @@ fn set_running(dock: &Entity<TerminalDock>, pty: &str, cx: &mut VisualTestContex
                     pty_id: pty,
                     status: ActivityStatus::Running,
                     process_label: Some("npm run dev".into()),
+                    pty_owner_key: None,
                 }),
                 cx,
             )

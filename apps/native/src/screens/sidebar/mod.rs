@@ -125,6 +125,10 @@ pub struct Sidebar {
     selected_session_id: Option<String>,
     /// Skills and instruction files the open task's agents get (footer badge).
     skill_count: usize,
+    /// Every shell the desktop holds (the row's count of running programs).
+    terminals: std::rc::Rc<Vec<crate::data::terminal_api::TerminalActivity>>,
+    /// Where the task's shells are ended (the desktop's API; a fake in tests).
+    terminal_api: Option<crate::data::desktop_api::DesktopApi>,
     task_flash: Option<arrival::Flash<String>>,
     section_flash: Option<arrival::Flash<state::HoldSection>>,
     membership: Option<arrival::Membership>,
@@ -183,6 +187,8 @@ impl Sidebar {
             active_agent_id: None,
             selected_session_id: None,
             skill_count: 0,
+            terminals: Default::default(),
+            terminal_api: None,
             task_flash: None,
             section_flash: None,
             membership: None,
@@ -386,6 +392,34 @@ impl Sidebar {
         let (range, count) = list::changed_span(&self.items, &next);
         self.list.splice(range, count);
         self.items = next;
+    }
+
+    /// What runs in the desktop's shells, as the terminal dock last read it.
+    pub fn set_terminals(
+        &mut self,
+        terminals: std::rc::Rc<Vec<crate::data::terminal_api::TerminalActivity>>,
+        cx: &mut Context<Self>,
+    ) {
+        if !std::rc::Rc::ptr_eq(&self.terminals, &terminals) {
+            self.terminals = terminals;
+            cx.notify();
+        }
+    }
+
+    /// `useWorkspaceActiveTerminalCount`: programs running in the task's
+    /// worktrees (its own and, for a multi-project task, its members').
+    pub(crate) fn active_terminals(&self, task_id: &str) -> usize {
+        let Some(task) = self.state.task(task_id) else {
+            return 0;
+        };
+        let mut ids = vec![task.id.clone()];
+        ids.extend(
+            task.member_workspace_ids
+                .iter()
+                .filter(|id| **id != task.id)
+                .cloned(),
+        );
+        crate::data::terminal_api::active_count(&self.terminals, &ids)
     }
 
     pub fn set_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
