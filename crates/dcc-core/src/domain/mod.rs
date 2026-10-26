@@ -2,6 +2,7 @@ pub mod agent;
 pub mod agent_call;
 pub mod attention;
 pub mod browser;
+pub mod browser_context;
 pub mod code_annotation;
 pub mod commit_mode;
 pub mod execution_dock;
