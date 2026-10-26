@@ -16,7 +16,7 @@ use std::task::{Context as TaskContext, Poll};
 use tokio::sync::{broadcast, oneshot};
 
 /// One page operation for the native Browser.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BridgeOpKind {
     /// Runs a script; its result's JSON comes back.
@@ -31,6 +31,17 @@ pub enum BridgeOpKind {
         url: String,
     },
     Reload,
+    /// A real click at these fractions of the viewport.
+    Click {
+        x: f64,
+        y: f64,
+    },
+    /// One allowed key to the focused page.
+    Press {
+        key: String,
+    },
+    /// The viewport as PNG, base64 in the answer.
+    Snapshot,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -178,7 +189,11 @@ pub trait DesktopBrowser: Send + Sync {
 pub(super) fn routes() -> Router<HttpState> {
     Router::new()
         .route("/api/v1/browser/bridge/stream", get(stream))
-        .route("/api/v1/browser/bridge/ops/:op_id/reply", post(reply))
+        // A snapshot's PNG (4 MB) comes back in base64.
+        .route(
+            "/api/v1/browser/bridge/ops/:op_id/reply",
+            post(reply).layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
         .route("/api/v1/browser/bridge/surface", post(open))
         .route("/api/v1/browser/bridge/surface/:token/report", post(report))
         .route("/api/v1/browser/bridge/surface/:token/close", post(close))

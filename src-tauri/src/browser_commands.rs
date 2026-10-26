@@ -1243,13 +1243,10 @@ pub(crate) async fn capture_browser_viewport_for_lease(
     if !context_ready_for_scope(state, workspace_id, Some(session_id), initial_url)? {
         return Err("browser page is still loading".to_string());
     }
-    let webview = match page_driver(state)? {
-        PageDriver::Local(webview) => *webview,
-        PageDriver::Remote => {
-            return Err("browser screenshot is unavailable in this Browser".to_string());
-        }
+    let bytes = match page_driver(state)? {
+        PageDriver::Local(webview) => crate::browser_capture::capture(*webview).await?,
+        PageDriver::Remote => remote_capture().await?,
     };
-    let bytes = crate::browser_capture::capture(webview).await?;
     authorize()?;
     let after = current_snapshot(state)?;
     if !browser_surface_matches_visibility_policy(
@@ -4126,11 +4123,9 @@ pub(crate) async fn execute_browser_control_action(
                 anchor.lifecycle_token,
                 Instant::now(),
             )?;
-            // The native app's Browser clicks through the page (8c2 brings
-            // its native click); the desktop's own view gets a real one.
-            let remote = remote_attached(state);
-            #[cfg(target_os = "macos")]
-            if !remote {
+            // A real click where a native view receives it: the desktop's on
+            // macOS, or the native app's Browser; elsewhere through the page.
+            if remote_attached(state) || cfg!(target_os = "macos") {
                 let raw = eval_browser_action_response(
                     state,
                     browser_element_action_script(
@@ -4153,20 +4148,13 @@ pub(crate) async fn execute_browser_control_action(
                     anchor.lifecycle_token,
                     Instant::now(),
                 )?;
-                let view = state
-                    .webview
-                    .lock()
-                    .map_err(|_| "browser state lock poisoned")?
-                    .clone()
-                    .ok_or("browser is not open")?;
-                crate::browser_input::click(
-                    view,
+                deliver_click(
+                    state,
                     point.x.ok_or("browser click point is unavailable")?,
                     point.y.ok_or("browser click point is unavailable")?,
                 )
                 .await?;
-            }
-            if remote || cfg!(not(target_os = "macos")) {
+            } else {
                 eval_browser_action_with_callback(
                     state,
                     browser_semantic_action_script(&target, None, &anchor.url, document_identity)?,
@@ -4209,10 +4197,6 @@ pub(crate) async fn execute_browser_control_action(
                 Instant::now(),
             )?;
             let is_key = action_name == "press";
-            // A key needs the native input (8c2); nothing is focused first.
-            if is_key && remote_attached(state) {
-                return Err("browser key press is unavailable in this Browser".to_string());
-            }
             eval_browser_action_with_callback(
                 state,
                 browser_element_action_script(
@@ -4233,13 +4217,7 @@ pub(crate) async fn execute_browser_control_action(
                     anchor.lifecycle_token,
                     Instant::now(),
                 )?;
-                let webview = state
-                    .webview
-                    .lock()
-                    .map_err(|_| "browser state lock poisoned")?
-                    .clone()
-                    .ok_or("browser is not open")?;
-                crate::browser_input::press(webview, &label).await?;
+                deliver_press(state, &label).await?;
             }
         }
     }
@@ -5116,6 +5094,80 @@ impl PageDriver {
     }
 }
 
+/// An input or a capture in the native app's Browser, its answer within
+/// `wait`; anything but a delivered answer is `failure`.
+async fn remote_input(
+    kind: dcc_http::BridgeOpKind,
+    wait: Duration,
+    failure: &str,
+) -> Result<Option<String>, String> {
+    let receiver = dcc_http::native_browser_bridge().request(kind)?;
+    match timeout(wait, receiver).await {
+        Ok(Ok(reply)) if reply.ok => Ok(reply.raw),
+        _ => Err(failure.to_string()),
+    }
+}
+
+/// `browser_input::click`: a real click at the fractions of the viewport.
+async fn deliver_click(state: &BrowserState, x: f64, y: f64) -> Result<(), String> {
+    if !x.is_finite() || !y.is_finite() || !(0.0..1.0).contains(&x) || !(0.0..1.0).contains(&y) {
+        return Err("browser click point is invalid".into());
+    }
+    match page_driver(state)? {
+        #[cfg(target_os = "macos")]
+        PageDriver::Local(view) => crate::browser_input::click(*view, x, y).await,
+        #[cfg(not(target_os = "macos"))]
+        PageDriver::Local(_) => Err("browser click is unavailable on this platform".into()),
+        PageDriver::Remote => remote_input(
+            dcc_http::BridgeOpKind::Click { x, y },
+            Duration::from_secs(3),
+            "browser click could not be delivered",
+        )
+        .await
+        .map(|_| ()),
+    }
+}
+
+/// `browser_input::press`: one allowed key to the focused page.
+async fn deliver_press(state: &BrowserState, key: &str) -> Result<(), String> {
+    match page_driver(state)? {
+        PageDriver::Local(view) => crate::browser_input::press(*view, key).await,
+        PageDriver::Remote => {
+            if !crate::browser_input::valid_key(key) {
+                return Err("browser key is invalid".into());
+            }
+            remote_input(
+                dcc_http::BridgeOpKind::Press {
+                    key: key.to_string(),
+                },
+                Duration::from_secs(3),
+                "browser keyboard input could not be delivered",
+            )
+            .await
+            .map(|_| ())
+        }
+    }
+}
+
+/// The native Browser's viewport as PNG (`browser_capture::capture`'s bounds).
+async fn remote_capture() -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    let encoded = remote_input(
+        dcc_http::BridgeOpKind::Snapshot,
+        Duration::from_secs(8),
+        "Browser snapshot could not be captured",
+    )
+    .await?
+    .ok_or("Browser snapshot could not be captured")?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|_| "Browser snapshot could not be captured")?;
+    if bytes.is_empty() || bytes.len() > 4 * 1024 * 1024 {
+        return Err("Browser snapshot could not be captured".into());
+    }
+    Ok(bytes)
+}
+
 /// A script in the page, its JSON answer within `wait`.
 async fn eval_page(
     state: &BrowserState,
@@ -5440,6 +5492,43 @@ mod tests {
                 .await
                 .is_err(),
             "an old lifecycle"
+        );
+        // A real click, and the viewport's PNG, from the native Browser.
+        let mut native = dcc_http::native_browser_bridge().subscribe();
+        let answering = tokio::spawn(async move {
+            use base64::Engine;
+            for _ in 0..2 {
+                let op = native.recv().await.unwrap();
+                let raw = match op.kind {
+                    dcc_http::BridgeOpKind::Click { x, y } => {
+                        assert_eq!((x, y), (0.25, 0.5));
+                        None
+                    }
+                    dcc_http::BridgeOpKind::Snapshot => {
+                        Some(base64::engine::general_purpose::STANDARD.encode(b"png"))
+                    }
+                    other => panic!("unexpected {other:?}"),
+                };
+                dcc_http::native_browser_bridge().reply(
+                    op.op_id,
+                    dcc_http::BridgeReply {
+                        ok: true,
+                        raw,
+                        error: None,
+                    },
+                );
+            }
+        });
+        deliver_click(&state, 0.25, 0.5).await.unwrap();
+        assert_eq!(remote_capture().await.unwrap(), b"png");
+        answering.await.unwrap();
+        assert!(
+            deliver_click(&state, 1.5, 0.5).await.is_err(),
+            "off the viewport"
+        );
+        assert_eq!(
+            deliver_press(&state, "Meta+Q").await.unwrap_err(),
+            "browser key is invalid"
         );
         remote_browser_close(&state, Some(41)).await.unwrap();
         assert!(!*state.lifecycle_open.lock().unwrap());
