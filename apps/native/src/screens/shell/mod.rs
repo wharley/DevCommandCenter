@@ -7,6 +7,7 @@ mod browser;
 pub mod layout;
 mod merge;
 mod regions;
+mod session_search;
 mod terminal;
 #[cfg(test)]
 mod tests;
@@ -100,6 +101,8 @@ pub struct Shell {
     _code_column_events: Subscription,
     _conversation_root: Subscription,
     _stage_events: Subscription,
+    /// "Sessões passadas", while open.
+    session_search: Option<session_search::OpenSearch>,
     /// The Browser beside the conversation (screen 8).
     browser: browser::BrowserState,
     /// The terminal dock under the conversation (screen 7).
@@ -202,6 +205,7 @@ impl Shell {
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
         Self {
             browser: browser::BrowserState::new(),
+            session_search: None,
             terminal,
             _terminal_events: terminal_events,
             _terminal_counts: terminal_counts,
@@ -304,6 +308,9 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         match event {
+            crate::screens::conversation::ConversationEvent::OpenSessionSearch => {
+                self.open_session_search(window, cx)
+            }
             // `handleOpenBrowser`: closes an open one, else opens.
             crate::screens::conversation::ConversationEvent::ToggleBrowser => {
                 if self.browser_open() {
@@ -804,6 +811,11 @@ impl Render for Shell {
             }))
             .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))
             .children(self.annotation.as_ref().map(|(card, _)| card.clone()))
+            .children(
+                self.session_search
+                    .as_ref()
+                    .map(|(search, _)| search.clone()),
+            )
             .children(Toaster::handle(cx))
     }
 }

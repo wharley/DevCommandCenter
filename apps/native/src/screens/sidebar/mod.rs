@@ -365,6 +365,17 @@ impl Sidebar {
         self._refresh = Self::refresh_loop(cx);
     }
 
+    /// Marks `task_id` as the open one without opening it again (the shell
+    /// opens a chosen conversation of it).
+    pub fn reveal_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
+        if self.state.task(task_id).is_none() {
+            return;
+        }
+        self.state.select(task_id);
+        self.sync_items();
+        cx.notify();
+    }
+
     /// Whether a task is open, once the list has loaded (`None` before).
     pub fn has_open_task(&self) -> Option<bool> {
         self.opened_first

@@ -10,6 +10,7 @@ pub mod file_view;
 pub mod merge;
 pub mod new_task;
 pub mod open_project;
+pub mod session_search;
 pub mod shell;
 pub mod sidebar;
 pub mod stage;

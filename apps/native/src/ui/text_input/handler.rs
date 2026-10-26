@@ -58,7 +58,10 @@ impl EntityInputHandler for TextInput {
             .map(|range| self.range_from_utf16(range))
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
-        let new_text = self.clamp_insert(&range, new_text);
+        // One line: a line break typed through the platform (Shift+Enter)
+        // has no place in it.
+        let single_line = new_text.replace(['\n', '\r'], "");
+        let new_text = self.clamp_insert(&range, &single_line);
         self.content = format!(
             "{}{new_text}{}",
             &self.content[..range.start],

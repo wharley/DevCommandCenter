@@ -121,6 +121,31 @@ impl ConversationView {
         tip("header-browser-tip", label, button)
     }
 
+    /// `TextSearch` (find in this conversation) and `Search` (past sessions).
+    fn find_buttons(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .child(tip(
+                "header-thread-find-tip",
+                cx.t("conversation.find.openTooltip"),
+                icon_button("header-thread-find")
+                    .on_click(cx.listener(|view, _, window, cx| view.open_find(window, cx)))
+                    .child(Icon::new("text-search").size(14.0)),
+            ))
+            .child(tip(
+                "header-session-search-tip",
+                cx.t("workbench.sessionSearch.buttonTooltip"),
+                icon_button("header-session-search")
+                    .on_click(
+                        cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::OpenSessionSearch)),
+                    )
+                    .child(Icon::new("search").size(14.0)),
+            ))
+            .into_any_element()
+    }
+
     fn new_session_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let starting = self.header.starting;
         tip(
@@ -210,6 +235,7 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
                         .child(view.terminal_button(cx))
                         .child(view.browser_button(cx))
                         .child(view.new_session_button(cx))
+                        .child(view.find_buttons(cx))
                         .child(view.history_menu(cx)),
                 ),
         )

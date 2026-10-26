@@ -8,6 +8,11 @@ mod activity;
 mod assistant_row;
 mod cards;
 mod delegation_card;
+pub(crate) mod find;
+mod find_bar;
+
+pub use find_bar::OpenThreadFind;
+pub(crate) use find_bar::bind_keys;
 pub(crate) mod header;
 #[cfg(test)]
 mod header_tests;
@@ -66,6 +71,8 @@ pub enum ConversationEvent {
     OpenTerminal,
     /// The header's Globe: the Browser opens, or closes.
     ToggleBrowser,
+    /// "Buscar sessões passadas".
+    OpenSessionSearch,
 }
 
 impl gpui::EventEmitter<ConversationEvent> for ConversationView {}
@@ -100,6 +107,8 @@ pub struct ConversationView {
     pub(crate) requests: requests::Requests,
     /// The header's own state (counts it shows, a close it asks about).
     pub(crate) header: header::HeaderState,
+    /// "Buscar na conversa", while open.
+    find: Option<find_bar::FindBar>,
     _clock: Task<()>,
 }
 
@@ -142,6 +151,7 @@ impl ConversationView {
             refresh_wake: None,
             requests: requests::Requests::default(),
             header: header::HeaderState::default(),
+            find: None,
             _clock: Self::clock_loop(cx),
         }
     }
@@ -172,6 +182,8 @@ impl ConversationView {
         }
         self.task_id = Some(task_id.to_string());
         self.wanted_session = session_id;
+        // Another conversation: its find starts over.
+        self.find = None;
         self.data = None;
         self.loading = true;
         self.list.reset(0);
@@ -311,6 +323,9 @@ impl ConversationView {
             composer.set_session(session, cx)
         });
         self.data = Some(next);
+        if self.find.is_some() {
+            self.search(false, cx);
+        }
         cx.notify();
     }
 
@@ -459,6 +474,28 @@ impl ConversationView {
         };
         let viewport = self.viewport_width;
         let content = row_element(self, &data, message, window, cx);
+        // `dcc-thread-find-focus`: the ring 4px out around the hit's row.
+        let ring = cx.theme().colors.ring.opacity(0.55);
+        let content = if self.find_focus() == Some(message.id.as_str()) {
+            div()
+                .debug_selector(|| "thread-find-focus".into())
+                .relative()
+                .child(content)
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(-4.0))
+                        .bottom(px(-4.0))
+                        .left(px(-4.0))
+                        .right(px(-4.0))
+                        .rounded(px(8.0))
+                        .border_2()
+                        .border_color(ring),
+                )
+                .into_any_element()
+        } else {
+            content
+        };
         div()
             .w_full()
             .min_w_0()
@@ -626,6 +663,7 @@ impl Render for ConversationView {
             .when(self.task_id.is_some(), |area| {
                 area.child(header::header(self, cx))
             })
+            .children(self.find_bar(cx))
             .child(
                 div()
                     .relative()

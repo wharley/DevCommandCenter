@@ -63,6 +63,7 @@ fn open<'a>(
     cx.update(|cx| {
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
         crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
     });
     let (port, server) = fake_desktop_routes(routes);
     let (view, cx) = cx.add_window_view(ConversationView::new);
@@ -79,6 +80,7 @@ fn open<'a>(
             sink.borrow_mut().push(match event {
                 ConversationEvent::OpenTerminal => "terminal",
                 ConversationEvent::ToggleBrowser => "browser",
+                ConversationEvent::OpenSessionSearch => "session-search",
                 ConversationEvent::ReviewDelegation { .. } => "delegation",
             });
         })
@@ -163,4 +165,62 @@ fn a_running_conversation_is_asked_about_then_stopped_and_closed(cx: &mut TestAp
     );
     let close: Value = serde_json::from_str(&requests[1].1).unwrap();
     assert_eq!(close["deleteHistory"], false, "it had turns: archived");
+}
+
+fn rows_with(texts: &[&str]) -> Arc<Vec<dcc_core::domain::timeline::TimelineMessage>> {
+    use dcc_core::domain::session::SessionEventRecord;
+    let mut kinds = Vec::new();
+    for (index, text) in texts.iter().enumerate() {
+        kinds.push(serde_json::json!({ "type": "turn_started", "turnId": format!("t{index}"), "prompt": text }));
+        kinds.push(serde_json::json!({ "type": "turn_completed", "turnId": format!("t{index}") }));
+    }
+    let records: Vec<SessionEventRecord> = kinds
+        .into_iter()
+        .enumerate()
+        .map(|(index, kind)| {
+            serde_json::from_value(serde_json::json!({
+                "eventId": format!("evt-{index}"),
+                "sessionId": "a",
+                "sequence": index + 1,
+                "occurredAt": format!("2026-05-01T12:00:{:02}Z", index),
+                "kind": kind,
+            }))
+            .unwrap()
+        })
+        .collect();
+    Arc::new(dcc_core::domain::timeline::project_session(&records, "a"))
+}
+
+#[gpui::test]
+fn find_in_the_conversation_steps_through_its_hits(cx: &mut TestAppContext) {
+    let (view, cx, _, _server) = open(cx, vec![("/never", 200, "{}".into())]);
+    view.update(cx, |view, cx| {
+        let mut next = data();
+        next.rows = rows_with(&["corrija o checkout", "e o timeout", "checkout de novo"]);
+        next.last_sequence = 6;
+        view.apply(Rc::new(next), cx);
+    });
+    cx.run_until_parked();
+    // The header's button opens the bar with its field focused (⌘F goes
+    // through the shell).
+    click(cx, "header-thread-find");
+    assert!(cx.debug_bounds("thread-find-bar").is_some());
+    cx.simulate_input("checkout");
+    cx.run_until_parked();
+    let focus = |cx: &mut VisualTestContext| {
+        cx.run_until_parked();
+        cx.update(|_, cx| view.read(cx).find_focus().map(str::to_string))
+    };
+    let first = focus(cx).expect("a hit");
+    assert!(cx.debug_bounds("thread-find-focus").is_some(), "the ring");
+    cx.simulate_keystrokes("enter");
+    let second = focus(cx).expect("the next");
+    assert_ne!(first, second);
+    cx.simulate_keystrokes("shift-enter");
+    assert_eq!(focus(cx), Some(first.clone()));
+    cx.simulate_keystrokes("enter enter");
+    assert_eq!(focus(cx), Some(first), "it wraps");
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("thread-find-bar").is_none());
 }

@@ -25,6 +25,11 @@ pub struct Dialog {
     close_button: bool,
     /// What takes the focus when it opens (a field), instead of the card.
     initial_focus: Option<FocusHandle>,
+    /// Opens this far down the window (a fraction of its height) instead of
+    /// centered: the command dialogs' `top-[18vh]`.
+    top: Option<f32>,
+    /// A radius of its own (`rounded-2xl` on the command dialogs).
+    radius: Option<f32>,
     on_close: OnClose,
     children: SmallVec<[AnyElement; 4]>,
 }
@@ -42,6 +47,8 @@ impl Dialog {
             gap: 16.0,
             close_button: true,
             initial_focus: None,
+            top: None,
+            radius: None,
             on_close: Rc::new(on_close),
             children: SmallVec::new(),
         }
@@ -68,6 +75,17 @@ impl Dialog {
     /// `gap-4` by default.
     pub fn gap(mut self, gap: f32) -> Self {
         self.gap = gap;
+        self
+    }
+
+    /// `top-[18vh]`: opens `fraction` of the window down, not centered.
+    pub fn top(mut self, fraction: f32) -> Self {
+        self.top = Some(fraction);
+        self
+    }
+
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.radius = Some(radius);
         self
     }
 
@@ -143,7 +161,10 @@ impl RenderOnce for Dialog {
                 card.max_h(px(height)).overflow_hidden()
             })
             .p(px(self.padding))
-            .rounded(theme.radius.dialog)
+            .map(|card| match self.radius {
+                Some(radius) => card.rounded(px(radius)),
+                None => card.rounded(theme.radius.dialog),
+            })
             .bg(colors.popover)
             .text_color(colors.popover_foreground)
             .text_size(px(14.0))
@@ -179,7 +200,10 @@ impl RenderOnce for Dialog {
                         .w(viewport.width)
                         .h(viewport.height)
                         .flex()
-                        .items_center()
+                        .map(|backdrop| match self.top {
+                            Some(fraction) => backdrop.items_start().pt(viewport.height * fraction),
+                            None => backdrop.items_center(),
+                        })
                         .justify_center()
                         .relative()
                         .bg(Hsla::black().opacity(0.15))
