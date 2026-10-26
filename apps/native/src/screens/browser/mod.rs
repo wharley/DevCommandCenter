@@ -3,8 +3,10 @@
 //! around it is GPUI.
 
 pub mod address;
+mod download;
 pub mod layout;
 pub mod page;
+mod popup;
 pub mod surface;
 mod surface_view;
 #[cfg(test)]

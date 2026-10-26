@@ -1,7 +1,8 @@
 //! The page itself: the system's engine as a child view of the GPUI window
 //! (`wry`, what the Tauri app's Browser is built on), with the desktop's
 //! policy — only HTTPS or local HTTP, no background throttling, a
-//! Browser-only data store — and what it reports back (loading, the URL,
+//! Browser-only data store, sign-in windows of their own, downloads only
+//! where the person picks — and what it reports back (loading, the URL,
 //! the title). Tests drive a fake page instead: the headless GPUI window
 //! has no native view to host one.
 
@@ -57,7 +58,17 @@ fn named_store_available() -> bool {
     })
 }
 
-pub struct WryPage(Rc<wry::WebView>);
+pub struct WryPage {
+    view: Rc<wry::WebView>,
+    /// The sign-in windows it opened, closed with it.
+    popups: super::popup::Popups,
+}
+
+impl Drop for WryPage {
+    fn drop(&mut self) {
+        self.popups.close_all();
+    }
+}
 
 impl WryPage {
     /// The page as a child of `window`, opening on `url` (already checked).
@@ -68,14 +79,18 @@ impl WryPage {
     ) -> Result<Self, String> {
         let loads = events.clone();
         let titles = events;
+        let popups = super::popup::Popups::default();
+        let requests = popups.clone();
         let builder = wry::WebViewBuilder::new()
             .with_url(url)
             .with_visible(false)
             .with_background_throttling(wry::BackgroundThrottlingPolicy::Disabled)
             // `on_navigation`: anything else is cancelled, like the desktop.
             .with_navigation_handler(|url| validate_browser_url(&url).is_ok())
-            // Sign-in windows come with the popups (8b).
-            .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
+            // Sign-in windows of their own; a download only where the person picks.
+            .with_new_window_req_handler(move |url, features| requests.request(url, features))
+            .with_download_started_handler(|_, destination| super::download::requested(destination))
+            .with_download_completed_handler(|_, _, _| {})
             .with_on_page_load_handler(move |event, url| {
                 let _ = loads.unbounded_send(match event {
                     wry::PageLoadEvent::Started => PageEvent::Loading(url),
@@ -103,7 +118,10 @@ impl WryPage {
         };
         builder
             .build_as_child(window)
-            .map(|webview| Self(Rc::new(webview)))
+            .map(|webview| Self {
+                view: Rc::new(webview),
+                popups,
+            })
             .map_err(|error| error.to_string())
     }
 }
@@ -123,30 +141,30 @@ fn rect(bounds: Bounds<Pixels>) -> wry::Rect {
 
 impl Page for WryPage {
     fn load_url(&self, url: &str) {
-        let _ = self.0.load_url(url);
+        let _ = self.view.load_url(url);
     }
 
     fn reload(&self) {
-        let _ = self.0.reload();
+        let _ = self.view.reload();
     }
 
     fn set_bounds(&self, bounds: Bounds<Pixels>) {
-        let _ = self.0.set_bounds(rect(bounds));
+        let _ = self.view.set_bounds(rect(bounds));
     }
 
     fn set_visible(&self, visible: bool) {
         if !visible {
-            let _ = self.0.focus_parent();
+            let _ = self.view.focus_parent();
         }
-        let _ = self.0.set_visible(visible);
+        let _ = self.view.set_visible(visible);
     }
 
     fn url(&self) -> Option<String> {
-        self.0.url().ok()
+        self.view.url().ok()
     }
 
     fn blur(&self) {
-        let _ = self.0.focus_parent();
+        let _ = self.view.focus_parent();
     }
 }
 
