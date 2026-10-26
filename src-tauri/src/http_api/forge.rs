@@ -9,6 +9,7 @@ use dcc_tauri::commands::forge_commands::{
     self, ForgeCliAccountsInput, WorkspaceForgeContextInput, WorkspaceRequestReviewersInput,
     WorkspaceReviewStateInput, WorkspaceReviewerCandidatesInput,
 };
+use dcc_tauri::commands::workspace_commands::WorkspaceChangeRequestContextInput;
 use dcc_tauri::delivery_failure::{WorkspaceDeliveryFailureInput, WorkspaceDeliveryRecoveryInput};
 
 fn reply<T: Serialize>(result: Result<T, String>) -> Result<Json<Value>, HttpApiError> {
@@ -24,6 +25,18 @@ pub(super) async fn context(
 ) -> Result<Json<Value>, HttpApiError> {
     git_changes::task_checkout(&backend, &input.workspace_root).await?;
     reply(forge_commands::workspace_forge_context_with_state(&backend.workspace, input).await)
+}
+
+/// The "Criar PR" dialog's route and default title (`workspaceChangeRequestContext`).
+pub(super) async fn change_request_context(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<WorkspaceChangeRequestContextInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    git_changes::task_checkout(&backend, &input.workspace_root).await?;
+    reply(
+        forge_commands::workspace_change_request_context_with_state(&backend.workspace, input)
+            .await,
+    )
 }
 
 pub(super) async fn accounts(

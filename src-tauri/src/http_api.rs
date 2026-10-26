@@ -583,7 +583,11 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/mobile/workspaces/:workspace_id/delivery/:action",
             post(delivery::act),
         )
-        // The same delivery for the native app's review header.
+        // The same delivery for the native app's review and conversation headers.
+        .route(
+            "/api/v1/workspaces/:workspace_id/delivery",
+            get(delivery::summary),
+        )
         .route(
             "/api/v1/workspaces/:workspace_id/delivery/:action",
             post(delivery::act),
@@ -705,6 +709,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/git/delivery-failure", post(forge::delivery_failure))
         .route("/api/v1/git/delivery-recovery", post(forge::delivery_recovery))
         .route("/api/v1/forge/context", post(forge::context))
+        .route(
+            "/api/v1/forge/change-request-context",
+            post(forge::change_request_context),
+        )
         .route("/api/v1/forge/accounts", post(forge::accounts))
         .route("/api/v1/forge/review-state", post(forge::review_state))
         .route(
@@ -1525,6 +1533,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/git/delivery-failure",
             "POST /api/v1/git/delivery-recovery",
             "POST /api/v1/forge/context",
+            "POST /api/v1/forge/change-request-context",
             "POST /api/v1/forge/accounts",
             "POST /api/v1/forge/review-state",
             "POST /api/v1/forge/reviewer-candidates",
@@ -1537,6 +1546,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/forge/pipeline-job-retry",
             "POST /api/v1/delegations/:delegation_id/apply",
             "POST /api/v1/delegations/:delegation_id/discard",
+            "GET /api/v1/workspaces/:workspace_id/delivery",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
             "POST /api/v1/sessions/:session_id/queue",
@@ -5419,6 +5429,7 @@ mod tests {
         let other = tempfile::tempdir().unwrap();
         for uri in [
             "/api/v1/forge/context",
+            "/api/v1/forge/change-request-context",
             "/api/v1/forge/review-state",
             "/api/v1/git/delivery-failure",
             "/api/v1/forge/review-comments",
@@ -5543,6 +5554,30 @@ mod tests {
         std::fs::create_dir_all(repo.join("docs")).unwrap();
         std::fs::write(repo.join("docs/guia.md"), "um\n").unwrap();
         let action = |name: &str| format!("/api/v1/workspaces/w-review/delivery/{name}");
+
+        // The conversation header's "Criar PR": the summary's token guards
+        // the local changes, the context names the route and the title.
+        let (status, summary) = call(
+            &fixture.app,
+            "GET",
+            "/api/v1/workspaces/w-review/delivery",
+            None,
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{summary}");
+        assert_eq!(summary["changes"].as_array().unwrap().len(), 1);
+        assert!(!summary["changesToken"].as_str().unwrap().is_empty());
+        let (status, context) = post_json(
+            &fixture.app,
+            "/api/v1/forge/change-request-context",
+            json!({ "workspaceRoot": repo.to_string_lossy() }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{context}");
+        assert_eq!(context["headBranch"], "dcc/revisao");
+        assert_eq!(context["baseBranch"], "main");
 
         // The preview stages everything and reads the deterministic message.
         let (status, preview) = post_json(&fixture.app, &action("prepare-commit"), json!({})).await;
