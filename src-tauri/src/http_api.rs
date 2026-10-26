@@ -735,6 +735,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(delegation_review::discard),
         )
         .route(
+            "/api/v1/delegations/:delegation_id/cancel",
+            post(delegation_review::cancel),
+        )
+        .route(
             "/api/v1/sessions/:session_id/last-turn-review",
             post(turn_review::last_turn),
         )
@@ -1546,6 +1550,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/forge/pipeline-job-retry",
             "POST /api/v1/delegations/:delegation_id/apply",
             "POST /api/v1/delegations/:delegation_id/discard",
+            "POST /api/v1/delegations/:delegation_id/cancel",
             "GET /api/v1/workspaces/:workspace_id/delivery",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
@@ -5459,6 +5464,13 @@ mod tests {
             &fixture.app,
             "/api/v1/delegations/missing/apply",
             json!({ "workspaceRoot": root }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/delegations/missing/cancel",
+            json!({}),
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{body}");

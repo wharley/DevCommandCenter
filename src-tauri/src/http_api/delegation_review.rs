@@ -1,7 +1,8 @@
 //! Reviewing an isolated delegation from the native app's changes list
 //! (`handleApplyDelegation` / `handleDiscardDelegation`): apply the child's
 //! worktree onto the task's checkout and approve the delegation, or throw
-//! the worktree away and cancel it, in the desktop's order.
+//! the worktree away and cancel it, in the desktop's order. The header's
+//! lineage menu stops a running one (`cancelRunningDelegation`).
 use super::*;
 use dcc_core::domain::delegation::DelegationId;
 use dcc_core::ports::DelegationRepo;
@@ -80,4 +81,26 @@ pub(super) async fn discard(
     .await
     .map_err(HttpApiError::bad_request)?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// `cancel_running_delegation`: marks it cancelled, aborts the child's turn
+/// and drops an implementation worktree; a finished one comes back as is.
+pub(super) async fn cancel(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(delegation_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let id = DelegationId(delegation_id);
+    let delegation = DelegationRepo::get_delegation(&backend.sessions, &id)
+        .await
+        .map_err(|error| HttpApiError::internal(error.to_string()))?
+        .ok_or_else(|| HttpApiError::not_found("delegation not found"))?;
+    let delegation = dcc_tauri::delegation_runtime::cancel_delegation_for_parent(
+        &backend.sessions,
+        &delegation.parent_session_id,
+        &delegation.id.0,
+        Some("Cancelled by the person.".to_string()),
+    )
+    .await
+    .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!({ "status": delegation.status })))
 }
