@@ -6,7 +6,9 @@
 //! the permissions, the conversation's runtime, the apps with a window),
 //! opens a permission's system settings (`access`) and answers (`respond`,
 //! first answer wins, shared with the phone). The desktop's own dialog
-//! stays quiet meanwhile. The desktop still does the controlling: the
+//! stays quiet meanwhile. The stream also carries what the agent does
+//! (`computer-activity`) and when the preview's frame changes, for the
+//! native app's preview, which reads the frame from `preview`. The desktop still does the controlling: the
 //! permissions are its own.
 use super::browser_bridge::BrowserFuture;
 use super::*;
@@ -22,6 +24,9 @@ pub trait DesktopComputer: Send + Sync {
     fn status(&self, session_id: Option<String>, include_targets: bool) -> BrowserFuture<Value>;
     /// `computer_use_request_access`: `accessibility` or `screenRecording`.
     fn request_access(&self, kind: String) -> BrowserFuture<Value>;
+    /// The session's latest preview frame (`ComputerUsePreviewFrame` or
+    /// null); `refresh` captures a new one first.
+    fn preview(&self, session_id: String, refresh: bool) -> BrowserFuture<Value>;
     /// `computer_use_respond_control_request`
     fn respond(
         &self,
@@ -48,6 +53,15 @@ impl NativeComputer {
     pub fn connected(&self) -> bool {
         self.events.receiver_count() > 0
     }
+
+    /// A live event for the native app's preview (`computer-activity`,
+    /// `computer-preview-updated`, `computer-preview-cleared`); dropped
+    /// when it is not listening.
+    pub fn publish(&self, name: &str, data: Value) {
+        if self.connected() {
+            let _ = self.events.send((name.to_string(), data));
+        }
+    }
 }
 
 pub(super) fn routes() -> Router<HttpState> {
@@ -55,6 +69,7 @@ pub(super) fn routes() -> Router<HttpState> {
         .route("/api/v1/computer/bridge/stream", get(stream))
         .route("/api/v1/computer/bridge/status", post(status))
         .route("/api/v1/computer/bridge/access", post(access))
+        .route("/api/v1/computer/bridge/preview", post(preview))
         .route(
             "/api/v1/computer/bridge/requests/:id/respond",
             post(respond),
@@ -87,6 +102,25 @@ async fn status(
         .await
         .map_err(HttpApiError::bad_request)?;
     Ok(Json(status))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewInput {
+    session_id: String,
+    #[serde(default)]
+    refresh: bool,
+}
+
+async fn preview(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<PreviewInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let frame = host(&backend)?
+        .preview(input.session_id, input.refresh)
+        .await
+        .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!({ "frame": frame })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,6 +227,9 @@ mod tests {
         }
         fn request_access(&self, _: String) -> BrowserFuture<Value> {
             Box::pin(async { Ok(json!({})) })
+        }
+        fn preview(&self, _: String, _: bool) -> BrowserFuture<Value> {
+            Box::pin(async { Ok(Value::Null) })
         }
         fn respond(&self, _: String, _: bool, _: Vec<String>) -> BrowserFuture<Value> {
             Box::pin(async { Ok(json!({})) })

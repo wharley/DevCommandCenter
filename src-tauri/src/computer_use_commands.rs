@@ -1997,6 +1997,14 @@ fn modifier_flags(modifiers: &[String]) -> Result<u64, String> {
         })
 }
 
+/// The native app's preview hears it too (`http_api::computer_bridge`).
+pub(crate) fn publish_preview_cleared(session_id: &str) {
+    dev_command_center_tauri::http_api::native_computer().publish(
+        "computer-preview-cleared",
+        serde_json::json!({ "sessionId": session_id }),
+    );
+}
+
 #[tauri::command]
 pub fn computer_use_status(
     state: State<'_, ComputerUseState>,
@@ -2011,6 +2019,7 @@ pub fn computer_use_arm(
     input: ComputerUseArmInput,
 ) -> Result<ComputerGrantStatus, String> {
     let grant = state.arm(&input.session_id, &input.allowed_bundle_ids)?;
+    publish_preview_cleared(&input.session_id);
     let _ = app.emit("computer-use-preview-cleared", input.session_id);
     Ok(grant)
 }
@@ -2021,6 +2030,7 @@ pub fn computer_use_disarm(
     input: ComputerUseDisarmInput,
 ) -> ComputerGrantStatus {
     let grant = state.disarm(&input.session_id);
+    publish_preview_cleared(&input.session_id);
     let _ = app.emit("computer-use-preview-cleared", input.session_id);
     grant
 }

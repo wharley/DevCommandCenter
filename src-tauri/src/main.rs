@@ -4224,6 +4224,28 @@ impl dev_command_center_tauri::http_api::DesktopComputer for HttpComputer {
         })
     }
 
+    fn preview(
+        &self,
+        session_id: String,
+        refresh: bool,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let state = self
+            .0
+            .state::<computer_use_commands::ComputerUseState>()
+            .inner()
+            .clone();
+        Box::pin(async move {
+            let frame = if refresh {
+                tokio::task::spawn_blocking(move || state.refresh_preview_frame(&session_id))
+                    .await
+                    .map_err(|_| "desktop computer-use preview refresh failed".to_string())?
+            } else {
+                state.preview_frame(&session_id)
+            };
+            serde_json::to_value(frame).map_err(|error| error.to_string())
+        })
+    }
+
     fn respond(
         &self,
         request_id: String,

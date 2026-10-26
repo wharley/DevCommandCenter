@@ -358,25 +358,32 @@ impl BrowserMcpBridge {
         phase: &'static str,
     ) {
         let Some(app) = self.app.as_ref() else { return };
-        let _ = app.emit(
-            "computer-use-activity",
-            ComputerUseActivityNotice {
-                session_id: binding.session_id.clone(),
-                provider_id: binding.provider_id.clone(),
-                activity_id: activity_id.to_string(),
-                tool: tool.to_string(),
-                phase,
-            },
-        );
+        let notice = ComputerUseActivityNotice {
+            session_id: binding.session_id.clone(),
+            provider_id: binding.provider_id.clone(),
+            activity_id: activity_id.to_string(),
+            tool: tool.to_string(),
+            phase,
+        };
+        if let Ok(event) = serde_json::to_value(&notice) {
+            dev_command_center_tauri::http_api::native_computer()
+                .publish("computer-activity", event);
+        }
+        let _ = app.emit("computer-use-activity", notice);
     }
 
     fn emit_computer_preview_updated(&self, session_id: &str) {
+        dev_command_center_tauri::http_api::native_computer().publish(
+            "computer-preview-updated",
+            serde_json::json!({ "sessionId": session_id }),
+        );
         if let Some(app) = self.app.as_ref() {
             let _ = app.emit("computer-use-preview-updated", session_id.to_string());
         }
     }
 
     fn emit_computer_preview_cleared(&self, session_id: &str) {
+        crate::computer_use_commands::publish_preview_cleared(session_id);
         if let Some(app) = self.app.as_ref() {
             let _ = app.emit("computer-use-preview-cleared", session_id.to_string());
         }

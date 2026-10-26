@@ -174,6 +174,7 @@ impl DesktopAgentRequests {
             Ok(output) => {
                 if allowed {
                     if let Some(session_id) = output.grant.session_id.as_deref() {
+                        crate::computer_use_commands::publish_preview_cleared(session_id);
                         let _ = self.app.emit("computer-use-preview-cleared", session_id);
                     }
                 }
