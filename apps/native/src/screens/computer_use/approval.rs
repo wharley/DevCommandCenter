@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
-use gpui::{Context, Task};
+use gpui::{Context, EventEmitter, Task};
 
 use crate::data::computer_use::{AccessKind, ComputerEvent, ComputerStatus, ControlRequest};
 use crate::data::desktop_api::DesktopApi;
@@ -24,6 +24,11 @@ const RECONNECT: Duration = Duration::from_secs(2);
 const STATUS_EVERY: Duration = Duration::from_millis(1500);
 /// `selectedBundleIds.slice(0, 16)`
 pub const MAX_APPS: usize = 16;
+
+/// What the agent does and its preview's frames, for the preview.
+pub struct LiveEvent(pub ComputerEvent);
+
+impl EventEmitter<LiveEvent> for ComputerApprovals {}
 
 /// A request, with when it runs out here.
 #[derive(Clone, Debug)]
@@ -143,7 +148,14 @@ impl ComputerApprovals {
 
     /// What the stream said.
     pub fn apply(&mut self, event: ComputerEvent, cx: &mut Context<Self>) {
-        let ComputerEvent::Requests(requests) = event;
+        let requests = match event {
+            ComputerEvent::Requests(requests) => requests,
+            // The preview's: the shell passes them on.
+            live => {
+                cx.emit(LiveEvent(live));
+                return;
+            }
+        };
         let now = Instant::now();
         let before = self.current().cloned();
         self.requests = requests

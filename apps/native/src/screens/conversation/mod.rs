@@ -81,6 +81,9 @@ impl gpui::EventEmitter<ConversationEvent> for ConversationView {}
 
 pub struct ConversationView {
     pub(crate) composer: Entity<Composer>,
+    /// The agent's screen while it uses the computer (the shell's).
+    pub(crate) computer_preview:
+        Option<Entity<crate::screens::computer_use::preview::ComputerPreview>>,
     /// A task just created: the composer takes the focus at the next frame.
     focus_composer: bool,
     _composer_events: gpui::Subscription,
@@ -145,6 +148,7 @@ impl ConversationView {
         });
         Self {
             composer,
+            computer_preview: None,
             focus_composer: false,
             _composer_events: composer_events,
             task_id: None,
@@ -708,7 +712,8 @@ impl Render for ConversationView {
                             self.list.clone(),
                             self.scrolled_at,
                         ))
-                    }),
+                    })
+                    .children(self.computer_preview.clone()),
             )
             .children(permission_panel::permission_panel(self, cx))
             .when(self.task_id.is_some(), |area| {

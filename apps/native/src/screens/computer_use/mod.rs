@@ -3,5 +3,7 @@
 
 pub mod approval;
 mod approval_view;
+pub mod preview;
+mod preview_view;
 #[cfg(test)]
 mod tests;

@@ -5,6 +5,7 @@ mod annotation;
 mod bootstrap;
 mod browser;
 mod browser_opens;
+mod computer;
 mod delivery;
 mod editor;
 pub mod layout;
@@ -114,6 +115,7 @@ pub struct Shell {
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
+    _computer: [Subscription; 3],
     /// The terminal dock under the conversation (screen 7).
     pub(crate) terminal: Entity<crate::screens::terminal::TerminalDock>,
     _terminal_events: Subscription,
@@ -225,6 +227,7 @@ impl Shell {
             };
             crate::screens::computer_use::approval::ComputerApprovals::new(api, computer_titles, cx)
         });
+        let computer_subscriptions = computer::link(&computer_approvals, &conversation, window, cx);
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
         Self {
@@ -233,6 +236,7 @@ impl Shell {
             browser_approvals,
             _browser_approvals: approval_subscriptions,
             computer_approvals,
+            _computer: computer_subscriptions,
             session_search: None,
             terminal,
             _terminal_events: terminal_events,

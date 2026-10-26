@@ -1,7 +1,7 @@
 //! Computer use through the desktop (`/api/v1/computer/bridge/*`): the
 //! agents' control requests (a stream that this app owns while it
-//! listens), the Mac's state for one, a permission's settings, and the
-//! answer. The desktop does the controlling; its permissions are its own.
+//! listens, with what the agent does and its preview's frames), the Mac's
+//! state for one, a permission's settings, the answer, and the frame. The desktop does the controlling; its permissions are its own.
 //! Blocking: call it off the UI thread.
 
 use std::time::Duration;
@@ -48,6 +48,7 @@ pub struct ComputerStatus {
     pub accessibility: Permission,
     pub screen_recording: Permission,
     pub targets: Vec<Target>,
+    pub grant: Grant,
 }
 
 impl ComputerStatus {
@@ -81,10 +82,70 @@ impl AccessKind {
     }
 }
 
+/// What the agent is doing (`ComputerUseActivityEvent`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Activity {
+    pub session_id: String,
+    pub activity_id: String,
+    pub tool: String,
+    /// `started`, `completed` or `failed`.
+    pub phase: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct SessionNotice {
+    session_id: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ComputerEvent {
     /// The control requests waiting, soonest to expire first.
     Requests(Vec<ControlRequest>),
+    Activity(Activity),
+    /// The session's preview has a new frame.
+    PreviewUpdated(String),
+    /// The session's preview is gone (the grant ended or changed).
+    PreviewCleared(String),
+}
+
+/// The window a preview frame shows.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct FrameTarget {
+    pub bundle_id: String,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// `ComputerUsePreviewFrame`: a PNG of the authorized window.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PreviewFrame {
+    pub session_id: String,
+    pub target: FrameTarget,
+    pub mime_type: String,
+    pub image_base64: String,
+    pub captured_at_ms: u64,
+}
+
+impl PreviewFrame {
+    pub fn png(&self) -> Option<Vec<u8>> {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode(&self.image_base64)
+            .ok()
+    }
+}
+
+/// The agent's grant, as `status` reports it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Grant {
+    pub armed: bool,
+    pub remaining_ms: u64,
 }
 
 pub struct ComputerStream {
@@ -96,6 +157,13 @@ impl ComputerStream {
     pub fn event(name: &str, data: &str) -> Option<ComputerEvent> {
         match name {
             "control-requests" => serde_json::from_str(data).ok().map(ComputerEvent::Requests),
+            "computer-activity" => serde_json::from_str(data).ok().map(ComputerEvent::Activity),
+            "computer-preview-updated" => serde_json::from_str::<SessionNotice>(data)
+                .ok()
+                .map(|notice| ComputerEvent::PreviewUpdated(notice.session_id)),
+            "computer-preview-cleared" => serde_json::from_str::<SessionNotice>(data)
+                .ok()
+                .map(|notice| ComputerEvent::PreviewCleared(notice.session_id)),
             _ => None,
         }
     }
@@ -137,6 +205,28 @@ impl DesktopApi {
             "/api/v1/computer/bridge/status",
             &json!({ "sessionId": session_id, "includeTargets": true }),
         )?)
+    }
+
+    /// The agent's grant for a conversation (no apps listed).
+    pub fn computer_grant(&self, session_id: &str) -> Result<Grant, ApiError> {
+        let status: ComputerStatus = Self::decoded(self.post(
+            "/api/v1/computer/bridge/status",
+            &json!({ "sessionId": session_id, "includeTargets": false }),
+        )?)?;
+        Ok(status.grant)
+    }
+
+    /// The session's latest preview frame; `refresh` captures one first.
+    pub fn computer_preview(
+        &self,
+        session_id: &str,
+        refresh: bool,
+    ) -> Result<Option<PreviewFrame>, ApiError> {
+        let value = self.post(
+            "/api/v1/computer/bridge/preview",
+            &json!({ "sessionId": session_id, "refresh": refresh }),
+        )?;
+        Self::decoded(value.get("frame").cloned().unwrap_or_default())
     }
 
     /// Opens the permission's system settings.
@@ -184,5 +274,21 @@ mod tests {
         assert!(!status.permissions_ready());
         let apps: Vec<String> = status.apps().into_iter().map(|app| app.name).collect();
         assert_eq!(apps, ["Finder", "Safari"]);
+        assert_eq!(
+            ComputerStream::event(
+                "computer-activity",
+                r#"{"sessionId":"s","providerId":"codex","activityId":"a1","tool":"dcc_computer_click","phase":"started"}"#,
+            ),
+            Some(ComputerEvent::Activity(Activity {
+                session_id: "s".into(),
+                activity_id: "a1".into(),
+                tool: "dcc_computer_click".into(),
+                phase: "started".into(),
+            }))
+        );
+        assert_eq!(
+            ComputerStream::event("computer-preview-cleared", r#"{"sessionId":"s"}"#),
+            Some(ComputerEvent::PreviewCleared("s".into()))
+        );
     }
 }
