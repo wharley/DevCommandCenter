@@ -2035,6 +2035,12 @@ pub fn computer_use_request_access(
 pub fn computer_use_list_pending_requests(
     state: State<'_, ComputerUseState>,
 ) -> ComputerUsePendingRequestsOutput {
+    // The native app answers them while it listens.
+    if dev_command_center_tauri::http_api::native_computer().connected() {
+        return ComputerUsePendingRequestsOutput {
+            requests: Vec::new(),
+        };
+    }
     state.pending_control_requests()
 }
 /// Answers through the shared ledger, so the desktop and a phone cannot both

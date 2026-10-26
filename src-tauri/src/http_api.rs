@@ -61,6 +61,7 @@ mod ai_memory;
 mod attention;
 mod browser_bridge;
 mod browser_opens;
+mod computer_bridge;
 mod delegation_review;
 mod delivery;
 mod files;
@@ -75,6 +76,7 @@ pub use browser_bridge::{
     native_browser_bridge, BridgeOpKind, BridgeReply, BrowserFuture, DesktopBrowser, PageReport,
 };
 pub use browser_opens::native_browser_opens;
+pub use computer_bridge::{native_computer, DesktopComputer};
 pub use terminals::{publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals};
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
@@ -233,6 +235,8 @@ pub struct HttpBackend {
     desktop_terminals: OnceLock<Arc<dyn DesktopTerminals>>,
     /// The desktop's Browser state, for the native app's Browser (local only).
     desktop_browser: OnceLock<Arc<dyn DesktopBrowser>>,
+    /// The desktop's computer use, for the native app (local only).
+    desktop_computer: OnceLock<Arc<dyn DesktopComputer>>,
     /// The relay connector serving this router, for the operator routes and
     /// to drop a revoked phone at once. Weak: the hub holds the router.
     remote: OnceLock<std::sync::Weak<RemoteHub>>,
@@ -264,6 +268,7 @@ impl HttpBackend {
             terminals: false,
             desktop_terminals: OnceLock::new(),
             desktop_browser: OnceLock::new(),
+            desktop_computer: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -289,6 +294,7 @@ impl HttpBackend {
             terminals: true,
             desktop_terminals: OnceLock::new(),
             desktop_browser: OnceLock::new(),
+            desktop_computer: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -312,6 +318,13 @@ impl HttpBackend {
     /// `/api/v1/browser/bridge/` (local clients only).
     pub fn with_desktop_browser(self, browser: Arc<dyn DesktopBrowser>) -> Self {
         let _ = self.desktop_browser.set(browser);
+        self
+    }
+
+    /// The desktop's computer use, for the native app under
+    /// `/api/v1/computer/bridge/` (local clients only).
+    pub fn with_desktop_computer(self, computer: Arc<dyn DesktopComputer>) -> Self {
+        let _ = self.desktop_computer.set(computer);
         self
     }
 
@@ -849,6 +862,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             .merge(terminals::routes())
             .merge(browser_bridge::routes())
             .merge(browser_opens::routes())
+            .merge(computer_bridge::routes())
     }
     .route_layer(middleware::from_fn_with_state(
         config.clone(),

@@ -3854,6 +3854,7 @@ fn start_embedded_http_server(
             .with_workspace_state(workspace_state)
             .with_desktop_terminals(Arc::new(HttpTerminals(app.handle().clone())))
             .with_desktop_browser(Arc::new(HttpBrowser(app.handle().clone())))
+            .with_desktop_computer(Arc::new(HttpComputer(app.handle().clone())))
             .with_app(app.handle().clone()),
         Err(error) => {
             eprintln!("[DCC HTTP] not started: {error}");
@@ -4166,6 +4167,81 @@ impl dev_command_center_tauri::http_api::DesktopBrowser for HttpBrowser {
                     .unwrap_or_else(|| "Browser approval could not be confirmed".into()));
             }
             serde_json::to_value(result).map_err(|error| error.to_string())
+        })
+    }
+}
+
+/// The desktop's computer use for the native app
+/// (`http_api::computer_bridge`): the same state and answers as the
+/// WebView's dialog.
+struct HttpComputer(AppHandle);
+
+impl dev_command_center_tauri::http_api::DesktopComputer for HttpComputer {
+    fn pending(&self) -> Value {
+        let state = self.0.state::<computer_use_commands::ComputerUseState>();
+        serde_json::to_value(state.pending_control_requests().requests)
+            .unwrap_or_else(|_| Value::Array(Vec::new()))
+    }
+
+    fn status(
+        &self,
+        session_id: Option<String>,
+        include_targets: bool,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let state = self
+            .0
+            .state::<computer_use_commands::ComputerUseState>()
+            .inner()
+            .clone();
+        Box::pin(async move {
+            // Lists the Mac's windows: off the async threads.
+            let status = tokio::task::spawn_blocking(move || {
+                state.status(session_id.as_deref(), include_targets)
+            })
+            .await
+            .map_err(|_| "desktop computer-use status failed".to_string())?;
+            serde_json::to_value(status).map_err(|error| error.to_string())
+        })
+    }
+
+    fn request_access(
+        &self,
+        kind: String,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let state = self
+            .0
+            .state::<computer_use_commands::ComputerUseState>()
+            .inner()
+            .clone();
+        Box::pin(async move {
+            let kind: computer_use_commands::ComputerAccessKind =
+                serde_json::from_value(Value::String(kind))
+                    .map_err(|_| "desktop computer-use access kind is invalid".to_string())?;
+            let status = tokio::task::spawn_blocking(move || state.request_access(kind))
+                .await
+                .map_err(|_| "desktop computer-use access failed".to_string())??;
+            serde_json::to_value(status).map_err(|error| error.to_string())
+        })
+    }
+
+    fn respond(
+        &self,
+        request_id: String,
+        allowed: bool,
+        allowed_bundle_ids: Vec<String>,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let output = computer_use_commands::computer_use_respond_control_request(
+                app.state(),
+                computer_use_commands::ComputerUseRespondControlRequestInput {
+                    request_id,
+                    allowed,
+                    allowed_bundle_ids,
+                },
+            )
+            .await?;
+            serde_json::to_value(output).map_err(|error| error.to_string())
         })
     }
 }
