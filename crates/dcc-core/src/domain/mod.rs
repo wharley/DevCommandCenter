@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_call;
 pub mod attention;
 pub mod browser;
 pub mod code_annotation;
@@ -25,6 +26,7 @@ pub mod objective_form;
 pub mod project;
 pub mod provider;
 pub mod repository;
+pub mod review_findings;
 pub mod review_thread_detail;
 pub mod review_threads;
 pub mod task_title;

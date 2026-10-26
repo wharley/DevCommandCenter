@@ -56,6 +56,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+mod agents;
 mod ai_memory;
 mod attention;
 mod delegation_review;
@@ -752,6 +753,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             get(ai_memory::source_actions).post(ai_memory::save_source_action),
         )
         .route("/api/v1/ai-memory/sidecar", get(ai_memory::sidecar_status))
+        .route(
+            "/api/v1/sessions/:session_id/agent",
+            post(agents::bind_session),
+        )
         .route(
             "/api/v1/sessions/:session_id/last-turn-review",
             post(turn_review::last_turn),
@@ -1570,6 +1575,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/ai-memory/source-actions",
             "POST /api/v1/ai-memory/source-actions",
             "GET /api/v1/ai-memory/sidecar",
+            "POST /api/v1/sessions/:session_id/agent",
             "GET /api/v1/workspaces/:workspace_id/delivery",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
@@ -5536,6 +5542,47 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_binds_to_a_live_agent_only() {
+        let fixture = embedded_fixture().await;
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/sessions/s-1/agent",
+            json!({ "agentId": "nobody" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        // The built-in reviewer, seeded as the desktop does on its first list.
+        let agents = fixture
+            .backend
+            .sessions
+            .list_resident_agents(
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+            )
+            .unwrap();
+        let reviewer = agents
+            .iter()
+            .find(|agent| agent.preset.as_deref() == Some("reviewer"))
+            .unwrap();
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/sessions/http-respond/agent",
+            json!({ "agentId": reviewer.id }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let bound = fixture
+            .backend
+            .sessions
+            .list_agent_session_bindings()
+            .unwrap();
+        assert!(bound.iter().any(|binding| {
+            binding.session_id == fixture.session_id.0 && binding.agent_id == reviewer.id
+        }));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
