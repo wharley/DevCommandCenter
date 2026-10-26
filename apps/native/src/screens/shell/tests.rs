@@ -467,3 +467,49 @@ fn the_columns_delivery_reaches_the_header_and_review_opens_changes(cx: &mut Tes
         assert_eq!(shell.prefs.code_column_tab, CodeColumnTab::Changes);
     });
 }
+
+#[gpui::test]
+fn the_browsers_page_context_lands_in_the_composers_draft(cx: &mut TestAppContext) {
+    use crate::screens::browser::BrowserEvent;
+    use crate::screens::browser::page::{FakePage, Page};
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let conversation = shell.read_with(cx, |shell, _| shell.conversation.clone());
+    conversation.update(cx, |view, cx| {
+        let data = crate::data::conversation::Conversation {
+            task_id: "t".into(),
+            session_id: Some("s".into()),
+            // A task's checkout: the Browser stays open for its task.
+            root_path: Some("/tmp/dcc-browser-test".into()),
+            last_sequence: 1,
+            ..Default::default()
+        };
+        view.show_loaded(data, cx);
+    });
+    cx.run_until_parked();
+    shell.update_in(cx, |shell, window, cx| {
+        shell.browser.pages = std::rc::Rc::new(|_, _, _| {
+            Ok(std::rc::Rc::new(FakePage::default()) as std::rc::Rc<dyn Page>)
+        });
+        shell.open_browser(Some("https://example.com/".into()), window, cx);
+    });
+    let surface = shell.read_with(cx, |shell, _| {
+        shell
+            .browser
+            .open
+            .as_ref()
+            .expect("the Browser")
+            .surface
+            .clone()
+    });
+    surface.update(cx, |_, cx| {
+        cx.emit(BrowserEvent::SendToAgent(
+            "<browser_page>\nGuia\n</browser_page>".into(),
+        ))
+    });
+    cx.run_until_parked();
+    let draft = cx.update(|_, cx| {
+        let composer = conversation.read(cx).composer.clone();
+        composer.read(cx).input.read(cx).text().to_string()
+    });
+    assert!(draft.contains("<browser_page>"), "{draft}");
+}

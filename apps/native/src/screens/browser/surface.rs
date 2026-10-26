@@ -43,7 +43,12 @@ pub struct BrowserRequest {
 
 pub enum BrowserEvent {
     Closed,
+    /// "Enviar contexto da página ao agente": the envelope for the composer.
+    SendToAgent(String),
 }
+
+/// Each Browser opened is a lifecycle of its own (the map ids say which).
+static LIFECYCLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -68,6 +73,13 @@ pub struct BrowserSurface {
     pub(super) shown: bool,
     /// The splitter is being dragged: the page stays out of the way.
     pub(super) force_hidden: bool,
+    /// The page's context is being read for the agent.
+    pub sending: bool,
+    /// Pages finished loading, to tell a reply from an old page.
+    pub(super) page_loads: u64,
+    pub(super) lifecycle: u64,
+    pub(super) map_generation: u64,
+    pub(super) _context: Option<Task<()>>,
     db_path: PathBuf,
     _address_events: Subscription,
     _page_events: Option<Task<()>>,
@@ -105,6 +117,11 @@ impl BrowserSurface {
             events: None,
             shown: false,
             force_hidden: false,
+            sending: false,
+            page_loads: 0,
+            lifecycle: LIFECYCLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+            map_generation: 0,
+            _context: None,
             db_path,
             _address_events: address_events,
             _page_events: None,
@@ -227,6 +244,7 @@ impl BrowserSurface {
             }
             PageEvent::Loaded(url) => {
                 self.loading = false;
+                self.page_loads += 1;
                 self.set_address(&url, cx);
                 self.persist(&url, cx);
                 self.url = Some(url);

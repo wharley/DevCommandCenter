@@ -3,6 +3,7 @@
 //! around it is GPUI.
 
 pub mod address;
+mod context;
 mod download;
 pub mod layout;
 pub mod page;

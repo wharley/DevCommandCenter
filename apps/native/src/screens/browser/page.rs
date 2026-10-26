@@ -33,6 +33,8 @@ pub trait Page {
     fn url(&self) -> Option<String>;
     /// The keyboard back to the GPUI window.
     fn blur(&self);
+    /// Runs `script` in the page; its result's JSON comes back on `reply`.
+    fn evaluate(&self, script: &str, reply: futures::channel::oneshot::Sender<String>);
 }
 
 /// A Browser-only WebKit store (macOS 14+), apart from anything else in
@@ -166,6 +168,15 @@ impl Page for WryPage {
     fn blur(&self) {
         let _ = self.view.focus_parent();
     }
+
+    fn evaluate(&self, script: &str, reply: futures::channel::oneshot::Sender<String>) {
+        let reply = std::sync::Mutex::new(Some(reply));
+        let _ = self.view.evaluate_script_with_callback(script, move |raw| {
+            if let Some(reply) = reply.lock().ok().and_then(|mut reply| reply.take()) {
+                let _ = reply.send(raw);
+            }
+        });
+    }
 }
 
 /// A page that only records what it is asked, for headless tests.
@@ -174,6 +185,8 @@ impl Page for WryPage {
 pub struct FakePage {
     pub calls: std::cell::RefCell<Vec<String>>,
     pub url: std::cell::RefCell<Option<String>>,
+    /// What a script answers (none: it never does).
+    pub answer: std::cell::RefCell<Option<String>>,
 }
 
 #[cfg(test)]
@@ -198,4 +211,15 @@ impl Page for FakePage {
     }
 
     fn blur(&self) {}
+
+    fn evaluate(&self, _: &str, reply: futures::channel::oneshot::Sender<String>) {
+        self.calls.borrow_mut().push("evaluate".into());
+        match self.answer.borrow().clone() {
+            Some(answer) => {
+                let _ = reply.send(answer);
+            }
+            // Kept so the reply never arrives (a page that hangs).
+            None => std::mem::forget(reply),
+        }
+    }
 }

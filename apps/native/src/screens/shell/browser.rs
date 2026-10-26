@@ -78,9 +78,14 @@ impl Shell {
         let pages = self.browser.pages.clone();
         let db_path = crate::data::loader::database_path();
         let surface = cx.new(|cx| BrowserSurface::new(request, pages, db_path, window, cx));
-        let events = cx.subscribe_in(&surface, window, |shell, _, event, _, cx| match event {
-            BrowserEvent::Closed => shell.close_browser(cx),
-        });
+        let events = cx.subscribe_in(
+            &surface,
+            window,
+            |shell, _, event, window, cx| match event {
+                BrowserEvent::Closed => shell.close_browser(cx),
+                BrowserEvent::SendToAgent(text) => shell.browser_to_agent(text.clone(), window, cx),
+            },
+        );
         self.browser.open = Some(OpenBrowser {
             surface,
             _events: events,
@@ -88,6 +93,22 @@ impl Shell {
         });
         self.sync_header(cx);
         cx.notify();
+    }
+
+    /// `handleSendBrowserToAgent`: the page's context into the draft; then
+    /// the composer, beside the Browser, or the Browser closes over the chat.
+    fn browser_to_agent(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        let composer = self.conversation.read(cx).composer.clone();
+        let added = composer.update(cx, |composer, cx| composer.append_text(&text, window, cx));
+        if !added {
+            return;
+        }
+        if should_split(self.workbench_width(window, cx)) {
+            self.conversation
+                .update(cx, |conversation, cx| conversation.focus_composer_soon(cx));
+        } else {
+            self.close_browser(cx);
+        }
     }
 
     /// `handleCloseBrowser`: the composer takes the focus back.

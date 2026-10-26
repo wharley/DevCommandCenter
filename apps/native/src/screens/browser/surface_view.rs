@@ -1,5 +1,5 @@
 //! The Browser as the desktop draws it: the 44px header (the address bar
-//! with the reload inside it, close), the 28px strip (an error, loading, or
+//! with the reload inside it, send to the agent, close), the 28px strip (an error, loading, or
 //! the page's title) and the white viewport the page is laid over.
 
 use gpui::{
@@ -150,6 +150,26 @@ impl BrowserSurface {
             .into_any_element()
     }
 
+    /// `browser.sendToAgent`: `Sparkles`, turning while the page is read.
+    fn send_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let label = cx.t("browser.sendToAgent");
+        let button = Button::new("browser-send-agent")
+            .variant(ButtonVariant::Ghost)
+            .size(ButtonSize::IconSm)
+            .muted()
+            .disabled(!self.can_send())
+            .on_click(cx.listener(|surface, _, _, cx| surface.send_to_agent(cx)))
+            .child(if self.sending {
+                spinner("browser-send-busy", 14.0).into_any_element()
+            } else {
+                Icon::new("sparkles").size(14.0).into_any_element()
+            });
+        Tooltip::new("browser-send-agent-tip", button, move |_, _| {
+            div().child(label.clone()).into_any_element()
+        })
+        .into_any_element()
+    }
+
     fn header(&self, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let close_label = cx.t("browser.close");
@@ -169,6 +189,7 @@ impl BrowserSurface {
             .bg(colors.background.opacity(0.95))
             .px(px(10.0))
             .child(self.address_bar(cx))
+            .child(self.send_button(cx))
             .child(Tooltip::new("browser-close-tip", close, move |_, _| {
                 div().child(close_label.clone()).into_any_element()
             }))

@@ -204,3 +204,56 @@ fn the_page_shows_and_hides_under_an_overlay(cx: &mut TestAppContext) {
     assert!(calls.contains(&"visible true".to_string()));
     assert!(calls.contains(&"visible false".to_string()));
 }
+
+#[gpui::test]
+fn the_pages_context_goes_to_the_agent_or_says_why_not(cx: &mut TestAppContext) {
+    use super::BrowserEvent;
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("database.sqlite");
+    let pages = Rc::new(Pages::default());
+    let (surface, cx) = open(cx, &db, Some("https://example.com/docs"), &pages);
+    let sent: Rc<RefCell<Vec<String>>> = Rc::default();
+    let sink = sent.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&surface, move |_, event: &BrowserEvent, _| {
+            if let BrowserEvent::SendToAgent(text) = event {
+                sink.borrow_mut().push(text.clone());
+            }
+        })
+        .detach();
+    });
+    // Still loading: nothing to read yet.
+    assert!(!cx.update(|_, cx| surface.read(cx).can_send()));
+    send(
+        &pages,
+        PageEvent::Loaded("https://example.com/docs".into()),
+        cx,
+    );
+    send(&pages, PageEvent::Title("Docs".into()), cx);
+    *pages.page.answer.borrow_mut() = Some(
+        r#"{"text":"Guia do <checkout>","selectionOnly":true,"truncated":false,"documentIdentity":3.5,"semanticMap":{"items":[{"role":"button","name":"Salvar","ordinal":2,"tag":"button","contentEditable":false}],"truncated":false}}"#.into(),
+    );
+    let button = cx
+        .debug_bounds("browser-send-agent")
+        .expect("the send button");
+    cx.simulate_click(button.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    let text = sent.borrow().first().cloned().expect("sent to the agent");
+    assert!(text.starts_with("<browser_page>"));
+    assert!(text.contains("URL: https://example.com/docs"));
+    assert!(text.contains("Título: Docs"));
+    assert!(text.contains("Origem: texto selecionado"));
+    assert!(text.contains("Guia do &lt;checkout>"));
+    assert!(text.contains("- [e1] button | Nome: Salvar"));
+    assert!(text.contains("ID do mapa: m-"));
+    // A page that never answers says so after 2s.
+    *pages.page.answer.borrow_mut() = None;
+    cx.update(|_, cx| surface.update(cx, |surface, cx| surface.send_to_agent(cx)));
+    assert!(cx.update(|_, cx| surface.read(cx).sending));
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(3));
+    cx.run_until_parked();
+    let error = cx.update(|_, cx| surface.read(cx).error.clone());
+    assert_eq!(error.as_deref(), Some("browser page context timed out"));
+    assert_eq!(sent.borrow().len(), 1);
+}
