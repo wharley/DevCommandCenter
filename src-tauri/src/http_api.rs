@@ -56,6 +56,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+mod ai_memory;
 mod attention;
 mod delegation_review;
 mod delivery;
@@ -738,6 +739,19 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/delegations/:delegation_id/cancel",
             post(delegation_review::cancel),
         )
+        .route(
+            "/api/v1/sessions/:session_id/ai-memory/export-status",
+            get(ai_memory::export_status),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/ai-memory/sources",
+            get(ai_memory::sources),
+        )
+        .route(
+            "/api/v1/ai-memory/source-actions",
+            get(ai_memory::source_actions).post(ai_memory::save_source_action),
+        )
+        .route("/api/v1/ai-memory/sidecar", get(ai_memory::sidecar_status))
         .route(
             "/api/v1/sessions/:session_id/last-turn-review",
             post(turn_review::last_turn),
@@ -1551,6 +1565,11 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/delegations/:delegation_id/apply",
             "POST /api/v1/delegations/:delegation_id/discard",
             "POST /api/v1/delegations/:delegation_id/cancel",
+            "GET /api/v1/sessions/:session_id/ai-memory/export-status",
+            "GET /api/v1/sessions/:session_id/ai-memory/sources",
+            "GET /api/v1/ai-memory/source-actions",
+            "POST /api/v1/ai-memory/source-actions",
+            "GET /api/v1/ai-memory/sidecar",
             "GET /api/v1/workspaces/:workspace_id/delivery",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
@@ -5474,6 +5493,49 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ai_memory_reads_a_sessions_sources_and_keeps_the_curation() {
+        let fixture = embedded_fixture().await;
+        let get = |uri: &'static str| call(&fixture.app, "GET", uri, None, None, true);
+        // Nothing exported waits, nothing was recovered, no sidecar here.
+        let (status, waiting) = get("/api/v1/sessions/s-none/ai-memory/export-status").await;
+        assert_eq!(status, StatusCode::OK, "{waiting}");
+        assert_eq!(waiting, Value::Null);
+        let (status, sources) = get("/api/v1/sessions/s-none/ai-memory/sources").await;
+        assert_eq!(status, StatusCode::OK, "{sources}");
+        assert_eq!(sources, json!([]));
+        let (status, sidecar) = get("/api/v1/ai-memory/sidecar").await;
+        assert_eq!(status, StatusCode::OK, "{sidecar}");
+        assert_eq!(sidecar["mode"], "disabled");
+        // A pin is kept, then cleared.
+        let (status, saved) = post_json(
+            &fixture.app,
+            "/api/v1/ai-memory/source-actions",
+            json!({ "sourceKey": "docs/a.md|A|um", "action": "pinned", "correction": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        let (_, actions) = get("/api/v1/ai-memory/source-actions").await;
+        assert_eq!(actions[0]["sourceKey"], "docs/a.md|A|um");
+        assert_eq!(actions[0]["action"], "pinned");
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/ai-memory/source-actions",
+            json!({ "sourceKey": "docs/a.md|A|um", "action": "cleared", "correction": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, actions) = get("/api/v1/ai-memory/source-actions").await;
+        assert_eq!(actions, json!([]));
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/ai-memory/source-actions",
+            json!({ "sourceKey": "x", "action": "deleted", "correction": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -369,6 +369,14 @@ pub fn ai_memory_recovered_sources(
     state: State<'_, SessionCommandState>,
     session_id: String,
 ) -> Result<Vec<AiMemoryQueryHit>, String> {
+    ai_memory_recovered_sources_with_state(&state, session_id)
+}
+
+/// `ai_memory_recovered_sources` for callers without a Tauri `State` (the HTTP API).
+pub fn ai_memory_recovered_sources_with_state(
+    state: &SessionCommandState,
+    session_id: String,
+) -> Result<Vec<AiMemoryQueryHit>, String> {
     let session_id = session_id.trim();
     if session_id.is_empty() || session_id.len() > 200 {
         return Err("sessionId is required".to_string());
@@ -393,6 +401,14 @@ pub fn ai_memory_source_actions(
     state: State<'_, SessionCommandState>,
     limit: Option<usize>,
 ) -> Result<Vec<AiMemorySourceActionOutput>, String> {
+    ai_memory_source_actions_with_state(&state, limit)
+}
+
+/// `ai_memory_source_actions` for callers without a Tauri `State` (the HTTP API).
+pub fn ai_memory_source_actions_with_state(
+    state: &SessionCommandState,
+    limit: Option<usize>,
+) -> Result<Vec<AiMemorySourceActionOutput>, String> {
     state
         .list_ai_memory_source_actions(limit.unwrap_or(200))
         .map(|actions| {
@@ -412,6 +428,14 @@ pub fn ai_memory_source_actions(
 #[tauri::command]
 pub fn ai_memory_source_action_save(
     state: State<'_, SessionCommandState>,
+    input: AiMemorySourceActionInput,
+) -> Result<AiMemorySourceActionOutput, String> {
+    ai_memory_source_action_save_with_state(&state, input)
+}
+
+/// `ai_memory_source_action_save` for callers without a Tauri `State` (the HTTP API).
+pub fn ai_memory_source_action_save_with_state(
+    state: &SessionCommandState,
     input: AiMemorySourceActionInput,
 ) -> Result<AiMemorySourceActionOutput, String> {
     let source_key = input.source_key.trim();
@@ -453,6 +477,14 @@ pub fn ai_memory_source_action_save(
 #[tauri::command]
 pub fn ai_memory_export_status(
     state: State<'_, SessionCommandState>,
+    session_id: String,
+) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
+    ai_memory_export_status_with_state(&state, session_id)
+}
+
+/// `ai_memory_export_status` for callers without a Tauri `State` (the HTTP API).
+pub fn ai_memory_export_status_with_state(
+    state: &SessionCommandState,
     session_id: String,
 ) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
     let session_id = session_id.trim();
