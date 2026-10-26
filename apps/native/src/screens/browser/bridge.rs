@@ -177,6 +177,40 @@ impl BrowserSurface {
                 }
             }
             BridgeOpKind::Reload => self.reload(cx),
+            BridgeOpKind::Click { x, y } => {
+                let delivered = page.click(x, y);
+                self.answer(
+                    op.op_id,
+                    delivered
+                        .then(|| "true".to_string())
+                        .ok_or_else(|| "browser click could not be delivered".to_string()),
+                );
+            }
+            BridgeOpKind::Press { key } => {
+                let delivered = page.press(&key);
+                self.answer(
+                    op.op_id,
+                    delivered
+                        .then(|| "true".to_string())
+                        .ok_or_else(|| "browser keyboard input could not be delivered".to_string()),
+                );
+            }
+            BridgeOpKind::Snapshot => {
+                let (reply, image) = futures::channel::oneshot::channel();
+                page.snapshot(reply);
+                let outbox = self.bridge.as_ref().map(|bridge| bridge.outbox.clone());
+                cx.spawn(async move |_, _| {
+                    use base64::Engine;
+                    let result = image
+                        .await
+                        .unwrap_or_else(|_| Err("Browser snapshot was cancelled".into()))
+                        .map(|png| base64::engine::general_purpose::STANDARD.encode(png));
+                    if let Some(outbox) = outbox {
+                        let _ = outbox.send(Outgoing::Reply(op.op_id, result));
+                    }
+                })
+                .detach();
+            }
         }
     }
 }

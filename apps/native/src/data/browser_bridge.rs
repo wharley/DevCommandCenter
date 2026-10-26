@@ -16,7 +16,7 @@ use crate::data::desktop_api::{ApiError, DesktopApi};
 use crate::data::sse::{Body, SseFrames};
 
 /// A page operation the desktop asks for.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BridgeOpKind {
     /// Runs a script; its result's JSON goes back.
@@ -31,9 +31,20 @@ pub enum BridgeOpKind {
         url: String,
     },
     Reload,
+    /// A real click at these fractions of the viewport.
+    Click {
+        x: f64,
+        y: f64,
+    },
+    /// One allowed key to the focused page.
+    Press {
+        key: String,
+    },
+    /// The viewport as PNG, base64 in the answer.
+    Snapshot,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeOp {
     pub op_id: u64,
@@ -208,6 +219,23 @@ mod tests {
             Some(BridgeOp {
                 op_id: 8,
                 kind: BridgeOpKind::Reload,
+            })
+        );
+        assert_eq!(
+            BridgeOps::op(
+                "browser-op",
+                r#"{"opId":9,"kind":"click","x":0.25,"y":0.5}"#
+            ),
+            Some(BridgeOp {
+                op_id: 9,
+                kind: BridgeOpKind::Click { x: 0.25, y: 0.5 },
+            })
+        );
+        assert_eq!(
+            BridgeOps::op("browser-op", r#"{"opId":10,"kind":"snapshot"}"#),
+            Some(BridgeOp {
+                op_id: 10,
+                kind: BridgeOpKind::Snapshot,
             })
         );
         assert_eq!(BridgeOps::op("browser-lagged", "{}"), None);

@@ -436,6 +436,44 @@ fn the_desktops_agents_drive_this_browser_and_hear_its_page(cx: &mut TestAppCont
             .any(|call| call == "load https://example.com/plans")
     );
     assert!(calls.iter().any(|call| call == "reload"));
+    // A real click, a key and the viewport's image.
+    run(cx, BridgeOpKind::Click { x: 0.25, y: 0.5 }, 10);
+    run(
+        cx,
+        BridgeOpKind::Press {
+            key: "Enter".into(),
+        },
+        11,
+    );
+    run(
+        cx,
+        BridgeOpKind::Press {
+            key: "Meta+Q".into(),
+        },
+        12,
+    );
+    run(cx, BridgeOpKind::Snapshot, 13);
+    let replies: Vec<(u64, Result<String, String>)> = outbox
+        .try_iter()
+        .filter_map(|message| match message {
+            Outgoing::Reply(op_id, result) => Some((op_id, result)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        replies,
+        [
+            (10, Ok("true".to_string())),
+            (11, Ok("true".to_string())),
+            (
+                12,
+                Err("browser keyboard input could not be delivered".to_string())
+            ),
+            (13, Ok("cG5n".to_string())),
+        ]
+    );
+    let calls = pages.page.calls.borrow().clone();
+    assert!(calls.iter().any(|call| call == "click 0.25 0.5"));
     // Hidden under an overlay: the desktop hears it.
     cx.update(|_, cx| surface.update(cx, |surface, _| surface.show_page(false)));
     assert!(

@@ -8,6 +8,7 @@ mod context;
 mod control;
 mod cookies;
 mod download;
+mod input;
 pub mod layout;
 pub mod page;
 mod popup;

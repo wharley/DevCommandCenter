@@ -35,6 +35,12 @@ pub trait Page {
     fn blur(&self);
     /// Runs `script` in the page; its result's JSON comes back on `reply`.
     fn evaluate(&self, script: &str, reply: futures::channel::oneshot::Sender<String>);
+    /// A real click at these fractions of the viewport (delivered or not).
+    fn click(&self, x: f64, y: f64) -> bool;
+    /// One allowed key to the focused page (delivered or not).
+    fn press(&self, key: &str) -> bool;
+    /// The viewport as PNG.
+    fn snapshot(&self, reply: futures::channel::oneshot::Sender<Result<Vec<u8>, String>>);
     /// Imported cookies into the page's store; imported and skipped back.
     fn set_cookies(
         &self,
@@ -70,6 +76,15 @@ pub struct WryPage {
     view: Rc<wry::WebView>,
     /// The sign-in windows it opened, closed with it.
     popups: super::popup::Popups,
+}
+
+#[cfg(target_os = "macos")]
+impl WryPage {
+    /// The page's own WKWebView.
+    fn wk(&self) -> objc2::rc::Retained<objc2_web_kit::WKWebView> {
+        use wry::WebViewExtMacOS;
+        objc2::rc::Retained::into_super(self.view.webview())
+    }
 }
 
 impl Drop for WryPage {
@@ -184,6 +199,44 @@ impl Page for WryPage {
         });
     }
 
+    fn click(&self, x: f64, y: f64) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            super::input::click(&self.wk(), x, y)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (x, y);
+            false
+        }
+    }
+
+    fn press(&self, key: &str) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            super::input::press(&self.wk(), key)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = key;
+            false
+        }
+    }
+
+    fn snapshot(&self, reply: futures::channel::oneshot::Sender<Result<Vec<u8>, String>>) {
+        #[cfg(target_os = "macos")]
+        super::input::snapshot(
+            &self.wk(),
+            Box::new(move |result| {
+                let _ = reply.send(result);
+            }),
+        );
+        #[cfg(not(target_os = "macos"))]
+        let _ = reply.send(Err(
+            "Browser screenshots are not supported on this platform".into(),
+        ));
+    }
+
     fn set_cookies(
         &self,
         cookies: Vec<dcc_infra::browser_sessions::PreparedSessionCookie>,
@@ -236,6 +289,21 @@ impl Page for FakePage {
     }
 
     fn blur(&self) {}
+
+    fn click(&self, x: f64, y: f64) -> bool {
+        self.calls.borrow_mut().push(format!("click {x} {y}"));
+        true
+    }
+
+    fn press(&self, key: &str) -> bool {
+        self.calls.borrow_mut().push(format!("press {key}"));
+        super::input::key_entry(key).is_some()
+    }
+
+    fn snapshot(&self, reply: futures::channel::oneshot::Sender<Result<Vec<u8>, String>>) {
+        self.calls.borrow_mut().push("snapshot".into());
+        let _ = reply.send(Ok(b"png".to_vec()));
+    }
 
     fn set_cookies(
         &self,
