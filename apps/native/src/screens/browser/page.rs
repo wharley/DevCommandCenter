@@ -35,6 +35,12 @@ pub trait Page {
     fn blur(&self);
     /// Runs `script` in the page; its result's JSON comes back on `reply`.
     fn evaluate(&self, script: &str, reply: futures::channel::oneshot::Sender<String>);
+    /// Imported cookies into the page's store; imported and skipped back.
+    fn set_cookies(
+        &self,
+        cookies: Vec<dcc_infra::browser_sessions::PreparedSessionCookie>,
+        reply: futures::channel::oneshot::Sender<(usize, usize)>,
+    );
 }
 
 /// A Browser-only WebKit store (macOS 14+), apart from anything else in
@@ -177,6 +183,25 @@ impl Page for WryPage {
             }
         });
     }
+
+    fn set_cookies(
+        &self,
+        cookies: Vec<dcc_infra::browser_sessions::PreparedSessionCookie>,
+        reply: futures::channel::oneshot::Sender<(usize, usize)>,
+    ) {
+        let done: super::cookies::Done = Box::new(move |imported, skipped| {
+            let _ = reply.send((imported, skipped));
+        });
+        #[cfg(target_os = "macos")]
+        {
+            use wry::WebViewExtMacOS;
+            let view: objc2::rc::Retained<objc2_web_kit::WKWebView> =
+                objc2::rc::Retained::into_super(self.view.webview());
+            super::cookies::set_cookies(&view, cookies, done);
+        }
+        #[cfg(not(target_os = "macos"))]
+        super::cookies::set_cookies(&(), cookies, done);
+    }
 }
 
 /// A page that only records what it is asked, for headless tests.
@@ -211,6 +236,17 @@ impl Page for FakePage {
     }
 
     fn blur(&self) {}
+
+    fn set_cookies(
+        &self,
+        cookies: Vec<dcc_infra::browser_sessions::PreparedSessionCookie>,
+        reply: futures::channel::oneshot::Sender<(usize, usize)>,
+    ) {
+        self.calls
+            .borrow_mut()
+            .push(format!("cookies {}", cookies.len()));
+        let _ = reply.send((cookies.len(), 0));
+    }
 
     fn evaluate(&self, _: &str, reply: futures::channel::oneshot::Sender<String>) {
         self.calls.borrow_mut().push("evaluate".into());

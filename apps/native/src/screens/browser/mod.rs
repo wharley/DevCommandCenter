@@ -4,10 +4,13 @@
 
 pub mod address;
 mod context;
+mod cookies;
 mod download;
 pub mod layout;
 pub mod page;
 mod popup;
+pub mod sessions;
+mod sessions_view;
 pub mod surface;
 mod surface_view;
 #[cfg(test)]

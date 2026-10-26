@@ -257,3 +257,111 @@ fn the_pages_context_goes_to_the_agent_or_says_why_not(cx: &mut TestAppContext) 
     assert_eq!(error.as_deref(), Some("browser page context timed out"));
     assert_eq!(sent.borrow().len(), 1);
 }
+
+fn fake_sessions() -> super::sessions::SessionSource {
+    use dcc_infra::browser_sessions::{
+        BrowserSessionProfile, PreparedImport, PreparedSessionCookie,
+    };
+    let cookie = |name: &str| PreparedSessionCookie {
+        name: name.into(),
+        value: "v".into(),
+        domain: ".example.com".into(),
+        path: "/".into(),
+        secure: true,
+        http_only: true,
+        same_site: 1,
+        expires_unix_seconds: None,
+    };
+    super::sessions::SessionSource {
+        list: Rc::new(|| {
+            vec![BrowserSessionProfile {
+                id: "chrome:Default".into(),
+                browser: "chrome".into(),
+                name: "Default".into(),
+            }]
+        }),
+        prepare: std::sync::Arc::new(move |profile, url| {
+            assert_eq!(profile, "chrome:Default");
+            assert_eq!(url, "https://example.com/conta");
+            Ok(PreparedImport {
+                cookies: vec![cookie("sid"), cookie("csrf")],
+                skipped: 1,
+            })
+        }),
+    }
+}
+
+#[gpui::test]
+fn a_chrome_session_goes_into_the_browser_and_the_page_reloads(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("database.sqlite");
+    let pages = Rc::new(Pages::default());
+    let (surface, cx) = open(cx, &db, Some("https://example.com/conta"), &pages);
+    cx.update(|_, cx| crate::ui::Toaster::init(cx));
+    send(
+        &pages,
+        PageEvent::Loaded("https://example.com/conta".into()),
+        cx,
+    );
+    cx.update(|_, cx| surface.update(cx, |surface, _| surface.session_source = fake_sessions()));
+    let click = |cx: &mut VisualTestContext, selector: &'static str| {
+        cx.run_until_parked();
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} on screen"));
+        cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+    };
+    click(cx, "browser-sessions");
+    let site = cx.update(|_, cx| surface.read(cx).sessions.as_ref().unwrap().site());
+    assert_eq!(site.as_deref(), Some("example.com"));
+    assert!(
+        cx.debug_bounds("browser-sessions-import").is_some(),
+        "the dialog draws"
+    );
+    click(cx, "browser-session-profile-0");
+    click(cx, "browser-sessions-import");
+    assert!(
+        pages
+            .page
+            .calls
+            .borrow()
+            .iter()
+            .any(|call| call == "cookies 2"),
+        "{:?}",
+        pages.page.calls.borrow()
+    );
+    assert!(
+        cx.update(|_, cx| surface.read(cx).sessions.is_none()),
+        "closed"
+    );
+    assert!(
+        pages
+            .page
+            .calls
+            .borrow()
+            .iter()
+            .any(|call| call == "reload")
+    );
+    let toasts = cx.update(|_, cx| crate::ui::Toaster::messages(cx));
+    assert!(
+        toasts
+            .iter()
+            .any(|toast| toast.contains("2 sessão(ões) importada(s) · 1 ignorada(s)"))
+    );
+    // A page that moved on meanwhile stops the import.
+    send(
+        &pages,
+        PageEvent::Loaded("https://example.com/conta".into()),
+        cx,
+    );
+    click(cx, "browser-sessions");
+    click(cx, "browser-session-profile-0");
+    cx.update(|_, cx| surface.update(cx, |surface, _| surface.loading = true));
+    click(cx, "browser-sessions-import");
+    let error = cx.update(|_, cx| surface.read(cx).sessions.as_ref().unwrap().error.clone());
+    assert_eq!(
+        error.as_deref(),
+        Some("browser changed page; reopen Sessions and try again")
+    );
+}

@@ -63,8 +63,10 @@ raw-window-handle = "0.6"
 # The Browser's sign-in windows and download save panel, on the same objc2
 # crates wry already uses.
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSApplication", "NSResponder", "NSWindow", "NSView", "NSPanel", "NSSavePanel", "NSScreen", "NSGraphics"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSGeometry", "NSThread"] }
-objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSString", "NSURL", "NSGeometry", "NSThread", "NSHTTPCookie", "NSDictionary", "NSArray", "NSDate", "NSValue", "NSObject", "NSEnumerator"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKHTTPCookieStore"] }
+# Completion blocks for the Browser's cookie store (session import).
+block2 = "0.6"
 
 [dev-dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.9", default-features = false, features = ["test-support"] }
