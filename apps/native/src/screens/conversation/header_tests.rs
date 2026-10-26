@@ -344,3 +344,51 @@ fn the_lineage_lists_the_childs_delegation_and_cancels_it(cx: &mut TestAppContex
     let requests = server.join().unwrap();
     assert_eq!(requests[0].0, "POST /api/v1/delegations/d-1/cancel");
 }
+
+#[gpui::test]
+fn ai_memory_shows_the_waiting_export_and_pins_a_source(cx: &mut TestAppContext) {
+    let sources = r#"[{"path":"docs/a.md","title":"Guia <mark>checkout</mark>","snippet":"um","createdAt":"2026-10-08T15:22:00Z","kind":null}]"#;
+    let pinned = r#"[{"sourceKey":"docs/a.md|Guia <mark>checkout</mark>|um","action":"pinned","correction":null,"updatedAt":"x"}]"#;
+    let (view, cx, _, server) = open(
+        cx,
+        vec![
+            (
+                "/api/v1/sessions/a/ai-memory/export-status",
+                200,
+                r#"{"sessionId":"a","attempts":2,"nextAttemptAt":"x","lastError":"offline","eventCount":0}"#.into(),
+            ),
+            ("/api/v1/ai-memory/sidecar", 200, r#"{"mode":"managed","running":true}"#.into()),
+            ("/api/v1/sessions/a/ai-memory/sources", 200, sources.into()),
+            ("/api/v1/ai-memory/source-actions", 200, "[]".into()),
+            ("/api/v1/ai-memory/source-actions", 200, "{}".into()),
+            ("/api/v1/ai-memory/source-actions", 200, pinned.into()),
+        ],
+    );
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("ai-memory-export").is_some(),
+        "the export waits"
+    );
+    click(cx, "header-ai-memory");
+    assert!(cx.debug_bounds("ai-memory-source-0").is_some());
+    click(cx, "ai-memory-pin-0");
+    let requests = server.join().unwrap();
+    let save = requests
+        .iter()
+        .find(|(line, _)| line == "POST /api/v1/ai-memory/source-actions")
+        .expect("the pin saved");
+    let body: Value = serde_json::from_str(&save.1).unwrap();
+    assert_eq!(body["sourceKey"], "docs/a.md|Guia <mark>checkout</mark>|um");
+    assert_eq!(body["action"], "pinned");
+    cx.run_until_parked();
+    let action = cx.update(|_, cx| {
+        view.read(cx)
+            .header
+            .ai_memory
+            .actions
+            .values()
+            .next()
+            .map(|action| action.action.clone())
+    });
+    assert_eq!(action.as_deref(), Some("pinned"));
+}

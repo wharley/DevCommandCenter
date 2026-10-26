@@ -214,6 +214,7 @@ impl RenderOnce for Button {
         // Tests find a button by its name.
         let selector = match &self.id {
             ElementId::Name(name) => Some(name.to_string()),
+            ElementId::NamedInteger(name, index) => Some(format!("{name}-{index}")),
             _ => None,
         };
         div()

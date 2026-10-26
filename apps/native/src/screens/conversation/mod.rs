@@ -335,7 +335,9 @@ impl ConversationView {
             composer.set_history(history);
             composer.set_session(session, cx)
         });
+        let shown = next.session_id.clone();
         self.data = Some(next);
+        self.follow_ai_memory(shown, cx);
         if self.find.is_some() {
             self.search(false, cx);
         }

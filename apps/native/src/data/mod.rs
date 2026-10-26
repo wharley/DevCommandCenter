@@ -4,6 +4,7 @@
 pub mod actions;
 pub mod activity;
 pub mod agents;
+pub mod ai_memory;
 pub mod avatar;
 pub mod child_tasks;
 pub mod code_tree;

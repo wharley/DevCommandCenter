@@ -2,10 +2,11 @@
 //! the actions in the desktop's order — resume, the editor, the terminal
 //! with its count, the Browser, the delivery, find, session search, a new
 //! conversation, the history; the agent's mascot beside the title and the
-//! open conversation's delegations. The ai-memory and the resident agents'
-//! call buttons arrive in their own slices.
+//! open conversation's delegations and its ai-memory. The resident agents'
+//! call buttons arrive in their own slice.
 
 mod actions;
+mod ai_memory;
 pub(crate) mod delivery;
 mod editor;
 mod history;
@@ -47,6 +48,8 @@ pub struct HeaderState {
     pub lineage_open: bool,
     /// The delegation being cancelled from it.
     pub cancelling: Option<String>,
+    /// The open conversation's ai-memory: export, sources, curation.
+    pub ai_memory: ai_memory::AiMemory,
     /// The agent each session runs as, from the sidebar's agents.
     pub agents:
         std::sync::Arc<std::collections::HashMap<String, crate::data::agents::SessionAgent>>,

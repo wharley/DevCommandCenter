@@ -760,6 +760,58 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// `loadAiMemoryExportStatus`: the export that still waits, if any.
+    pub fn ai_memory_export_status(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<crate::data::ai_memory::ExportStatus>, ApiError> {
+        Self::decoded(self.get(&format!(
+            "/api/v1/sessions/{}/ai-memory/export-status",
+            encode(session_id)
+        ))?)
+    }
+
+    /// `loadAiMemoryRecoveredSources`: what the latest turn received.
+    pub fn ai_memory_sources(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::data::ai_memory::SourceHit>, ApiError> {
+        Self::decoded(self.get(&format!(
+            "/api/v1/sessions/{}/ai-memory/sources",
+            encode(session_id)
+        ))?)
+    }
+
+    /// `loadAiMemorySourceActions`: the person's curation.
+    pub fn ai_memory_source_actions(
+        &self,
+    ) -> Result<Vec<crate::data::ai_memory::SourceAction>, ApiError> {
+        Self::decoded(self.get("/api/v1/ai-memory/source-actions")?)
+    }
+
+    /// `saveAiMemorySourceAction`: `pinned`, `ignored`, `corrected` or `cleared`.
+    pub fn save_ai_memory_source_action(
+        &self,
+        source_key: &str,
+        action: &str,
+        correction: Option<&str>,
+    ) -> Result<(), ApiError> {
+        self.post(
+            "/api/v1/ai-memory/source-actions",
+            &json!({ "sourceKey": source_key, "action": action, "correction": correction }),
+        )
+        .map(|_| ())
+    }
+
+    /// `loadAiMemorySidecarStatus`: its mode (`managed`, `unavailable`, …).
+    pub fn ai_memory_sidecar_mode(&self) -> Result<Option<String>, ApiError> {
+        let value = self.get("/api/v1/ai-memory/sidecar")?;
+        Ok(value
+            .get("mode")
+            .and_then(Value::as_str)
+            .map(str::to_string))
+    }
+
     /// `cancelRunningDelegation`: a running delegation stopped.
     pub fn cancel_delegation(&self, id: &str) -> Result<(), ApiError> {
         self.post(
