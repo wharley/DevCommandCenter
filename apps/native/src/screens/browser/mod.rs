@@ -3,11 +3,13 @@
 //! around it is GPUI.
 
 pub mod address;
+mod audit;
 mod bridge;
 mod context;
 mod control;
 mod cookies;
 mod download;
+mod evidence;
 mod input;
 pub mod layout;
 pub mod page;
@@ -18,5 +20,7 @@ pub mod surface;
 mod surface_view;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_evidence;
 
 pub use surface::{BrowserEvent, BrowserRequest, BrowserSurface};

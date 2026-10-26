@@ -84,6 +84,9 @@ impl Shell {
             |shell, _, event, window, cx| match event {
                 BrowserEvent::Closed => shell.close_browser(cx),
                 BrowserEvent::SendToAgent(text) => shell.browser_to_agent(text.clone(), window, cx),
+                BrowserEvent::SendEvidence(text) => {
+                    shell.browser_evidence_to_agent(text.clone(), window, cx)
+                }
             },
         );
         self.browser.open = Some(OpenBrowser {
@@ -108,6 +111,22 @@ impl Shell {
                 .update(cx, |conversation, cx| conversation.focus_composer_soon(cx));
         } else {
             self.close_browser(cx);
+        }
+    }
+
+    /// `handleSendBrowserEvidenceToAgent`: the evidence into the draft; the
+    /// Browser stays, and beside it the composer takes the focus.
+    fn browser_evidence_to_agent(
+        &mut self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let composer = self.conversation.read(cx).composer.clone();
+        let added = composer.update(cx, |composer, cx| composer.append_text(&text, window, cx));
+        if added && should_split(self.workbench_width(window, cx)) {
+            self.conversation
+                .update(cx, |conversation, cx| conversation.focus_composer_soon(cx));
         }
     }
 

@@ -3,12 +3,13 @@
 //! arrive on one stream and each answer goes back by its id; the Browser
 //! tells the desktop when it opens (getting the desktop's lifecycle token),
 //! what its page does, whether it shows, and when it closes; and the
-//! person arms or disarms the agent's control. Blocking: call it off the UI
-//! thread.
+//! person arms or disarms the agent's control, captures evidence and reads
+//! the Browser's activity. Blocking: call it off the UI thread.
 
 use std::net::TcpStream;
 use std::time::Duration;
 
+use dcc_core::domain::browser_evidence::EvidenceResult;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -81,6 +82,33 @@ impl PageReport {
 pub struct ControlStatus {
     pub armed: bool,
     pub remaining_ms: u64,
+}
+
+/// "Capturar evidência" started: the capture's handle and the page as it
+/// was then.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EvidenceStart {
+    pub capture_id: String,
+    pub remaining_ms: u64,
+    pub url: String,
+    pub title: Option<String>,
+    pub text: String,
+    pub selection_only: bool,
+    pub truncated: bool,
+}
+
+/// One line of "Atividade do navegador" (`BrowserAuditViewRecord`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AuditRecord {
+    /// `ui` or `mcp`.
+    pub origin: String,
+    pub provider_id: Option<String>,
+    pub tool: String,
+    pub grant_state: String,
+    pub outcome: String,
+    pub timestamp_ms: i64,
 }
 
 /// The operations, one at a time; `None` once the stream ends.
@@ -198,6 +226,63 @@ impl DesktopApi {
                 "armed": armed,
             }),
         )?)
+    }
+
+    /// Reads the page and starts a capture anchored on it (needs the grant).
+    pub fn browser_evidence_start(
+        &self,
+        workspace_id: &str,
+        session_id: Option<&str>,
+        token: u64,
+    ) -> Result<EvidenceStart, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/browser/bridge/evidence/start",
+            &json!({
+                "workspaceId": workspace_id,
+                "sessionId": session_id,
+                "lifecycleToken": token,
+            }),
+        )?)
+    }
+
+    /// The capture's events; the handle is spent either way.
+    pub fn browser_evidence_read(
+        &self,
+        workspace_id: &str,
+        session_id: Option<&str>,
+        capture_id: &str,
+    ) -> Result<EvidenceResult, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/browser/bridge/evidence/read",
+            &json!({
+                "workspaceId": workspace_id,
+                "sessionId": session_id,
+                "captureId": capture_id,
+            }),
+        )?)
+    }
+
+    /// `readBrowserAudit`, newest first (`newestFirstBrowserAuditRecords`).
+    pub fn browser_audit(
+        &self,
+        workspace_id: &str,
+        session_id: Option<&str>,
+        token: u64,
+        limit: usize,
+    ) -> Result<Vec<AuditRecord>, ApiError> {
+        let value = self.post(
+            "/api/v1/browser/bridge/audit",
+            &json!({
+                "workspaceId": workspace_id,
+                "sessionId": session_id,
+                "lifecycleToken": token,
+                "limit": limit,
+            }),
+        )?;
+        let mut records: Vec<AuditRecord> =
+            Self::decoded(value.get("records").cloned().unwrap_or(Value::Null))?;
+        records.sort_by_key(|record| std::cmp::Reverse(record.timestamp_ms));
+        Ok(records)
     }
 }
 

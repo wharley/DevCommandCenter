@@ -45,6 +45,8 @@ pub enum BrowserEvent {
     Closed,
     /// "Enviar contexto da página ao agente": the envelope for the composer.
     SendToAgent(String),
+    /// "Coletar": the `<browser_evidence>` block for the composer.
+    SendEvidence(String),
 }
 
 /// Each Browser opened is a lifecycle of its own (the map ids say which).
@@ -93,6 +95,13 @@ pub struct BrowserSurface {
     pub(super) control_until: Option<std::time::Instant>,
     pub(super) control_busy: bool,
     pub(super) _control: Option<Task<()>>,
+    /// The evidence capture running, until collected.
+    pub evidence: Option<super::evidence::Capture>,
+    pub(super) evidence_busy: bool,
+    pub(super) _evidence: Option<Task<()>>,
+    pub(super) _evidence_tick: Option<Task<()>>,
+    /// "Atividade do navegador".
+    pub audit: super::audit::AuditPanel,
     db_path: PathBuf,
     _address_events: Subscription,
     _page_events: Option<Task<()>>,
@@ -148,6 +157,11 @@ impl BrowserSurface {
             control_until: None,
             control_busy: false,
             _control: None,
+            evidence: None,
+            evidence_busy: false,
+            _evidence: None,
+            _evidence_tick: None,
+            audit: Default::default(),
             db_path,
             _address_events: address_events,
             _page_events: None,

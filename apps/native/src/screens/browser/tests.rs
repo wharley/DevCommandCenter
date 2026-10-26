@@ -15,8 +15,8 @@ use super::{BrowserRequest, BrowserSurface};
 use crate::theme::{Theme, ThemePreference};
 
 #[derive(Default)]
-struct Pages {
-    page: Rc<FakePage>,
+pub(super) struct Pages {
+    pub(super) page: Rc<FakePage>,
     opened_on: RefCell<Vec<String>>,
     events: RefCell<Option<UnboundedSender<PageEvent>>>,
 }
@@ -31,7 +31,7 @@ fn factory(pages: &Rc<Pages>) -> PageFactory {
     })
 }
 
-fn open<'a>(
+pub(super) fn open<'a>(
     cx: &'a mut TestAppContext,
     db: &std::path::Path,
     initial_url: Option<&str>,
@@ -58,7 +58,7 @@ fn open<'a>(
     (surface, cx)
 }
 
-fn send(pages: &Pages, event: PageEvent, cx: &mut VisualTestContext) {
+pub(super) fn send(pages: &Pages, event: PageEvent, cx: &mut VisualTestContext) {
     let sender = pages.events.borrow().clone().expect("a page");
     sender.unbounded_send(event).unwrap();
     cx.run_until_parked();

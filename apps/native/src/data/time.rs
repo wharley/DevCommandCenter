@@ -376,3 +376,24 @@ pub fn local_date_time(value: &str) -> String {
         })
         .unwrap_or_else(|_| value.to_string())
 }
+
+/// `toLocaleTimeString()` of a millisecond time (`14:03:22`, `2:03:22 PM`);
+/// `None` when it is not one (`browserAuditTime`).
+pub fn local_clock(at_ms: i64, english: bool) -> Option<String> {
+    use chrono::Timelike;
+    if at_ms < 0 {
+        return None;
+    }
+    let at = chrono::DateTime::from_timestamp_millis(at_ms)?.with_timezone(&chrono::Local);
+    Some(if english {
+        let (pm, hour) = at.hour12();
+        format!(
+            "{hour}:{:02}:{:02} {}",
+            at.minute(),
+            at.second(),
+            if pm { "PM" } else { "AM" }
+        )
+    } else {
+        format!("{:02}:{:02}:{:02}", at.hour(), at.minute(), at.second())
+    })
+}

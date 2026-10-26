@@ -1,7 +1,7 @@
 //! The Browser as the desktop draws it: the 44px header (the address bar
 //! with the reload inside it, "Sessões", send to the agent, the agent's
-//! control, close), the 28px strip (an error, loading, or
-//! the page's title) and the white viewport the page is laid over.
+//! control or the activity, close), the 28px strip (an error, the
+//! evidence capture, loading, or the page's title and the control's mark) and the white viewport the page is laid over.
 
 use gpui::{
     AnyElement, App, Bounds, Context, Element, ElementId, Entity, FontWeight, GlobalElementId,
@@ -193,6 +193,7 @@ impl BrowserSurface {
             .child(self.sessions_button(cx))
             .child(self.send_button(cx))
             .children(self.agent_pill(cx))
+            .children(self.audit_button(cx))
             .child(Tooltip::new("browser-close-tip", close, move |_, _| {
                 div().child(close_label.clone()).into_any_element()
             }))
@@ -210,6 +211,8 @@ impl BrowserSurface {
                     &Args::default().with("error", error.clone()),
                 ))
                 .into_any_element()
+        } else if let Some(capture) = self.evidence_strip(cx) {
+            capture
         } else if self.loading {
             div()
                 .flex()
@@ -224,12 +227,31 @@ impl BrowserSurface {
                 .child(cx.t("browser.loading"))
                 .into_any_element()
         } else {
+            let active = (self.request.session_id.is_some() && self.control.armed).then(|| {
+                div()
+                    .flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_color(tw::EMERALD_500.hsla())
+                    .child(Icon::new("shield-check").size(12.0))
+                    .child(cx.t("browser.controlActiveShort"))
+            });
             div()
+                .flex()
                 .flex_1()
                 .min_w_0()
-                .truncate()
-                .text_color(colors.muted_foreground)
-                .children(self.title.clone())
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(colors.muted_foreground)
+                        .children(self.title.clone()),
+                )
+                .children(active)
                 .into_any_element()
         };
         div()

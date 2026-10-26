@@ -3,11 +3,12 @@
 //! its menu's toggle — "Permitir controle do agente por 60 segundos", or
 //! turn it off. The grant lives in the desktop (`browser_arm_control`);
 //! here only its remaining time is shown, read again when it runs out.
-//! Evidence capture and the activity log join the menu later (8c3).
+//! Below it, evidence capture (with the control on) and, after a separator,
+//! the Browser's activity, whose card opens under the pill.
 
 use std::time::{Duration, Instant};
 
-use gpui::{AnyElement, Context, div, prelude::*, px};
+use gpui::{AnyElement, Context, div, prelude::*};
 
 use super::surface::BrowserSurface;
 use crate::data::browser_bridge::ControlStatus;
@@ -31,12 +32,16 @@ impl BrowserSurface {
         })
     }
 
-    fn set_control(&mut self, status: ControlStatus, cx: &mut Context<Self>) {
+    pub(super) fn set_control(&mut self, status: ControlStatus, cx: &mut Context<Self>) {
         self.control = status;
         self.control_until = status
             .armed
             .then(|| Instant::now() + Duration::from_millis(status.remaining_ms));
         self.control_busy = false;
+        if !status.armed {
+            // Reading a capture needs the grant that started it.
+            self.expire_evidence(cx);
+        }
         if status.armed {
             self.tick_control(cx);
         } else {
@@ -125,6 +130,10 @@ impl BrowserSurface {
             cx.t("browser.armControl")
         };
         let loading = self.loading;
+        let evidence_on = self.can_start_evidence();
+        let evidence = cx.t("browser.evidence.start");
+        let requires = (!armed).then(|| cx.t("browser.evidence.requiresControl"));
+        let activity = cx.t("browser.audit.title");
         let view = cx.entity().downgrade();
         let trigger = move |_open: bool| {
             Button::new("browser-agent")
@@ -152,19 +161,48 @@ impl BrowserSurface {
                 .into_any_element()
         };
         let menu = Menu::dropdown("browser-agent-menu", trigger, move |_, _| {
-            let view = view.clone();
-            vec![MenuEntry::from(
-                MenuItem::new(toggle.clone(), move |_, cx| {
-                    let _ = view.update(cx, |surface, cx| {
-                        surface.ask_control(Some(!surface.control.armed), cx)
-                    });
-                })
-                .icon(Icon::new(if armed { "shield-check" } else { "shield" }).size(14.0))
-                .disabled(loading || busy),
-            )]
+            let (toggle_view, evidence_view, audit_view) =
+                (view.clone(), view.clone(), view.clone());
+            let mut start = MenuItem::new(evidence.clone(), move |_, cx| {
+                let _ = evidence_view.update(cx, |surface, cx| surface.start_evidence(cx));
+            })
+            .icon(Icon::new("activity").size(14.0))
+            .disabled(!evidence_on);
+            if let Some(requires) = requires.clone() {
+                start = start.detail(requires);
+            }
+            vec![
+                MenuEntry::from(
+                    MenuItem::new(toggle.clone(), move |_, cx| {
+                        let _ = toggle_view.update(cx, |surface, cx| {
+                            surface.ask_control(Some(!surface.control.armed), cx)
+                        });
+                    })
+                    .icon(Icon::new(if armed { "shield-check" } else { "shield" }).size(14.0))
+                    .disabled(loading || busy),
+                ),
+                MenuEntry::from(start),
+                MenuEntry::Separator,
+                MenuEntry::from(
+                    MenuItem::new(activity.clone(), move |_, cx| {
+                        let _ =
+                            audit_view.update(cx, |surface, cx| surface.set_audit_open(true, cx));
+                    })
+                    .icon(Icon::new("history").size(14.0)),
+                ),
+            ]
         })
         .align(MenuAlign::End)
         .min_width(256.0);
-        Some(div().mr(px(0.0)).child(menu).into_any_element())
+        // The activity's card opens under the pill, as its popover's anchor.
+        let audit = self.audit_popover(div(), cx);
+        Some(
+            div()
+                .relative()
+                .flex_shrink_0()
+                .child(menu)
+                .child(div().absolute().right_0().bottom_0().child(audit))
+                .into_any_element(),
+        )
     }
 }
