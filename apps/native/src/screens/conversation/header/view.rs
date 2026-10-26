@@ -273,6 +273,7 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
                         .children(view.ai_memory_export(cx))
                         .children(view.ai_memory_menu(cx))
                         .children(view.lineage_menu(cx))
+                        .child(view.call_agents.clone())
                         .child(view.new_session_button(cx))
                         .child(view.find_buttons(cx))
                         .child(view.history_menu(cx)),

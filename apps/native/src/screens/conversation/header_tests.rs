@@ -392,3 +392,100 @@ fn ai_memory_shows_the_waiting_export_and_pins_a_source(cx: &mut TestAppContext)
     });
     assert_eq!(action.as_deref(), Some("pinned"));
 }
+
+fn agent(id: &str, name: &str, preset: Option<&str>) -> crate::data::agents::AgentRecord {
+    crate::data::agents::AgentRecord {
+        id: id.into(),
+        name: name.into(),
+        preset: preset.map(str::to_string),
+        avatar: dcc_core::domain::agent::AgentAvatar {
+            color: "violet".into(),
+            arms: 2,
+            eyes: "round".into(),
+        },
+        provider_id: Some("codex".into()),
+        model: None,
+        effort: None,
+        kickoff_prompt: "Escreva o guia do checkout".into(),
+        sessions: Vec::new(),
+    }
+}
+
+#[gpui::test]
+fn calling_an_agent_starts_its_bound_session_with_the_kickoff(cx: &mut TestAppContext) {
+    let (view, cx, _, server) = open(
+        cx,
+        vec![
+            (
+                "/api/v1/sessions/start",
+                200,
+                r#"{"session":{"id":"s-new"}}"#.into(),
+            ),
+            ("/api/v1/sessions/s-new/agent", 200, r#"{"ok":true}"#.into()),
+            (
+                "/api/v1/sessions/s-new/turns",
+                200,
+                r#"{"turn":{"id":"t-1"}}"#.into(),
+            ),
+        ],
+    );
+    view.update(cx, |view, cx| {
+        let mut next = data();
+        next.new_thread = Some(crate::data::conversation::ThreadStart {
+            workspace_id: "task".into(),
+            project_id: "p".into(),
+            additional_workspace_ids: Vec::new(),
+            name: Some("Pagamentos".into()),
+            auto_named: false,
+        });
+        next.last_sequence = 3;
+        view.apply(Rc::new(next), cx);
+    });
+    let buttons = cx.update(|_, cx| view.read(cx).call_agents.clone());
+    buttons.update(cx, |buttons, cx| {
+        buttons.set_agents(
+            vec![
+                agent("writer", "Escritor", None),
+                agent("research", "Pesquisador", Some("researcher")),
+                agent("rev", "Revisor", Some("reviewer")),
+            ],
+            cx,
+        );
+        buttons.set_has_changes(Some(false), cx);
+        // The fixture's delegated child runs: that alone would block every call.
+        assert!(buttons.busy);
+        buttons.set_busy(false, cx);
+    });
+    cx.run_until_parked();
+    // The researcher has a surface of its own; the reviewer waits for changes.
+    assert!(cx.debug_bounds("call-agent-0").is_some());
+    assert!(cx.debug_bounds("call-agent-1").is_some());
+    assert!(cx.debug_bounds("call-agent-2").is_none());
+    let reviewer = agent("rev", "Revisor", Some("reviewer"));
+    assert_eq!(
+        cx.update(|_, cx| buttons.read(cx).block_key(&reviewer)),
+        Some("agents.call.nothingToReview")
+    );
+    click(cx, "call-agent-0");
+    let requests = server.join().unwrap();
+    let lines: Vec<&str> = requests.iter().map(|(line, _)| line.as_str()).collect();
+    assert_eq!(
+        lines,
+        [
+            "POST /api/v1/sessions/start",
+            "POST /api/v1/sessions/s-new/agent",
+            "POST /api/v1/sessions/s-new/turns",
+        ]
+    );
+    let start: Value = serde_json::from_str(&requests[0].1).unwrap();
+    assert_eq!(start["title"], "Escritor");
+    assert_eq!(start["providerId"], "codex");
+    let bind: Value = serde_json::from_str(&requests[1].1).unwrap();
+    assert_eq!(bind["agentId"], "writer");
+    let turn: Value = serde_json::from_str(&requests[2].1).unwrap();
+    assert_eq!(turn["prompt"], "Escreva o guia do checkout");
+    assert_eq!(turn["approvalPolicy"], "ask");
+    assert_eq!(turn["effort"], "medium");
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| view.read(cx).header.calling.is_none()));
+}

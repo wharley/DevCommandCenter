@@ -46,16 +46,24 @@ impl Shell {
     /// The header's buttons follow the column (they redraw only when it
     /// changed what they show).
     fn sync_delivery(&mut self, cx: &mut Context<Self>) {
-        let dock = self.code_column.read(cx).dock();
+        let column = self.code_column.read(cx);
+        let dock = column.dock();
+        let changes = dcc_core::domain::agent_call::has_reviewable_changes(column.status.as_ref());
         self.delivery
             .buttons
             .update(cx, |buttons, cx| buttons.set(dock, cx));
+        // The reviewer's button needs something to review.
+        let calls = self.conversation.read(cx).call_agents.clone();
+        calls.update(cx, |buttons, cx| buttons.set_has_changes(changes, cx));
     }
 
     /// The agent each session runs as, for the header's mascots (only when
     /// the sidebar read something new).
     pub(super) fn sync_session_agents(&mut self, cx: &mut Context<Self>) {
-        let agents = crate::data::agents::by_session(self.sidebar.read(cx).agents());
+        let records = self.sidebar.read(cx).agents().to_vec();
+        let calls = self.conversation.read(cx).call_agents.clone();
+        calls.update(cx, |buttons, cx| buttons.set_agents(records.clone(), cx));
+        let agents = crate::data::agents::by_session(&records);
         self.conversation.update(cx, |conversation, cx| {
             if *conversation.header.agents != agents {
                 conversation.header.agents = std::sync::Arc::new(agents);

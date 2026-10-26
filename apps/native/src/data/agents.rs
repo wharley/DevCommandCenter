@@ -35,6 +35,8 @@ impl AgentState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AgentSession {
     pub session_id: String,
+    /// The task it runs in.
+    pub workspace_id: String,
     pub state: AgentState,
     /// When its last turn finished, if it did.
     pub completed_at: Option<String>,
@@ -48,6 +50,12 @@ pub struct AgentRecord {
     pub name: String,
     pub preset: Option<String>,
     pub avatar: AgentAvatar,
+    /// Its own provider, model and effort; none runs on the composer's.
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// What a call asks it first.
+    pub kickoff_prompt: String,
     pub sessions: Vec<AgentSession>,
 }
 
@@ -77,6 +85,28 @@ pub fn by_session(agents: &[AgentRecord]) -> HashMap<String, SessionAgent> {
             })
         })
         .collect()
+}
+
+/// `loadLatestReview`: the findings of the latest review a reviewer's
+/// conversation holds; `None` before its first. A later answer without the
+/// block (a question to the reviewer) does not replace the review before it.
+pub fn latest_review(
+    db_path: &std::path::Path,
+    session_id: &str,
+) -> Option<Vec<dcc_core::domain::review_findings::ReviewFinding>> {
+    use dcc_core::domain::session::AssistantMessagePhase;
+    use dcc_core::domain::timeline::{Role, project_session};
+    let events = super::conversation::session_events(db_path, session_id).ok()?;
+    project_session(&events, session_id)
+        .iter()
+        .rev()
+        .filter(|message| {
+            message.role == Role::Assistant
+                && message.assistant_phase != Some(AssistantMessagePhase::Commentary)
+        })
+        .find_map(|message| {
+            dcc_core::domain::review_findings::parse_review_findings(&message.content)
+        })
 }
 
 /// `agentSessionState`
@@ -171,6 +201,7 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                     let input = inputs.get(&binding.session_id);
                     AgentSession {
                         session_id: binding.session_id.clone(),
+                        workspace_id: binding.workspace_id.clone(),
                         state: session_state(input.map(|(input, _)| input)),
                         completed_at: input.and_then(|(_, completed)| completed.clone()),
                     }
@@ -181,6 +212,10 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                 name: agent.name,
                 preset: agent.preset,
                 avatar: agent.avatar,
+                provider_id: agent.provider_id,
+                model: agent.model,
+                effort: agent.effort,
+                kickoff_prompt: agent.kickoff_prompt,
                 sessions,
             }
         })

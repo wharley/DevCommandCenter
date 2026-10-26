@@ -812,6 +812,15 @@ impl DesktopApi {
             .map(str::to_string))
     }
 
+    /// `bindSessionAgent`: the session runs as this agent from now on.
+    pub fn bind_session_agent(&self, session_id: &str, agent_id: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/sessions/{}/agent", encode(session_id)),
+            &json!({ "agentId": agent_id }),
+        )
+        .map(|_| ())
+    }
+
     /// `cancelRunningDelegation`: a running delegation stopped.
     pub fn cancel_delegation(&self, id: &str) -> Result<(), ApiError> {
         self.post(

@@ -2,11 +2,13 @@
 //! the actions in the desktop's order — resume, the editor, the terminal
 //! with its count, the Browser, the delivery, find, session search, a new
 //! conversation, the history; the agent's mascot beside the title and the
-//! open conversation's delegations and its ai-memory. The resident agents'
-//! call buttons arrive in their own slice.
+//! open conversation's delegations, its ai-memory and the buttons that
+//! call a resident agent in the task.
 
 mod actions;
 mod ai_memory;
+pub(crate) mod call_agents;
+mod calling;
 pub(crate) mod delivery;
 mod editor;
 mod history;
@@ -44,6 +46,8 @@ pub struct HeaderState {
     pub pending_close: Option<PendingClose>,
     /// The preferred editor's id (`dcc-preferred-editor`).
     pub editor: &'static str,
+    /// The agent being called (one at a time).
+    pub calling: Option<String>,
     /// The lineage menu is open.
     pub lineage_open: bool,
     /// The delegation being cancelled from it.

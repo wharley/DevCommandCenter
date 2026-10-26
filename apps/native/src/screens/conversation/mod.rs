@@ -111,6 +111,9 @@ pub struct ConversationView {
     pub(crate) header: header::HeaderState,
     /// The header's delivery buttons (set and heard by the shell).
     pub(crate) delivery: Entity<header::delivery::DeliveryButtons>,
+    /// The header's buttons that call a resident agent.
+    pub(crate) call_agents: Entity<header::call_agents::CallAgentButtons>,
+    _call_agents: gpui::Subscription,
     /// "Buscar na conversa", while open.
     find: Option<find_bar::FindBar>,
     _clock: Task<()>,
@@ -118,6 +121,13 @@ pub struct ConversationView {
 
 impl ConversationView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let call_agents = cx.new(|_| header::call_agents::CallAgentButtons::default());
+        let call_agent_events = cx.subscribe(
+            &call_agents,
+            |view, _, event: &header::call_agents::CallAgentEvent, cx| match event {
+                header::call_agents::CallAgentEvent::Call(id) => view.call_agent(id.clone(), cx),
+            },
+        );
         let composer = cx.new(|cx| Composer::new(window, cx));
         let composer_events =
             cx.subscribe(
@@ -156,6 +166,8 @@ impl ConversationView {
             requests: requests::Requests::default(),
             header: header::HeaderState::default(),
             delivery: cx.new(|_| header::delivery::DeliveryButtons::default()),
+            call_agents,
+            _call_agents: call_agent_events,
             find: None,
             _clock: Self::clock_loop(cx),
         }
@@ -336,6 +348,9 @@ impl ConversationView {
             composer.set_session(session, cx)
         });
         let shown = next.session_id.clone();
+        let busy = next.sessions.iter().any(|row| row.running);
+        self.call_agents
+            .update(cx, |buttons, cx| buttons.set_busy(busy, cx));
         self.data = Some(next);
         self.follow_ai_memory(shown, cx);
         if self.find.is_some() {
