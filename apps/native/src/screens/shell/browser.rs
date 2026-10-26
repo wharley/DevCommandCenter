@@ -86,6 +86,7 @@ impl Shell {
             _events: events,
             drag: None,
         });
+        self.sync_header(cx);
         cx.notify();
     }
 
@@ -94,6 +95,7 @@ impl Shell {
         if self.browser.open.take().is_some() {
             self.conversation
                 .update(cx, |conversation, cx| conversation.focus_composer_soon(cx));
+            self.sync_header(cx);
             cx.notify();
         }
     }
@@ -109,6 +111,7 @@ impl Shell {
             if let Some(open) = self.browser.open.take() {
                 open.surface.update(cx, |surface, cx| surface.close(cx));
             }
+            self.sync_header(cx);
             cx.notify();
         }
     }

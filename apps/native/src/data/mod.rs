@@ -30,6 +30,7 @@ pub mod provider_selection;
 pub mod rail;
 pub mod recap;
 pub mod seen;
+pub mod session_list;
 pub mod setup_report;
 pub mod snooze;
 pub mod tasks;

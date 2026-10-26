@@ -71,6 +71,8 @@ pub struct Conversation {
     pub rows: Arc<Vec<TimelineMessage>>,
     /// The task's delegations by id, for the cards' live status and report.
     pub delegations: HashMap<String, DelegationRecord>,
+    /// The task's conversations for the header's history.
+    pub sessions: Arc<Vec<crate::data::session_list::SessionRow>>,
     /// Child conversations' state and title, by session id.
     pub children: HashMap<String, ChildSession>,
     /// Provider-reported tokens by turn, for the turn footer. Read while no
@@ -357,6 +359,16 @@ pub fn load(
             )
         })
         .collect();
+    let lineage: HashMap<String, String> = delegations
+        .iter()
+        .filter_map(|delegation| {
+            delegation
+                .child_session_id
+                .as_ref()
+                .map(|child| (child.0.clone(), delegation.parent_session_id.0.clone()))
+        })
+        .collect();
+    conversation.sessions = Arc::new(crate::data::session_list::rows(&summaries, &lineage));
     conversation.children = summaries
         .iter()
         .filter(|summary| delegated.contains(&summary.session.id.0))
@@ -521,6 +533,7 @@ impl Conversation {
             && self.base_branch == other.base_branch
             && self.delegations == other.delegations
             && self.children == other.children
+            && self.sessions == other.sessions
             && self.turn_tokens == other.turn_tokens
             && self.workspace_name == other.workspace_name
             && self.branch == other.branch

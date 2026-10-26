@@ -368,6 +368,28 @@ impl DesktopApi {
     }
 
     /// "Continuar sozinho se o limite acabar" for one conversation.
+    /// `closeSession`: archived, or gone with its history when it never had
+    /// a turn. Returns whether the history went.
+    pub fn close_session(&self, session_id: &str, delete_history: bool) -> Result<bool, ApiError> {
+        let value = self.post(
+            &format!("/api/v1/sessions/{}/close", encode(session_id)),
+            &json!({ "deleteHistory": delete_history }),
+        )?;
+        Ok(value
+            .get("deletedHistory")
+            .and_then(Value::as_bool)
+            .unwrap_or(delete_history))
+    }
+
+    /// `restoreSession`: an archived conversation comes back.
+    pub fn restore_session(&self, session_id: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/sessions/{}/restore", encode(session_id)),
+            &json!({}),
+        )
+        .map(|_| ())
+    }
+
     pub fn set_auto_resume(&self, session_id: &str, enabled: bool) -> Result<(), ApiError> {
         self.request(
             "PUT",

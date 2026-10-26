@@ -39,6 +39,7 @@ pub(super) fn follow_terminals(
         shell
             .sidebar
             .update(cx, |sidebar, cx| sidebar.set_terminals(terminals, cx));
+        shell.sync_header(cx);
     })
 }
 
@@ -83,6 +84,43 @@ pub(super) fn place_of(view: &ConversationView, cx: &gpui::App) -> Option<Termin
 }
 
 impl Shell {
+    /// What the conversation's header shows of the shell: the programs
+    /// running in this task's terminals and in all of them, the Browser.
+    pub(super) fn sync_header(&mut self, cx: &mut Context<Self>) {
+        let dock = self.terminal.read(cx);
+        let scopes: Vec<String> = dock
+            .place_scopes()
+            .into_iter()
+            .map(|key| format!("terminal:{key}:"))
+            .collect();
+        let active = dock.activity.iter().filter(|item| item.active());
+        let owner = |item: &&crate::data::terminal_api::TerminalActivity| {
+            item.pty_owner_key.clone().unwrap_or_default()
+        };
+        let counts = crate::screens::conversation::header::TerminalCounts {
+            current: active
+                .clone()
+                .filter(|item| {
+                    let owner = owner(item);
+                    scopes.iter().any(|scope| owner.starts_with(scope))
+                })
+                .count(),
+            total: active
+                .filter(|item| owner(item).starts_with("terminal:"))
+                .count(),
+        };
+        let browser_open = self.browser_open();
+        self.conversation.update(cx, |conversation, cx| {
+            if conversation.header.terminals != counts
+                || conversation.header.browser_open != browser_open
+            {
+                conversation.header.terminals = counts;
+                conversation.header.browser_open = browser_open;
+                cx.notify();
+            }
+        });
+    }
+
     pub(super) fn toggle_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.sidebar.read(cx).has_open_task() != Some(true) {
             return;

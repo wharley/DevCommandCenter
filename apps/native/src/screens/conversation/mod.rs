@@ -8,6 +8,9 @@ mod activity;
 mod assistant_row;
 mod cards;
 mod delegation_card;
+pub(crate) mod header;
+#[cfg(test)]
+mod header_tests;
 mod hover_actions;
 mod paced;
 mod permission_panel;
@@ -61,6 +64,8 @@ pub enum ConversationEvent {
     },
     /// The task's terminal dock, on its worktree.
     OpenTerminal,
+    /// The header's Globe: the Browser opens, or closes.
+    ToggleBrowser,
 }
 
 impl gpui::EventEmitter<ConversationEvent> for ConversationView {}
@@ -93,6 +98,8 @@ pub struct ConversationView {
     /// Wakes the refresh loop early (after an answer is sent).
     refresh_wake: Option<futures::channel::mpsc::UnboundedSender<()>>,
     pub(crate) requests: requests::Requests,
+    /// The header's own state (counts it shows, a close it asks about).
+    pub(crate) header: header::HeaderState,
     _clock: Task<()>,
 }
 
@@ -134,6 +141,7 @@ impl ConversationView {
             _refresh: None,
             refresh_wake: None,
             requests: requests::Requests::default(),
+            header: header::HeaderState::default(),
             _clock: Self::clock_loop(cx),
         }
     }
@@ -615,6 +623,9 @@ impl Render for ConversationView {
             .min_h_0()
             .min_w_0()
             .size_full()
+            .when(self.task_id.is_some(), |area| {
+                area.child(header::header(self, cx))
+            })
             .child(
                 div()
                     .relative()
@@ -635,5 +646,6 @@ impl Render for ConversationView {
             .when(self.task_id.is_some(), |area| {
                 area.child(self.composer.clone())
             })
+            .children(self.close_session_dialog(cx))
     }
 }

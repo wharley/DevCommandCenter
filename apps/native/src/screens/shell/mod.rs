@@ -304,6 +304,17 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         match event {
+            // `handleOpenBrowser`: closes an open one, else opens.
+            crate::screens::conversation::ConversationEvent::ToggleBrowser => {
+                if self.browser_open() {
+                    if let Some(open) = self.browser.open.as_ref() {
+                        let surface = open.surface.clone();
+                        surface.update(cx, |surface, cx| surface.close(cx));
+                    }
+                } else {
+                    self.open_browser(None, window, cx);
+                }
+            }
             // `openPreferredTerminal`: the worktree, else the project.
             crate::screens::conversation::ConversationEvent::OpenTerminal => {
                 self.terminal.update(cx, |dock, cx| {

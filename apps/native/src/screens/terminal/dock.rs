@@ -222,6 +222,14 @@ impl TerminalDock {
         cx.notify();
     }
 
+    /// The open task's two scope keys (`useActiveTerminalCount`'s scopes).
+    pub fn place_scopes(&self) -> Vec<String> {
+        self.place
+            .as_ref()
+            .map(|place| place.scopes().into_iter().map(|scope| scope.key).collect())
+            .unwrap_or_default()
+    }
+
     pub fn scope(&self) -> Option<TerminalScope> {
         self.place.as_ref().map(|place| place.scope(self.kind))
     }
