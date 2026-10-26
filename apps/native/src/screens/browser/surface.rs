@@ -47,6 +47,8 @@ pub enum BrowserEvent {
     SendToAgent(String),
     /// "Coletar": the `<browser_evidence>` block for the composer.
     SendEvidence(String),
+    /// The desktop knows this Browser: its lifecycle token.
+    Ready(u64),
 }
 
 /// Each Browser opened is a lifecycle of its own (the map ids say which).

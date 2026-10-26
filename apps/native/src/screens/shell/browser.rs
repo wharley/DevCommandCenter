@@ -24,6 +24,8 @@ pub(super) struct OpenBrowser {
     _events: Subscription,
     /// Pointer x and width when a splitter drag started.
     drag: Option<(f32, f32)>,
+    /// The agent's open it was opened for, until the desktop confirms it.
+    pub approval: Option<crate::data::browser_opens::OpenRequest>,
 }
 
 /// What the Shell keeps for the Browser.
@@ -32,6 +34,8 @@ pub(super) struct BrowserState {
     pub widths: Widths,
     pub width: f32,
     pub pages: PageFactory,
+    /// Allowed opens waiting for their conversation to show.
+    pub waiting: Vec<crate::data::browser_opens::OpenRequest>,
 }
 
 impl BrowserState {
@@ -41,6 +45,7 @@ impl BrowserState {
             widths: Widths::load(&Widths::default_path()),
             width: crate::screens::browser::layout::DEFAULT_WIDTH,
             pages: wry_pages(),
+            waiting: Vec::new(),
         }
     }
 }
@@ -87,12 +92,14 @@ impl Shell {
                 BrowserEvent::SendEvidence(text) => {
                     shell.browser_evidence_to_agent(text.clone(), window, cx)
                 }
+                BrowserEvent::Ready(token) => shell.browser_ready(*token, cx),
             },
         );
         self.browser.open = Some(OpenBrowser {
             surface,
             _events: events,
             drag: None,
+            approval: None,
         });
         self.sync_header(cx);
         cx.notify();

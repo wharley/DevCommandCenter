@@ -4,6 +4,7 @@
 mod annotation;
 mod bootstrap;
 mod browser;
+mod browser_opens;
 mod delivery;
 mod editor;
 pub mod layout;
@@ -108,6 +109,9 @@ pub struct Shell {
     session_search: Option<session_search::OpenSearch>,
     /// The Browser beside the conversation (screen 8).
     browser: browser::BrowserState,
+    /// The agents' requests to open it, and the card asking for them.
+    browser_approvals: Entity<crate::screens::browser::approval::BrowserApprovals>,
+    _browser_approvals: [Subscription; 2],
     /// The terminal dock under the conversation (screen 7).
     pub(crate) terminal: Entity<crate::screens::terminal::TerminalDock>,
     _terminal_events: Subscription,
@@ -208,11 +212,15 @@ impl Shell {
                 column.set_conversation_state(running, pending, cx);
             });
         });
+        let (browser_approvals, approval_subscriptions) =
+            browser_opens::new_approvals(&sidebar, &conversation, window, cx);
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
         Self {
             delivery,
             browser: browser::BrowserState::new(),
+            browser_approvals,
+            _browser_approvals: approval_subscriptions,
             session_search: None,
             terminal,
             _terminal_events: terminal_events,
@@ -842,6 +850,7 @@ impl Render for Shell {
                     .as_ref()
                     .map(|(search, _)| search.clone()),
             )
+            .child(self.browser_approvals.clone())
             .children(Toaster::handle(cx))
     }
 }

@@ -376,6 +376,11 @@ impl Sidebar {
         cx.notify();
     }
 
+    /// A listed task's name.
+    pub fn task_name(&self, task_id: &str) -> Option<String> {
+        self.state.task(task_id).map(|task| task.name.clone())
+    }
+
     /// Whether a task is open, once the list has loaded (`None` before).
     pub fn has_open_task(&self) -> Option<bool> {
         self.opened_first

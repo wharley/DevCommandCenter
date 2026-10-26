@@ -7,6 +7,7 @@ pub mod agents;
 pub mod ai_memory;
 pub mod avatar;
 pub mod browser_bridge;
+pub mod browser_opens;
 pub mod child_tasks;
 pub mod code_tree;
 pub mod composer_settings;

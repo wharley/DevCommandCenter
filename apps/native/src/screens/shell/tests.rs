@@ -513,3 +513,64 @@ fn the_browsers_page_context_lands_in_the_composers_draft(cx: &mut TestAppContex
     });
     assert!(draft.contains("<browser_page>"), "{draft}");
 }
+
+#[gpui::test]
+fn an_allowed_open_goes_to_its_conversation_and_opens_the_browser_there(cx: &mut TestAppContext) {
+    use crate::data::browser_opens::OpenRequest;
+    use crate::screens::browser::page::{FakePage, Page};
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let conversation = shell.read_with(cx, |shell, _| shell.conversation.clone());
+    let loaded = |session: &str| crate::data::conversation::Conversation {
+        task_id: "t".into(),
+        session_id: Some(session.into()),
+        root_path: Some("/tmp/dcc-browser-test".into()),
+        last_sequence: 1,
+        ..Default::default()
+    };
+    conversation.update(cx, |view, cx| view.show_loaded(loaded("s-1"), cx));
+    cx.run_until_parked();
+    shell.update_in(cx, |shell, window, cx| {
+        shell.browser.pages = std::rc::Rc::new(|_, _, _| {
+            Ok(std::rc::Rc::new(FakePage::default()) as std::rc::Rc<dyn Page>)
+        });
+        shell.open_approved(
+            OpenRequest {
+                request_id: "r-1".into(),
+                workspace_id: "t".into(),
+                session_id: "s-2".into(),
+                url: "https://example.com/plans".into(),
+                ..OpenRequest::default()
+            },
+            window,
+            cx,
+        );
+    });
+    // Another conversation of the task: nothing opens until it shows.
+    assert!(!shell.read_with(cx, |shell, _| shell.browser_open()));
+    conversation.update(cx, |view, cx| view.show_loaded(loaded("s-2"), cx));
+    cx.run_until_parked();
+    let (url, approval) = shell.read_with(cx, |shell, cx| {
+        let open = shell.browser.open.as_ref().expect("the Browser");
+        let surface = open.surface.read(cx);
+        (
+            surface.request.initial_url.clone(),
+            open.approval
+                .as_ref()
+                .map(|request| request.request_id.clone()),
+        )
+    });
+    assert_eq!(url.as_deref(), Some("https://example.com/plans"));
+    assert_eq!(approval.as_deref(), Some("r-1"));
+    assert!(shell.read_with(cx, |shell, _| shell.browser.waiting.is_empty()));
+    // The desktop knows that Browser: the open is confirmed once.
+    let surface = shell.read_with(cx, |shell, _| {
+        shell.browser.open.as_ref().unwrap().surface.clone()
+    });
+    surface.update(cx, |_, cx| {
+        cx.emit(crate::screens::browser::BrowserEvent::Ready(41))
+    });
+    cx.run_until_parked();
+    assert!(shell.read_with(cx, |shell, _| {
+        shell.browser.open.as_ref().unwrap().approval.is_none()
+    }));
+}

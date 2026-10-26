@@ -13,7 +13,7 @@ use dcc_core::domain::browser::validate_browser_url;
 use futures::StreamExt;
 use gpui::{Context, Task};
 
-use super::surface::BrowserSurface;
+use super::surface::{BrowserEvent, BrowserSurface};
 use crate::data::browser_bridge::{BridgeOp, BridgeOpKind, PageReport};
 use crate::data::desktop_api::DesktopApi;
 
@@ -116,6 +116,9 @@ impl BrowserSurface {
             let _ = this.update(cx, |surface, cx| {
                 if let Some(bridge) = surface.bridge.as_mut() {
                     bridge.token = token;
+                }
+                if let Some(token) = token {
+                    cx.emit(BrowserEvent::Ready(token));
                 }
                 cx.notify();
             });

@@ -3,6 +3,7 @@
 //! around it is GPUI.
 
 pub mod address;
+pub mod approval;
 mod audit;
 mod bridge;
 mod context;
@@ -20,6 +21,8 @@ pub mod surface;
 mod surface_view;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_approval;
 #[cfg(test)]
 mod tests_evidence;
 
