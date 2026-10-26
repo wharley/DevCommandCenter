@@ -12,6 +12,10 @@ pub struct ForgeContext {
     /// `github` | `gitlab`
     pub provider: Option<String>,
     pub host: Option<String>,
+    pub namespace: Option<String>,
+    pub repo: Option<String>,
+    /// The CLI's state: `ready` when it can act.
+    pub status: Option<String>,
     /// `ok` | `unauthenticated` | `unavailable`
     pub remote_state: Option<String>,
     pub bound_login: Option<String>,
@@ -22,6 +26,22 @@ impl ForgeContext {
     /// `forgeConnected`
     pub fn connected(&self) -> bool {
         self.remote_state.as_deref() == Some("ok")
+    }
+
+    /// `forgeReady`: a pull request can be opened from here.
+    pub fn ready(&self) -> bool {
+        self.status.as_deref() == Some("ready") && self.connected()
+    }
+
+    /// `forgeDestination`: `host/namespace/repo`.
+    pub fn destination(&self) -> Option<String> {
+        let (namespace, repo) = (self.namespace.as_ref()?, self.repo.as_ref()?);
+        let parts: Vec<&str> = [self.host.as_ref(), Some(namespace), Some(repo)]
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+            .collect();
+        Some(parts.join("/"))
     }
 }
 

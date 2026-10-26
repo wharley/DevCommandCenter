@@ -9,7 +9,7 @@ use dcc_core::domain::commit_mode::{CommitButtonStatus, CommitMode, should_auto_
 use gpui::{App, AppContext, Context, Focusable, SharedString, Window};
 
 use super::super::CodeColumn;
-use super::{Confirm, Preview};
+use super::{Confirm, Preview, PreviewOrigin};
 use crate::data::desktop_api::{ApiError, DesktopApi};
 use crate::i18n::{Args, Translate};
 use crate::ui::text_area::TextArea;
@@ -129,6 +129,7 @@ impl CodeColumn {
                     let focus = subject.read(cx).focus_handle(cx);
                     focus.focus(window, cx);
                     column.delivery.preview = Some(Preview {
+                        origin: PreviewOrigin::Review,
                         subject,
                         body,
                         staged_files: suggestion.staged_file_count,
@@ -152,8 +153,9 @@ impl CodeColumn {
     }
 
     pub(crate) fn close_preview(&mut self, cx: &mut Context<Self>) {
-        if self.delivery.button() != CommitButtonStatus::Busy {
+        if self.delivery.button() != CommitButtonStatus::Busy && !self.delivery.busy {
             self.delivery.preview = None;
+            self.delivery.preparing = None;
             cx.notify();
         }
     }
@@ -169,6 +171,11 @@ impl CodeColumn {
         }
         let body = preview.body.read(cx).text().to_string();
         let fingerprint = preview.fingerprint.clone();
+        if let PreviewOrigin::Dock { push } = preview.origin {
+            self.delivery.preview = None;
+            self.dock_commit(message, body, fingerprint, push, cx);
+            return;
+        }
         self.run_step(
             CommitMode::CommitAndPush,
             Some((message, body, fingerprint)),
@@ -499,7 +506,7 @@ impl CodeColumn {
     }
 }
 
-pub(super) fn message_of(error: ApiError, cx: &App) -> String {
+pub(crate) fn message_of(error: ApiError, cx: &App) -> String {
     match error {
         ApiError::DesktopClosed => cx.t("native.desktopClosed").to_string(),
         error => error.to_string(),

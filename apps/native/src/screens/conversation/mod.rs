@@ -109,6 +109,8 @@ pub struct ConversationView {
     pub(crate) requests: requests::Requests,
     /// The header's own state (counts it shows, a close it asks about).
     pub(crate) header: header::HeaderState,
+    /// The header's delivery buttons (set and heard by the shell).
+    pub(crate) delivery: Entity<header::delivery::DeliveryButtons>,
     /// "Buscar na conversa", while open.
     find: Option<find_bar::FindBar>,
     _clock: Task<()>,
@@ -153,6 +155,7 @@ impl ConversationView {
             refresh_wake: None,
             requests: requests::Requests::default(),
             header: header::HeaderState::default(),
+            delivery: cx.new(|_| header::delivery::DeliveryButtons::default()),
             find: None,
             _clock: Self::clock_loop(cx),
         }
@@ -269,6 +272,14 @@ impl ConversationView {
                 futures::future::select(Box::pin(beat), futures::StreamExt::next(&mut woken)).await;
             }
         })
+    }
+
+    /// A task's conversation as if it had been read, for other screens' tests.
+    #[cfg(test)]
+    pub(crate) fn show_loaded(&mut self, data: Conversation, cx: &mut Context<Self>) {
+        self.task_id = Some(data.task_id.clone());
+        self.loading = false;
+        self.apply(Rc::new(data), cx);
     }
 
     fn apply(&mut self, next: Rc<Conversation>, cx: &mut Context<Self>) {

@@ -41,6 +41,8 @@ pub struct MenuItem {
     detail: Option<SharedString>,
     /// A mark at the right end (the current choice's ✓).
     trailing: Option<SharedString>,
+    /// `font-medium`: the step the menu suggests.
+    emphasized: bool,
     on_select: OnSelect,
 }
 
@@ -56,6 +58,7 @@ impl MenuItem {
             destructive: false,
             detail: None,
             trailing: None,
+            emphasized: false,
             on_select: Rc::new(on_select),
         }
     }
@@ -88,6 +91,11 @@ impl MenuItem {
 
     pub fn destructive(mut self) -> Self {
         self.destructive = true;
+        self
+    }
+
+    pub fn emphasized(mut self, emphasized: bool) -> Self {
+        self.emphasized = emphasized;
         self
     }
 }
@@ -408,6 +416,7 @@ fn panel(
                     text: item.label,
                     detail: item.detail,
                     trailing: item.trailing,
+                    emphasized: item.emphasized,
                 },
                 false,
                 item.disabled,
@@ -432,6 +441,7 @@ fn panel(
                         text: label,
                         detail: None,
                         trailing: None,
+                        emphasized: false,
                     },
                     true,
                     false,

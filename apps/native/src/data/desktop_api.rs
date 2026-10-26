@@ -53,6 +53,8 @@ pub enum ApiError {
     Refused {
         code: String,
         message: String,
+        /// The outcome's `target` (`behind_remote`: the branch that moved).
+        target: Option<String>,
     },
     Failed(String),
 }
@@ -260,6 +262,10 @@ impl DesktopApi {
                 Some(code) => Err(ApiError::Refused {
                     code: code.to_string(),
                     message: error_message(&value).unwrap_or_else(|| code.to_string()),
+                    target: value
+                        .pointer("/error/outcome/target")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                 }),
             },
             _ => Err(ApiError::Failed(
@@ -597,14 +603,57 @@ impl DesktopApi {
         self.delivery(workspace_id, action, &json!({})).map(|_| ())
     }
 
-    /// The header's "Criar PR": no title or body (the forge fills it), not a draft.
+    /// The review header's "Criar PR": no title or body (the forge fills
+    /// it), not a draft.
     pub fn create_request(&self, workspace_id: &str) -> Result<(), ApiError> {
+        self.create_request_with(workspace_id, &RequestInput::default())
+    }
+
+    /// The "Criar PR" dialog's request: its title, body and draft, and the
+    /// local changes committed and pushed first when `changes_token` (the
+    /// status it was read from) still holds.
+    pub fn create_request_with(
+        &self,
+        workspace_id: &str,
+        input: &RequestInput,
+    ) -> Result<(), ApiError> {
         self.delivery(
             workspace_id,
             "request",
-            &json!({ "title": null, "body": null, "draft": false, "includeLocalChanges": false }),
+            &json!({
+                "title": input.title,
+                "body": input.body,
+                "draft": input.draft,
+                "includeLocalChanges": input.changes_token.is_some(),
+                "changesToken": input.changes_token,
+            }),
         )
         .map(|_| ())
+    }
+
+    /// The token that guards committing the task's local changes now.
+    pub fn changes_token(&self, workspace_id: &str) -> Result<String, ApiError> {
+        let value = self.get(&format!(
+            "/api/v1/workspaces/{}/delivery",
+            encode(workspace_id)
+        ))?;
+        value
+            .get("changesToken")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| ApiError::Failed("no changes token".into()))
+    }
+
+    /// `workspaceChangeRequestContext`: the dialog's route and default title.
+    pub fn change_request_context(
+        &self,
+        root: &str,
+        login: Option<&str>,
+    ) -> Result<ChangeRequestContext, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/forge/change-request-context",
+            &json!({ "workspaceRoot": root, "forgeLogin": login }),
+        )?)
     }
 
     /// "Atualizar worktree" with the base (the PR's when it has one).
@@ -1029,6 +1078,25 @@ impl DesktopApi {
         )
         .map(|_| ())
     }
+}
+
+/// What "Criar PR" sends: `changes_token` set means the local changes go too.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RequestInput {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub draft: bool,
+    pub changes_token: Option<String>,
+}
+
+/// `WorkspaceChangeRequestContextOutput`
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ChangeRequestContext {
+    pub head_branch: String,
+    pub base_branch: String,
+    pub title: Option<String>,
+    pub request_label: String,
 }
 
 fn error_message(value: &Value) -> Option<String> {

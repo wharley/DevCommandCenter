@@ -774,10 +774,11 @@ pub(crate) fn changes(
     let updating = (column.delivery.busy || column.delivery.syncing).then(|| updating(cx));
     let header = crate::screens::code_column::delivery::header(column, cx);
     let toolbar = crate::screens::code_column::delivery::toolbar(column, cx);
-    let mut dialogs = crate::screens::code_column::delivery::dialogs(column, window, cx);
-    dialogs.extend(crate::screens::code_column::review::recovery_confirm(
-        column, cx,
-    ));
+    // The delivery's own dialogs are the `DeliveryOverlay`'s.
+    let mut dialogs: Vec<AnyElement> =
+        crate::screens::code_column::review::recovery_confirm(column, cx)
+            .into_iter()
+            .collect();
     dialogs.extend(crate::screens::code_column::review::pipeline_retry_confirm(
         column, cx,
     ));

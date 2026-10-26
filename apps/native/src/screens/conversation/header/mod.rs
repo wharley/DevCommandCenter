@@ -1,10 +1,11 @@
 //! The conversation's header (`DccWorkbenchChatHeader`): the title, then
-//! the actions in the desktop's order — resume, the terminal with its
-//! count, the Browser, a new conversation, the history. The rest of the
-//! desktop's row (editor, delivery, ai-memory, delegations, agents, find,
-//! session search) arrives in its own slices.
+//! the actions in the desktop's order — resume, the editor, the terminal
+//! with its count, the Browser, the delivery, find, session search, a new
+//! conversation, the history. The ai-memory, delegations and resident
+//! agents arrive in their own slice.
 
 mod actions;
+pub(crate) mod delivery;
 mod editor;
 mod history;
 mod view;

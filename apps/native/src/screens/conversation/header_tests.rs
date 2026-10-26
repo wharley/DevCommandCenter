@@ -225,3 +225,59 @@ fn find_in_the_conversation_steps_through_its_hits(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("thread-find-bar").is_none());
 }
+
+#[gpui::test]
+fn the_delivery_controls_count_and_pick_a_step(cx: &mut TestAppContext) {
+    use dcc_core::domain::execution_dock::{
+        DockActionContext, DockChangeSummary, DockGitState, resolve_dock_actions,
+        resolve_dock_status,
+    };
+    let (view, cx, events, _server) = open(cx, vec![("/never", 200, "{}".into())]);
+    assert!(
+        cx.debug_bounds("header-review-changes").is_none(),
+        "no checkout, no delivery"
+    );
+    let summary = DockChangeSummary {
+        files: 2,
+        additions: 8,
+        deletions: 3,
+        has_remote: Some(true),
+        ..DockChangeSummary::default()
+    };
+    let context = DockActionContext::from_summary(
+        Some(dcc_core::domain::commit_mode::CommitMode::CommitAndPush),
+        false,
+        false,
+        Some(&summary),
+    );
+    use crate::screens::conversation::header::delivery::DeliveryButtonsEvent;
+    let buttons = cx.update(|_, cx| view.read(cx).delivery.clone());
+    let sink = events.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&buttons, move |_, event: &DeliveryButtonsEvent, _| {
+            sink.borrow_mut().push(match event {
+                DeliveryButtonsEvent::ReviewChanges => "review-changes",
+                DeliveryButtonsEvent::Run(_) => "run-delivery",
+            })
+        })
+        .detach();
+    });
+    buttons.update(cx, |buttons, cx| {
+        let controls = crate::screens::code_column::delivery::DockControls {
+            status: resolve_dock_status(Some(&summary), DockGitState::Ready),
+            actions: resolve_dock_actions(&context),
+            busy: false,
+            loading: false,
+            request_label: "PR",
+        };
+        buttons.set(Some(controls), cx);
+    });
+    click(cx, "header-review-changes");
+    click(cx, "header-delivery");
+    cx.simulate_keystrokes("down enter");
+    cx.run_until_parked();
+    assert_eq!(
+        events.borrow().as_slice(),
+        ["review-changes", "run-delivery"]
+    );
+}

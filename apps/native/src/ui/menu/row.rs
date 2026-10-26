@@ -12,6 +12,7 @@ pub(super) struct Label {
     pub(super) text: SharedString,
     pub(super) detail: Option<SharedString>,
     pub(super) trailing: Option<SharedString>,
+    pub(super) emphasized: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -48,6 +49,9 @@ pub(super) fn row(
             row.bg(colors.accent).text_color(colors.accent_foreground)
         })
         .when(destructive, |row| row.text_color(colors.destructive))
+        .when(label.emphasized, |row| {
+            row.font_weight(gpui::FontWeight::MEDIUM)
+        })
         .when(disabled, |row| row.opacity(0.5))
         .when(!disabled, |row| {
             row.cursor_pointer()

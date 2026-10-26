@@ -4,6 +4,7 @@
 mod annotation;
 mod bootstrap;
 mod browser;
+mod delivery;
 mod editor;
 pub mod layout;
 mod merge;
@@ -111,6 +112,8 @@ pub struct Shell {
     pub(crate) terminal: Entity<crate::screens::terminal::TerminalDock>,
     _terminal_events: Subscription,
     _terminal_counts: Subscription,
+    /// The conversation header's delivery and its dialogs.
+    delivery: delivery::DeliveryLink,
 }
 
 impl Shell {
@@ -156,6 +159,7 @@ impl Shell {
             cx.subscribe_in(&conversation, window, Self::on_conversation_event);
         let code_column = cx.new(|cx| CodeColumn::new(prefs.code_column_tab, cx));
         let code_column_events = cx.subscribe_in(&code_column, window, Self::on_code_column_event);
+        let delivery = delivery::link(&code_column, &conversation, window, cx);
         let stage = cx.new(Stage::new);
         let stage_events = cx.subscribe_in(&stage, window, Self::on_stage_event);
         // A file link in the conversation opens on the stage.
@@ -206,6 +210,7 @@ impl Shell {
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
         Self {
+            delivery,
             browser: browser::BrowserState::new(),
             session_search: None,
             terminal,
@@ -411,6 +416,7 @@ impl Shell {
                 });
             }
             CodeColumnEvent::Close => self.set_code_column(false, None, cx),
+            CodeColumnEvent::ReviewChanges => self.review_changes(cx),
             CodeColumnEvent::TabChanged(tab) => self.set_code_column(true, Some(*tab), cx),
         }
     }
@@ -827,6 +833,7 @@ impl Render for Shell {
                     self.new_task.clone().into_any_element()
                 }
             }))
+            .child(self.delivery.overlay.clone())
             .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))
             .children(self.annotation.as_ref().map(|(card, _)| card.clone()))
             .children(

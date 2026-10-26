@@ -38,7 +38,14 @@ struct Toast {
     description: Option<SharedString>,
     /// Its time ran out while the pointer was over the stack.
     expired: bool,
+    /// sonner's `action`: a button that runs and closes the toast.
+    action: Option<ToastAction>,
     _timer: Task<()>,
+}
+
+struct ToastAction {
+    label: SharedString,
+    run: std::rc::Rc<dyn Fn(&mut App)>,
 }
 
 pub struct Toaster {
@@ -140,6 +147,33 @@ impl Toaster {
         );
     }
 
+    /// `toast.error(message, { description, duration, action })`: stays
+    /// `lifetime` and offers one step.
+    pub fn error_action(
+        message: impl Into<SharedString>,
+        description: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        lifetime: Duration,
+        run: impl Fn(&mut App) + 'static,
+        cx: &mut App,
+    ) {
+        let (message, description) = (message.into(), Some(description.into()));
+        let action = ToastAction {
+            label: label.into(),
+            run: std::rc::Rc::new(run),
+        };
+        let Some(toaster) = Self::handle(cx) else {
+            return eprintln!("[dcc-native] {message}");
+        };
+        toaster.update(cx, |toaster, cx| {
+            let id = toaster.push(ToastKind::Error, message, description, cx);
+            if let Some(toast) = toaster.toasts.iter_mut().find(|toast| toast.id == id) {
+                toast.action = Some(action);
+                toast._timer = Self::timer_for(id, lifetime, cx);
+            }
+        });
+    }
+
     /// `toast.loading(message)`: the id to settle it with.
     pub fn loading(message: impl Into<SharedString>, cx: &mut App) -> Option<u64> {
         let message = message.into();
@@ -188,8 +222,12 @@ impl Toaster {
     }
 
     fn timer(id: u64, cx: &mut Context<Self>) -> Task<()> {
+        Self::timer_for(id, LIFETIME, cx)
+    }
+
+    fn timer_for(id: u64, lifetime: Duration, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(LIFETIME).await;
+            cx.background_executor().timer(lifetime).await;
             let _ = this.update(cx, |toaster, cx| toaster.expire(id, cx));
         })
     }
@@ -231,6 +269,7 @@ impl Toaster {
             message,
             description,
             expired: false,
+            action: None,
             _timer: timer,
         });
         cx.notify();
@@ -407,6 +446,32 @@ impl Toaster {
                         )
                     }),
             )
+            .when_some(toast.action.as_ref(), |row, action| {
+                let run = action.run.clone();
+                // sonner's `[data-button]`: 24px, the text's color as its fill.
+                row.child(
+                    div()
+                        .id(("toast-action", id as usize))
+                        .debug_selector(move || format!("toast-action-{id}"))
+                        .flex()
+                        .flex_shrink_0()
+                        .h(px(24.0))
+                        .items_center()
+                        .rounded(px(4.0))
+                        .px(px(8.0))
+                        .bg(colors.text)
+                        .text_color(colors.background)
+                        .text_size(px(12.0))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .cursor_pointer()
+                        .child(action.label.clone())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.dismiss(id, cx);
+                            let run = run.clone();
+                            cx.defer(move |cx| run(cx));
+                        })),
+                )
+            })
             .child(
                 // `translate(-35%, -35%)` of a 20px button at the top-left corner.
                 div()

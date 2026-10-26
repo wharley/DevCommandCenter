@@ -4,7 +4,7 @@
 
 mod changes;
 mod delegation;
-mod delivery;
+pub(crate) mod delivery;
 mod recap;
 pub(crate) mod review;
 mod tree;
@@ -78,6 +78,8 @@ pub enum CodeColumnEvent {
     OpenMergeResolver(crate::screens::merge::MergeResolverRequest),
     /// Lines picked in a card's diff, for the agent.
     Annotate(crate::screens::annotation::AnnotationRequest),
+    /// "Mudanças" to look at (the conversation menu's fix and conflicts).
+    ReviewChanges,
 }
 
 /// The checkout's files: tracked and new, then the ignored ones (dimmed).
@@ -248,7 +250,7 @@ impl CodeColumn {
         if self.tab != tab {
             self.tab = tab;
             cx.emit(CodeColumnEvent::TabChanged(tab));
-            // The branch and its pull request are read while "Mudanças" shows.
+            // Read again now rather than at the next status.
             self.read_branch(cx);
             self.read_pull_request(cx);
             self.read_review(false, cx);

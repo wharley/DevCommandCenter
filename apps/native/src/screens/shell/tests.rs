@@ -433,3 +433,37 @@ fn cmd_f_outside_a_field_opens_the_find_bar(cx: &mut TestAppContext) {
     let open = shell.read_with(cx, |shell, cx| shell.conversation.read(cx).find_open());
     assert!(!open, "the composer keeps ⌘F");
 }
+
+#[gpui::test]
+fn the_columns_delivery_reaches_the_header_and_review_opens_changes(cx: &mut TestAppContext) {
+    use crate::screens::conversation::header::delivery::DeliveryButtonsEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let repo = crate::test_support::git_checkout(&[("a.rs", "fn a() {}\n")]);
+    std::fs::write(repo.path().join("a.rs"), "fn a() { b(); }\n").unwrap();
+    let (column, conversation) = shell.read_with(cx, |shell, _| {
+        (shell.code_column.clone(), shell.conversation.clone())
+    });
+    let root = repo.path().to_string_lossy().into_owned();
+    // The open task's checkout: the shell gives it to the column.
+    conversation.update(cx, |view, cx| {
+        let data = crate::data::conversation::Conversation {
+            task_id: "t".into(),
+            workspace_path: Some(root),
+            last_sequence: 1,
+            ..Default::default()
+        };
+        view.show_loaded(data, cx);
+    });
+    cx.run_until_parked();
+    assert!(column.read_with(cx, |column, _| column.root.is_some()));
+    let delivery = conversation.read_with(cx, |view, cx| view.delivery.read(cx).controls.clone());
+    let delivery = delivery.expect("the header has the task's delivery");
+    assert_eq!(delivery.status.counts(), (1, 1));
+    let buttons = conversation.read_with(cx, |view, _| view.delivery.clone());
+    buttons.update(cx, |_, cx| cx.emit(DeliveryButtonsEvent::ReviewChanges));
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, _| {
+        assert!(shell.prefs.code_column_open);
+        assert_eq!(shell.prefs.code_column_tab, CodeColumnTab::Changes);
+    });
+}

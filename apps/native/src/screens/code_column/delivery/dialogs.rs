@@ -1,30 +1,38 @@
-//! The header's dialogs: "Revisar mensagem do commit" (subject and body,
-//! both editable, in monospace) and the confirmation before a merge or a
-//! sync with the base.
+//! The delivery dialogs: "Revisar mensagem do commit" (subject and body,
+//! both editable, in monospace; "Preparando…" while the conversation
+//! menu's is read), the confirmation before a merge or a sync with the
+//! base, and "Criar PR". Drawn by the `DeliveryOverlay`, so they open from
+//! either header with the column shown or not.
 
 use gpui::{
-    AnyElement, Context, Entity, Focusable, FontWeight, SharedString, Window, div, prelude::*, px,
+    AnyElement, Context, FocusHandle, Focusable, FontWeight, SharedString, Window, div, prelude::*,
+    px,
 };
 
 use super::super::CodeColumn;
-use super::Confirm;
+use super::{Confirm, PreviewOrigin};
 use crate::i18n::{Args, Translate};
 use crate::theme::{ActiveTheme, Appearance, fonts};
-use crate::ui::text_area::TextArea;
-use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog, dialog_footer, dialog_header};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog, dialog_footer, dialog_header, spinner};
 
-/// shadcn's `Textarea` with `min-h-* resize-y font-mono text-[12px]`.
-fn field(
-    area: &Entity<TextArea>,
-    min_height: f32,
+/// shadcn's `Input` (one line, 36px) or `Textarea` (`min-h-*`), in
+/// monospace at 12px for a commit.
+pub(super) fn field(
+    child: AnyElement,
+    focus: &FocusHandle,
+    min_height: Option<f32>,
+    mono: bool,
     window: &Window,
     cx: &Context<CodeColumn>,
 ) -> AnyElement {
     let colors = cx.theme().colors.clone();
-    let focused = area.read(cx).focus_handle(cx).is_focused(window);
+    let focused = focus.is_focused(window);
     let dark = cx.theme().appearance == Appearance::Dark;
     div()
-        .min_h(px(min_height))
+        .when_some(min_height, |field, height| field.min_h(px(height)))
+        .when(min_height.is_none(), |field| {
+            field.h(px(36.0)).flex().items_center()
+        })
         .w_full()
         .rounded(px(8.0))
         .border_1()
@@ -39,19 +47,64 @@ fn field(
                 inset: false,
             }])
         })
-        .px(px(10.0))
-        .py(px(8.0))
-        .font_family(fonts::MONO)
-        .text_size(px(12.0))
-        .child(area.clone())
+        .px(px(if min_height.is_some() { 10.0 } else { 12.0 }))
+        .when(min_height.is_some(), |field| field.py(px(8.0)))
+        .when(mono, |field| {
+            field.font_family(fonts::MONO).text_size(px(12.0))
+        })
+        .when(!mono, |field| field.text_size(px(14.0)))
+        .child(child)
         .into_any_element()
 }
 
-fn label(text: SharedString) -> AnyElement {
+pub(super) fn label(text: SharedString) -> AnyElement {
     div()
         .text_size(px(12.0))
         .font_weight(FontWeight::MEDIUM)
         .child(text)
+        .into_any_element()
+}
+
+/// "Preparando a prévia do commit…" (`role="status"`).
+fn preparing(cx: &Context<CodeColumn>) -> AnyElement {
+    let colors = cx.theme().colors.clone();
+    div()
+        .debug_selector(|| "commit-preview-preparing".into())
+        .my(px(12.0))
+        .flex()
+        .min_h(px(208.0))
+        .items_center()
+        .justify_center()
+        .gap(px(12.0))
+        .rounded(px(10.0))
+        .border_1()
+        .border_color(colors.border.opacity(0.6))
+        .bg(colors.muted.opacity(0.2))
+        .px(px(24.0))
+        .py(px(32.0))
+        .child(
+            div()
+                .flex_shrink_0()
+                .text_color(colors.muted_foreground)
+                .child(spinner("commit-preview-spinner", 20.0)),
+        )
+        .child(
+            div()
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(cx.t("commit.preview.preparing")),
+                )
+                .child(
+                    div()
+                        .mt(px(4.0))
+                        .text_size(px(11.0))
+                        .line_height(px(16.0))
+                        .text_color(colors.muted_foreground)
+                        .child(cx.t("commit.preview.preparingDescription")),
+                ),
+        )
         .into_any_element()
 }
 
@@ -60,46 +113,83 @@ fn preview(
     window: &Window,
     cx: &mut Context<CodeColumn>,
 ) -> Option<AnyElement> {
-    let preview = column.delivery.preview.as_ref()?;
+    let preview = column.delivery.preview.as_ref();
+    let preparing_push = column.delivery.preparing;
+    if preview.is_none() && preparing_push.is_none() {
+        return None;
+    }
     let colors = cx.theme().colors.clone();
-    let empty = preview.subject.read(cx).text().trim().is_empty();
+    let empty = preview.is_none_or(|preview| preview.subject.read(cx).text().trim().is_empty());
     let busy = column.delivery.busy;
+    // Only a commit without its push says "Commitar".
+    let commit_only = match preview.map(|preview| preview.origin) {
+        Some(PreviewOrigin::Dock { push }) => !push,
+        Some(PreviewOrigin::Review) => false,
+        None => preparing_push == Some(false),
+    };
     let header = dialog_header(
         cx.t("commit.preview.title"),
         Some(cx.t("commit.preview.description")),
         cx,
     );
-    let source = cx.t_with(
-        "commit.preview.source",
-        &Args::count(i64::from(preview.staged_files)),
-    );
-    let fields = div()
-        .flex()
-        .flex_col()
-        .gap(px(8.0))
-        .py(px(12.0))
-        .child(label(cx.t("commit.preview.label")))
-        .child(field(&preview.subject, 96.0, window, cx))
-        .child(label(cx.t("commit.preview.bodyLabel")))
-        .child(field(&preview.body, 80.0, window, cx))
-        .child(
+    let fields = match preview {
+        None => preparing(cx),
+        Some(preview) => {
+            let source = cx.t_with(
+                "commit.preview.source",
+                &Args::count(i64::from(preview.staged_files)),
+            );
+            let subject_focus = preview.subject.read(cx).focus_handle(cx);
+            let body_focus = preview.body.read(cx).focus_handle(cx);
             div()
-                .text_size(px(11.0))
-                .text_color(colors.muted_foreground)
-                .child(source),
-        );
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .py(px(12.0))
+                .child(label(cx.t("commit.preview.label")))
+                .child(field(
+                    preview.subject.clone().into_any_element(),
+                    &subject_focus,
+                    Some(96.0),
+                    true,
+                    window,
+                    cx,
+                ))
+                .child(label(cx.t("commit.preview.bodyLabel")))
+                .child(field(
+                    preview.body.clone().into_any_element(),
+                    &body_focus,
+                    Some(80.0),
+                    true,
+                    window,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(colors.muted_foreground)
+                        .child(source),
+                )
+                .into_any_element()
+        }
+    };
     let footer = dialog_footer(
         [
             Button::new("commit-preview-cancel")
                 .variant(ButtonVariant::Outline)
                 .size(ButtonSize::Default)
+                .disabled(busy)
                 .child(cx.t("commit.preview.cancel"))
                 .on_click(cx.listener(|column, _, _, cx| column.close_preview(cx)))
                 .into_any_element(),
             Button::new("commit-preview-confirm")
                 .size(ButtonSize::Default)
-                .disabled(empty || busy)
-                .child(cx.t("commit.preview.confirm"))
+                .disabled(empty || busy || preview.is_none())
+                .child(if commit_only {
+                    cx.t("composer.executionDock.actions.commit")
+                } else {
+                    cx.t("commit.preview.confirm")
+                })
                 .on_click(cx.listener(|column, _, _, cx| column.confirm_preview(cx)))
                 .into_any_element(),
         ],
@@ -209,8 +299,8 @@ fn confirm(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> Option<AnyEleme
     )
 }
 
-/// Whichever of the header's dialogs is open.
-pub(crate) fn dialogs(
+/// Whichever of the delivery dialogs is open.
+pub(super) fn dialogs(
     column: &CodeColumn,
     window: &Window,
     cx: &mut Context<CodeColumn>,
@@ -218,5 +308,6 @@ pub(crate) fn dialogs(
     preview(column, window, cx)
         .into_iter()
         .chain(confirm(column, cx))
+        .chain(super::request::request_dialog(column, window, cx))
         .collect()
 }

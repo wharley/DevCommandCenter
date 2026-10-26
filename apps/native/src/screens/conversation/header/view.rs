@@ -235,6 +235,7 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
                         .child(view.editor_picker(cx))
                         .child(view.terminal_button(cx))
                         .child(view.browser_button(cx))
+                        .child(view.delivery.clone())
                         .child(view.new_session_button(cx))
                         .child(view.find_buttons(cx))
                         .child(view.history_menu(cx)),

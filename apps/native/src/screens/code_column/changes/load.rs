@@ -4,7 +4,7 @@
 
 use gpui::{AppContext, Context};
 
-use super::super::{CodeColumn, CodeColumnTab, Loaded};
+use super::super::{CodeColumn, Loaded};
 use super::{CardDiff, ChangeGroup, Scope};
 use crate::screens::diff_view::DiffView;
 
@@ -216,14 +216,12 @@ impl CodeColumn {
     }
 
     /// `useWorkspaceGitBranchDiff`: the files the branch changed against its
-    /// base, while "Mudanças" shows.
+    /// base (the conversation header counts them too, as the desktop's
+    /// panel hoists the query).
     pub(crate) fn read_branch(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self.root.clone() else {
             return;
         };
-        if self.tab != CodeColumnTab::Changes {
-            return;
-        }
         let db_path = self.db_path.clone();
         self._branch = Some(cx.spawn(async move |this, cx| {
             let path = root.clone();

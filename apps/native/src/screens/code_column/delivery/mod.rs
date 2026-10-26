@@ -9,13 +9,19 @@
 mod actions;
 mod conflicts;
 mod dialogs;
+mod dock;
+#[cfg(test)]
+mod dock_tests;
 mod header;
+mod overlay;
+mod request;
 #[cfg(test)]
 mod tests;
 mod toolbar;
 
-pub(crate) use dialogs::dialogs;
+pub use dock::DockControls;
 pub(crate) use header::header;
+pub use overlay::DeliveryOverlay;
 pub(crate) use toolbar::toolbar;
 
 use dcc_core::domain::commit_mode::{CommitButtonStatus, CommitMode, resolve_commit_mode};
@@ -36,8 +42,18 @@ pub enum Confirm {
     CompleteMerge,
 }
 
+/// Which header opened the commit preview.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewOrigin {
+    /// The review's "Commitar e enviar".
+    Review,
+    /// The conversation's menu: a commit, pushed or not.
+    Dock { push: bool },
+}
+
 /// "Revisar mensagem do commit": the staged snapshot's message, editable.
 pub(crate) struct Preview {
+    pub origin: PreviewOrigin,
     pub subject: Entity<TextArea>,
     pub body: Entity<TextArea>,
     pub staged_files: u32,
@@ -58,6 +74,10 @@ pub(crate) struct Delivery {
     pub button: Option<CommitButtonStatus>,
     pub confirm: Option<Confirm>,
     pub preview: Option<Preview>,
+    /// The conversation menu's preview is being prepared (it pushes or not).
+    pub preparing: Option<bool>,
+    /// "Criar PR" from the conversation's menu.
+    pub request: Option<request::RequestDialog>,
     /// The task completed after its merge, once.
     pub completed: Option<String>,
     /// `.dcc.toml`'s delivery policy and its before-merge checks, read with
@@ -122,15 +142,13 @@ impl CodeColumn {
         )
     }
 
-    /// The task and its pull request, read with the status while
-    /// "Mudanças" shows (`useWorkspacePrStatus`, every ten seconds).
+    /// The task and its pull request, read with the status every ten
+    /// seconds (`useWorkspacePrStatus`), the column shown or not: the
+    /// conversation header's delivery needs them.
     pub(crate) fn read_pull_request(&mut self, cx: &mut Context<Self>) {
         let Some(root) = self.root.clone() else {
             return;
         };
-        if self.tab != super::CodeColumnTab::Changes {
-            return;
-        }
         let (db_path, branch) = (self.db_path.clone(), self.current_branch());
         self._pull_request = Some(cx.spawn(async move |this, cx| {
             let path = root.clone();
