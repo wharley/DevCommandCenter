@@ -35,6 +35,7 @@ use crate::browser_popups::{
 pub use dcc_core::domain::browser_context::*;
 use dcc_core::domain::session::SessionId;
 use dcc_tauri::state::SessionCommandState;
+use dev_command_center_tauri::http_api as dcc_http;
 
 const BROWSER_LABEL: &str = "dcc-browser";
 static BROWSER_VIEW_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -531,6 +532,9 @@ pub struct BrowserControlStatus {
 #[derive(Clone)]
 pub struct BrowserState {
     pub(crate) webview: Arc<Mutex<Option<Webview<Wry>>>>,
+    /// The native app's Browser is the surface: page operations go to it
+    /// through the bridge instead of `webview`.
+    remote: Arc<Mutex<bool>>,
     contexts: Arc<Mutex<HashMap<String, BrowserContext>>>,
     active_scope: Arc<Mutex<Option<String>>>,
     active_workspace: Arc<Mutex<Option<String>>>,
@@ -566,6 +570,7 @@ impl Default for BrowserState {
     fn default() -> Self {
         Self {
             webview: Arc::new(Mutex::new(None)),
+            remote: Arc::new(Mutex::new(false)),
             contexts: Arc::new(Mutex::new(HashMap::new())),
             active_scope: Arc::new(Mutex::new(None)),
             active_workspace: Arc::new(Mutex::new(None)),
@@ -1238,12 +1243,12 @@ pub(crate) async fn capture_browser_viewport_for_lease(
     if !context_ready_for_scope(state, workspace_id, Some(session_id), initial_url)? {
         return Err("browser page is still loading".to_string());
     }
-    let webview = state
-        .webview
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?
-        .clone()
-        .ok_or_else(|| "browser is not open".to_string())?;
+    let webview = match page_driver(state)? {
+        PageDriver::Local(webview) => *webview,
+        PageDriver::Remote => {
+            return Err("browser screenshot is unavailable in this Browser".to_string());
+        }
+    };
     let bytes = crate::browser_capture::capture(webview).await?;
     authorize()?;
     let after = current_snapshot(state)?;
@@ -1965,31 +1970,14 @@ async fn eval_browser_action_response(
     state: &BrowserState,
     script: String,
 ) -> Result<String, String> {
-    let (sender, receiver) = oneshot::channel();
-    let sender = Arc::new(Mutex::new(Some(sender)));
-    {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        let webview = webview
-            .as_ref()
-            .ok_or_else(|| "browser is not open".to_string())?;
-        let sender = sender.clone();
-        webview
-            .eval_with_callback(script, move |raw| {
-                if let Ok(mut sender) = sender.lock() {
-                    if let Some(sender) = sender.take() {
-                        let _ = sender.send(raw);
-                    }
-                }
-            })
-            .map_err(|_| "browser action failed".to_string())?;
-    }
-    let raw = timeout(BROWSER_CONTEXT_TIMEOUT, receiver)
+    let raw = eval_page(state, script, BROWSER_CONTEXT_TIMEOUT)
         .await
-        .map_err(|_| "browser action timed out".to_string())?
-        .map_err(|_| "browser action confirmation was cancelled".to_string())?;
+        .map_err(|error| match error {
+            PageEvalError::NotOpen(message) => message,
+            PageEvalError::Start(_) => "browser action failed".to_string(),
+            PageEvalError::Timeout => "browser action timed out".to_string(),
+            PageEvalError::Cancelled => "browser action confirmation was cancelled".to_string(),
+        })?;
     if raw.len() > 1024 {
         return Err("browser action response is invalid".into());
     }
@@ -2289,31 +2277,14 @@ async fn eval_browser_evidence_with_callback(
     state: &BrowserState,
     script: String,
 ) -> Result<String, String> {
-    let (sender, receiver) = oneshot::channel();
-    let sender = Arc::new(Mutex::new(Some(sender)));
-    {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        let webview = webview
-            .as_ref()
-            .ok_or_else(|| "browser is not open".to_string())?;
-        let sender = sender.clone();
-        webview
-            .eval_with_callback(script, move |raw| {
-                if let Ok(mut sender) = sender.lock() {
-                    if let Some(sender) = sender.take() {
-                        let _ = sender.send(raw);
-                    }
-                }
-            })
-            .map_err(|_| "browser evidence script failed".to_string())?;
-    }
-    timeout(BROWSER_EVIDENCE_TIMEOUT, receiver)
+    eval_page(state, script, BROWSER_EVIDENCE_TIMEOUT)
         .await
-        .map_err(|_| "browser evidence script timed out".to_string())?
-        .map_err(|_| "browser evidence response was cancelled".to_string())
+        .map_err(|error| match error {
+            PageEvalError::NotOpen(message) => message,
+            PageEvalError::Start(_) => "browser evidence script failed".to_string(),
+            PageEvalError::Timeout => "browser evidence script timed out".to_string(),
+            PageEvalError::Cancelled => "browser evidence response was cancelled".to_string(),
+        })
 }
 
 fn browser_evidence_origin_json(expected_url: &str) -> Result<String, String> {
@@ -4074,13 +4045,7 @@ pub(crate) async fn execute_browser_control_action(
     let action_name = action.name().to_string();
     match action {
         PreparedBrowserControlAction::Navigate(url) => {
-            let webview = state
-                .webview
-                .lock()
-                .map_err(|_| "browser state lock poisoned".to_string())?;
-            let webview = webview
-                .as_ref()
-                .ok_or_else(|| "browser is not open".to_string())?;
+            let page = page_driver(state)?;
             require_action_page_revision(state, &anchor)?;
             require_browser_control_grant(
                 state,
@@ -4105,18 +4070,11 @@ pub(crate) async fn execute_browser_control_action(
                 &anchor.workspace_id,
                 anchor.session_id.as_deref(),
             );
-            webview
-                .navigate(url)
+            page.navigate(&url)
                 .map_err(|_| "browser navigate action failed".to_string())?;
         }
         PreparedBrowserControlAction::Reload => {
-            let webview = state
-                .webview
-                .lock()
-                .map_err(|_| "browser state lock poisoned".to_string())?;
-            let webview = webview
-                .as_ref()
-                .ok_or_else(|| "browser is not open".to_string())?;
+            let page = page_driver(state)?;
             require_action_page_revision(state, &anchor)?;
             require_browser_control_grant(
                 state,
@@ -4141,18 +4099,11 @@ pub(crate) async fn execute_browser_control_action(
                 &anchor.workspace_id,
                 anchor.session_id.as_deref(),
             );
-            webview
-                .reload()
+            page.reload()
                 .map_err(|_| "browser reload action failed".to_string())?;
         }
         PreparedBrowserControlAction::Scroll { delta_x, delta_y } => {
-            let webview = state
-                .webview
-                .lock()
-                .map_err(|_| "browser state lock poisoned".to_string())?;
-            let webview = webview
-                .as_ref()
-                .ok_or_else(|| "browser is not open".to_string())?;
+            let page = page_driver(state)?;
             require_action_page_revision(state, &anchor)?;
             require_browser_control_grant(
                 state,
@@ -4161,8 +4112,7 @@ pub(crate) async fn execute_browser_control_action(
                 anchor.lifecycle_token,
                 Instant::now(),
             )?;
-            webview
-                .eval(browser_scroll_script(delta_x, delta_y))
+            page.eval_detached(browser_scroll_script(delta_x, delta_y))
                 .map_err(|_| "browser scroll action failed".to_string())?;
         }
         PreparedBrowserControlAction::Click { .. } => {
@@ -4176,8 +4126,11 @@ pub(crate) async fn execute_browser_control_action(
                 anchor.lifecycle_token,
                 Instant::now(),
             )?;
+            // The native app's Browser clicks through the page (8c2 brings
+            // its native click); the desktop's own view gets a real one.
+            let remote = remote_attached(state);
             #[cfg(target_os = "macos")]
-            {
+            if !remote {
                 let raw = eval_browser_action_response(
                     state,
                     browser_element_action_script(
@@ -4213,12 +4166,13 @@ pub(crate) async fn execute_browser_control_action(
                 )
                 .await?;
             }
-            #[cfg(not(target_os = "macos"))]
-            eval_browser_action_with_callback(
-                state,
-                browser_semantic_action_script(&target, None, &anchor.url, document_identity)?,
-            )
-            .await?;
+            if remote || cfg!(not(target_os = "macos")) {
+                eval_browser_action_with_callback(
+                    state,
+                    browser_semantic_action_script(&target, None, &anchor.url, document_identity)?,
+                )
+                .await?;
+            }
         }
         PreparedBrowserControlAction::Fill { text, .. } => {
             let (target, document_identity) =
@@ -4255,6 +4209,10 @@ pub(crate) async fn execute_browser_control_action(
                 Instant::now(),
             )?;
             let is_key = action_name == "press";
+            // A key needs the native input (8c2); nothing is focused first.
+            if is_key && remote_attached(state) {
+                return Err("browser key press is unavailable in this Browser".to_string());
+            }
             eval_browser_action_with_callback(
                 state,
                 browser_element_action_script(
@@ -4798,32 +4756,14 @@ async fn extract_browser_context_locked(
     let initial_page_load_revision =
         current_page_load_revision(&state, &workspace_id, session_id.as_deref(), &initial_url)?;
 
-    let (sender, receiver) = oneshot::channel();
-    let sender = Arc::new(Mutex::new(Some(sender)));
-    {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        let webview = webview
-            .as_ref()
-            .ok_or_else(|| "browser is not open".to_string())?;
-        let sender = sender.clone();
-        webview
-            .eval_with_callback(browser_context_script(), move |raw| {
-                if let Ok(mut sender) = sender.lock() {
-                    if let Some(sender) = sender.take() {
-                        let _ = sender.send(raw);
-                    }
-                }
-            })
-            .map_err(|error| format!("failed to read browser page context: {error}"))?;
-    }
-
-    let raw = timeout(BROWSER_CONTEXT_TIMEOUT, receiver)
+    let raw = eval_page(state, browser_context_script(), BROWSER_CONTEXT_TIMEOUT)
         .await
-        .map_err(|_| "browser page context timed out".to_string())?
-        .map_err(|_| "browser page context response was cancelled".to_string())?;
+        .map_err(|error| match error {
+            PageEvalError::NotOpen(message) => message,
+            PageEvalError::Start(error) => format!("failed to read browser page context: {error}"),
+            PageEvalError::Timeout => "browser page context timed out".to_string(),
+            PageEvalError::Cancelled => "browser page context response was cancelled".to_string(),
+        })?;
     require_current_lifecycle(
         &state,
         &workspace_id,
@@ -5111,8 +5051,401 @@ pub fn shutdown(state: &BrowserState) {
     }
 }
 
+// ---- The native app's Browser (`http_api::browser_bridge`) ----------------
+
+/// Where page operations go: the desktop's own view, or the native app's
+/// Browser through the bridge. Everything around them — scope, lifecycle,
+/// grant, maps, evidence, audit — is the same either way.
+pub(crate) enum PageDriver {
+    Local(Box<Webview<Wry>>),
+    Remote,
+}
+
+pub(crate) enum PageEvalError {
+    /// Neither Browser is there ("browser is not open").
+    NotOpen(String),
+    Start(String),
+    Timeout,
+    Cancelled,
+}
+
+fn remote_attached(state: &BrowserState) -> bool {
+    state.remote.lock().map(|remote| *remote).unwrap_or(false)
+}
+
+pub(crate) fn page_driver(state: &BrowserState) -> Result<PageDriver, String> {
+    if remote_attached(state) {
+        return Ok(PageDriver::Remote);
+    }
+    state
+        .webview
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?
+        .clone()
+        .map(|webview| PageDriver::Local(Box::new(webview)))
+        .ok_or_else(|| "browser is not open".to_string())
+}
+
+impl PageDriver {
+    fn navigate(&self, url: &Url) -> Result<(), String> {
+        match self {
+            Self::Local(webview) => webview
+                .navigate(url.clone())
+                .map_err(|error| error.to_string()),
+            Self::Remote => {
+                dcc_http::native_browser_bridge().fire(dcc_http::BridgeOpKind::Navigate {
+                    url: url.to_string(),
+                })
+            }
+        }
+    }
+
+    fn reload(&self) -> Result<(), String> {
+        match self {
+            Self::Local(webview) => webview.reload().map_err(|error| error.to_string()),
+            Self::Remote => dcc_http::native_browser_bridge().fire(dcc_http::BridgeOpKind::Reload),
+        }
+    }
+
+    fn eval_detached(&self, script: String) -> Result<(), String> {
+        match self {
+            Self::Local(webview) => webview.eval(script).map_err(|error| error.to_string()),
+            Self::Remote => dcc_http::native_browser_bridge()
+                .fire(dcc_http::BridgeOpKind::EvalDetached { script }),
+        }
+    }
+}
+
+/// A script in the page, its JSON answer within `wait`.
+async fn eval_page(
+    state: &BrowserState,
+    script: String,
+    wait: Duration,
+) -> Result<String, PageEvalError> {
+    match page_driver(state).map_err(PageEvalError::NotOpen)? {
+        PageDriver::Local(webview) => {
+            let (sender, receiver) = oneshot::channel();
+            let sender = Arc::new(Mutex::new(Some(sender)));
+            webview
+                .eval_with_callback(script, move |raw| {
+                    if let Ok(mut sender) = sender.lock() {
+                        if let Some(sender) = sender.take() {
+                            let _ = sender.send(raw);
+                        }
+                    }
+                })
+                .map_err(|error| PageEvalError::Start(error.to_string()))?;
+            timeout(wait, receiver)
+                .await
+                .map_err(|_| PageEvalError::Timeout)?
+                .map_err(|_| PageEvalError::Cancelled)
+        }
+        PageDriver::Remote => {
+            let receiver = dcc_http::native_browser_bridge()
+                .request(dcc_http::BridgeOpKind::Eval { script })
+                .map_err(PageEvalError::NotOpen)?;
+            let reply = timeout(wait, receiver)
+                .await
+                .map_err(|_| PageEvalError::Timeout)?
+                .map_err(|_| PageEvalError::Cancelled)?;
+            if reply.ok {
+                Ok(reply.raw.unwrap_or_default())
+            } else {
+                Err(PageEvalError::Start(reply.error.unwrap_or_else(|| {
+                    "browser page script failed".to_string()
+                })))
+            }
+        }
+    }
+}
+
+fn remote_token_is_current(state: &BrowserState, lifecycle_token: u64) -> Result<String, String> {
+    let current = *state
+        .lifecycle_token
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    let open = *state
+        .lifecycle_open
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    if !remote_attached(state) || !open || current != lifecycle_token {
+        return Err("browser lifecycle is stale".to_string());
+    }
+    state
+        .active_scope
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?
+        .clone()
+        .ok_or_else(|| "browser lifecycle is stale".to_string())
+}
+
+/// `browser_open`'s bookkeeping for the native app's Browser, opened on
+/// `url` for a task's conversation: it becomes the surface (the desktop's
+/// own view, if any, goes), a new lifecycle starts — no grant, map or
+/// evidence carried over — and the URL is the one asked for.
+pub(crate) async fn remote_browser_open(
+    app: &AppHandle<Wry>,
+    state: &BrowserState,
+    sessions: &SessionCommandState,
+    workspace_id: &str,
+    session_id: Option<&str>,
+    url: &str,
+) -> Result<u64, String> {
+    let _operation = state.operation_lock.lock().await;
+    validate_scope(sessions, workspace_id, session_id).await?;
+    let url = validate_browser_url(url)?.to_string();
+    let previous_scope = state
+        .active_scope
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?
+        .clone();
+    if let Some(previous_scope) = previous_scope.as_deref() {
+        let previous_token = *state
+            .lifecycle_token
+            .lock()
+            .map_err(|_| "browser state lock poisoned")?;
+        crate::browser_popups::close_browser_popups_for_lifecycle(
+            app,
+            previous_scope,
+            previous_token,
+        );
+    }
+    discard_browser_view(state)?;
+    set_active_scope(state, workspace_id, session_id)?;
+    let token = {
+        let mut token = state
+            .lifecycle_token
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?;
+        advance_lifecycle_token(&mut token);
+        *token
+    };
+    invalidate_semantic_map_for_scope(state, workspace_id, session_id);
+    clear_browser_evidence_captures(state);
+    clear_browser_control_grant(state);
+    *state
+        .remote
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = true;
+    *state
+        .lifecycle_open
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = true;
+    *state
+        .occluded
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = false;
+    *state
+        .visible
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = true;
+    if let Ok(mut contexts) = state.contexts.lock() {
+        mark_context_open_request(
+            contexts
+                .entry(scope_key(workspace_id, session_id))
+                .or_default(),
+            url,
+            None,
+        );
+    }
+    Ok(token)
+}
+
+/// What the native Browser's page did, in the desktop's page context.
+pub(crate) async fn remote_browser_report(
+    state: &BrowserState,
+    lifecycle_token: u64,
+    report: dcc_http::PageReport,
+) -> Result<(), String> {
+    let _operation = state.operation_lock.lock().await;
+    let key = remote_token_is_current(state, lifecycle_token)?;
+    use dcc_http::PageReport;
+    if let PageReport::Visibility { visible } = report {
+        *state
+            .visible
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())? = visible;
+        *state
+            .occluded
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())? = !visible;
+        return Ok(());
+    }
+    let mut changed_page = false;
+    {
+        let mut contexts = state
+            .contexts
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?;
+        let context = contexts.entry(key.clone()).or_default();
+        match report {
+            PageReport::Loading { url } => {
+                mark_context_loading(context, url);
+                context.main_load_started = true;
+                changed_page = true;
+            }
+            PageReport::Loaded { url } => {
+                context.expected_url = Some(url.clone());
+                context.url = Some(url.clone());
+                context.ready_url = Some(url);
+                context.main_load_started = false;
+            }
+            // A single-page app moved: a new document for the agent.
+            PageReport::Url { url } => {
+                if context.ready_url.is_some() && context.url.as_deref() != Some(url.as_str()) {
+                    mark_context_loading(context, url.clone());
+                    context.url = Some(url.clone());
+                    context.ready_url = Some(url);
+                    changed_page = true;
+                } else if context.ready_url.is_none() {
+                    context.expected_url = Some(url);
+                }
+            }
+            PageReport::Title { title } => {
+                context.title = (!title.trim().is_empty()).then_some(title);
+            }
+            PageReport::Visibility { .. } => {}
+        }
+    }
+    if changed_page {
+        invalidate_browser_evidence_for_scope_key(state, &key);
+    }
+    Ok(())
+}
+
+/// `browser_hide`'s bookkeeping: the native Browser closed (or its app
+/// went away): no grant, no evidence, a new lifecycle, no surface.
+pub(crate) async fn remote_browser_close(
+    state: &BrowserState,
+    lifecycle_token: Option<u64>,
+) -> Result<(), String> {
+    let _operation = state.operation_lock.lock().await;
+    let key = match lifecycle_token {
+        Some(token) => remote_token_is_current(state, token)?,
+        None if remote_attached(state) => state
+            .active_scope
+            .lock()
+            .map_err(|_| "browser state lock poisoned".to_string())?
+            .clone()
+            .unwrap_or_default(),
+        None => return Ok(()),
+    };
+    clear_browser_control_grant(state);
+    invalidate_browser_evidence_for_scope_key(state, &key);
+    if let Ok(mut contexts) = state.contexts.lock() {
+        if let Some(context) = contexts.get_mut(&key) {
+            invalidate_semantic_map(context);
+        }
+    }
+    *state
+        .remote
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = false;
+    *state
+        .visible
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = false;
+    *state
+        .lifecycle_open
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = false;
+    *state
+        .occluded
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())? = false;
+    let mut token = state
+        .lifecycle_token
+        .lock()
+        .map_err(|_| "browser state lock poisoned".to_string())?;
+    advance_lifecycle_token(&mut token);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn the_native_browser_runs_the_scripts_and_reports_its_page() {
+        use super::*;
+        let state = BrowserState::default();
+        let scope = scope_key("w-native", Some("s-native"));
+        *state.active_scope.lock().unwrap() = Some(scope.clone());
+        *state.lifecycle_token.lock().unwrap() = 41;
+        *state.lifecycle_open.lock().unwrap() = true;
+        *state.remote.lock().unwrap() = true;
+        // The bridge carries the script; the answer comes back by its id.
+        let mut native = dcc_http::native_browser_bridge().subscribe();
+        let answering = tokio::spawn(async move {
+            let op = native.recv().await.unwrap();
+            assert_eq!(
+                op.kind,
+                dcc_http::BridgeOpKind::Eval {
+                    script: "document.title".into()
+                }
+            );
+            dcc_http::native_browser_bridge().reply(
+                op.op_id,
+                dcc_http::BridgeReply {
+                    ok: true,
+                    raw: Some("\"Docs\"".into()),
+                    error: None,
+                },
+            );
+        });
+        let raw = eval_page(&state, "document.title".into(), Duration::from_secs(2)).await;
+        answering.await.unwrap();
+        assert_eq!(raw.ok().as_deref(), Some("\"Docs\""));
+        // Its page reports move the desktop's context like WebKit's do.
+        use dcc_http::PageReport;
+        remote_browser_report(
+            &state,
+            41,
+            PageReport::Loading {
+                url: "https://ex.com/a".into(),
+            },
+        )
+        .await
+        .unwrap();
+        remote_browser_report(
+            &state,
+            41,
+            PageReport::Loaded {
+                url: "https://ex.com/a".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let revision = {
+            let contexts = state.contexts.lock().unwrap();
+            let context = &contexts[&scope];
+            assert!(context_is_ready_for_url(context, "https://ex.com/a"));
+            context.page_load_revision
+        };
+        remote_browser_report(
+            &state,
+            41,
+            PageReport::Url {
+                url: "https://ex.com/b".into(),
+            },
+        )
+        .await
+        .unwrap();
+        {
+            let contexts = state.contexts.lock().unwrap();
+            let context = &contexts[&scope];
+            assert!(context_is_ready_for_url(context, "https://ex.com/b"));
+            assert!(context.page_load_revision > revision, "a new document");
+        }
+        assert!(
+            remote_browser_report(&state, 40, PageReport::Title { title: "x".into() })
+                .await
+                .is_err(),
+            "an old lifecycle"
+        );
+        remote_browser_close(&state, Some(41)).await.unwrap();
+        assert!(!*state.lifecycle_open.lock().unwrap());
+        assert!(matches!(page_driver(&state), Err(error) if error == "browser is not open"));
+    }
+
     use std::time::{Duration as StdDuration, Instant};
 
     use super::{

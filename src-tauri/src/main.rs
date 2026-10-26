@@ -3853,6 +3853,7 @@ fn start_embedded_http_server(
         Ok(backend) => backend
             .with_workspace_state(workspace_state)
             .with_desktop_terminals(Arc::new(HttpTerminals(app.handle().clone())))
+            .with_desktop_browser(Arc::new(HttpBrowser(app.handle().clone())))
             .with_app(app.handle().clone()),
         Err(error) => {
             eprintln!("[DCC HTTP] not started: {error}");
@@ -3890,6 +3891,109 @@ fn api_message(error: ApiError) -> String {
 
 fn reply_ok(value: Value) -> bool {
     value.get("ok").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// The desktop's Browser state for the native app's Browser
+/// (`http_api::browser_bridge`): its lifecycle reports and the agent's
+/// control run the same bookkeeping and commands as the WebView's.
+struct HttpBrowser(AppHandle);
+
+impl dev_command_center_tauri::http_api::DesktopBrowser for HttpBrowser {
+    fn open(
+        &self,
+        workspace_id: String,
+        session_id: Option<String>,
+        url: String,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<u64> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let state = app.state::<browser_commands::BrowserState>();
+            let sessions = app.state::<SessionCommandState>();
+            browser_commands::remote_browser_open(
+                &app,
+                &state,
+                &sessions,
+                &workspace_id,
+                session_id.as_deref(),
+                &url,
+            )
+            .await
+        })
+    }
+
+    fn report(
+        &self,
+        lifecycle_token: u64,
+        report: dev_command_center_tauri::http_api::PageReport,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<()> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let state = app.state::<browser_commands::BrowserState>();
+            browser_commands::remote_browser_report(&state, lifecycle_token, report).await
+        })
+    }
+
+    fn close(&self, lifecycle_token: u64) -> dev_command_center_tauri::http_api::BrowserFuture<()> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let state = app.state::<browser_commands::BrowserState>();
+            browser_commands::remote_browser_close(&state, Some(lifecycle_token)).await
+        })
+    }
+
+    fn disconnected(&self) -> dev_command_center_tauri::http_api::BrowserFuture<()> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let state = app.state::<browser_commands::BrowserState>();
+            browser_commands::remote_browser_close(&state, None).await
+        })
+    }
+
+    fn control(
+        &self,
+        workspace_id: String,
+        session_id: Option<String>,
+        lifecycle_token: u64,
+        armed: Option<bool>,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let status = match armed {
+                Some(true) => {
+                    browser_commands::browser_arm_control(
+                        app.state(),
+                        app.state(),
+                        workspace_id,
+                        session_id,
+                        lifecycle_token,
+                    )
+                    .await?
+                }
+                Some(false) => {
+                    browser_commands::browser_disarm_control(
+                        app.state(),
+                        app.state(),
+                        app.state(),
+                        workspace_id,
+                        session_id,
+                        lifecycle_token,
+                    )
+                    .await?
+                }
+                None => {
+                    browser_commands::browser_control_status(
+                        app.state(),
+                        app.state(),
+                        workspace_id,
+                        session_id,
+                        lifecycle_token,
+                    )
+                    .await?
+                }
+            };
+            serde_json::to_value(status).map_err(|error| error.to_string())
+        })
+    }
 }
 
 impl DesktopTerminals for HttpTerminals {

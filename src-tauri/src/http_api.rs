@@ -59,6 +59,7 @@ use uuid::Uuid;
 mod agents;
 mod ai_memory;
 mod attention;
+mod browser_bridge;
 mod delegation_review;
 mod delivery;
 mod files;
@@ -69,6 +70,9 @@ mod mobile;
 mod terminals;
 mod turn_review;
 
+pub use browser_bridge::{
+    native_browser_bridge, BridgeOpKind, BridgeReply, BrowserFuture, DesktopBrowser, PageReport,
+};
 pub use terminals::{publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals};
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
@@ -225,6 +229,8 @@ pub struct HttpBackend {
     terminals: bool,
     /// Inside the desktop app: its own PTYs, for the native app's dock.
     desktop_terminals: OnceLock<Arc<dyn DesktopTerminals>>,
+    /// The desktop's Browser state, for the native app's Browser (local only).
+    desktop_browser: OnceLock<Arc<dyn DesktopBrowser>>,
     /// The relay connector serving this router, for the operator routes and
     /// to drop a revoked phone at once. Weak: the hub holds the router.
     remote: OnceLock<std::sync::Weak<RemoteHub>>,
@@ -255,6 +261,7 @@ impl HttpBackend {
             _bus: bus,
             terminals: false,
             desktop_terminals: OnceLock::new(),
+            desktop_browser: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -279,6 +286,7 @@ impl HttpBackend {
             _bus: bus,
             terminals: true,
             desktop_terminals: OnceLock::new(),
+            desktop_browser: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -295,6 +303,13 @@ impl HttpBackend {
     /// The desktop's PTYs, served under `/api/v1/terminals/` to local clients.
     pub fn with_desktop_terminals(self, terminals: Arc<dyn DesktopTerminals>) -> Self {
         let _ = self.desktop_terminals.set(terminals);
+        self
+    }
+
+    /// The desktop's Browser, driven from the native app's under
+    /// `/api/v1/browser/bridge/` (local clients only).
+    pub fn with_desktop_browser(self, browser: Arc<dyn DesktopBrowser>) -> Self {
+        let _ = self.desktop_browser.set(browser);
         self
     }
 
@@ -828,7 +843,9 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
     let protected_routes = if backend.terminals {
         protected_routes.merge(terminal_routes)
     } else {
-        protected_routes.merge(terminals::routes())
+        protected_routes
+            .merge(terminals::routes())
+            .merge(browser_bridge::routes())
     }
     .route_layer(middleware::from_fn_with_state(
         config.clone(),

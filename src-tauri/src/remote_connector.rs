@@ -1271,6 +1271,7 @@ pub fn remote_path_allowed(path: &str) -> bool {
         && !route.starts_with("/api/v1/auth/")
         && !route.starts_with("/api/v1/remote/")
         && !route.starts_with("/api/v1/terminals/")
+        && !route.starts_with("/api/v1/browser/bridge/")
 }
 
 fn is_channel_route(path: &str) -> bool {
