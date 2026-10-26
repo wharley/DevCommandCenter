@@ -143,7 +143,12 @@ impl Eq for ExecutionContext {}
 /// What a delegation card reads from the stored record.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DelegationRecord {
+    pub id: String,
     pub status: DelegationStatus,
+    /// `review` | `implement` | `explain` | `test` | `research`
+    pub mode: String,
+    pub created_at: String,
+    pub started_at: Option<String>,
     pub is_task: bool,
     pub title: Option<String>,
     pub instruction: String,
@@ -203,8 +208,18 @@ fn delegation_instruction(delegation: &Delegation) -> String {
 
 impl DelegationRecord {
     fn from_delegation(delegation: &Delegation) -> Self {
+        let id_of = |value: serde_json::Result<serde_json::Value>| {
+            value
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_string))
+                .unwrap_or_default()
+        };
         Self {
+            id: delegation.id.0.clone(),
             status: delegation.status.clone(),
+            mode: id_of(serde_json::to_value(&delegation.mode)),
+            created_at: delegation.created_at.clone(),
+            started_at: delegation.started_at.clone(),
             is_task: delegation.kind == DelegationKind::Task,
             title: delegation.title.clone(),
             instruction: delegation_instruction(delegation),

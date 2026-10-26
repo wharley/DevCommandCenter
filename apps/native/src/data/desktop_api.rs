@@ -760,6 +760,15 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// `cancelRunningDelegation`: a running delegation stopped.
+    pub fn cancel_delegation(&self, id: &str) -> Result<(), ApiError> {
+        self.post(
+            &format!("/api/v1/delegations/{}/cancel", encode(id)),
+            &json!({}),
+        )
+        .map(|_| ())
+    }
+
     /// Saves a task's file: only when the disk still has `expected` (the
     /// compare-and-swap of `write_workspace_file`); otherwise the disk's
     /// text comes back and nothing is written.

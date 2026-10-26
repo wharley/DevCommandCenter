@@ -382,6 +382,11 @@ impl Sidebar {
             .then(|| self.state.selected_task_id.is_some())
     }
 
+    /// The resident agents and their sessions' state, as last read.
+    pub fn agents(&self) -> &[crate::data::agents::AgentRecord] {
+        &self.state.data.agents
+    }
+
     pub fn projects(&self) -> &[Project] {
         &self.state.data.projects
     }

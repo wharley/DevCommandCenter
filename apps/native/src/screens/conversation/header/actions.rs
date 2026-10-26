@@ -19,7 +19,7 @@ fn failed(error: ApiError, cx: &mut gpui::App) {
 }
 
 impl ConversationView {
-    fn header_api(&self, cx: &gpui::App) -> Option<DesktopApi> {
+    pub(super) fn header_api(&self, cx: &gpui::App) -> Option<DesktopApi> {
         self.composer
             .read(cx)
             .endpoint

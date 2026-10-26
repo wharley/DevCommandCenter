@@ -51,6 +51,34 @@ pub struct AgentRecord {
     pub sessions: Vec<AgentSession>,
 }
 
+/// The agent a session runs as, for its mascot (`SessionAgentBadge`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionAgent {
+    pub name: String,
+    pub avatar: AgentAvatar,
+    /// That session's own state.
+    pub state: AgentState,
+}
+
+/// Every agent's sessions, by session id (`agentBySessionId`).
+pub fn by_session(agents: &[AgentRecord]) -> HashMap<String, SessionAgent> {
+    agents
+        .iter()
+        .flat_map(|agent| {
+            agent.sessions.iter().map(move |session| {
+                (
+                    session.session_id.clone(),
+                    SessionAgent {
+                        name: agent.name.clone(),
+                        avatar: agent.avatar.clone(),
+                        state: session.state,
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
 /// `agentSessionState`
 pub fn session_state(input: Option<&SessionActivityInput>) -> AgentState {
     let Some(input) = input else {

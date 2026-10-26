@@ -11,6 +11,7 @@ pub mod composer_settings;
 pub mod conflict_api;
 pub mod conversation;
 pub mod daily_recap;
+pub mod delegation_lineage;
 pub mod deletion;
 pub mod desktop_api;
 pub mod diff;

@@ -281,3 +281,66 @@ fn the_delivery_controls_count_and_pick_a_step(cx: &mut TestAppContext) {
         ["review-changes", "run-delivery"]
     );
 }
+
+#[gpui::test]
+fn the_lineage_lists_the_childs_delegation_and_cancels_it(cx: &mut TestAppContext) {
+    use crate::data::agents::{AgentState, SessionAgent};
+    use crate::data::conversation::DelegationRecord;
+    use dcc_core::domain::delegation::DelegationStatus;
+    let (view, cx, _, server) = open(
+        cx,
+        vec![("/api/v1/delegations/d-1/cancel", 200, "{}".into())],
+    );
+    assert!(
+        cx.debug_bounds("header-lineage").is_none(),
+        "no lineage yet"
+    );
+    view.update(cx, |view, cx| {
+        let mut next = data();
+        next.delegations.insert(
+            "d-1".into(),
+            DelegationRecord {
+                id: "d-1".into(),
+                status: DelegationStatus::Running,
+                mode: "implement".into(),
+                created_at: "2026-10-26T10:00:00Z".into(),
+                started_at: None,
+                is_task: false,
+                title: None,
+                instruction: "corrigir o checkout".into(),
+                result_summary: None,
+                prompt: String::new(),
+                touched_files: Vec::new(),
+                provider_id: "claude".into(),
+                model_id: None,
+                child_session_id: Some("child".into()),
+                implement: true,
+                parent_session_id: "a".into(),
+                worktree: None,
+            },
+        );
+        next.last_sequence = 9;
+        view.apply(Rc::new(next), cx);
+        let agent = SessionAgent {
+            name: "Revisor".into(),
+            avatar: dcc_core::domain::agent::AgentAvatar {
+                color: "violet".into(),
+                arms: 2,
+                eyes: "round".into(),
+            },
+            state: AgentState::Working,
+        };
+        view.header.agents = Arc::new([("a".to_string(), agent)].into_iter().collect());
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("agent-badge-a").is_some(),
+        "the title's mascot"
+    );
+    click(cx, "header-lineage");
+    assert!(cx.debug_bounds("lineage-child-0").is_some());
+    click(cx, "lineage-cancel-0");
+    let requests = server.join().unwrap();
+    assert_eq!(requests[0].0, "POST /api/v1/delegations/d-1/cancel");
+}

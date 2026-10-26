@@ -23,6 +23,33 @@ fn icon_button(id: &'static str) -> Button {
 }
 
 impl ConversationView {
+    /// The agent's mascot for a session, when it runs as one.
+    pub(super) fn session_agent_badge(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        session: Option<&str>,
+        size: f32,
+    ) -> Option<AnyElement> {
+        let session = session?.to_string();
+        let agent = self.header.agents.get(&session)?;
+        Some(
+            Tooltip::text(
+                id,
+                div()
+                    .debug_selector(move || format!("agent-badge-{session}"))
+                    .flex_shrink_0()
+                    .child(crate::agent::AgentAvatarView::new(
+                        "agent-badge",
+                        &agent.avatar,
+                        Some(agent.state),
+                        size,
+                    )),
+                agent.name.clone(),
+            )
+            .into_any_element(),
+        )
+    }
+
     fn resume_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let row = self.shown_row();
         let resumable = can_resume(row);
@@ -185,6 +212,12 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
         Some(project) => format!("{project} / {title}").into(),
         None => title.clone().into(),
     };
+    // `SessionAgentBadge`: the mascot of the agent this conversation runs as.
+    let badge = view.session_agent_badge(
+        "header-agent",
+        data.and_then(|data| data.session_id.as_deref()),
+        18.0,
+    );
     div()
         .debug_selector(|| "conversation-header".into())
         .flex_shrink_0()
@@ -209,6 +242,7 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
                         .flex_1()
                         .items_center()
                         .gap(px(8.0))
+                        .children(badge)
                         .child(Tooltip::text(
                             "header-title-tip",
                             div()
@@ -236,6 +270,7 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
                         .child(view.terminal_button(cx))
                         .child(view.browser_button(cx))
                         .child(view.delivery.clone())
+                        .children(view.lineage_menu(cx))
                         .child(view.new_session_button(cx))
                         .child(view.find_buttons(cx))
                         .child(view.history_menu(cx)),

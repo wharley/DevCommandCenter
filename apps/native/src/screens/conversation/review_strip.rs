@@ -133,7 +133,11 @@ mod tests {
 
     fn record(parent: &str, status: DelegationStatus, implement: bool) -> DelegationRecord {
         DelegationRecord {
+            id: String::new(),
             status,
+            mode: "implement".into(),
+            created_at: String::new(),
+            started_at: None,
             is_task: false,
             title: None,
             instruction: String::new(),

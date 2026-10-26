@@ -82,6 +82,7 @@ impl ConversationView {
                         .child(ProviderIcon::new(&row.provider_id).size(14.0)),
                 )
             })
+            .children(self.session_agent_badge(("history-agent", index), Some(&row.id), 16.0))
             .child(div().min_w_0().flex_1().truncate().child(row.title.clone()))
             .child(
                 div()

@@ -1,13 +1,15 @@
 //! The conversation's header (`DccWorkbenchChatHeader`): the title, then
 //! the actions in the desktop's order — resume, the editor, the terminal
 //! with its count, the Browser, the delivery, find, session search, a new
-//! conversation, the history. The ai-memory, delegations and resident
-//! agents arrive in their own slice.
+//! conversation, the history; the agent's mascot beside the title and the
+//! open conversation's delegations. The ai-memory and the resident agents'
+//! call buttons arrive in their own slices.
 
 mod actions;
 pub(crate) mod delivery;
 mod editor;
 mod history;
+mod lineage;
 mod view;
 
 pub(crate) use view::header;
@@ -41,4 +43,11 @@ pub struct HeaderState {
     pub pending_close: Option<PendingClose>,
     /// The preferred editor's id (`dcc-preferred-editor`).
     pub editor: &'static str,
+    /// The lineage menu is open.
+    pub lineage_open: bool,
+    /// The delegation being cancelled from it.
+    pub cancelling: Option<String>,
+    /// The agent each session runs as, from the sidebar's agents.
+    pub agents:
+        std::sync::Arc<std::collections::HashMap<String, crate::data::agents::SessionAgent>>,
 }

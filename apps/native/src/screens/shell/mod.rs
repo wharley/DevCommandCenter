@@ -153,6 +153,7 @@ impl Shell {
             this.new_task.update(cx, |new_task, cx| {
                 new_task.set_projects(&projects, &linked, cx)
             });
+            this.sync_session_agents(cx);
         });
         let new_task_events = cx.subscribe_in(&new_task, window, Self::on_new_task_event);
         let conversation_events =

@@ -289,6 +289,64 @@ pub fn relative_time(at_ms: i64, now_ms: i64, english: bool) -> String {
     }
 }
 
+/// `Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "short" })`
+/// by seconds, minutes, hours, then days (`relativeTimeLabel`): "agora",
+/// "há 5 min.", "há 3 h", "ontem", "há 4 dias".
+pub fn short_relative(at_ms: i64, now_ms: i64, english: bool) -> String {
+    let seconds = ((at_ms - now_ms) as f64 / 1000.0).round() as i64;
+    let past = seconds <= 0;
+    let abs = seconds.abs();
+    let (value, unit) = if abs < 60 {
+        (abs, "second")
+    } else if abs < 3600 {
+        ((abs as f64 / 60.0).round() as i64, "minute")
+    } else if abs < 86_400 {
+        ((abs as f64 / 3600.0).round() as i64, "hour")
+    } else {
+        ((abs as f64 / 86_400.0).round() as i64, "day")
+    };
+    match (unit, value, past) {
+        ("second", 0, _) => return if english { "now" } else { "agora" }.to_string(),
+        ("day", 1, true) => return if english { "yesterday" } else { "ontem" }.to_string(),
+        ("day", 1, false) => return if english { "tomorrow" } else { "amanhã" }.to_string(),
+        _ => {}
+    }
+    let word = match (unit, english) {
+        ("second", false) => "seg.".to_string(),
+        ("minute", false) => "min.".to_string(),
+        ("hour", false) => "h".to_string(),
+        ("day", false) => if value == 1 { "dia" } else { "dias" }.to_string(),
+        ("second", true) => "sec.".to_string(),
+        ("minute", true) => "min.".to_string(),
+        ("hour", true) => "hr.".to_string(),
+        _ => if value == 1 { "day" } else { "days" }.to_string(),
+    };
+    match (english, past) {
+        (false, true) => format!("há {value} {word}"),
+        (false, false) => format!("em {value} {word}"),
+        (true, true) => format!("{value} {word} ago"),
+        (true, false) => format!("in {value} {word}"),
+    }
+}
+
+#[cfg(test)]
+mod short_relative_tests {
+    use super::short_relative;
+
+    #[test]
+    fn reads_like_the_short_intl_format() {
+        let now = 1_000_000_000_000;
+        let ago = |seconds: i64| short_relative(now - seconds * 1000, now, false);
+        assert_eq!(ago(0), "agora");
+        assert_eq!(ago(30), "há 30 seg.");
+        assert_eq!(ago(5 * 60), "há 5 min.");
+        assert_eq!(ago(3 * 3600), "há 3 h");
+        assert_eq!(ago(30 * 3600), "ontem");
+        assert_eq!(ago(4 * 86_400), "há 4 dias");
+        assert_eq!(short_relative(now - 7_200_000, now, true), "2 hr. ago");
+    }
+}
+
 #[cfg(test)]
 mod relative_tests {
     use super::relative_time;

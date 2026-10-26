@@ -1,6 +1,6 @@
-//! The conversation header's delivery wired to the code column: the
-//! column's state shown in the header whenever it changes, the header's
-//! picks run by the column, its dialogs drawn over the window.
+//! What the conversation header shows of the rest of the window: the code
+//! column's delivery (shown whenever it changes, its picks run by the
+//! column, its dialogs over the window) and the sidebar's agents.
 
 use gpui::{AppContext, Context, Entity, Subscription, Window};
 
@@ -50,6 +50,18 @@ impl Shell {
         self.delivery
             .buttons
             .update(cx, |buttons, cx| buttons.set(dock, cx));
+    }
+
+    /// The agent each session runs as, for the header's mascots (only when
+    /// the sidebar read something new).
+    pub(super) fn sync_session_agents(&mut self, cx: &mut Context<Self>) {
+        let agents = crate::data::agents::by_session(self.sidebar.read(cx).agents());
+        self.conversation.update(cx, |conversation, cx| {
+            if *conversation.header.agents != agents {
+                conversation.header.agents = std::sync::Arc::new(agents);
+                cx.notify();
+            }
+        });
     }
 
     /// "Revisar mudanças da tarefa", and the menu's fix or conflicts.
