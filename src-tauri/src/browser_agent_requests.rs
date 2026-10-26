@@ -556,6 +556,10 @@ pub fn browser_agent_pending(
 pub fn browser_agent_pending_all(
     broker: State<'_, BrowserAgentRequestBroker>,
 ) -> Vec<BrowserAgentRequestView> {
+    // The native app's Browser answers them while it listens.
+    if dev_command_center_tauri::http_api::native_browser_opens().connected() {
+        return Vec::new();
+    }
     broker.pending_all()
 }
 

@@ -209,6 +209,32 @@ pub trait DesktopBrowser: Send + Sync {
         lifecycle_token: u64,
         limit: usize,
     ) -> BrowserFuture<Value>;
+    /// The agents' open requests waiting for the person
+    /// (`BrowserAgentRequestView`s, soonest to expire first).
+    fn open_requests(&self) -> Value;
+    /// "Abrir e permitir": takes the request (first answer wins) and
+    /// answers it, for the native Browser to open.
+    fn open_allow(
+        &self,
+        request_id: String,
+        workspace_id: String,
+        session_id: String,
+    ) -> BrowserFuture<Value>;
+    fn open_deny(
+        &self,
+        request_id: String,
+        workspace_id: String,
+        session_id: String,
+    ) -> BrowserFuture<()>;
+    /// The native Browser opened it: its lifecycle token completes the
+    /// approval (and arms the agent's control).
+    fn open_ack(
+        &self,
+        request_id: String,
+        workspace_id: String,
+        session_id: String,
+        lifecycle_token: u64,
+    ) -> BrowserFuture<Value>;
 }
 
 pub(super) fn routes() -> Router<HttpState> {

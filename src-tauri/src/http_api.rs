@@ -60,6 +60,7 @@ mod agents;
 mod ai_memory;
 mod attention;
 mod browser_bridge;
+mod browser_opens;
 mod delegation_review;
 mod delivery;
 mod files;
@@ -73,6 +74,7 @@ mod turn_review;
 pub use browser_bridge::{
     native_browser_bridge, BridgeOpKind, BridgeReply, BrowserFuture, DesktopBrowser, PageReport,
 };
+pub use browser_opens::native_browser_opens;
 pub use terminals::{publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals};
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
@@ -846,6 +848,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         protected_routes
             .merge(terminals::routes())
             .merge(browser_bridge::routes())
+            .merge(browser_opens::routes())
     }
     .route_layer(middleware::from_fn_with_state(
         config.clone(),

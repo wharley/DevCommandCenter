@@ -160,7 +160,12 @@ mod macos {
         if state.stopped.load(Ordering::Relaxed) {
             return;
         }
-        let pending = app.state::<BrowserAgentRequestBroker>().pending_to_offer();
+        // The native app shows its own card while it owns the Browser.
+        let pending = if dev_command_center_tauri::http_api::native_browser_opens().connected() {
+            Vec::new()
+        } else {
+            app.state::<BrowserAgentRequestBroker>().pending_to_offer()
+        };
         let Ok(mut suppressed) = state.suppressed.lock() else {
             return;
         };

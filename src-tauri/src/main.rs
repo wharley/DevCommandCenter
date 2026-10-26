@@ -4079,6 +4079,95 @@ impl dev_command_center_tauri::http_api::DesktopBrowser for HttpBrowser {
             serde_json::to_value(records).map_err(|error| error.to_string())
         })
     }
+
+    fn open_requests(&self) -> Value {
+        let broker = self
+            .0
+            .state::<browser_agent_requests::BrowserAgentRequestBroker>();
+        serde_json::to_value(broker.pending_all()).unwrap_or_else(|_| Value::Array(Vec::new()))
+    }
+
+    fn open_allow(
+        &self,
+        request_id: String,
+        workspace_id: String,
+        session_id: String,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let view = desktop_agent_requests::browser_agent_claim(
+                app.state(),
+                desktop_agent_requests::BrowserAgentClaimInput {
+                    request_id,
+                    workspace_id,
+                    session_id,
+                },
+            )?;
+            serde_json::to_value(view).map_err(|error| error.to_string())
+        })
+    }
+
+    fn open_deny(
+        &self,
+        request_id: String,
+        workspace_id: String,
+        session_id: String,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<()> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let result = browser_agent_requests::browser_agent_resolve(
+                app.state(),
+                app.state(),
+                app.state(),
+                browser_agent_requests::BrowserAgentResolveInput {
+                    request_id,
+                    workspace_id,
+                    session_id,
+                    decision: browser_agent_requests::BrowserAgentRequestDecision::Deny,
+                    lifecycle_token: None,
+                },
+            );
+            match result.status {
+                browser_agent_requests::BrowserAgentOpenStatus::Denied => Ok(()),
+                _ => Err(result
+                    .message
+                    .unwrap_or_else(|| "browser open request is unavailable".into())),
+            }
+        })
+    }
+
+    fn open_ack(
+        &self,
+        request_id: String,
+        workspace_id: String,
+        session_id: String,
+        lifecycle_token: u64,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let result = browser_agent_requests::browser_agent_resolve(
+                app.state(),
+                app.state(),
+                app.state(),
+                browser_agent_requests::BrowserAgentResolveInput {
+                    request_id,
+                    workspace_id,
+                    session_id,
+                    decision: browser_agent_requests::BrowserAgentRequestDecision::Allow,
+                    lifecycle_token: Some(lifecycle_token),
+                },
+            );
+            // `acknowledgeBrowserOpen`
+            if result.status != browser_agent_requests::BrowserAgentOpenStatus::Approved
+                || result.lifecycle_token != Some(lifecycle_token)
+            {
+                return Err(result
+                    .message
+                    .unwrap_or_else(|| "Browser approval could not be confirmed".into()));
+            }
+            serde_json::to_value(result).map_err(|error| error.to_string())
+        })
+    }
 }
 
 impl DesktopTerminals for HttpTerminals {

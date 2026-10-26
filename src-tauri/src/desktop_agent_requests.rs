@@ -7,7 +7,8 @@
 //! expiry, the Browser's native lifecycle ACK, the computer-use grant).
 //!
 //! Allowing a Browser open claims the request and asks the main window to
-//! open the Browser (`browser-agent-open-approved`); the renderer completes
+//! open the Browser (`browser-agent-open-approved`) — or the native app's
+//! Browser, while it listens (`http_api::browser_opens`); either completes
 //! it with the lifecycle ACK as before. Allowing computer use arms the grant
 //! for the picked apps, as the desktop dialog does.
 use std::sync::Arc;
@@ -105,9 +106,14 @@ impl DesktopAgentRequests {
         let view = self.broker.claim(request_id).ok_or(AgentRequestError::NotFound)?;
         let outcome = claim.settle();
         if notify {
-            let _ = self
-                .app
-                .emit_to("main", BROWSER_OPEN_APPROVED_EVENT, &view);
+            // The native app's Browser opens it while it listens; else the
+            // main window does.
+            let to_native = serde_json::to_value(&view).is_ok_and(|request| {
+                dev_command_center_tauri::http_api::native_browser_opens().approved(request)
+            });
+            if !to_native {
+                let _ = self.app.emit_to("main", BROWSER_OPEN_APPROVED_EVENT, &view);
+            }
         }
         Ok((view, outcome))
     }
