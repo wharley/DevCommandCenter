@@ -935,18 +935,24 @@ dependencies = [
 name = "dcc-infra"
 version = "0.0.0"
 dependencies = [
+ "aes",
  "async-trait",
  "base64 0.22.1",
+ "cbc",
  "chrono",
  "dcc-core",
  "futures",
  "keyring",
  "libc",
+ "pbkdf2",
+ "psl",
  "rand 0.8.6",
  "reqwest 0.11.27",
  "rusqlite",
+ "security-framework",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "tempfile",
  "thiserror 2.0.18",
@@ -954,6 +960,7 @@ dependencies = [
  "toml 0.8.2",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -1088,11 +1095,9 @@ dependencies = [
 name = "dev-command-center-tauri"
 version = "0.1.99"
 dependencies = [
- "aes",
  "async-trait",
  "axum",
  "base64 0.22.1",
- "cbc",
  "chrono",
  "dcc-core",
  "dcc-infra",
@@ -1109,20 +1114,16 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",
- "pbkdf2",
  "portable-pty",
- "psl",
  "rand 0.8.6",
  "regex",
  "reqwest 0.11.27",
  "rusqlite",
  "rustls",
  "rustls-native-certs",
- "security-framework",
  "serde",
  "serde_json",
  "serde_yaml",
- "sha1",
  "sha2",
  "specta",
  "specta-typescript",
@@ -1145,7 +1146,6 @@ dependencies = [
  "tower-http 0.5.2",
  "url",
  "uuid",
- "zeroize",
 ]
 
 [[package]]

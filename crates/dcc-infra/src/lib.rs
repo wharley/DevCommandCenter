@@ -2,6 +2,7 @@ pub mod ai_memory;
 pub mod connector_icon;
 pub mod credential_store;
 pub mod db;
+pub mod browser_sessions;
 pub mod editor_launch;
 pub mod delegation_apply;
 pub mod decision_context;

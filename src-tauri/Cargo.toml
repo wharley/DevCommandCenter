@@ -53,12 +53,6 @@ rand = "0.8"
 subtle = "2.5"
 thiserror = "1"
 url = "2"
-aes = "0.8"
-cbc = "0.1"
-pbkdf2 = "0.12"
-sha1 = "0.10"
-psl = "2"
-zeroize = "1"
 futures-util = "0.3"
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
@@ -70,7 +64,6 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSResponder", "NSView"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 objc2-web-kit = "0.3"
-security-framework = "3.7"
 
 [[bin]]
 name = "dccd"

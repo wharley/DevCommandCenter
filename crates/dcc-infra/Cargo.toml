@@ -30,5 +30,16 @@ toml = "0.8"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 
+# The Browser's session import (Chromium's macOS cookie encryption).
+aes = "0.8"
+cbc = "0.1"
+pbkdf2 = "0.12"
+sha1 = "0.10"
+psl = "2"
+zeroize = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"
+
 [dev-dependencies]
 tempfile = "3"
