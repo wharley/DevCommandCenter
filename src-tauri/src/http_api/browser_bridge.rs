@@ -5,7 +5,8 @@
 //! also reports its Browser's lifecycle (opened, loading, loaded, its URL
 //! and title, visibility, closed) so the desktop's own bookkeeping — scope,
 //! lifecycle token, page-load revision, the grant, semantic maps, evidence,
-//! audit — keeps working unchanged. Local clients only: the relay refuses
+//! audit — keeps working unchanged. The person's own evidence capture and
+//! the activity log come through here too. Local clients only: the relay refuses
 //! `/api/v1/browser/bridge/`.
 use super::*;
 use std::collections::HashMap;
@@ -184,6 +185,30 @@ pub trait DesktopBrowser: Send + Sync {
         lifecycle_token: u64,
         armed: Option<bool>,
     ) -> BrowserFuture<Value>;
+    /// "Capturar evidência": the page's context now, and a capture
+    /// anchored on it — `{ captureId, remainingMs, url, title, text,
+    /// selectionOnly, truncated }`.
+    fn evidence_start(
+        &self,
+        workspace_id: String,
+        session_id: Option<String>,
+        lifecycle_token: u64,
+    ) -> BrowserFuture<Value>;
+    /// The capture's console and network events (`BrowserEvidenceResult`).
+    fn evidence_read(
+        &self,
+        workspace_id: String,
+        session_id: Option<String>,
+        capture_id: String,
+    ) -> BrowserFuture<Value>;
+    /// "Atividade do navegador": the latest audit records, newest first.
+    fn audit(
+        &self,
+        workspace_id: String,
+        session_id: Option<String>,
+        lifecycle_token: u64,
+        limit: usize,
+    ) -> BrowserFuture<Value>;
 }
 
 pub(super) fn routes() -> Router<HttpState> {
@@ -198,6 +223,12 @@ pub(super) fn routes() -> Router<HttpState> {
         .route("/api/v1/browser/bridge/surface/:token/report", post(report))
         .route("/api/v1/browser/bridge/surface/:token/close", post(close))
         .route("/api/v1/browser/bridge/control", post(control))
+        .route(
+            "/api/v1/browser/bridge/evidence/start",
+            post(evidence_start),
+        )
+        .route("/api/v1/browser/bridge/evidence/read", post(evidence_read))
+        .route("/api/v1/browser/bridge/audit", post(audit))
 }
 
 fn host(backend: &HttpBackend) -> Result<Arc<dyn DesktopBrowser>, HttpApiError> {
@@ -276,6 +307,58 @@ async fn control(
         .await
         .map_err(HttpApiError::bad_request)?;
     Ok(Json(status))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScopeInput {
+    workspace_id: String,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    lifecycle_token: u64,
+    #[serde(default)]
+    capture_id: String,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+async fn evidence_start(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<ScopeInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let started = host(&backend)?
+        .evidence_start(input.workspace_id, input.session_id, input.lifecycle_token)
+        .await
+        .map_err(HttpApiError::bad_request)?;
+    Ok(Json(started))
+}
+
+async fn evidence_read(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<ScopeInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let evidence = host(&backend)?
+        .evidence_read(input.workspace_id, input.session_id, input.capture_id)
+        .await
+        .map_err(HttpApiError::bad_request)?;
+    Ok(Json(evidence))
+}
+
+async fn audit(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<ScopeInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let records = host(&backend)?
+        .audit(
+            input.workspace_id,
+            input.session_id,
+            input.lifecycle_token,
+            input.limit.unwrap_or(50),
+        )
+        .await
+        .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!({ "records": records })))
 }
 
 async fn reply(Path(op_id): Path<u64>, Json(input): Json<BridgeReply>) -> Json<Value> {

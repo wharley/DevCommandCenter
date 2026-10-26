@@ -792,7 +792,7 @@ pub fn escape_agent_context(value: &str) -> String {
 }
 
 /// `escapeBrowserAgentContextWithin`: escaped, up to `max` characters.
-fn escape_within(value: &str, max: usize) -> (String, bool) {
+pub fn escape_within(value: &str, max: usize) -> (String, bool) {
     let mut escaped = String::new();
     let mut count = 0;
     for character in value.chars() {

@@ -3994,6 +3994,91 @@ impl dev_command_center_tauri::http_api::DesktopBrowser for HttpBrowser {
             serde_json::to_value(status).map_err(|error| error.to_string())
         })
     }
+
+    fn evidence_start(
+        &self,
+        workspace_id: String,
+        session_id: Option<String>,
+        lifecycle_token: u64,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            // What the WebView's menu does: read the page, anchor on it.
+            let context = browser_commands::browser_extract_context(
+                app.state(),
+                app.state(),
+                workspace_id,
+                session_id,
+                lifecycle_token,
+            )
+            .await?;
+            let handle = browser_commands::browser_start_evidence_capture(
+                app.state(),
+                app.state(),
+                browser_commands::BrowserActionAnchor {
+                    workspace_id: context.workspace_id.clone(),
+                    session_id: context.session_id.clone(),
+                    lifecycle_token,
+                    map_id: context.semantic_map.map_id.clone(),
+                    generation: context.semantic_map.generation,
+                    url: context.url.clone(),
+                    page_load_revision: context.semantic_map.page_load_revision,
+                },
+            )
+            .await?;
+            Ok(serde_json::json!({
+                "captureId": handle.capture_id,
+                "remainingMs": handle.remaining_ms,
+                "url": context.url,
+                "title": context.title,
+                "text": context.text,
+                "selectionOnly": context.selection_only,
+                "truncated": context.truncated,
+            }))
+        })
+    }
+
+    fn evidence_read(
+        &self,
+        workspace_id: String,
+        session_id: Option<String>,
+        capture_id: String,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let evidence = browser_commands::browser_read_evidence_capture(
+                app.state(),
+                app.state(),
+                workspace_id,
+                session_id,
+                capture_id,
+            )
+            .await?;
+            serde_json::to_value(evidence).map_err(|error| error.to_string())
+        })
+    }
+
+    fn audit(
+        &self,
+        workspace_id: String,
+        session_id: Option<String>,
+        lifecycle_token: u64,
+        limit: usize,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let records = browser_commands::browser_read_audit(
+                app.state(),
+                app.state(),
+                workspace_id,
+                session_id,
+                lifecycle_token,
+                limit,
+            )
+            .await?;
+            serde_json::to_value(records).map_err(|error| error.to_string())
+        })
+    }
 }
 
 impl DesktopTerminals for HttpTerminals {
