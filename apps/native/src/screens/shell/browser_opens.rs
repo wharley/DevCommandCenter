@@ -14,16 +14,14 @@ use crate::screens::browser::approval::{ApprovalEvent, BrowserApprovals, TitleOf
 use crate::screens::conversation::ConversationView;
 use crate::screens::sidebar::Sidebar;
 
-/// The card, and the shell following what it allows and what shows.
-pub(super) fn new_approvals(
+/// A request's conversation title: its own when its task is open, else
+/// the task's name.
+pub(super) fn conversation_titles(
     sidebar: &Entity<Sidebar>,
     conversation: &Entity<ConversationView>,
-    window: &mut Window,
-    cx: &mut Context<Shell>,
-) -> (Entity<BrowserApprovals>, [Subscription; 2]) {
+) -> TitleOf {
     let (titles, names) = (conversation.downgrade(), sidebar.downgrade());
-    // The conversation's own title when its task is open, else the task's.
-    let title_of: TitleOf = Rc::new(move |request, cx| {
+    Rc::new(move |request, cx| {
         let open = titles.upgrade().and_then(|view| {
             let data = view.read(cx).data()?;
             (data.task_id == request.workspace_id).then(|| {
@@ -35,7 +33,17 @@ pub(super) fn new_approvals(
             })?
         });
         open.or_else(|| names.upgrade()?.read(cx).task_name(&request.workspace_id))
-    });
+    })
+}
+
+/// The card, and the shell following what it allows and what shows.
+pub(super) fn new_approvals(
+    sidebar: &Entity<Sidebar>,
+    conversation: &Entity<ConversationView>,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> (Entity<BrowserApprovals>, [Subscription; 2]) {
+    let title_of = conversation_titles(sidebar, conversation);
     let api = if cfg!(test) {
         None
     } else {

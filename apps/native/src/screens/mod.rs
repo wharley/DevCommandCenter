@@ -3,6 +3,7 @@
 pub mod annotation;
 pub mod browser;
 pub mod code_column;
+pub mod computer_use;
 pub mod composer;
 pub mod conversation;
 pub mod diff_view;

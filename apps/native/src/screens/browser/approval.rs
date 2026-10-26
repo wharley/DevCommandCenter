@@ -176,7 +176,7 @@ impl BrowserApprovals {
             return;
         }
         if self.announced.insert(request.request_id.clone()) {
-            attention();
+            crate::ui::attention::request_attention();
         }
         if self._tick.is_none() {
             self._tick = Some(cx.spawn(async move |this, cx| {
@@ -259,22 +259,6 @@ impl BrowserApprovals {
     #[cfg(test)]
     pub fn set_api(&mut self, api: DesktopApi) {
         self.api = Some(api);
-    }
-}
-
-/// The Dock icon bounces once, only while the person is in another app
-/// (`agent_request_attention`).
-fn attention() {
-    #[cfg(all(target_os = "macos", not(test)))]
-    {
-        use objc2::MainThreadMarker;
-        use objc2_app_kit::{NSApplication, NSRequestUserAttentionType};
-        if let Some(mtm) = MainThreadMarker::new() {
-            let app = NSApplication::sharedApplication(mtm);
-            if !app.isActive() {
-                app.requestUserAttention(NSRequestUserAttentionType::InformationalRequest);
-            }
-        }
     }
 }
 

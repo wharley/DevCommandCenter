@@ -112,6 +112,8 @@ pub struct Shell {
     /// The agents' requests to open it, and the card asking for them.
     browser_approvals: Entity<crate::screens::browser::approval::BrowserApprovals>,
     _browser_approvals: [Subscription; 2],
+    /// The agents' computer-use requests (screen 8d).
+    computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
     /// The terminal dock under the conversation (screen 7).
     pub(crate) terminal: Entity<crate::screens::terminal::TerminalDock>,
     _terminal_events: Subscription,
@@ -214,6 +216,15 @@ impl Shell {
         });
         let (browser_approvals, approval_subscriptions) =
             browser_opens::new_approvals(&sidebar, &conversation, window, cx);
+        let computer_titles = browser_opens::conversation_titles(&sidebar, &conversation);
+        let computer_approvals = cx.new(|cx| {
+            let api = if cfg!(test) {
+                None
+            } else {
+                crate::data::desktop_api::DesktopApi::load()
+            };
+            crate::screens::computer_use::approval::ComputerApprovals::new(api, computer_titles, cx)
+        });
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
         Self {
@@ -221,6 +232,7 @@ impl Shell {
             browser: browser::BrowserState::new(),
             browser_approvals,
             _browser_approvals: approval_subscriptions,
+            computer_approvals,
             session_search: None,
             terminal,
             _terminal_events: terminal_events,
@@ -851,6 +863,7 @@ impl Render for Shell {
                     .map(|(search, _)| search.clone()),
             )
             .child(self.browser_approvals.clone())
+            .child(self.computer_approvals.clone())
             .children(Toaster::handle(cx))
     }
 }

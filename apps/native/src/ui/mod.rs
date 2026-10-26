@@ -2,6 +2,7 @@
 //! projects: components take props and read only the theme.
 
 mod button;
+pub mod attention;
 pub mod dialog;
 mod feedback;
 mod icon;
