@@ -1,6 +1,7 @@
 //! A project's face: the mascot, symbol or logo and the color, picked by the
 //! rules in `@dcc/mascots` so a project looks the same on every DCC surface.
 
+pub mod editor;
 pub mod file_icon;
 mod glyph;
 mod provider;

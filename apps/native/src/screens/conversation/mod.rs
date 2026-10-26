@@ -73,6 +73,8 @@ pub enum ConversationEvent {
     ToggleBrowser,
     /// "Buscar sessões passadas".
     OpenSessionSearch,
+    /// "Abrir no editor" with this editor (it becomes the preferred one).
+    OpenInEditor(&'static str),
 }
 
 impl gpui::EventEmitter<ConversationEvent> for ConversationView {}

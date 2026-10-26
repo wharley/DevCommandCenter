@@ -110,12 +110,16 @@ impl Shell {
                 .count(),
         };
         let browser_open = self.browser_open();
+        let editor = self.preferred_editor();
         self.conversation.update(cx, |conversation, cx| {
-            if conversation.header.terminals != counts
-                || conversation.header.browser_open != browser_open
+            let header = &mut conversation.header;
+            if header.terminals != counts
+                || header.browser_open != browser_open
+                || header.editor != editor
             {
-                conversation.header.terminals = counts;
-                conversation.header.browser_open = browser_open;
+                header.terminals = counts;
+                header.browser_open = browser_open;
+                header.editor = editor;
                 cx.notify();
             }
         });

@@ -395,3 +395,41 @@ fn the_merge_resolver_takes_the_conversations_place_until_closed(cx: &mut TestAp
     });
     shell.read_with(cx, |shell, _| assert!(shell.merge_resolver().is_none()));
 }
+
+#[gpui::test]
+fn cmd_f_outside_a_field_opens_the_find_bar(cx: &mut TestAppContext) {
+    use crate::screens::sidebar::SidebarEvent;
+    cx.update(|cx| {
+        super::bind_keys(cx);
+        crate::screens::conversation::bind_keys(cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::OpenTask("any".into())));
+    cx.run_until_parked();
+    let focus = shell.read_with(cx, |shell, _| shell.focus.clone());
+    cx.update(|window, cx| window.focus(&focus, cx));
+    cx.simulate_keystrokes("cmd-f");
+    cx.run_until_parked();
+    // The list has no task here, so the bar's state stands for it.
+    let open = shell.read_with(cx, |shell, cx| shell.conversation.read(cx).find_open());
+    assert!(open);
+    // Inside a field the key stays the field's.
+    cx.update(|_, cx| {
+        shell.update(cx, |shell, cx| {
+            shell
+                .conversation
+                .update(cx, |conversation, cx| conversation.close_find(cx))
+        })
+    });
+    let composer = shell.read_with(cx, |shell, cx| {
+        let input = shell.conversation.read(cx).composer.read(cx).input.clone();
+        gpui::Focusable::focus_handle(input.read(cx), cx)
+    });
+    cx.update(|window, cx| window.focus(&composer, cx));
+    cx.simulate_keystrokes("cmd-f");
+    cx.run_until_parked();
+    let open = shell.read_with(cx, |shell, cx| shell.conversation.read(cx).find_open());
+    assert!(!open, "the composer keeps ⌘F");
+}

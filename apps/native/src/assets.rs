@@ -14,7 +14,7 @@ pub struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
-        if let Some(svg) = provider_mark(path) {
+        if let Some(svg) = provider_mark(path).or_else(|| editor_mark(path)) {
             return Ok(Some(Cow::Borrowed(svg.as_bytes())));
         }
         Ok(icon_svg(path).map(|svg| Cow::Owned(svg.into_bytes())))
@@ -49,6 +49,15 @@ fn icon_svg(path: &str) -> Option<String> {
 pub fn provider_mark(path: &str) -> Option<&'static str> {
     let name = path.strip_prefix("providers/")?.strip_suffix(".svg")?;
     generated::PROVIDER_MARKS
+        .iter()
+        .find(|(candidate, _)| *candidate == name)
+        .map(|(_, svg)| *svg)
+}
+
+/// An editor's brand mark (`editors/<id>.svg`, `editor-brand-icons.tsx`).
+pub fn editor_mark(path: &str) -> Option<&'static str> {
+    let name = path.strip_prefix("editors/")?.strip_suffix(".svg")?;
+    generated::EDITOR_MARKS
         .iter()
         .find(|(candidate, _)| *candidate == name)
         .map(|(_, svg)| *svg)

@@ -23,13 +23,15 @@ gpui::actions!(
     ]
 );
 
-/// ⌘F anywhere but a field, an editor or the terminal (they keep theirs).
+/// ⌘F anywhere but a field, the editor or the terminal: those keep the key
+/// (the editor binds its own find; `NoAction` silences it in the others).
 pub(crate) fn bind_keys(cx: &mut gpui::App) {
-    cx.bind_keys([gpui::KeyBinding::new(
-        "cmd-f",
-        OpenThreadFind,
-        Some("!TextArea && !TextInput && !CodeEditor && !Terminal"),
-    )]);
+    cx.bind_keys([
+        gpui::KeyBinding::new("cmd-f", OpenThreadFind, None),
+        gpui::KeyBinding::new("cmd-f", gpui::NoAction, Some("TextArea")),
+        gpui::KeyBinding::new("cmd-f", gpui::NoAction, Some("TextInput")),
+        gpui::KeyBinding::new("cmd-f", gpui::NoAction, Some("Terminal")),
+    ]);
 }
 
 pub(crate) struct FindBar {
@@ -65,6 +67,10 @@ impl ConversationView {
             input.update(cx, |input, cx| input.focus_and_select_all(window, cx));
         }
         cx.notify();
+    }
+
+    pub fn find_open(&self) -> bool {
+        self.find.is_some()
     }
 
     pub fn close_find(&mut self, cx: &mut Context<Self>) {

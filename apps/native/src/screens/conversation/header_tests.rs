@@ -81,6 +81,7 @@ fn open<'a>(
                 ConversationEvent::OpenTerminal => "terminal",
                 ConversationEvent::ToggleBrowser => "browser",
                 ConversationEvent::OpenSessionSearch => "session-search",
+                ConversationEvent::OpenInEditor(editor) => editor,
                 ConversationEvent::ReviewDelegation { .. } => "delegation",
             });
         })

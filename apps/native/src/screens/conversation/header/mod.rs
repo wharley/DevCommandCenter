@@ -5,6 +5,7 @@
 //! session search) arrives in its own slices.
 
 mod actions;
+mod editor;
 mod history;
 mod view;
 
@@ -37,4 +38,6 @@ pub struct HeaderState {
     /// The conversation being closed or restored.
     pub busy_session: Option<String>,
     pub pending_close: Option<PendingClose>,
+    /// The preferred editor's id (`dcc-preferred-editor`).
+    pub editor: &'static str,
 }

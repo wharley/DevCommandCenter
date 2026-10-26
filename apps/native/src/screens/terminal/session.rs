@@ -3,7 +3,7 @@
 //! stream; keys, the size and the end go to the desktop one at a time, in
 //! order, from a thread of its own.
 
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use gpui::{Context, EventEmitter, FocusHandle, Task};
 
@@ -59,7 +59,8 @@ fn banner(context: &ShellContext, spec: &ShellSpec) -> String {
 enum Command {
     Write(String),
     Resize(u16, u16),
-    Kill,
+    /// Ends the PTY after what was queued; says so when asked.
+    Kill(Option<Sender<()>>),
 }
 
 /// The calls for one PTY, in the order they were made.
@@ -70,7 +71,13 @@ fn commands(api: DesktopApi, pty_id: String) -> Sender<Command> {
             let result = match command {
                 Command::Write(data) => api.write_terminal(&pty_id, &data),
                 Command::Resize(cols, rows) => api.resize_terminal(&pty_id, cols, rows),
-                Command::Kill => api.kill_terminal(&pty_id),
+                Command::Kill(done) => {
+                    let result = api.kill_terminal(&pty_id);
+                    if let Some(done) = done {
+                        let _ = done.send(());
+                    }
+                    result
+                }
             };
             if let Err(error) = result {
                 eprintln!("[dcc-native] terminal {pty_id}: {error}");
@@ -78,6 +85,13 @@ fn commands(api: DesktopApi, pty_id: String) -> Sender<Command> {
         }
     });
     sender
+}
+
+/// How the shell before this one ends, if there was one.
+enum Ending {
+    None,
+    Queued(Receiver<()>),
+    Direct(String),
 }
 
 pub enum SessionEvent {
@@ -174,11 +188,11 @@ impl TerminalSession {
     /// `ensureTerminal`: the owner's shell at the emulator's size, with what
     /// it printed so far.
     pub(super) fn open(&mut self, cx: &mut Context<Self>) {
-        self.open_after(None, cx);
+        self.open_after(Ending::None, cx);
     }
 
     /// Opens the owner's shell, once `ended` (the one restarted) is gone.
-    fn open_after(&mut self, ended: Option<String>, cx: &mut Context<Self>) {
+    fn open_after(&mut self, ended: Ending, cx: &mut Context<Self>) {
         let (cols, rows) = self.emulator.size();
         self.opened_at = (cols, rows);
         let spec = ShellSpec {
@@ -195,8 +209,15 @@ impl TerminalSession {
                 .background_executor()
                 .spawn(async move {
                     let api = api.ok_or(ApiError::DesktopClosed)?;
-                    if let Some(pty_id) = ended {
-                        api.kill_terminal(&pty_id)?;
+                    match ended {
+                        Ending::None => {}
+                        // After the keys already queued for it (⌃C first).
+                        Ending::Queued(killed) => {
+                            let _ = killed.recv();
+                        }
+                        Ending::Direct(pty_id) => {
+                            api.kill_terminal(&pty_id)?;
+                        }
                     }
                     api.open_terminal(&owner_key, &spec)
                         .map(|opened| (api, opened))
@@ -339,13 +360,21 @@ impl TerminalSession {
     /// Returns the PTY that ends, for the dock to stop routing it.
     pub fn restart(&mut self, cx: &mut Context<Self>) -> Option<String> {
         let ended = self.pty_id.take();
-        self.sender = None;
+        let ending = match (self.sender.take(), ended.clone()) {
+            (Some(sender), Some(_)) => {
+                let (done, killed) = channel();
+                let _ = sender.send(Command::Kill(Some(done)));
+                Ending::Queued(killed)
+            }
+            (_, Some(pty_id)) => Ending::Direct(pty_id),
+            (_, None) => Ending::None,
+        };
         let (cols, rows) = self.emulator.size();
         self.emulator = Emulator::new(cols, rows);
         self.activity = None;
         self.dev_servers = Default::default();
         self.early.clear();
-        self.open_after(ended.clone(), cx);
+        self.open_after(ending, cx);
         cx.emit(SessionEvent::Changed);
         ended
     }
@@ -363,7 +392,7 @@ impl TerminalSession {
 
     /// `disposeTerminal`: the shell ends with its tab.
     pub fn kill(&mut self) {
-        self.send(Command::Kill);
+        self.send(Command::Kill(None));
         self.sender = None;
         self.pty_id = None;
     }

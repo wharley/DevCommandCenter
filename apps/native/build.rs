@@ -14,12 +14,15 @@ fn main() {
     let icons = manifest.join("assets/icons");
     let providers = manifest.join("assets/providers");
     let file_icons = manifest.join("assets/file-icons");
-    for path in [&mascots, &icons, &providers, &file_icons] {
+    let editors = manifest.join("assets/editors");
+    for path in [&mascots, &icons, &providers, &file_icons, &editors] {
         println!("cargo:rerun-if-changed={}", path.display());
     }
 
     fs::write(out.join("mascots.rs"), mascot_frames(&mascots)).unwrap();
-    let tables = svg_table(&icons, "ICONS") + &svg_table(&providers, "PROVIDER_MARKS");
+    let tables = svg_table(&icons, "ICONS")
+        + &svg_table(&providers, "PROVIDER_MARKS")
+        + &svg_table(&editors, "EDITOR_MARKS");
     fs::write(out.join("icons.rs"), tables).unwrap();
     // The code column's Material icons (`scripts/gen-file-icons.mjs`).
     let file_tables = svg_table(&file_icons.join("file"), "FILE_ICONS")

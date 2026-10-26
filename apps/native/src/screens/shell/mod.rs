@@ -4,6 +4,7 @@
 mod annotation;
 mod bootstrap;
 mod browser;
+mod editor;
 pub mod layout;
 mod merge;
 mod regions;
@@ -58,6 +59,7 @@ pub fn bind_keys(cx: &mut gpui::App) {
         gpui::KeyBinding::new("cmd-shift-g", ToggleCodeChanges, None),
         gpui::KeyBinding::new("cmd-j", ToggleTerminal, None),
     ]);
+    editor::bind_keys(cx);
 }
 
 /// Drag payload of the sidebar separator.
@@ -308,6 +310,9 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         match event {
+            crate::screens::conversation::ConversationEvent::OpenInEditor(editor) => {
+                self.open_in_editor(editor, cx)
+            }
             crate::screens::conversation::ConversationEvent::OpenSessionSearch => {
                 self.open_session_search(window, cx)
             }
@@ -759,6 +764,19 @@ impl Render for Shell {
             .on_action(
                 cx.listener(|this, _: &ToggleTerminal, window, cx| {
                     this.toggle_terminal(window, cx)
+                }),
+            )
+            // ⌘F: find in the conversation.
+            .on_action(cx.listener(
+                |this, _: &crate::screens::conversation::OpenThreadFind, window, cx| {
+                    this.conversation
+                        .update(cx, |conversation, cx| conversation.open_find(window, cx))
+                },
+            ))
+            // ⌘O: the task's folder in the preferred editor.
+            .on_action(
+                cx.listener(|this, _: &editor::OpenInPreferredEditor, _, cx| {
+                    this.open_in_preferred_editor(cx)
                 }),
             )
             // Esc outside the terminal hides its dock (the drawer's window listener).

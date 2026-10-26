@@ -20,7 +20,7 @@ pub(super) fn row(
     state: &gpui::Entity<MenuState>,
     index: usize,
     highlighted: bool,
-    icon: Option<Icon>,
+    icon: Option<AnyElement>,
     label: Label,
     submenu: bool,
     disabled: bool,

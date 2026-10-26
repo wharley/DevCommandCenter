@@ -232,6 +232,7 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
                         .justify_end()
                         .gap(px(4.0))
                         .child(view.resume_button(cx))
+                        .child(view.editor_picker(cx))
                         .child(view.terminal_button(cx))
                         .child(view.browser_button(cx))
                         .child(view.new_session_button(cx))

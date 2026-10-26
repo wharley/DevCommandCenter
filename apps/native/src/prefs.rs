@@ -31,6 +31,8 @@ pub struct Prefs {
     pub code_column_tab: crate::screens::code_column::CodeColumnTab,
     /// The terminal dock's height (`dcc-workbench-terminal-dock-height-v1`).
     pub terminal_height: f32,
+    /// "Abrir no editor"'s pick (`dcc-preferred-editor`).
+    pub preferred_editor: String,
 }
 
 impl Default for Prefs {
@@ -45,6 +47,7 @@ impl Default for Prefs {
             code_column_open: false,
             code_column_tab: crate::screens::code_column::CodeColumnTab::Files,
             terminal_height: crate::screens::terminal::dock::DEFAULT_HEIGHT,
+            preferred_editor: dcc_infra::editor_launch::EDITORS[0].id.to_string(),
         }
     }
 }
@@ -57,6 +60,10 @@ impl Prefs {
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
         prefs.sidebar_width = clamp_sidebar_width(prefs.sidebar_width);
+        // `getStoredPreferredEditor`: anything unknown is Cursor.
+        if dcc_infra::editor_launch::editor(&prefs.preferred_editor).is_none() {
+            prefs.preferred_editor = dcc_infra::editor_launch::EDITORS[0].id.to_string();
+        }
         prefs
     }
 

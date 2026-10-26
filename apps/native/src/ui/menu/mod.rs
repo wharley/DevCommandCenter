@@ -33,7 +33,7 @@ pub enum MenuEntry {
 
 pub struct MenuItem {
     label: SharedString,
-    icon: Option<Icon>,
+    icon: Option<AnyElement>,
     disabled: bool,
     /// `text-destructive focus:text-destructive`
     destructive: bool,
@@ -71,7 +71,13 @@ impl MenuItem {
     }
 
     pub fn icon(mut self, icon: Icon) -> Self {
-        self.icon = Some(icon);
+        self.icon = Some(icon.into_any_element());
+        self
+    }
+
+    /// Anything drawn where the icon goes (a brand mark).
+    pub fn leading(mut self, element: impl IntoElement) -> Self {
+        self.icon = Some(element.into_any_element());
         self
     }
 
@@ -421,7 +427,7 @@ fn panel(
                     state,
                     index,
                     highlighted == Some(index) || open,
-                    icon,
+                    icon.map(IntoElement::into_any_element),
                     Label {
                         text: label,
                         detail: None,
