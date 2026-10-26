@@ -84,6 +84,15 @@ pub struct BrowserSurface {
     pub sessions: Option<super::sessions::SessionsDialog>,
     pub session_source: super::sessions::SessionSource,
     pub(super) session_openings: u64,
+    /// The desktop's agents on this Browser (none without the desktop, and
+    /// in tests).
+    pub(super) bridge: Option<super::bridge::SurfaceBridge>,
+    pub(super) bridge_api: Option<crate::data::desktop_api::DesktopApi>,
+    /// The agent's control (`browser_control_status`).
+    pub control: crate::data::browser_bridge::ControlStatus,
+    pub(super) control_until: Option<std::time::Instant>,
+    pub(super) control_busy: bool,
+    pub(super) _control: Option<Task<()>>,
     db_path: PathBuf,
     _address_events: Subscription,
     _page_events: Option<Task<()>>,
@@ -129,6 +138,16 @@ impl BrowserSurface {
             sessions: None,
             session_source: super::sessions::SessionSource::real(),
             session_openings: 0,
+            bridge: None,
+            bridge_api: if cfg!(test) {
+                None
+            } else {
+                crate::data::desktop_api::DesktopApi::load()
+            },
+            control: Default::default(),
+            control_until: None,
+            control_busy: false,
+            _control: None,
             db_path,
             _address_events: address_events,
             _page_events: None,
@@ -197,6 +216,7 @@ impl BrowserSurface {
             Ok(page) => {
                 self.page = Some(page);
                 self.events = Some(sender);
+                self.attach_bridge(url.clone(), cx);
                 self._page_events = Some(cx.spawn(async move |this, cx| {
                     while let Some(event) = receiver.next().await {
                         if this
@@ -231,6 +251,7 @@ impl BrowserSurface {
                     {
                         surface.url = Some(url.clone());
                         surface.set_address(&url, cx);
+                        surface.report(crate::data::browser_bridge::PageReport::Url(url));
                         cx.notify();
                     }
                 });
@@ -247,6 +268,9 @@ impl BrowserSurface {
                 self.loading = true;
                 self.error = None;
                 self.set_address(&url, cx);
+                self.report(crate::data::browser_bridge::PageReport::Loading(
+                    url.clone(),
+                ));
                 self.url = Some(url);
             }
             PageEvent::Loaded(url) => {
@@ -254,9 +278,13 @@ impl BrowserSurface {
                 self.page_loads += 1;
                 self.set_address(&url, cx);
                 self.persist(&url, cx);
+                self.report(crate::data::browser_bridge::PageReport::Loaded(url.clone()));
                 self.url = Some(url);
             }
             PageEvent::Title(title) => {
+                self.report(crate::data::browser_bridge::PageReport::Title(
+                    title.clone(),
+                ));
                 self.title = (!title.trim().is_empty()).then_some(title);
             }
         }
@@ -289,7 +317,7 @@ impl BrowserSurface {
             .detach();
     }
 
-    fn set_address(&self, url: &str, cx: &mut Context<Self>) {
+    pub(super) fn set_address(&self, url: &str, cx: &mut Context<Self>) {
         self.address
             .update(cx, |input, cx| input.set_text(url.to_string(), cx));
     }
@@ -342,6 +370,7 @@ impl BrowserSurface {
         if let Some(page) = &self.page {
             page.set_visible(visible);
         }
+        self.report(crate::data::browser_bridge::PageReport::Visibility(visible));
     }
 
     pub fn close(&mut self, cx: &mut Context<Self>) {

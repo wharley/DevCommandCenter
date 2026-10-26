@@ -3,7 +3,9 @@
 //! around it is GPUI.
 
 pub mod address;
+mod bridge;
 mod context;
+mod control;
 mod cookies;
 mod download;
 pub mod layout;

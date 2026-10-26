@@ -365,3 +365,92 @@ fn a_chrome_session_goes_into_the_browser_and_the_page_reloads(cx: &mut TestAppC
         Some("browser changed page; reopen Sessions and try again")
     );
 }
+
+#[gpui::test]
+fn the_desktops_agents_drive_this_browser_and_hear_its_page(cx: &mut TestAppContext) {
+    use super::bridge::{Outgoing, SurfaceBridge};
+    use crate::data::browser_bridge::{BridgeOp, BridgeOpKind, PageReport};
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("database.sqlite");
+    let pages = Rc::new(Pages::default());
+    let (surface, cx) = open(cx, &db, Some("https://example.com/docs"), &pages);
+    let (bridge, outbox) = SurfaceBridge::for_test(41);
+    cx.update(|_, cx| surface.update(cx, |surface, _| surface.bridge = Some(bridge)));
+    send(
+        &pages,
+        PageEvent::Loaded("https://example.com/docs".into()),
+        cx,
+    );
+    send(&pages, PageEvent::Title("Docs".into()), cx);
+    let reports: Vec<PageReport> = outbox
+        .try_iter()
+        .filter_map(|message| match message {
+            Outgoing::Report(report) => Some(report),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        reports[..2],
+        [
+            PageReport::Loaded("https://example.com/docs".into()),
+            PageReport::Title("Docs".into()),
+        ]
+    );
+    // A script an agent asked for runs on this page; its answer goes back.
+    *pages.page.answer.borrow_mut() = Some("\"Docs\"".into());
+    let run = |cx: &mut VisualTestContext, kind: BridgeOpKind, op_id: u64| {
+        cx.update(|_, cx| {
+            surface.update(cx, |surface, cx| {
+                surface.run_op(BridgeOp { op_id, kind }, cx)
+            })
+        });
+        cx.run_until_parked();
+    };
+    run(
+        cx,
+        BridgeOpKind::Eval {
+            script: "document.title".into(),
+        },
+        7,
+    );
+    let replies: Vec<(u64, Result<String, String>)> = outbox
+        .try_iter()
+        .filter_map(|message| match message {
+            Outgoing::Reply(op_id, result) => Some((op_id, result)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(replies, [(7, Ok("\"Docs\"".to_string()))]);
+    run(
+        cx,
+        BridgeOpKind::Navigate {
+            url: "https://example.com/plans".into(),
+        },
+        8,
+    );
+    run(cx, BridgeOpKind::Reload, 9);
+    let calls = pages.page.calls.borrow().clone();
+    assert!(
+        calls
+            .iter()
+            .any(|call| call == "load https://example.com/plans")
+    );
+    assert!(calls.iter().any(|call| call == "reload"));
+    // Hidden under an overlay: the desktop hears it.
+    cx.update(|_, cx| surface.update(cx, |surface, _| surface.show_page(false)));
+    assert!(
+        outbox
+            .try_iter()
+            .any(|message| matches!(message, Outgoing::Report(PageReport::Visibility(false))))
+    );
+    // The agent's pill shows in a conversation, counting the grant down.
+    assert!(cx.debug_bounds("browser-agent").is_some());
+    let seconds = cx.update(|_, cx| {
+        surface.update(cx, |surface, _| {
+            surface.control_until =
+                Some(std::time::Instant::now() + std::time::Duration::from_millis(4_500));
+            surface.control_seconds()
+        })
+    });
+    assert_eq!(seconds, 5);
+}

@@ -3,14 +3,14 @@
 //! dock reads what they print from one event stream. Blocking: call it off
 //! the UI thread.
 
-use std::io::{BufRead, BufReader, Read};
-use std::net::TcpStream;
+use std::io::Read;
 use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::data::desktop_api::{ApiError, DesktopApi, encode};
+use crate::data::sse::{Body, SseFrames};
 
 /// The shell a tab runs and the size it starts at.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -241,52 +241,6 @@ impl DesktopApi {
     }
 }
 
-/// The response body, with HTTP/1.1 chunks taken off.
-struct Body {
-    reader: BufReader<TcpStream>,
-    chunked: bool,
-    /// Bytes left in the chunk being read.
-    left: usize,
-}
-
-impl Body {
-    fn new(reader: BufReader<TcpStream>, chunked: bool) -> Self {
-        Self {
-            reader,
-            chunked,
-            left: 0,
-        }
-    }
-}
-
-impl Read for Body {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if !self.chunked {
-            return self.reader.read(buf);
-        }
-        if self.left == 0 {
-            let mut line = String::new();
-            // The CRLF closing the previous chunk, then the size line.
-            while line.trim().is_empty() {
-                line.clear();
-                if self.reader.read_line(&mut line)? == 0 {
-                    return Ok(0);
-                }
-            }
-            let size = line.split(';').next().unwrap_or_default().trim();
-            self.left =
-                usize::from_str_radix(size, 16).map_err(|_| std::io::Error::other("bad chunk"))?;
-            if self.left == 0 {
-                return Ok(0);
-            }
-        }
-        let wanted = buf.len().min(self.left);
-        let read = self.reader.read(&mut buf[..wanted])?;
-        self.left -= read;
-        Ok(read)
-    }
-}
-
 /// The stream's messages, one at a time; `None` once it ends (the desktop
 /// closed, or nothing came for longer than its keep-alive).
 pub struct TerminalEvents {
@@ -311,46 +265,30 @@ impl Iterator for TerminalEvents {
     }
 }
 
-/// Server-sent events into terminal events (`event:` and `data:` lines, a
-/// blank line closing each).
+/// Server-sent events into terminal events.
 #[derive(Default)]
 pub(crate) struct SseDecoder {
-    pending: Vec<u8>,
-    name: String,
-    data: String,
-    ready: std::collections::VecDeque<TerminalEvent>,
+    frames: SseFrames,
 }
 
 impl SseDecoder {
     pub(crate) fn feed(&mut self, bytes: &[u8]) {
-        self.pending.extend_from_slice(bytes);
-        while let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = self.pending.drain(..=end).collect();
-            let line = String::from_utf8_lossy(&line);
-            let line = line.trim_end_matches(['\n', '\r']);
-            if line.is_empty() {
-                self.dispatch();
-            } else if let Some(name) = line.strip_prefix("event:") {
-                self.name = name.trim_start().to_string();
-            } else if let Some(data) = line.strip_prefix("data:") {
-                if !self.data.is_empty() {
-                    self.data.push('\n');
-                }
-                self.data.push_str(data.strip_prefix(' ').unwrap_or(data));
-            }
-        }
+        self.frames.feed(bytes);
     }
 
     pub(crate) fn next_event(&mut self) -> Option<TerminalEvent> {
-        self.ready.pop_front()
+        while let Some((name, data)) = self.frames.next_frame() {
+            if let Some(event) = Self::event(&name, &data) {
+                return Some(event);
+            }
+        }
+        None
     }
 
-    fn dispatch(&mut self) {
-        let name = std::mem::take(&mut self.name);
-        let data = std::mem::take(&mut self.data);
-        let value: Value = serde_json::from_str(&data).unwrap_or(Value::Null);
+    fn event(name: &str, data: &str) -> Option<TerminalEvent> {
+        let value: Value = serde_json::from_str(data).unwrap_or(Value::Null);
         let text = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
-        let event = match name.as_str() {
+        match name {
             "terminal-output" => text("ptyId")
                 .zip(text("data"))
                 .map(|(pty_id, data)| TerminalEvent::Output { pty_id, data }),
@@ -360,8 +298,7 @@ impl SseDecoder {
             }),
             "terminal-lagged" => Some(TerminalEvent::Lagged),
             _ => None,
-        };
-        self.ready.extend(event);
+        }
     }
 }
 
