@@ -6,8 +6,10 @@
 use super::*;
 use dcc_core::application::ActivateMcpDefinitionInput;
 use dcc_tauri::commands::mcp_commands::{
-    self as commands, CreateMcpIntegrationInput, DisconnectMcpConnectorInput, McpConnectLoginInput,
-    RemoveMcpIntegrationInput, SetMcpConnectorScopesInput, StartMcpConnectInput,
+    self as commands, CreateMcpIntegrationInput, DisconnectMcpConnectorInput,
+    FetchMcpConnectorLogoInput, ImportNativeMcpServersInput, McpConnectLoginInput,
+    RemoveMcpIntegrationInput, SetMcpConnectorLogoInput, SetMcpConnectorScopesInput,
+    SetMcpProjectEnabledInput, SetMcpToolPolicyInput, StartMcpConnectInput,
     TestMcpIntegrationInput,
 };
 use dcc_tauri::connector_gateway::ConnectorGateway;
@@ -119,4 +121,45 @@ pub(super) async fn test(
     let app = app(&backend)?;
     let gateway = gateway(&app)?;
     reply(commands::test_mcp_integration_with(&backend.workspace, &gateway, input).await)
+}
+
+pub(super) async fn set_logo(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<SetMcpConnectorLogoInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(commands::set_mcp_connector_logo_with(&backend.workspace, input).await)
+}
+
+/// The icon of the connector's own site, kept as its logo.
+pub(super) async fn fetch_logo(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<FetchMcpConnectorLogoInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(commands::fetch_mcp_connector_logo_with(&backend.workspace, input).await)
+}
+
+pub(super) async fn set_project(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<SetMcpProjectEnabledInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(commands::set_mcp_project_enabled_with(&backend.workspace, input).await)
+}
+
+pub(super) async fn set_tool_policy(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<SetMcpToolPolicyInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(commands::set_mcp_tool_policy_with(&backend.workspace, input).await)
+}
+
+/// The remote servers Claude Code, Codex and Cursor have configured.
+pub(super) async fn native_servers() -> Result<Json<Value>, HttpApiError> {
+    reply(commands::list_native_mcp_servers().await)
+}
+
+pub(super) async fn import_native(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<ImportNativeMcpServersInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(commands::import_native_mcp_servers_with(&backend.workspace, input).await)
 }

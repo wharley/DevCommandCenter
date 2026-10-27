@@ -377,6 +377,14 @@ pub async fn set_mcp_tool_policy(
     state: State<'_, WorkspaceCommandState>,
     input: SetMcpToolPolicyInput,
 ) -> Result<SetMcpToolPolicyOutput, String> {
+    set_mcp_tool_policy_with(&state, input).await
+}
+
+/// `set_mcp_tool_policy` for the HTTP API (no Tauri `State`).
+pub async fn set_mcp_tool_policy_with(
+    state: &WorkspaceCommandState,
+    input: SetMcpToolPolicyInput,
+) -> Result<SetMcpToolPolicyOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     set_tool_policy(&repo, input)
         .await
@@ -534,6 +542,14 @@ pub async fn set_mcp_connector_logo(
     state: State<'_, WorkspaceCommandState>,
     input: SetMcpConnectorLogoInput,
 ) -> Result<McpConnectorDetailsOutput, String> {
+    set_mcp_connector_logo_with(&state, input).await
+}
+
+/// `set_mcp_connector_logo` for the HTTP API (no Tauri `State`).
+pub async fn set_mcp_connector_logo_with(
+    state: &WorkspaceCommandState,
+    input: SetMcpConnectorLogoInput,
+) -> Result<McpConnectorDetailsOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     update_connector_details(&repo, &input.definition_id, |details| {
         details.logo = input.logo;
@@ -546,6 +562,14 @@ pub async fn set_mcp_connector_logo(
 #[tauri::command]
 pub async fn fetch_mcp_connector_logo(
     state: State<'_, WorkspaceCommandState>,
+    input: FetchMcpConnectorLogoInput,
+) -> Result<McpConnectorDetailsOutput, String> {
+    fetch_mcp_connector_logo_with(&state, input).await
+}
+
+/// `fetch_mcp_connector_logo` for the HTTP API (no Tauri `State`).
+pub async fn fetch_mcp_connector_logo_with(
+    state: &WorkspaceCommandState,
     input: FetchMcpConnectorLogoInput,
 ) -> Result<McpConnectorDetailsOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
@@ -650,6 +674,14 @@ pub async fn list_native_mcp_servers() -> Result<ListNativeMcpServersOutput, Str
 #[tauri::command]
 pub async fn import_native_mcp_servers(
     state: State<'_, WorkspaceCommandState>,
+    input: ImportNativeMcpServersInput,
+) -> Result<ImportNativeMcpServersOutput, String> {
+    import_native_mcp_servers_with(&state, input).await
+}
+
+/// `import_native_mcp_servers` for the HTTP API (no Tauri `State`).
+pub async fn import_native_mcp_servers_with(
+    state: &WorkspaceCommandState,
     input: ImportNativeMcpServersInput,
 ) -> Result<ImportNativeMcpServersOutput, String> {
     let found = tokio::task::spawn_blocking(crate::native_connectors::discover_importable)
@@ -771,6 +803,14 @@ async fn update_connector_details(
 #[tauri::command]
 pub async fn set_mcp_project_enabled(
     state: State<'_, WorkspaceCommandState>,
+    input: SetMcpProjectEnabledInput,
+) -> Result<SetMcpProjectEnabledOutput, String> {
+    set_mcp_project_enabled_with(&state, input).await
+}
+
+/// `set_mcp_project_enabled` for the HTTP API (no Tauri `State`).
+pub async fn set_mcp_project_enabled_with(
+    state: &WorkspaceCommandState,
     input: SetMcpProjectEnabledInput,
 ) -> Result<SetMcpProjectEnabledOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;

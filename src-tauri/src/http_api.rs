@@ -861,6 +861,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/mcp/connect/cancel", post(mcp::cancel_connect))
         .route("/api/v1/mcp/disconnect", post(mcp::disconnect))
         .route("/api/v1/mcp/test", post(mcp::test))
+        .route("/api/v1/mcp/logo", post(mcp::set_logo))
+        .route("/api/v1/mcp/logo/fetch", post(mcp::fetch_logo))
+        .route("/api/v1/mcp/project", post(mcp::set_project))
+        .route("/api/v1/mcp/tool-policy", post(mcp::set_tool_policy))
+        .route(
+            "/api/v1/mcp/native-servers",
+            get(mcp::native_servers).post(mcp::import_native),
+        )
         .route(
             "/api/v1/workspaces/automation",
             post(automation::config).put(automation::save),
@@ -1743,6 +1751,12 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/mcp/connect/cancel",
             "POST /api/v1/mcp/disconnect",
             "POST /api/v1/mcp/test",
+            "POST /api/v1/mcp/logo",
+            "POST /api/v1/mcp/logo/fetch",
+            "POST /api/v1/mcp/project",
+            "POST /api/v1/mcp/tool-policy",
+            "GET /api/v1/mcp/native-servers",
+            "POST /api/v1/mcp/native-servers",
             "POST /api/v1/workspaces/automation",
             "PUT /api/v1/workspaces/automation",
             "POST /api/v1/workspaces/automation/run",
@@ -5860,6 +5874,51 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{removed}");
         let (_, after) = get_json(&fixture.app, "/api/v1/mcp/integrations").await;
         assert_eq!(after["integrations"], json!([]));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_connectors_logo_projects_and_tool_policies_are_set_through_the_desktop() {
+        let fixture = embedded_fixture().await;
+        let (_, created) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/integrations",
+            json!({ "displayName": "Acme", "transport": { "type": "http",
+                "url": "https://mcp.acme.dev/mcp" }, "scope": { "type": "global" },
+                "credentials": [] }),
+        )
+        .await;
+        let id = created["integration"]["definition"]["id"].clone();
+        let logo = "data:image/png;base64,iVBORw0KGgo=";
+        let (status, details) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/logo",
+            json!({ "definitionId": id, "logo": logo }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{details}");
+        assert_eq!(details["logo"], logo);
+        let (status, excluded) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/project",
+            json!({ "definitionId": id, "projectId": "p-1", "enabled": false }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{excluded}");
+        assert_eq!(excluded["excludedProjectIds"], json!(["p-1"]));
+        let (status, policy) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/tool-policy",
+            json!({ "definitionId": id, "toolName": "search", "decision": "allow" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{policy}");
+        let (_, listed) = get_json(&fixture.app, "/api/v1/mcp/integrations").await;
+        let record = &listed["integrations"][0];
+        assert_eq!(record["logo"], logo);
+        assert_eq!(record["toolPolicies"][0]["decision"], "allow");
+        let (status, servers) = get_json(&fixture.app, "/api/v1/mcp/native-servers").await;
+        assert_eq!(status, StatusCode::OK, "{servers}");
+        assert!(servers["servers"].is_array());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
