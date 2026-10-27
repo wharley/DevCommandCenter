@@ -391,6 +391,16 @@ pub fn appshots_set_shortcut(
     configure_shortcut(&app, shortcut)
 }
 
+/// `appshots_status` (without targets) for the native app's Settings.
+pub fn settings_status(app: &tauri::AppHandle) -> Result<AppshotStatus, String> {
+    app.state::<AppshotState>().status(false)
+}
+
+/// `appshots_set_shortcut` without the window check.
+pub fn set_shortcut(app: &tauri::AppHandle, shortcut: Option<String>) -> Result<(), String> {
+    configure_shortcut(app, shortcut)
+}
+
 #[cfg(target_os = "macos")]
 fn configure_shortcut(app: &tauri::AppHandle, shortcut: Option<String>) -> Result<(), String> {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut};

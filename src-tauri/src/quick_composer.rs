@@ -81,6 +81,12 @@ pub fn quick_composer_status(
     state: State<QuickComposerState>,
 ) -> Result<Status, String> {
     trusted(&window)?;
+    status(&state)
+}
+
+/// `quick_composer_status` without the window check (the native app's
+/// Settings, over the loopback API).
+pub fn status(state: &QuickComposerState) -> Result<Status, String> {
     let saved = state.saved.lock().map_err(|e| e.to_string())?;
     Ok(Status {
         supported: cfg!(target_os = "macos"),
@@ -218,6 +224,11 @@ pub fn quick_composer_set_shortcut(
     shortcut: Option<String>,
 ) -> Result<(), String> {
     trusted(&window)?;
+    set_shortcut(&app, shortcut)
+}
+
+/// `quick_composer_set_shortcut` without the window check.
+pub fn set_shortcut(app: &AppHandle, shortcut: Option<String>) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (app, shortcut);

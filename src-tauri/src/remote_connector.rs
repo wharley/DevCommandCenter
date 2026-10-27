@@ -1273,6 +1273,8 @@ pub fn remote_path_allowed(path: &str) -> bool {
         && !route.starts_with("/api/v1/terminals/")
         && !route.starts_with("/api/v1/browser/bridge/")
         && !route.starts_with("/api/v1/computer/bridge/")
+        && !route.starts_with("/api/v1/quick-composer/")
+        && !route.starts_with("/api/v1/appshots/")
 }
 
 fn is_channel_route(path: &str) -> bool {
@@ -1749,6 +1751,8 @@ mod tests {
         assert!(!remote_path_allowed("/auth/devices"));
         assert!(!remote_path_allowed("/auth/pair-init"));
         assert!(!remote_path_allowed("/api/v1/auth/bearer/rotate"));
+        assert!(!remote_path_allowed("/api/v1/quick-composer/toggle"));
+        assert!(!remote_path_allowed("/api/v1/appshots/shortcut"));
         assert!(!remote_path_allowed("/api/v1/remote/pairing/offers"));
         assert!(!remote_path_allowed("/api/v1/terminals/spawn"));
         assert!(!remote_path_allowed("/api/v1/terminals/by-owner/terminal%3Ax"));

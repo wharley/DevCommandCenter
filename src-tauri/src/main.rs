@@ -3856,6 +3856,7 @@ fn start_embedded_http_server(
             .with_desktop_browser(Arc::new(HttpBrowser(app.handle().clone())))
             .with_desktop_computer(Arc::new(HttpComputer(app.handle().clone())))
             .with_desktop_keep_awake(Arc::new(HttpKeepAwake(app.handle().clone())))
+            .with_desktop_shortcuts(Arc::new(HttpShortcuts(app.handle().clone())))
             .with_app(app.handle().clone()),
         Err(error) => {
             eprintln!("[DCC HTTP] not started: {error}");
@@ -4176,6 +4177,37 @@ impl dev_command_center_tauri::http_api::DesktopBrowser for HttpBrowser {
 /// (`http_api::computer_bridge`): the same state and answers as the
 /// WebView's dialog.
 struct HttpComputer(AppHandle);
+
+/// The quick composer's and Appshots' global shortcuts for the native app.
+struct HttpShortcuts(AppHandle);
+
+impl dev_command_center_tauri::http_api::DesktopShortcuts for HttpShortcuts {
+    fn quick_composer(&self) -> Result<Value, String> {
+        let state = self
+            .0
+            .try_state::<quick_composer::QuickComposerState>()
+            .ok_or("unavailable")?;
+        let status = quick_composer::status(&state)?;
+        serde_json::to_value(status).map_err(|error| error.to_string())
+    }
+
+    fn set_quick_composer(&self, shortcut: Option<String>) -> Result<(), String> {
+        quick_composer::set_shortcut(&self.0, shortcut)
+    }
+
+    fn toggle_quick_composer(&self) -> Result<(), String> {
+        quick_composer::toggle(&self.0)
+    }
+
+    fn appshots(&self) -> Result<Value, String> {
+        let status = appshot_commands::settings_status(&self.0)?;
+        serde_json::to_value(status).map_err(|error| error.to_string())
+    }
+
+    fn set_appshots(&self, shortcut: Option<String>) -> Result<(), String> {
+        appshot_commands::set_shortcut(&self.0, shortcut)
+    }
+}
 
 /// `keep_awake_status` / `keep_awake_set_mode` for the native app.
 struct HttpKeepAwake(AppHandle);

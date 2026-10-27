@@ -7,7 +7,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
     },
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use dcc_core::{
@@ -70,6 +70,7 @@ mod git_changes;
 mod git_conflicts;
 mod keep_awake;
 mod mobile;
+mod shortcuts;
 mod skills;
 mod terminals;
 mod turn_review;
@@ -80,6 +81,7 @@ pub use browser_bridge::{
 pub use browser_opens::native_browser_opens;
 pub use computer_bridge::{native_computer, DesktopComputer};
 pub use keep_awake::DesktopKeepAwake;
+pub use shortcuts::DesktopShortcuts;
 pub use terminals::{publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals};
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
@@ -242,6 +244,8 @@ pub struct HttpBackend {
     desktop_computer: OnceLock<Arc<dyn DesktopComputer>>,
     /// The desktop's keep-awake hold, for the native app's Settings.
     desktop_keep_awake: OnceLock<Arc<dyn DesktopKeepAwake>>,
+    /// The desktop's global shortcuts, for the native app's Settings.
+    desktop_shortcuts: OnceLock<Arc<dyn DesktopShortcuts>>,
     /// The relay connector serving this router, for the operator routes and
     /// to drop a revoked phone at once. Weak: the hub holds the router.
     remote: OnceLock<std::sync::Weak<RemoteHub>>,
@@ -275,6 +279,7 @@ impl HttpBackend {
             desktop_browser: OnceLock::new(),
             desktop_computer: OnceLock::new(),
             desktop_keep_awake: OnceLock::new(),
+            desktop_shortcuts: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -302,6 +307,7 @@ impl HttpBackend {
             desktop_browser: OnceLock::new(),
             desktop_computer: OnceLock::new(),
             desktop_keep_awake: OnceLock::new(),
+            desktop_shortcuts: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -332,6 +338,13 @@ impl HttpBackend {
     /// `/api/v1/computer/bridge/` (local clients only).
     pub fn with_desktop_computer(self, computer: Arc<dyn DesktopComputer>) -> Self {
         let _ = self.desktop_computer.set(computer);
+        self
+    }
+
+    /// The desktop's global shortcuts, for `/api/v1/quick-composer/*` and
+    /// `/api/v1/appshots/*`.
+    pub fn with_desktop_shortcuts(self, shortcuts: Arc<dyn DesktopShortcuts>) -> Self {
+        let _ = self.desktop_shortcuts.set(shortcuts);
         self
     }
 
@@ -742,6 +755,20 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/keep-awake",
             get(keep_awake::status).put(keep_awake::set_mode),
         )
+        .route(
+            "/api/v1/quick-composer/status",
+            get(shortcuts::quick_composer),
+        )
+        .route(
+            "/api/v1/quick-composer/shortcut",
+            put(shortcuts::set_quick_composer),
+        )
+        .route(
+            "/api/v1/quick-composer/toggle",
+            post(shortcuts::toggle_quick_composer),
+        )
+        .route("/api/v1/appshots/status", get(shortcuts::appshots))
+        .route("/api/v1/appshots/shortcut", put(shortcuts::set_appshots))
         .route("/api/v1/skills/save", post(skills::save))
         .route("/api/v1/skills/delete", post(skills::delete))
         .route("/api/v1/skills/import", post(skills::import))
@@ -1632,6 +1659,11 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/ai-memory/sidecar",
             "GET /api/v1/keep-awake",
             "PUT /api/v1/keep-awake",
+            "GET /api/v1/quick-composer/status",
+            "PUT /api/v1/quick-composer/shortcut",
+            "POST /api/v1/quick-composer/toggle",
+            "GET /api/v1/appshots/status",
+            "PUT /api/v1/appshots/shortcut",
             "POST /api/v1/skills/save",
             "POST /api/v1/skills/delete",
             "POST /api/v1/skills/import",
@@ -5294,6 +5326,68 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         let (status, _) = post_json(&fixture.app, "/api/v1/git/discard-file", file("../x")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn global_shortcuts_pass_through_to_the_desktop() {
+        struct Fake(std::sync::Mutex<Vec<String>>);
+        impl DesktopShortcuts for Fake {
+            fn quick_composer(&self) -> Result<Value, String> {
+                Ok(json!({ "supported": true, "shortcut": "Super+Shift+KeyK" }))
+            }
+            fn set_quick_composer(&self, shortcut: Option<String>) -> Result<(), String> {
+                match shortcut.as_deref() {
+                    Some("Shift+KeyA") => Err("shortcutInvalid".into()),
+                    other => {
+                        self.0.lock().unwrap().push(format!("quick {other:?}"));
+                        Ok(())
+                    }
+                }
+            }
+            fn toggle_quick_composer(&self) -> Result<(), String> {
+                self.0.lock().unwrap().push("toggle".into());
+                Ok(())
+            }
+            fn appshots(&self) -> Result<Value, String> {
+                Ok(json!({ "supported": true, "shortcut": null }))
+            }
+            fn set_appshots(&self, shortcut: Option<String>) -> Result<(), String> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(format!("appshots {shortcut:?}"));
+                Ok(())
+            }
+        }
+        let fixture = embedded_fixture().await;
+        let (status, _) = get_json(&fixture.app, "/api/v1/appshots/status").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let fake = Arc::new(Fake(std::sync::Mutex::new(Vec::new())));
+        let shared: Arc<dyn DesktopShortcuts> = fake.clone();
+        let _ = fixture.backend.desktop_shortcuts.set(shared);
+        let (_, quick) = get_json(&fixture.app, "/api/v1/quick-composer/status").await;
+        assert_eq!(quick["shortcut"], "Super+Shift+KeyK");
+        let (status, refused) = send_json(
+            &fixture.app,
+            "PUT",
+            "/api/v1/quick-composer/shortcut",
+            json!({ "shortcut": "Shift+KeyA" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(refused.to_string().contains("shortcutInvalid"), "{refused}");
+        send_json(
+            &fixture.app,
+            "PUT",
+            "/api/v1/appshots/shortcut",
+            json!({ "shortcut": null }),
+        )
+        .await;
+        post_json(&fixture.app, "/api/v1/quick-composer/toggle", json!({})).await;
+        assert_eq!(
+            *fake.0.lock().unwrap(),
+            ["appshots None".to_string(), "toggle".to_string()]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
