@@ -29,9 +29,9 @@ impl Render for Settings {
             SectionId::Git => self.git_section(cx),
             SectionId::Integrations => self.connectors_section(cx),
             SectionId::ComputerUse => self.computer_section(cx),
+            SectionId::Connections => self.connections_section(cx),
             SectionId::Shortcuts => self.shortcuts_section(cx),
             SectionId::Experimental => self.experimental(cx),
-            _ => div().into_any_element(),
         };
         let confirm = self
             .confirm_dialog(cx)
@@ -41,6 +41,7 @@ impl Render for Settings {
             .or_else(|| self.automation_dialog())
             .or_else(|| self.connector_confirm_dialog(cx))
             .or_else(|| self.manage_dialog(cx))
+            .or_else(|| self.connections_dialog(cx))
             .or_else(|| {
                 self.connectors
                     .custom

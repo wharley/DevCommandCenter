@@ -27,6 +27,8 @@ anyhow = "1"
 chrono = "0.4"
 futures = "0.3"
 base64 = "0.22"
+# The relay pairing QR in Settings → Conexões (encoded only; drawn by GPUI).
+qrcode = { version = "0.14", default-features = false }
 smallvec = "1"
 unicode-segmentation = "1"
 # Project logos: decode an upload and write the 64px PNG DCC stores (both

@@ -64,8 +64,8 @@ pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
 
 #[gpui::test]
 fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) {
-    // "Conexões" is not here yet: the first section the native app has.
-    let (settings, cx, events) = open(Some(SectionId::Connections), cx);
+    // No section asked: the first one.
+    let (settings, cx, events) = open(None, cx);
     assert_eq!(
         cx.update(|_, cx| settings.read(cx).active),
         SectionId::General
@@ -80,7 +80,7 @@ fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) 
     assert!(cx.debug_bounds("settings-section-aiMemory").is_some());
     assert!(cx.debug_bounds("settings-section-integrations").is_some());
     assert!(cx.debug_bounds("settings-section-computerUse").is_some());
-    assert!(cx.debug_bounds("settings-section-connections").is_none());
+    assert!(cx.debug_bounds("settings-section-connections").is_some());
     cx.simulate_input("experim");
     cx.run_until_parked();
     assert!(cx.debug_bounds("settings-section-appearance").is_none());
@@ -118,7 +118,7 @@ fn the_appearance_choices_go_out(cx: &mut TestAppContext) {
         assert_eq!(settings.theme, ThemePreference::Dark);
         assert_eq!(settings.density, Density::Compact);
     });
-    // "Experimental" may sit below the navigation's fold.
+    // Twelve sections: "Experimental" sits below the navigation's fold.
     cx.update(|_, cx| {
         settings.update(cx, |settings, cx| {
             settings.select(SectionId::Experimental, cx)

@@ -6,6 +6,7 @@
 mod account;
 mod appearance;
 mod computer;
+mod connections;
 mod connectors;
 mod decision;
 mod experimental;
@@ -22,6 +23,8 @@ mod tests;
 mod tests_account;
 #[cfg(test)]
 mod tests_computer;
+#[cfg(test)]
+mod tests_connections;
 #[cfg(test)]
 mod tests_connectors;
 #[cfg(test)]
@@ -131,8 +134,8 @@ impl SectionId {
     }
 }
 
-/// The sections the native app has, in the desktop's array order.
-pub const AVAILABLE: [SectionId; 11] = [
+/// The sections, in the desktop's array order (all of them now).
+pub const AVAILABLE: [SectionId; 12] = [
     SectionId::General,
     SectionId::Appearance,
     SectionId::Model,
@@ -140,6 +143,7 @@ pub const AVAILABLE: [SectionId; 11] = [
     SectionId::AiMemory,
     SectionId::Integrations,
     SectionId::ComputerUse,
+    SectionId::Connections,
     SectionId::Shortcuts,
     SectionId::Git,
     SectionId::Experimental,
@@ -167,6 +171,7 @@ pub struct Settings {
     account: account::Account,
     connectors: connectors::Connectors,
     computer: computer::Computer,
+    connections: connections::Connections,
     /// "Automação do projeto" over Settings.
     automation: Option<(
         Entity<crate::screens::automation::ProjectAutomation>,
@@ -239,6 +244,7 @@ impl Settings {
             account: account::Account::new(window, cx),
             connectors: connectors::Connectors::new(window, cx),
             computer: computer::Computer::default(),
+            connections: connections::Connections::new(window, cx),
             automation: None,
             _search_events: events,
         };
@@ -255,6 +261,9 @@ impl Settings {
         }
         if settings.active == SectionId::ComputerUse {
             settings.ensure_computer(cx);
+        }
+        if settings.active == SectionId::Connections {
+            settings.ensure_connections(cx);
         }
         settings
     }
@@ -286,6 +295,10 @@ impl Settings {
         if self.active == SectionId::ComputerUse {
             self.ensure_computer(cx);
         }
+        self.connections.reset();
+        if self.active == SectionId::Connections {
+            self.ensure_connections(cx);
+        }
     }
 
     pub fn search_input(&self) -> Entity<TextInput> {
@@ -302,6 +315,9 @@ impl Settings {
         }
         if section == SectionId::ComputerUse {
             self.ensure_computer(cx);
+        }
+        if section == SectionId::Connections {
+            self.ensure_connections(cx);
         }
         // A new section starts at its top.
         self.scroll

@@ -53,6 +53,7 @@ pub mod provider_usage;
 pub mod quick_open;
 pub mod rail;
 pub mod recap;
+pub mod remote_access;
 pub mod seen;
 pub mod session_list;
 pub mod session_search;
