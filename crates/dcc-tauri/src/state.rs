@@ -2192,14 +2192,14 @@ impl SessionCommandState {
         self.app_data_dir.join("provider-accounts")
     }
 
-    pub(crate) fn list_provider_accounts(&self) -> Result<Vec<ProviderAccount>> {
+    pub fn list_provider_accounts(&self) -> Result<Vec<ProviderAccount>> {
         SqliteWorkspaceRepo::open(&self.db_path)?.list_provider_accounts()
     }
 
     /// Adds a named sign-in. Without `import_dir`, DCC creates the account's
     /// config directory and links the person's shared Claude config into it;
     /// with one, it references that directory as it is.
-    pub(crate) fn create_provider_account(
+    pub fn create_provider_account(
         &self,
         provider_id: &str,
         label: &str,
@@ -2288,7 +2288,7 @@ impl SessionCommandState {
         Ok(path)
     }
 
-    pub(crate) fn rename_provider_account(
+    pub fn rename_provider_account(
         &self,
         account_id: &str,
         label: &str,
@@ -2311,7 +2311,7 @@ impl SessionCommandState {
 
     /// Forgets the account. Its folder, login and conversation history stay on
     /// disk, so adding it again under the same name signs it straight back in.
-    pub(crate) fn remove_provider_account(&self, account_id: &str) -> Result<()> {
+    pub fn remove_provider_account(&self, account_id: &str) -> Result<()> {
         if !SqliteWorkspaceRepo::open(&self.db_path)?.delete_provider_account(account_id)? {
             return Err(dcc_core::CoreError::Provider(format!(
                 "provider account {account_id} no longer exists"

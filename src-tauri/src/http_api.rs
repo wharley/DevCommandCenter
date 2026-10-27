@@ -70,6 +70,7 @@ mod git_changes;
 mod git_conflicts;
 mod keep_awake;
 mod mobile;
+mod provider_accounts;
 mod providers;
 mod shortcuts;
 mod skills;
@@ -759,6 +760,26 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/providers/:provider_id/availability",
             put(providers::set_availability),
+        )
+        .route(
+            "/api/v1/provider-accounts",
+            get(provider_accounts::list).post(provider_accounts::create),
+        )
+        .route(
+            "/api/v1/provider-accounts/status",
+            post(provider_accounts::status),
+        )
+        .route(
+            "/api/v1/provider-accounts/sign-in",
+            post(provider_accounts::sign_in),
+        )
+        .route(
+            "/api/v1/provider-accounts/sign-in/cancel",
+            post(provider_accounts::cancel_sign_in),
+        )
+        .route(
+            "/api/v1/provider-accounts/:account_id",
+            put(provider_accounts::rename).delete(provider_accounts::remove),
         )
         .route(
             "/api/v1/quick-composer/status",
@@ -1665,6 +1686,13 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/keep-awake",
             "PUT /api/v1/keep-awake",
             "PUT /api/v1/providers/:provider_id/availability",
+            "GET /api/v1/provider-accounts",
+            "POST /api/v1/provider-accounts",
+            "POST /api/v1/provider-accounts/status",
+            "POST /api/v1/provider-accounts/sign-in",
+            "POST /api/v1/provider-accounts/sign-in/cancel",
+            "PUT /api/v1/provider-accounts/:account_id",
+            "DELETE /api/v1/provider-accounts/:account_id",
             "GET /api/v1/quick-composer/status",
             "PUT /api/v1/quick-composer/shortcut",
             "POST /api/v1/quick-composer/toggle",
@@ -5452,6 +5480,51 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn provider_accounts_are_added_renamed_and_removed_through_the_desktop() {
+        let fixture = embedded_fixture().await;
+        let (status, created) = send_json(
+            &fixture.app,
+            "POST",
+            "/api/v1/provider-accounts",
+            json!({ "providerId": "claude_code", "label": "Zedy" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let id = created["account"]["id"].as_str().unwrap().to_string();
+        assert_eq!(created["account"]["label"], "Zedy");
+        // The same name twice, or a provider without accounts: refused.
+        let (status, _) = send_json(
+            &fixture.app,
+            "POST",
+            "/api/v1/provider-accounts",
+            json!({ "providerId": "claude_code", "label": "zedy" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, listed) = get_json(&fixture.app, "/api/v1/provider-accounts").await;
+        assert_eq!(status, StatusCode::OK, "{listed}");
+        assert_eq!(listed["accounts"].as_array().unwrap().len(), 1);
+        let path = format!("/api/v1/provider-accounts/{id}");
+        let (status, renamed) =
+            send_json(&fixture.app, "PUT", &path, json!({ "label": "Trabalho" })).await;
+        assert_eq!(status, StatusCode::OK, "{renamed}");
+        assert_eq!(renamed["account"]["label"], "Trabalho");
+        let (status, _) = send_json(&fixture.app, "DELETE", &path, json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = send_json(&fixture.app, "DELETE", &path, json!({})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // Cancelling a sign-in that is not waiting is fine.
+        let (status, _) = send_json(
+            &fixture.app,
+            "POST",
+            "/api/v1/provider-accounts/sign-in/cancel",
+            json!({ "providerId": "claude_code" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

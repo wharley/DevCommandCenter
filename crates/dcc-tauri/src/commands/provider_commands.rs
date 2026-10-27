@@ -351,6 +351,11 @@ pub async fn sign_in_provider_account_for_state(
 pub async fn cancel_provider_account_sign_in(
     input: ProviderAccountStatusInput,
 ) -> Result<(), String> {
+    cancel_account_sign_in(&input)
+}
+
+/// Stops the account's sign-in waiting on the browser, if one is.
+pub fn cancel_account_sign_in(input: &ProviderAccountStatusInput) -> Result<(), String> {
     let key = account_sign_in_key(input.provider_id.trim(), input.account_id.as_deref());
     if let Some((_, cancel)) = account_sign_ins()
         .lock()

@@ -1,3 +1,6 @@
+// The HTTP API's endpoint index is one `json!` literal past the default depth.
+#![recursion_limit = "256"]
+
 pub mod agent_requests;
 pub mod ai_memory_sidecar;
 pub mod daemon_client;
