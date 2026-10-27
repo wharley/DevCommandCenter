@@ -885,6 +885,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/forge/backfill-bindings",
             post(forge::backfill_bindings),
         )
+        .route(
+            "/api/v1/forge/retry-binding",
+            post(forge::retry_binding),
+        )
         .route("/api/v1/forge/review-state", post(forge::review_state))
         .route(
             "/api/v1/forge/reviewer-candidates",
@@ -1779,6 +1783,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/forge/hosts",
             "POST /api/v1/forge/select-login",
             "POST /api/v1/forge/backfill-bindings",
+            "POST /api/v1/forge/retry-binding",
             "POST /api/v1/forge/review-state",
             "POST /api/v1/forge/reviewer-candidates",
             "POST /api/v1/forge/request-reviewers",
@@ -5809,6 +5814,17 @@ mod tests {
             post_json(&fixture.app, "/api/v1/forge/backfill-bindings", json!({})).await;
         assert_eq!(status, StatusCode::OK, "{bound}");
         assert_eq!(bound["bound"], 0);
+        // An unknown repository has no login to bind.
+        let (status, retried) = post_json(
+            &fixture.app,
+            "/api/v1/forge/retry-binding",
+            json!({ "repositoryId": "missing" }),
+        )
+        .await;
+        assert_eq!(retried["login"], Value::Null, "{status} {retried}");
+        assert!(!crate::remote_connector::remote_path_allowed(
+            "/api/v1/forge/retry-binding"
+        ));
         // A host that is not one is refused before any CLI runs.
         let (status, _) = post_json(
             &fixture.app,

@@ -866,6 +866,14 @@ pub async fn workspace_retry_repository_forge_binding(
     state: State<'_, WorkspaceCommandState>,
     input: RepositoryIdInput,
 ) -> Result<Option<String>, String> {
+    workspace_retry_repository_forge_binding_with_state(&state, input).await
+}
+
+/// A repository bound again to the login now signed in, if one fits.
+pub async fn workspace_retry_repository_forge_binding_with_state(
+    state: &WorkspaceCommandState,
+    input: RepositoryIdInput,
+) -> Result<Option<String>, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let repository_id = dcc_core::domain::repository::RepositoryId(input.repository_id);
     let login = crate::commands::forge::accounts::auto_bind_repository(&repo, &repository_id)?;

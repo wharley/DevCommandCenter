@@ -1290,6 +1290,7 @@ pub fn remote_path_allowed(path: &str) -> bool {
                 | "/api/v1/forge/hosts"
                 | "/api/v1/forge/select-login"
                 | "/api/v1/forge/backfill-bindings"
+                | "/api/v1/forge/retry-binding"
         )
 }
 

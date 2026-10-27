@@ -86,6 +86,22 @@ pub(super) async fn backfill_bindings(
     )
 }
 
+/// After a sign-in from the Session tab: the task's repository bound
+/// again (`workspace_retry_repository_forge_binding`).
+pub(super) async fn retry_binding(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::workspace_commands::RepositoryIdInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(
+        forge_commands::workspace_retry_repository_forge_binding_with_state(
+            &backend.workspace,
+            input,
+        )
+        .await
+        .map(|login| json!({ "login": login })),
+    )
+}
+
 pub(super) async fn review_state(
     State(backend): State<Arc<HttpBackend>>,
     Json(input): Json<WorkspaceReviewStateInput>,
