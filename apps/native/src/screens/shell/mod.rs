@@ -19,6 +19,7 @@ mod sidebar_events;
 mod terminal;
 #[cfg(test)]
 mod tests;
+mod usage;
 
 use std::path::PathBuf;
 
@@ -114,6 +115,8 @@ pub struct Shell {
     _stage_events: Subscription,
     /// "Sessões passadas", while open.
     session_search: Option<session_search::OpenSearch>,
+    /// "DCC Usage", while open.
+    usage: Option<usage::OpenUsage>,
     /// The command palette (⌘K), while open.
     palette: Option<palette::OpenPalette>,
     /// "Abrir arquivo" (⌘P) or "Buscar no workspace" (⌘⇧F), while open.
@@ -258,6 +261,7 @@ impl Shell {
             shortcuts_open: false,
             file_finder: None,
             palette: None,
+            usage: None,
             terminal,
             _terminal_events: terminal_events,
             _terminal_counts: terminal_counts,
@@ -792,6 +796,7 @@ impl Render for Shell {
                     .as_ref()
                     .map(|(search, _)| search.clone()),
             )
+            .children(self.usage_overlay())
             .children(self.palette_overlay())
             .children(self.file_finder_overlay())
             .children(self.help_overlays(cx))

@@ -137,6 +137,7 @@ impl Shell {
                 cx.notify();
             }
             PaletteCommand::Help(topic) => self.open_help(topic, window, cx),
+            PaletteCommand::Usage => self.open_usage(cx),
             PaletteCommand::OpenTask(task) => {
                 self.sidebar
                     .update(cx, |sidebar, cx| sidebar.reveal_task(&task, cx));

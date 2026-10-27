@@ -545,6 +545,9 @@ fn an_allowed_open_goes_to_its_conversation_and_opens_the_browser_there(cx: &mut
             cx,
         );
     });
+    // The conversation's own read settles first (it would replace what the
+    // test shows next).
+    cx.run_until_parked();
     // Another conversation of the task: nothing opens until it shows.
     assert!(!shell.read_with(cx, |shell, _| shell.browser_open()));
     conversation.update(cx, |view, cx| view.show_loaded(loaded("s-2"), cx));
@@ -692,4 +695,17 @@ fn cmd_k_opens_the_palette_and_runs_what_is_picked(cx: &mut TestAppContext) {
         assert!(shell.prefs.code_column_open);
         assert_eq!(shell.prefs.code_column_tab, CodeColumnTab::Files);
     });
+}
+
+#[gpui::test]
+fn the_sidebars_chart_button_opens_the_usage(cx: &mut TestAppContext) {
+    use crate::screens::sidebar::SidebarEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::OpenUsage));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("usage-dialog").is_some());
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("usage-dialog").is_none());
 }

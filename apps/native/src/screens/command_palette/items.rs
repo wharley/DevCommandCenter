@@ -36,6 +36,8 @@ pub enum PaletteCommand {
     /// "Clonar a partir de URL": `openWorkspaceDialog("clone")`.
     Clone,
     Shortcuts,
+    /// "DCC Usage".
+    Usage,
     /// The help, on a topic when one was picked.
     Help(Option<&'static str>),
     OpenTask(String),
@@ -168,6 +170,12 @@ fn actions(selected: bool, cx: &App) -> Vec<Action> {
             "commandPalette.keywords.clone",
             None,
             PaletteCommand::Clone,
+        ),
+        action(
+            "commandPalette.openUsage",
+            "commandPalette.keywords.usage",
+            None,
+            PaletteCommand::Usage,
         ),
         action(
             "commandPalette.keyboardShortcuts",

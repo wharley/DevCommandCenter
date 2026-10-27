@@ -20,4 +20,5 @@ pub mod shortcuts;
 pub mod sidebar;
 pub mod stage;
 pub mod terminal;
+pub mod usage;
 pub mod workspace_search;
