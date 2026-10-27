@@ -948,6 +948,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/sessions/:session_id/agent",
             post(agents::bind_session),
         )
+        .route("/api/v1/agents/:agent_id", post(agents::save))
         .route(
             "/api/v1/sessions/:session_id/last-turn-review",
             post(turn_review::last_turn),
@@ -1836,6 +1837,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/skills/import",
             "POST /api/v1/skills/compile",
             "POST /api/v1/sessions/:session_id/agent",
+            "POST /api/v1/agents/:agent_id",
             "GET /api/v1/workspaces/:workspace_id/delivery",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
@@ -6451,6 +6453,31 @@ mod tests {
         assert!(bound.iter().any(|binding| {
             binding.session_id == fixture.session_id.0 && binding.agent_id == reviewer.id
         }));
+        // The page saves the person's changes; the role stays DCC's.
+        let (status, saved) = post_json(
+            &fixture.app,
+            &format!("/api/v1/agents/{}", reviewer.id),
+            json!({
+                "name": "Crítico",
+                "role": reviewer.role,
+                "kickoffPrompt": reviewer.kickoff_prompt,
+                "offerPrompt": "",
+                "extraInstructions": "Seja breve.",
+                "providerId": "codex",
+                "model": null,
+                "effort": "high",
+                "avatar": { "color": "pink", "arms": 5, "eyes": "visor" },
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["agent"]["name"], "Crítico");
+        assert_eq!(saved["agent"]["extraInstructions"], "Seja breve.");
+        assert_eq!(saved["agent"]["avatar"]["color"], "pink");
+        assert!(!crate::remote_connector::remote_path_allowed(&format!(
+            "/api/v1/agents/{}",
+            reviewer.id
+        )));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
