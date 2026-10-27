@@ -9,7 +9,7 @@ use super::{SessionSearch, SessionSearchEvent};
 use crate::data::session_search::{updated_at_label, workspace_label};
 use crate::i18n::{Locale, Translate};
 use crate::theme::ActiveTheme;
-use crate::ui::{Dialog, Icon};
+use crate::ui::{Badge, BadgeVariant, Dialog, Icon};
 
 impl SessionSearch {
     fn item(&self, index: usize, english: bool, cx: &mut Context<Self>) -> AnyElement {
@@ -17,15 +17,11 @@ impl SessionSearch {
         let result = &self.results[index];
         let highlighted = index == self.highlighted;
         let archived = result.archived_at.is_some().then(|| {
-            div()
-                .flex_shrink_0()
-                .rounded(px(6.0))
-                .border_1()
-                .border_color(colors.border)
-                .px(px(6.0))
-                .text_size(px(10.0))
-                .line_height(px(16.0))
-                .child(cx.t("workbench.sessionSearch.archived"))
+            Badge::new(
+                cx.t("workbench.sessionSearch.archived"),
+                BadgeVariant::Outline,
+            )
+            .text_size(10.0)
         });
         let snippet = result.snippet.trim().to_string();
         div()
@@ -34,7 +30,8 @@ impl SessionSearch {
             .flex()
             .items_start()
             .gap(px(12.0))
-            .rounded(px(2.0))
+            // `rounded-sm` on the desktop's scale.
+            .rounded(cx.theme().radius.sm)
             .px(px(8.0))
             .py(px(8.0))
             .text_size(px(14.0))
@@ -184,7 +181,11 @@ impl Render for SessionSearch {
             let _ = close.update(cx, |_, cx| cx.emit(SessionSearchEvent::Closed));
         })
         .top(0.18)
-        .radius(16.0)
+        // `CommandDialog`: `rounded-2xl border border-border/60 bg-background shadow-2xl`.
+        .radius(f32::from(cx.theme().radius.xxl))
+        .surface(colors.background)
+        .border(colors.border.opacity(0.6))
+        .shadow_2xl()
         .max_width(760.0)
         .max_height((f32::from(viewport.height) * 0.84).min(620.0))
         .padding(0.0)

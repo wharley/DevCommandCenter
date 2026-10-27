@@ -87,6 +87,26 @@ impl I18n {
             .is_some()
     }
 
+    /// `t(key, { returnObjects: true })` on an array of strings; nothing
+    /// when the key is missing or is not a list.
+    pub fn t_list(&self, key: &str) -> Vec<SharedString> {
+        let list = |catalog: &Value| {
+            key.split('.')
+                .try_fold(catalog, |node, part| node.get(part))
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|item| SharedString::from(item.to_string()))
+                        .collect::<Vec<_>>()
+                })
+        };
+        list(&self.catalog)
+            .or_else(|| list(&self.fallback))
+            .unwrap_or_default()
+    }
+
     fn lookup(&self, key: &str) -> Option<&str> {
         find(&self.catalog, key).or_else(|| find(&self.fallback, key))
     }
@@ -145,6 +165,7 @@ fn interpolate(template: &str, args: &Args) -> String {
 pub trait Translate {
     fn t(&self, key: &str) -> SharedString;
     fn t_with(&self, key: &str, args: &Args) -> SharedString;
+    fn t_list(&self, key: &str) -> Vec<SharedString>;
 }
 
 impl Translate for App {
@@ -154,6 +175,10 @@ impl Translate for App {
 
     fn t_with(&self, key: &str, args: &Args) -> SharedString {
         self.global::<I18n>().t_with(key, args)
+    }
+
+    fn t_list(&self, key: &str) -> Vec<SharedString> {
+        self.global::<I18n>().t_list(key)
     }
 }
 
@@ -169,6 +194,15 @@ mod tests {
             I18n::new(Locale::En).t("sidebar.tasksTitle").as_ref(),
             "Tasks"
         );
+    }
+
+    #[test]
+    fn lists_come_back_whole() {
+        let pt = I18n::new(Locale::PtBr);
+        let steps = pt.t_list("help.topics.workspaces.steps");
+        assert!(steps.len() > 1, "{steps:?}");
+        assert!(pt.t_list("help.topics.workspaces.label").is_empty());
+        assert!(pt.t_list("help.topics.missing.steps").is_empty());
     }
 
     #[test]

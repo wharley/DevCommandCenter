@@ -2,6 +2,7 @@
 //! projects: components take props and read only the theme.
 
 pub mod attention;
+mod badge;
 mod button;
 pub mod dialog;
 mod feedback;
@@ -19,6 +20,7 @@ pub mod text_input;
 mod toast;
 pub mod tooltip;
 
+pub use badge::{Badge, BadgeVariant};
 pub use button::{Button, Size as ButtonSize, Variant as ButtonVariant};
 pub use dialog::{Dialog, dialog_footer, dialog_footer_split, dialog_header};
 pub use feedback::{Checkbox, Spinner, ThinkingIndicator, spinner, thinking_indicator};

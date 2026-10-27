@@ -8,6 +8,7 @@ mod browser_opens;
 mod computer;
 mod delivery;
 mod editor;
+mod help;
 pub mod layout;
 mod merge;
 mod regions;
@@ -108,6 +109,9 @@ pub struct Shell {
     _stage_events: Subscription,
     /// "Sessões passadas", while open.
     session_search: Option<session_search::OpenSearch>,
+    /// "Ajuda" and "Atalhos de teclado", while open.
+    help: Option<help::OpenHelp>,
+    shortcuts_open: bool,
     /// The Browser beside the conversation (screen 8).
     browser: browser::BrowserState,
     /// The agents' requests to open it, and the card asking for them.
@@ -238,6 +242,8 @@ impl Shell {
             computer_approvals,
             _computer: computer_subscriptions,
             session_search: None,
+            help: None,
+            shortcuts_open: false,
             terminal,
             _terminal_events: terminal_events,
             _terminal_counts: terminal_counts,
@@ -594,6 +600,7 @@ impl Shell {
                 self.show(Surface::Conversation, cx);
             }
             SidebarEvent::NewTask => self.show(Surface::NewTask, cx),
+            SidebarEvent::OpenHelp => self.open_help(None, window, cx),
             // `toggleCodeColumn`
             SidebarEvent::ToggleCodeColumn => {
                 let open = !self.prefs.code_column_open;
@@ -866,6 +873,7 @@ impl Render for Shell {
                     .as_ref()
                     .map(|(search, _)| search.clone()),
             )
+            .children(self.help_overlays(cx))
             .child(self.browser_approvals.clone())
             .child(self.computer_approvals.clone())
             .children(Toaster::handle(cx))

@@ -574,3 +574,21 @@ fn an_allowed_open_goes_to_its_conversation_and_opens_the_browser_there(cx: &mut
         shell.browser.open.as_ref().unwrap().approval.is_none()
     }));
 }
+
+#[gpui::test]
+fn the_sidebars_help_opens_and_its_footer_swaps_it_for_the_shortcuts(cx: &mut TestAppContext) {
+    use crate::screens::sidebar::SidebarEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::OpenHelp));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("help-dialog").is_some());
+    let bounds = cx.debug_bounds("help-open-shortcuts").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("help-dialog").is_none());
+    assert!(cx.debug_bounds("shortcuts-dialog").is_some());
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("shortcuts-dialog").is_none());
+}

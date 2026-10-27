@@ -1,5 +1,6 @@
 //! `WorkspaceBootstrapState`: no task at all yet. Open a project or clone
-//! one; the provider new work would start on is named underneath.
+//! one, or read how it works; the provider new work would start on is
+//! named underneath.
 
 use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*, px};
 
@@ -127,6 +128,21 @@ pub(super) fn render(shell: &Shell, cx: &mut Context<Shell>) -> AnyElement {
                                 |shell, _, window, cx| shell.open_from_bootstrap(true, window, cx),
                             )),
                         ),
+                )
+                // "Como funciona": the help on its first topic.
+                .child(
+                    div().mt(px(8.0)).child(
+                        button(
+                            "bootstrap-how-it-works",
+                            ButtonVariant::Ghost,
+                            "circle-question-mark",
+                            cx.t("bootstrap.howItWorks"),
+                        )
+                        .muted()
+                        .on_click(cx.listener(|shell, _, window, cx| {
+                            shell.open_help(Some(crate::screens::help::DEFAULT_TOPIC), window, cx)
+                        })),
+                    ),
                 )
                 .children(provider.map(|line| {
                     div()

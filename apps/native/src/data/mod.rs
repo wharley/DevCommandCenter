@@ -42,4 +42,5 @@ pub mod snooze;
 pub(crate) mod sse;
 pub mod tasks;
 pub mod terminal_api;
+pub mod text_match;
 pub mod time;

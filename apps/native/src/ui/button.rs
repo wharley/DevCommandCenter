@@ -51,6 +51,8 @@ pub struct Button {
     height: Option<f32>,
     text_size: Option<f32>,
     padding: Option<f32>,
+    /// `w-full justify-start`
+    stretch: bool,
     children: SmallVec<[AnyElement; 2]>,
     on_click: Option<ClickHandler>,
 }
@@ -69,6 +71,7 @@ impl Button {
             height: None,
             text_size: None,
             padding: None,
+            stretch: false,
             children: SmallVec::new(),
             on_click: None,
         }
@@ -118,6 +121,12 @@ impl Button {
     /// `px-*` over the size's own.
     pub fn padding_x(mut self, padding: f32) -> Self {
         self.padding = Some(padding);
+        self
+    }
+
+    /// `w-full justify-start`: the whole row, its content on the left.
+    pub fn stretch(mut self) -> Self {
+        self.stretch = true;
         self
     }
 
@@ -226,7 +235,13 @@ impl RenderOnce for Button {
             .flex()
             .flex_shrink_0()
             .items_center()
-            .justify_center()
+            .map(|button| {
+                if self.stretch {
+                    button.w_full().justify_start()
+                } else {
+                    button.justify_center()
+                }
+            })
             .gap(px(6.0))
             .h(px(height))
             .when_some(width, |button, width| button.w(px(width)))

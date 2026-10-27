@@ -30,6 +30,12 @@ pub struct Dialog {
     top: Option<f32>,
     /// A radius of its own (`rounded-2xl` on the command dialogs).
     radius: Option<f32>,
+    /// `bg-background` instead of the popover's.
+    surface: Option<Hsla>,
+    /// `shadow-2xl` instead of `--dcc-shadow-dialog` (the ring stays).
+    shadow_2xl: bool,
+    /// A 1px `border` (the command dialogs' `border-border/60`).
+    border: Option<Hsla>,
     on_close: OnClose,
     children: SmallVec<[AnyElement; 4]>,
 }
@@ -49,6 +55,9 @@ impl Dialog {
             initial_focus: None,
             top: None,
             radius: None,
+            surface: None,
+            shadow_2xl: false,
+            border: None,
             on_close: Rc::new(on_close),
             children: SmallVec::new(),
         }
@@ -89,6 +98,24 @@ impl Dialog {
         self
     }
 
+    /// `bg-background` (Ajuda, Atalhos, the command dialogs).
+    pub fn surface(mut self, color: Hsla) -> Self {
+        self.surface = Some(color);
+        self
+    }
+
+    /// `shadow-2xl`: `0 25px 50px -12px rgb(0 0 0 / .25)`.
+    pub fn shadow_2xl(mut self) -> Self {
+        self.shadow_2xl = true;
+        self
+    }
+
+    /// A 1px border around the card, inside the ring.
+    pub fn border(mut self, color: Hsla) -> Self {
+        self.border = Some(color);
+        self
+    }
+
     /// The field that takes the focus when it opens (`autoFocus`).
     pub fn initial_focus(mut self, focus: FocusHandle) -> Self {
         self.initial_focus = Some(focus);
@@ -108,26 +135,30 @@ impl ParentElement for Dialog {
     }
 }
 
-/// `--dcc-shadow-dialog` plus the `ring-foreground/10` edge.
-fn dialog_shadow(ring: Hsla) -> Vec<BoxShadow> {
-    let shadow = |alpha: f32, y: f32, blur: f32| BoxShadow {
+/// `--dcc-shadow-dialog` (or `shadow-2xl`) plus the `ring-foreground/10` edge.
+fn dialog_shadow(ring: Hsla, shadow_2xl: bool) -> Vec<BoxShadow> {
+    let shadow = |alpha: f32, y: f32, blur: f32, spread: f32| BoxShadow {
         color: Hsla::black().opacity(alpha),
         offset: point(px(0.0), px(y)),
         blur_radius: px(blur),
-        spread_radius: px(0.0),
+        spread_radius: px(spread),
         inset: false,
     };
-    vec![
-        shadow(0.16, 24.0, 80.0),
-        shadow(0.06, 4.0, 14.0),
-        BoxShadow {
+    let elevation = if shadow_2xl {
+        vec![shadow(0.25, 25.0, 50.0, -12.0)]
+    } else {
+        vec![shadow(0.16, 24.0, 80.0, 0.0), shadow(0.06, 4.0, 14.0, 0.0)]
+    };
+    elevation
+        .into_iter()
+        .chain([BoxShadow {
             color: ring,
             offset: point(px(0.0), px(0.0)),
             blur_radius: px(0.0),
             spread_radius: px(1.0),
             inset: false,
-        },
-    ]
+        }])
+        .collect()
 }
 
 impl RenderOnce for Dialog {
@@ -165,11 +196,17 @@ impl RenderOnce for Dialog {
                 Some(radius) => card.rounded(px(radius)),
                 None => card.rounded(theme.radius.dialog),
             })
-            .bg(colors.popover)
+            .bg(self.surface.unwrap_or(colors.popover))
+            .when_some(self.border, |card, color| {
+                card.border_1().border_color(color)
+            })
             .text_color(colors.popover_foreground)
             .text_size(px(14.0))
             .line_height(px(20.0))
-            .shadow(dialog_shadow(colors.foreground.opacity(0.1)))
+            .shadow(dialog_shadow(
+                colors.foreground.opacity(0.1),
+                self.shadow_2xl,
+            ))
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_key_down(move |event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" && !busy {
