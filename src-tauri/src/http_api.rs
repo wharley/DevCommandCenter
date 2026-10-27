@@ -68,6 +68,7 @@ mod files;
 mod forge;
 mod git_changes;
 mod git_conflicts;
+mod keep_awake;
 mod mobile;
 mod skills;
 mod terminals;
@@ -78,6 +79,7 @@ pub use browser_bridge::{
 };
 pub use browser_opens::native_browser_opens;
 pub use computer_bridge::{native_computer, DesktopComputer};
+pub use keep_awake::DesktopKeepAwake;
 pub use terminals::{publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals};
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {
@@ -238,6 +240,8 @@ pub struct HttpBackend {
     desktop_browser: OnceLock<Arc<dyn DesktopBrowser>>,
     /// The desktop's computer use, for the native app (local only).
     desktop_computer: OnceLock<Arc<dyn DesktopComputer>>,
+    /// The desktop's keep-awake hold, for the native app's Settings.
+    desktop_keep_awake: OnceLock<Arc<dyn DesktopKeepAwake>>,
     /// The relay connector serving this router, for the operator routes and
     /// to drop a revoked phone at once. Weak: the hub holds the router.
     remote: OnceLock<std::sync::Weak<RemoteHub>>,
@@ -270,6 +274,7 @@ impl HttpBackend {
             desktop_terminals: OnceLock::new(),
             desktop_browser: OnceLock::new(),
             desktop_computer: OnceLock::new(),
+            desktop_keep_awake: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -296,6 +301,7 @@ impl HttpBackend {
             desktop_terminals: OnceLock::new(),
             desktop_browser: OnceLock::new(),
             desktop_computer: OnceLock::new(),
+            desktop_keep_awake: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
@@ -326,6 +332,12 @@ impl HttpBackend {
     /// `/api/v1/computer/bridge/` (local clients only).
     pub fn with_desktop_computer(self, computer: Arc<dyn DesktopComputer>) -> Self {
         let _ = self.desktop_computer.set(computer);
+        self
+    }
+
+    /// The desktop's keep-awake controller, for `/api/v1/keep-awake`.
+    pub fn with_desktop_keep_awake(self, keep_awake: Arc<dyn DesktopKeepAwake>) -> Self {
+        let _ = self.desktop_keep_awake.set(keep_awake);
         self
     }
 
@@ -726,6 +738,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(create_workspace_bundle_handler),
         )
         .route("/api/v1/files/write", post(files::write))
+        .route(
+            "/api/v1/keep-awake",
+            get(keep_awake::status).put(keep_awake::set_mode),
+        )
         .route("/api/v1/skills/save", post(skills::save))
         .route("/api/v1/skills/delete", post(skills::delete))
         .route("/api/v1/skills/import", post(skills::import))
@@ -1614,6 +1630,8 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/ai-memory/source-actions",
             "POST /api/v1/ai-memory/source-actions",
             "GET /api/v1/ai-memory/sidecar",
+            "GET /api/v1/keep-awake",
+            "PUT /api/v1/keep-awake",
             "POST /api/v1/skills/save",
             "POST /api/v1/skills/delete",
             "POST /api/v1/skills/import",
@@ -5276,6 +5294,44 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         let (status, _) = post_json(&fixture.app, "/api/v1/git/discard-file", file("../x")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn keep_awake_answers_only_with_the_desktops_controller() {
+        use crate::keep_awake::{KeepAwakeMode, KeepAwakeStatus};
+        struct Fake(std::sync::Mutex<KeepAwakeMode>);
+        impl DesktopKeepAwake for Fake {
+            fn status(&self) -> Option<KeepAwakeStatus> {
+                Some(KeepAwakeStatus {
+                    supported: true,
+                    mode: *self.0.lock().unwrap(),
+                    active: None,
+                })
+            }
+            fn set_mode(&self, mode: KeepAwakeMode) -> Option<Result<KeepAwakeStatus, String>> {
+                *self.0.lock().unwrap() = mode;
+                self.status().map(Ok)
+            }
+        }
+        let fixture = embedded_fixture().await;
+        let (status, _) = get_json(&fixture.app, "/api/v1/keep-awake").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let fake: Arc<dyn DesktopKeepAwake> =
+            Arc::new(Fake(std::sync::Mutex::new(KeepAwakeMode::Off)));
+        let _ = fixture.backend.desktop_keep_awake.set(fake);
+        let (status, read) = get_json(&fixture.app, "/api/v1/keep-awake").await;
+        assert_eq!(status, StatusCode::OK, "{read}");
+        assert_eq!(read["mode"], "off");
+        let (status, set) = send_json(
+            &fixture.app,
+            "PUT",
+            "/api/v1/keep-awake",
+            json!({ "mode": "during_agents" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{set}");
+        assert_eq!(set["mode"], "during_agents");
+        assert_eq!(set["supported"], true);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

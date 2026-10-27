@@ -3855,6 +3855,7 @@ fn start_embedded_http_server(
             .with_desktop_terminals(Arc::new(HttpTerminals(app.handle().clone())))
             .with_desktop_browser(Arc::new(HttpBrowser(app.handle().clone())))
             .with_desktop_computer(Arc::new(HttpComputer(app.handle().clone())))
+            .with_desktop_keep_awake(Arc::new(HttpKeepAwake(app.handle().clone())))
             .with_app(app.handle().clone()),
         Err(error) => {
             eprintln!("[DCC HTTP] not started: {error}");
@@ -4175,6 +4176,24 @@ impl dev_command_center_tauri::http_api::DesktopBrowser for HttpBrowser {
 /// (`http_api::computer_bridge`): the same state and answers as the
 /// WebView's dialog.
 struct HttpComputer(AppHandle);
+
+/// `keep_awake_status` / `keep_awake_set_mode` for the native app.
+struct HttpKeepAwake(AppHandle);
+
+impl dev_command_center_tauri::http_api::DesktopKeepAwake for HttpKeepAwake {
+    fn status(&self) -> Option<dev_command_center_tauri::keep_awake::KeepAwakeStatus> {
+        let state = self.0.try_state::<keep_awake_commands::KeepAwakeState>()?;
+        Some(state.controller.status())
+    }
+
+    fn set_mode(
+        &self,
+        mode: dev_command_center_tauri::keep_awake::KeepAwakeMode,
+    ) -> Option<Result<dev_command_center_tauri::keep_awake::KeepAwakeStatus, String>> {
+        let state = self.0.try_state::<keep_awake_commands::KeepAwakeState>()?;
+        Some(state.controller.set_mode(mode))
+    }
+}
 
 impl dev_command_center_tauri::http_api::DesktopComputer for HttpComputer {
     fn pending(&self) -> Value {
