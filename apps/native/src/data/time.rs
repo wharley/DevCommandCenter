@@ -428,6 +428,31 @@ pub fn medium_date_time(value: &str, english: bool) -> String {
     }
 }
 
+/// `Intl.DateTimeFormat(language, { weekday: "short", hour: "2-digit",
+/// minute: "2-digit" })`: `seg., 10:05` or `Mon 10:05 AM`.
+pub fn weekday_time(value: &str, english: bool) -> String {
+    use chrono::{Datelike, Timelike};
+    let Ok(at) = chrono::DateTime::parse_from_rfc3339(value) else {
+        return value.to_string();
+    };
+    let at = at.with_timezone(&chrono::Local);
+    let day = at.weekday().num_days_from_sunday() as usize;
+    if english {
+        const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        let (pm, hour) = at.hour12();
+        format!(
+            "{} {:02}:{:02} {}",
+            DAYS[day],
+            hour,
+            at.minute(),
+            if pm { "PM" } else { "AM" }
+        )
+    } else {
+        const DAYS: [&str; 7] = ["dom.", "seg.", "ter.", "qua.", "qui.", "sex.", "sáb."];
+        format!("{}, {:02}:{:02}", DAYS[day], at.hour(), at.minute())
+    }
+}
+
 /// `toLocaleTimeString()` of a millisecond time (`14:03:22`, `2:03:22 PM`);
 /// `None` when it is not one (`browserAuditTime`).
 pub fn local_clock(at_ms: i64, english: bool) -> Option<String> {

@@ -92,6 +92,20 @@ impl DailyRecap {
             .is_some_and(|window| self.seen_to.as_deref() != Some(window.to.as_str()))
     }
 
+    /// `markDailyRecapSeen`: the Reporter's page shows it; returns whether
+    /// it was unread.
+    pub fn mark_seen(&mut self) -> bool {
+        let Some(to) = self.current.as_ref().map(|window| window.to.clone()) else {
+            return false;
+        };
+        if self.seen_to.as_deref() == Some(to.as_str()) {
+            return false;
+        }
+        self.seen_to = Some(to);
+        self.save();
+        true
+    }
+
     fn save(&self) {
         let Some(path) = &self.path else { return };
         if let Some(parent) = path.parent() {
@@ -146,7 +160,10 @@ mod tests {
                 .with_timezone(&Local),
             local("2026-10-23 09:00")
         );
-        let reloaded = DailyRecap::load(&path, local("2026-10-24 09:00"));
+        let mut reloaded = DailyRecap::load(&path, local("2026-10-24 09:00"));
         assert!(reloaded.is_unread(), "a stored window is not a first run");
+        assert!(reloaded.mark_seen());
+        assert!(!reloaded.mark_seen(), "once");
+        assert!(!DailyRecap::load(&path, local("2026-10-24 10:00")).is_unread());
     }
 }

@@ -134,6 +134,49 @@ impl Sidebar {
         })
     }
 
+    /// The Reporter's current recap window.
+    pub fn recap_window(&self) -> Option<crate::data::daily_recap::RecapWindow> {
+        self.agent_markers.recap.current.clone()
+    }
+
+    pub fn recap_unread(&self) -> bool {
+        self.agent_markers.recap.is_unread()
+    }
+
+    /// `markDailyRecapSeen`: its page is on screen.
+    pub fn mark_recap_seen(&mut self, cx: &mut Context<Self>) {
+        if self.agent_markers.recap.mark_seen() {
+            cx.notify();
+        }
+    }
+
+    /// `RECAP_BLOCKING_REASONS`: what blocks the person now (an unread result
+    /// is "moved" instead).
+    pub fn recap_blocked(&self) -> Vec<dcc_core::domain::attention::AttentionItem> {
+        use dcc_core::domain::attention::AttentionReason as R;
+        self.state
+            .attention()
+            .into_iter()
+            .filter(|item| {
+                matches!(
+                    item.reason,
+                    R::Permission
+                        | R::Input
+                        | R::Conflicts
+                        | R::PrConflicts
+                        | R::ChecksFailing
+                        | R::DelegatedReview
+                        | R::Setup
+                )
+            })
+            .collect()
+    }
+
+    /// A listed task's project id.
+    pub fn task_project(&self, id: &str) -> Option<String> {
+        self.state.task(id).map(|task| task.project_id.clone())
+    }
+
     pub fn set_active_agent(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         self.active_agent_id = id;
         cx.notify();

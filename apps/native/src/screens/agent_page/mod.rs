@@ -2,8 +2,8 @@
 //! what it runs on; how it is called; its conversations in every project
 //! (opening one goes to that task); the person's extra instructions; and
 //! its role, folded. It reads the sidebar, which reads the agents every few
-//! seconds; "Editar" changes what the person owns. The Reporter's recap and
-//! the Researcher's new idea come with the next parts.
+//! seconds; "Editar" changes what the person owns, and the Reporter's page
+//! is its recap. The Researcher's new idea comes with the next part.
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, Render, SharedString,
@@ -23,6 +23,7 @@ use crate::ui::{Icon, Tracked};
 
 mod editor;
 mod picker;
+mod recap;
 #[cfg(test)]
 mod tests;
 
@@ -31,6 +32,8 @@ pub const RESEARCHER_PRESET: &str = "researcher";
 pub enum AgentPageEvent {
     /// A conversation of the agent: its task, on that session.
     OpenSession { task_id: String, session_id: String },
+    /// A task from the Reporter's recap.
+    OpenTask(String),
 }
 
 pub struct AgentPage {
@@ -42,6 +45,10 @@ pub struct AgentPage {
     pub(crate) editor: Option<(Entity<editor::AgentEditor>, Subscription)>,
     /// Where the Reporter's cleanup alert is kept (tests use their own).
     pub(crate) cleanup_path: std::path::PathBuf,
+    /// The Reporter's recap for its current window.
+    pub(crate) recap: recap::RecapRead,
+    /// The database the recap is read from (tests use their own).
+    pub(crate) db_path: std::path::PathBuf,
     _sidebar: Subscription,
 }
 
@@ -96,6 +103,8 @@ impl AgentPage {
             role_open: false,
             editor: None,
             cleanup_path: crate::prefs::native_file("cleanup-alert.json"),
+            recap: recap::RecapRead::default(),
+            db_path: crate::data::loader::database_path(),
             _sidebar: observe,
         }
     }
@@ -393,6 +402,8 @@ impl Render for AgentPage {
                 )
         });
         let sessions = (!chronicler).then(|| self.sessions(&data, cx));
+        // The Reporter has no conversations: its page is the recap.
+        let recap = chronicler.then(|| self.recap_card(&data, cx));
         let extra = (!agent.extra_instructions.is_empty()).then(|| {
             div()
                 .child(Self::section_title(cx.t("agents.editor.extra"), cx))
@@ -477,6 +488,7 @@ impl Render for AgentPage {
                     .px(px(32.0))
                     .py(px(32.0))
                     .child(header)
+                    .children(recap)
                     .children(how_to_call)
                     .children(sessions)
                     .children(extra)

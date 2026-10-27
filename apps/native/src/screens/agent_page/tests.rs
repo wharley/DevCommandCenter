@@ -98,11 +98,13 @@ fn the_page_shows_the_agent_and_opens_its_conversations(cx: &mut TestAppContext)
     let seen = events.clone();
     page.update(cx, |_, cx| {
         cx.subscribe_self(move |_, event: &AgentPageEvent, _| {
-            let AgentPageEvent::OpenSession {
+            if let AgentPageEvent::OpenSession {
                 task_id,
                 session_id,
-            } = event;
-            seen.borrow_mut().push(format!("{task_id} {session_id}"));
+            } = event
+            {
+                seen.borrow_mut().push(format!("{task_id} {session_id}"));
+            }
         })
         .detach();
     });
@@ -232,4 +234,58 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
     let alert = crate::data::cleanup_alert::CleanupAlert::load(&cleanup);
     assert_eq!(alert.threshold_gb, 12);
     assert!(alert.enabled);
+}
+
+#[gpui::test]
+fn the_reporters_page_is_its_recap(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let db = dir.path().join("database.sqlite");
+    drop(dcc_infra::db::SqliteSessionRepo::open(&db).unwrap());
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("a-3".into(), sidebar, composer, cx)
+    });
+    cx.run_until_parked();
+    let reporter = AgentRecord {
+        name: "Repórter".into(),
+        ..agent(
+            "a-3",
+            "chronicler",
+            vec![session("s-9", "w-1", AgentState::Done)],
+        )
+    };
+    page.update(cx, |page, cx| {
+        page.db_path = db;
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![reporter],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("recap-card").is_some());
+    // No conversations on its page, and nothing moved in an empty database.
+    assert!(cx.debug_bounds("agent-session-0").is_none());
+    assert!(cx.debug_bounds("recap-empty").is_some());
+    assert!(!page.read_with(cx, |page, cx| page.sidebar.read(cx).recap_unread()));
+}
+
+#[test]
+fn weekday_times_read_like_intl() {
+    let value = chrono::Local::now().to_rfc3339();
+    let pt = crate::data::time::weekday_time(&value, false);
+    assert!(pt.contains(".,"), "{pt}");
+    let en = crate::data::time::weekday_time(&value, true);
+    assert!(en.ends_with("AM") || en.ends_with("PM"), "{en}");
 }

@@ -16,6 +16,7 @@ mod footer;
 mod header;
 mod identity_card;
 mod labels;
+pub use labels::reason_label;
 mod list;
 mod meta_chips;
 mod navigation;
