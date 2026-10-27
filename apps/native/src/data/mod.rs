@@ -43,6 +43,7 @@ pub mod seen;
 pub mod session_list;
 pub mod session_search;
 pub mod setup_report;
+pub mod shortcuts;
 pub mod skills;
 pub mod snooze;
 pub(crate) mod sse;

@@ -8,6 +8,7 @@ mod experimental;
 mod general;
 mod nav;
 mod preview;
+mod shortcuts;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -20,6 +21,8 @@ use crate::ui::text_input::{TextInput, TextInputEvent};
 
 pub enum SettingsEvent {
     Closed,
+    /// "Abrir atalhos": the cheatsheet over Settings.
+    OpenShortcuts,
     Theme(ThemePreference),
     Locale(Locale),
     Density(Density),
@@ -107,9 +110,10 @@ impl SectionId {
 }
 
 /// The sections the native app has, in the desktop's array order.
-pub const AVAILABLE: [SectionId; 3] = [
+pub const AVAILABLE: [SectionId; 4] = [
     SectionId::General,
     SectionId::Appearance,
+    SectionId::Shortcuts,
     SectionId::Experimental,
 ];
 
@@ -125,6 +129,7 @@ pub struct Settings {
     metrics: std::collections::HashMap<String, crate::data::ux_metrics::Metric>,
     scroll: ScrollHandle,
     general: general::General,
+    shortcuts: shortcuts::Shortcuts,
     _search_events: Subscription,
 }
 
@@ -180,9 +185,11 @@ impl Settings {
             } else {
                 crate::data::desktop_api::DesktopApi::load()
             }),
+            shortcuts: shortcuts::Shortcuts::new(cx),
             _search_events: events,
         };
         settings.load_general(cx);
+        settings.load_shortcuts(cx);
         settings
     }
 
@@ -195,6 +202,7 @@ impl Settings {
     ) {
         self.general.set_api(api, data_dir);
         self.load_general(cx);
+        self.load_shortcuts(cx);
     }
 
     pub fn search_input(&self) -> Entity<TextInput> {

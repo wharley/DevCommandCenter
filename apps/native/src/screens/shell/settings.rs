@@ -37,6 +37,7 @@ impl Shell {
         let events = cx.subscribe_in(&settings, window, |shell, _, event, window, cx| {
             match event {
                 SettingsEvent::Closed => shell.settings = None,
+                SettingsEvent::OpenShortcuts => shell.shortcuts_open = true,
                 SettingsEvent::Theme(theme) => {
                     shell.update_prefs(|prefs| prefs.theme = *theme);
                     crate::theme::Theme::init(*theme, cx);

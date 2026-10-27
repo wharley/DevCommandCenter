@@ -22,6 +22,7 @@ impl Render for Settings {
         let content = match self.active {
             SectionId::General => self.general(cx),
             SectionId::Appearance => self.appearance(cx),
+            SectionId::Shortcuts => self.shortcuts_section(cx),
             SectionId::Experimental => self.experimental(cx),
             _ => div().into_any_element(),
         };

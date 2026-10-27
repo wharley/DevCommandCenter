@@ -36,6 +36,7 @@ fn open(
         cx.subscribe(&settings, move |_, event: &SettingsEvent, _| {
             sink.borrow_mut().push(match event {
                 SettingsEvent::Closed => "closed".into(),
+                SettingsEvent::OpenShortcuts => "shortcuts".into(),
                 SettingsEvent::Theme(theme) => format!("theme {theme:?}"),
                 SettingsEvent::Locale(locale) => format!("locale {locale:?}"),
                 SettingsEvent::Density(density) => format!("density {density:?}"),
@@ -164,4 +165,92 @@ fn general_keeps_the_mac_awake_for_the_limit_through_the_desktop(cx: &mut TestAp
     click(cx, "settings-copy-diagnostics");
     let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
     assert!(copied.unwrap().contains("schemaVersion"));
+}
+
+gpui::actions!(settings_test, [Probe]);
+
+#[gpui::test]
+fn shortcuts_record_a_global_key_before_the_app_bindings(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    let fired = Rc::new(RefCell::new(0));
+    let count = fired.clone();
+    cx.update(|cx| {
+        cx.bind_keys([gpui::KeyBinding::new("cmd-k", Probe, None)]);
+        cx.on_action(move |_: &Probe, _| *count.borrow_mut() += 1);
+    });
+    let (settings, cx, events) = open(Some(SectionId::Shortcuts), cx);
+    // No desktop: only the keyboard shortcuts card.
+    assert!(cx.debug_bounds("settings-quick-composer").is_none());
+    assert!(cx.debug_bounds("settings-open-cheatsheet").is_some());
+    let status = |shortcut: &str| {
+        format!(r#"{{"supported":true,"shortcut":{shortcut},"shortcutError":false}}"#)
+    };
+    let (port, server) = fake_desktop_routes(vec![
+        ("/api/v1/quick-composer/status", 200, status("null")),
+        (
+            "/api/v1/appshots/status",
+            200,
+            r#"{"supported":false,"shortcut":null}"#.into(),
+        ),
+        (
+            "/api/v1/quick-composer/shortcut",
+            200,
+            r#"{"ok":true}"#.into(),
+        ),
+        (
+            "/api/v1/quick-composer/status",
+            200,
+            status(r#""Super+KeyK""#),
+        ),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.set_api(
+                crate::data::desktop_api::DesktopApi::new(port, "k"),
+                dir.path().to_path_buf(),
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    // Appshots is not offered here: its card hides.
+    assert!(cx.debug_bounds("settings-quick-composer").is_some());
+    assert!(cx.debug_bounds("settings-appshots").is_none());
+    assert!(cx.debug_bounds("settings-quick-composer-disable").is_none());
+    // Esc cancels without closing Settings.
+    click(cx, "settings-quick-composer-shortcut");
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| settings.read(cx).shortcuts.recording.is_none()));
+    assert!(events.borrow().is_empty(), "{:?}", events.borrow());
+    // A key without a modifier is not one; ⌘K is recorded, the app's ⌘K
+    // does not fire.
+    click(cx, "settings-quick-composer-shortcut");
+    cx.simulate_keystrokes("k cmd-k");
+    cx.run_until_parked();
+    assert_eq!(*fired.borrow(), 0);
+    let seen = server.join().unwrap();
+    assert_eq!(seen[2].0, "PUT /api/v1/quick-composer/shortcut");
+    assert!(seen[2].1.contains("Super+KeyK"), "{}", seen[2].1);
+    cx.update(|_, cx| {
+        let settings = settings.read(cx);
+        assert!(settings.shortcuts.recording.is_none());
+        assert_eq!(
+            settings
+                .shortcuts
+                .quick
+                .as_ref()
+                .unwrap()
+                .shortcut
+                .as_deref(),
+            Some("Super+KeyK")
+        );
+    });
+    assert!(cx.debug_bounds("settings-quick-composer-disable").is_some());
+    // Not recording: the app's ⌘K is back.
+    cx.simulate_keystrokes("cmd-k");
+    assert_eq!(*fired.borrow(), 1);
+    click(cx, "settings-open-cheatsheet");
+    assert_eq!(events.borrow().as_slice(), ["shortcuts"]);
 }

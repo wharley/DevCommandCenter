@@ -88,6 +88,10 @@ impl General {
         }
     }
 
+    pub(super) fn api(&self) -> Option<DesktopApi> {
+        self.api.clone()
+    }
+
     #[cfg(test)]
     pub(super) fn set_api(&mut self, api: DesktopApi, data_dir: std::path::PathBuf) {
         self.api = Some(api);
