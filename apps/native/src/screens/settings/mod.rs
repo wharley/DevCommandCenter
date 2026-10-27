@@ -3,6 +3,7 @@
 //! arrive one by one (screen 9g); the navigation only lists the ones the
 //! native app has.
 
+mod account;
 mod appearance;
 mod decision;
 mod experimental;
@@ -14,6 +15,8 @@ mod providers;
 mod shortcuts;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_account;
 #[cfg(test)]
 mod tests_providers;
 mod view;
@@ -120,7 +123,7 @@ impl SectionId {
 }
 
 /// The sections the native app has, in the desktop's array order.
-pub const AVAILABLE: [SectionId; 7] = [
+pub const AVAILABLE: [SectionId; 8] = [
     SectionId::General,
     SectionId::Appearance,
     SectionId::Model,
@@ -128,6 +131,7 @@ pub const AVAILABLE: [SectionId; 7] = [
     SectionId::AiMemory,
     SectionId::Shortcuts,
     SectionId::Experimental,
+    SectionId::Account,
 ];
 
 pub struct Settings {
@@ -146,6 +150,7 @@ pub struct Settings {
     providers: providers::Providers,
     decision: decision::Decision,
     memory: memory::Memory,
+    account: account::Account,
     _search_events: Subscription,
 }
 
@@ -207,6 +212,7 @@ impl Settings {
             providers: providers::Providers::new(state.default_pick, window, cx),
             decision: decision::Decision::new(window, cx),
             memory: memory::Memory::new(window, cx),
+            account: account::Account::new(window, cx),
             _search_events: events,
         };
         settings.load_general(cx);
@@ -214,6 +220,9 @@ impl Settings {
         settings.load_providers(cx);
         settings.load_decision(cx);
         settings.load_memory(cx);
+        if settings.active == SectionId::Account {
+            settings.ensure_account(cx);
+        }
         settings
     }
 
@@ -232,6 +241,10 @@ impl Settings {
         self.load_providers(cx);
         self.load_decision(cx);
         self.load_memory(cx);
+        self.account.reset();
+        if self.active == SectionId::Account {
+            self.ensure_account(cx);
+        }
     }
 
     pub fn search_input(&self) -> Entity<TextInput> {
@@ -240,6 +253,9 @@ impl Settings {
 
     fn select(&mut self, section: SectionId, cx: &mut Context<Self>) {
         self.active = section;
+        if section == SectionId::Account {
+            self.ensure_account(cx);
+        }
         // A new section starts at its top.
         self.scroll
             .set_offset(gpui::point(gpui::px(0.0), gpui::px(0.0)));

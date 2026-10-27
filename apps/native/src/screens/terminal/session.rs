@@ -134,6 +134,8 @@ pub struct TerminalSession {
     opened_at: (u16, u16),
     /// Local servers seen in what it printed.
     pub dev_servers: super::dev_server::DevServers,
+    /// The "Dev Command Center terminal" lines a new shell starts with.
+    banner: bool,
     _open: Option<Task<()>>,
 }
 
@@ -171,10 +173,17 @@ impl TerminalSession {
             hovered_link: None,
             opened_at: (0, 0),
             dev_servers: Default::default(),
+            banner: true,
             _open: None,
         };
         session.open(cx);
         session
+    }
+
+    /// A shell that only runs one command (a sign-in): no banner.
+    pub fn without_banner(mut self) -> Self {
+        self.banner = false;
+        self
     }
 
     pub fn pty_id(&self) -> Option<&str> {
@@ -237,7 +246,7 @@ impl TerminalSession {
         self.dev_servers = Default::default();
         let mut found = false;
         let sender = commands(api, opened.pty_id.clone());
-        if opened.chunks.is_empty() && !opened.existing {
+        if self.banner && opened.chunks.is_empty() && !opened.existing {
             self.emulator
                 .feed(banner(&self.context, &self.spec).as_bytes());
         }

@@ -26,6 +26,7 @@ pub mod diff;
 pub mod disk;
 pub mod feedback;
 pub mod forge;
+pub mod forge_cli;
 pub mod git_watch;
 pub mod goal;
 pub mod highlight;
