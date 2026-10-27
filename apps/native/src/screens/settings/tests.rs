@@ -63,8 +63,8 @@ pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
 
 #[gpui::test]
 fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) {
-    // "AI Memory" is not here yet: the first section the native app has.
-    let (settings, cx, events) = open(Some(SectionId::AiMemory), cx);
+    // "Conectores" is not here yet: the first section the native app has.
+    let (settings, cx, events) = open(Some(SectionId::Integrations), cx);
     assert_eq!(
         cx.update(|_, cx| settings.read(cx).active),
         SectionId::General
@@ -76,7 +76,8 @@ fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) 
         cx.debug_bounds("settings-section-decisionProvider")
             .is_some()
     );
-    assert!(cx.debug_bounds("settings-section-aiMemory").is_none());
+    assert!(cx.debug_bounds("settings-section-aiMemory").is_some());
+    assert!(cx.debug_bounds("settings-section-integrations").is_none());
     cx.simulate_input("experim");
     cx.run_until_parked();
     assert!(cx.debug_bounds("settings-section-appearance").is_none());
@@ -353,4 +354,92 @@ fn decision_provider_saves_the_form_and_shows_the_history(cx: &mut TestAppContex
     assert_eq!(body["mode"], "enforce");
     assert_eq!(body["toolRiskThreshold"], 0.4);
     assert_eq!(body["clearApiKey"], false);
+}
+
+#[gpui::test]
+fn ai_memory_saves_restarts_and_retries_the_queue(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    let (settings, cx, _) = open(Some(SectionId::AiMemory), cx);
+    let status = serde_json::json!({
+        "mode": "managed", "running": true, "url": "http://127.0.0.1:49374",
+        "dataDir": "/data/ai-memory", "binaryPath": null, "version": "2.6.1",
+        "logPath": "/data/ai-memory.log", "message": null,
+    })
+    .to_string();
+    let saved = |mode: &str, restart: bool| {
+        serde_json::json!({ "mode": mode, "baseUrl": null, "workspace": "dcc-workspace",
+            "project": "dcc-project", "dataDir": null, "tokenConfigured": true,
+            "restartRequired": restart })
+        .to_string()
+    };
+    let outbox = serde_json::json!([{ "sessionId": "session-123456789", "attempts": 2,
+        "nextAttemptAt": "2026-10-27T13:00:00Z", "lastError": "timeout", "eventCount": 9 }])
+    .to_string();
+    let exports = serde_json::json!([{ "id": 1, "sessionId": "session-123456789",
+        "status": "retrying", "attempts": 2, "eventCount": 9, "acceptedCount": 0,
+        "nextAttemptAt": null, "error": "timeout", "startedAt": "2026-10-27T12:00:00Z",
+        "finishedAt": "2026-10-27T12:00:01Z" }])
+    .to_string();
+    let (port, server) = fake_desktop_routes(vec![
+        ("/api/v1/ai-memory/sidecar", 200, status.clone()),
+        ("/api/v1/ai-memory/settings", 200, saved("managed", false)),
+        ("/api/v1/ai-memory/settings", 200, saved("remote", true)),
+        ("/api/v1/ai-memory/sidecar", 200, status),
+        ("/api/v1/app/restart", 200, r#"{"ok":true}"#.into()),
+        ("/api/v1/ai-memory/outbox?limit=50", 200, outbox),
+        (
+            "/api/v1/ai-memory/export-history?limit=100",
+            200,
+            exports.clone(),
+        ),
+        (
+            "/api/v1/ai-memory/outbox/session-123456789/retry",
+            200,
+            "null".into(),
+        ),
+        ("/api/v1/ai-memory/outbox?limit=50", 200, "[]".into()),
+        ("/api/v1/ai-memory/export-history?limit=100", 200, exports),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.set_api(
+                crate::data::desktop_api::DesktopApi::new(port, "k"),
+                dir.path().to_path_buf(),
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("settings-memory-status").is_some());
+    // Remote: the server field takes typing; saving says DCC must restart.
+    click(cx, "settings-memory-mode-remote");
+    cx.update(|_, cx| settings.update(cx, |settings, cx| settings.save_memory(cx)));
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(settings.read(cx).memory.restart_required));
+    cx.update(|_, cx| settings.update(cx, |settings, cx| settings.restart_desktop(cx)));
+    cx.run_until_parked();
+    // The queue, "Reprocessar", then the queue again.
+    cx.update(|_, cx| settings.update(cx, |settings, cx| settings.select_memory_tab(1, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("settings-memory-history").is_some());
+    click(cx, "settings-memory-retry-session-123456789");
+    let seen = server.join().unwrap();
+    cx.run_until_parked();
+    let put = seen
+        .iter()
+        .find(|(request, _)| request == "PUT /api/v1/ai-memory/settings")
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_str(&put.1).unwrap();
+    assert_eq!(body["mode"], "remote");
+    assert_eq!(body["workspace"], "dcc-workspace");
+    assert!(
+        seen.iter()
+            .any(|(request, _)| request == "POST /api/v1/app/restart")
+    );
+    assert!(
+        seen.iter()
+            .any(|(request, _)| request == "POST /api/v1/ai-memory/outbox/session-123456789/retry")
+    );
+    cx.update(|_, cx| assert_eq!(settings.read(cx).memory.outbox.as_deref(), Some(&[][..])));
 }

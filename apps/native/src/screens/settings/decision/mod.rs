@@ -4,6 +4,7 @@
 //! while it shows.
 
 mod config;
+pub(super) use config::field;
 mod history;
 
 use std::collections::HashSet;

@@ -32,7 +32,11 @@ fn small(text: impl Into<SharedString>, cx: &gpui::App) -> AnyElement {
 }
 
 /// shadcn's `Input`: h32, rounded-md, the field's border.
-pub(super) fn field(id: &'static str, input: &Entity<TextInput>, cx: &gpui::App) -> AnyElement {
+pub(in super::super) fn field(
+    id: &'static str,
+    input: &Entity<TextInput>,
+    cx: &gpui::App,
+) -> AnyElement {
     let colors = &cx.theme().colors;
     div()
         .debug_selector(move || id.to_string())

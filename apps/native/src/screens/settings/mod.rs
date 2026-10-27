@@ -7,6 +7,7 @@ mod appearance;
 mod decision;
 mod experimental;
 mod general;
+mod memory;
 mod nav;
 mod preview;
 mod providers;
@@ -119,11 +120,12 @@ impl SectionId {
 }
 
 /// The sections the native app has, in the desktop's array order.
-pub const AVAILABLE: [SectionId; 6] = [
+pub const AVAILABLE: [SectionId; 7] = [
     SectionId::General,
     SectionId::Appearance,
     SectionId::Model,
     SectionId::DecisionProvider,
+    SectionId::AiMemory,
     SectionId::Shortcuts,
     SectionId::Experimental,
 ];
@@ -143,6 +145,7 @@ pub struct Settings {
     shortcuts: shortcuts::Shortcuts,
     providers: providers::Providers,
     decision: decision::Decision,
+    memory: memory::Memory,
     _search_events: Subscription,
 }
 
@@ -203,12 +206,14 @@ impl Settings {
             shortcuts: shortcuts::Shortcuts::new(cx),
             providers: providers::Providers::new(state.default_pick, window, cx),
             decision: decision::Decision::new(window, cx),
+            memory: memory::Memory::new(window, cx),
             _search_events: events,
         };
         settings.load_general(cx);
         settings.load_shortcuts(cx);
         settings.load_providers(cx);
         settings.load_decision(cx);
+        settings.load_memory(cx);
         settings
     }
 
@@ -226,6 +231,7 @@ impl Settings {
         self.load_shortcuts(cx);
         self.load_providers(cx);
         self.load_decision(cx);
+        self.load_memory(cx);
     }
 
     pub fn search_input(&self) -> Entity<TextInput> {
