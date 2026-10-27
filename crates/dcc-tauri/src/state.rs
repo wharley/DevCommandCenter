@@ -2332,7 +2332,7 @@ impl SessionCommandState {
             })
     }
 
-    pub(crate) fn app_data_dir(&self) -> &std::path::Path {
+    pub fn app_data_dir(&self) -> &std::path::Path {
         &self.app_data_dir
     }
 

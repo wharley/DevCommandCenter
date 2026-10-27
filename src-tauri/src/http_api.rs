@@ -62,6 +62,7 @@ mod attention;
 mod browser_bridge;
 mod browser_opens;
 mod computer_bridge;
+mod decision_provider;
 mod delegation_review;
 mod delivery;
 mod files;
@@ -757,6 +758,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/keep-awake",
             get(keep_awake::status).put(keep_awake::set_mode),
+        )
+        .route(
+            "/api/v1/decision-provider/settings",
+            get(decision_provider::settings).put(decision_provider::save),
+        )
+        .route(
+            "/api/v1/decision-provider/history",
+            get(decision_provider::history),
         )
         .route(
             "/api/v1/providers/:provider_id/availability",
@@ -1707,6 +1716,9 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/keep-awake",
             "PUT /api/v1/keep-awake",
             "PUT /api/v1/providers/:provider_id/availability",
+            "GET /api/v1/decision-provider/settings",
+            "PUT /api/v1/decision-provider/settings",
+            "GET /api/v1/decision-provider/history",
             "GET /api/v1/provider-accounts",
             "POST /api/v1/provider-accounts",
             "POST /api/v1/provider-accounts/status",
@@ -5590,6 +5602,27 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{antigravity}");
         assert_eq!(antigravity["managedRuntimeInstalled"], false);
         assert_eq!(antigravity["signedIn"], false);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn decision_provider_settings_and_history_go_through_the_desktop() {
+        let fixture = embedded_fixture().await;
+        let (status, history) =
+            get_json(&fixture.app, "/api/v1/decision-provider/history?limit=5").await;
+        assert_eq!(status, StatusCode::OK, "{history}");
+        assert_eq!(history, json!([]));
+        // An invalid mode is refused before anything is written.
+        let (status, _) = send_json(
+            &fixture.app,
+            "PUT",
+            "/api/v1/decision-provider/settings",
+            json!({ "provider": "disabled", "mode": "nope", "modelRouting": "manual",
+                "baseUrl": null, "model": null, "memoryThreshold": null,
+                "skillConfidenceThreshold": null, "modelConfidenceThreshold": null,
+                "completionThreshold": null, "toolRiskThreshold": null, "apiKey": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
