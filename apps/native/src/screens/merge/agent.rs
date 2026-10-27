@@ -145,6 +145,8 @@ impl MergeResolver {
                         plan_mode: false,
                         fast_mode: false,
                         tool_instructions: Some(AGENT_RESOLUTION_TOOL_INSTRUCTIONS.into()),
+                        // The conversation just started with its own.
+                        provider_runtime: None,
                     };
                     let turn = api.send_turn_for_id(&session, &prompt, &options)?;
                     Ok::<_, ApiError>((api, session, turn))

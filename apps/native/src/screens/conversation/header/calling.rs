@@ -150,6 +150,7 @@ impl ConversationView {
             plan_mode: false,
             fast_mode: false,
             tool_instructions: None,
+            provider_runtime: Some(crate::data::provider_runtime::load().runtime_for(&provider)),
         };
         let intro = cx.t("agents.review.followUp").to_string();
         let previous_label = cx.t("agents.review.previousFindings").to_string();

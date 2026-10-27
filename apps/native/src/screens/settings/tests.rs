@@ -27,6 +27,7 @@ fn open(
         locale: Locale::PtBr,
         density: Density::Comfortable,
         workspace: (Some("Checkout".into()), Some("/repo".into())),
+        default_pick: None,
     };
     let (settings, cx) =
         cx.add_window_view(move |window, cx| Settings::new(state, section, window, cx));
@@ -37,6 +38,10 @@ fn open(
             sink.borrow_mut().push(match event {
                 SettingsEvent::Closed => "closed".into(),
                 SettingsEvent::OpenShortcuts => "shortcuts".into(),
+                SettingsEvent::DefaultPick(pick) => {
+                    format!("pick {} {}", pick.provider_id, pick.model_id)
+                }
+                SettingsEvent::ProvidersChanged => "providers".into(),
                 SettingsEvent::Theme(theme) => format!("theme {theme:?}"),
                 SettingsEvent::Locale(locale) => format!("locale {locale:?}"),
                 SettingsEvent::Density(density) => format!("density {density:?}"),
@@ -58,15 +63,19 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 
 #[gpui::test]
 fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) {
-    // "Provedores" is not here yet: the first section the native app has.
-    let (settings, cx, events) = open(Some(SectionId::Model), cx);
+    // "Decision Provider" is not here yet: the first section the native app has.
+    let (settings, cx, events) = open(Some(SectionId::DecisionProvider), cx);
     assert_eq!(
         cx.update(|_, cx| settings.read(cx).active),
         SectionId::General
     );
     assert!(cx.debug_bounds("settings-section-appearance").is_some());
     assert!(cx.debug_bounds("settings-section-experimental").is_some());
-    assert!(cx.debug_bounds("settings-section-model").is_none());
+    assert!(cx.debug_bounds("settings-section-model").is_some());
+    assert!(
+        cx.debug_bounds("settings-section-decisionProvider")
+            .is_none()
+    );
     cx.simulate_input("experim");
     cx.run_until_parked();
     assert!(cx.debug_bounds("settings-section-appearance").is_none());
@@ -253,4 +262,109 @@ fn shortcuts_record_a_global_key_before_the_app_bindings(cx: &mut TestAppContext
     assert_eq!(*fired.borrow(), 1);
     click(cx, "settings-open-cheatsheet");
     assert_eq!(events.borrow().as_slice(), ["shortcuts"]);
+}
+
+#[gpui::test]
+fn providers_pick_the_default_switch_off_and_keep_the_launch_settings(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    use dcc_core::domain::provider::HealthStatus;
+    let (settings, cx, events) = open(Some(SectionId::Model), cx);
+    // No desktop: the built-in list, the default's provider (none: the first).
+    assert!(cx.debug_bounds("settings-providers").is_some());
+    assert!(cx.debug_bounds("settings-provider-codex").is_some());
+    let mut providers = dcc_providers::offline_catalog().providers;
+    let codex = providers.iter_mut().find(|p| p.id.0 == "codex").unwrap();
+    codex.health = HealthStatus::Unhealthy {
+        reason: "Codex is not signed in: run `codex login`".into(),
+    };
+    let model = codex.models[0].id.clone();
+    let binary = providers
+        .iter()
+        .find(|p| p.capabilities.supports_runtime_binary)
+        .map(|p| p.id.0.clone())
+        .unwrap();
+    let catalog = serde_json::json!({ "providers": providers }).to_string();
+    let (port, server) = fake_desktop_routes(vec![
+        ("/api/v1/mobile/catalog", 200, catalog),
+        (
+            "/api/v1/providers/codex/availability",
+            200,
+            r#"{"availability":{}}"#.into(),
+        ),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.set_api(
+                crate::data::desktop_api::DesktopApi::new(port, "k"),
+                dir.path().to_path_buf(),
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    // The provider needs setup: said in Portuguese, with "Verificar de novo".
+    click(cx, "settings-provider-codex");
+    assert!(cx.debug_bounds("settings-provider-problem").is_some());
+    assert!(cx.debug_bounds("settings-provider-recheck").is_some());
+    // A model becomes the default for new tasks.
+    let selector: &'static str = Box::leak(format!("settings-model-{model}").into_boxed_str());
+    click(cx, selector);
+    assert_eq!(events.borrow().as_slice(), [format!("pick codex {model}")]);
+    // Off through the desktop: the switch says so, and the composer rereads.
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.set_availability("codex".into(), false, cx)
+        })
+    });
+    cx.run_until_parked();
+    let seen = server.join().unwrap();
+    assert_eq!(seen[1].0, "PUT /api/v1/providers/codex/availability");
+    assert!(seen[1].1.contains("false"), "{}", seen[1].1);
+    assert_eq!(events.borrow().last().unwrap(), "providers");
+    cx.update(|_, cx| {
+        let settings = settings.read(cx);
+        let codex = settings.providers.current().unwrap();
+        assert!(!codex.enabled);
+    });
+    // Off: its problem is no longer shown, its models cannot be picked.
+    assert!(cx.debug_bounds("settings-provider-problem").is_none());
+    // Advanced: an executable that cannot run means setup, at once; kept in
+    // the file the composer reads; "Redefinir" clears it.
+    let id = binary.clone();
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.choose_provider(id, cx);
+            settings
+                .providers
+                .binary
+                .update(cx, |input, cx| input.set_text("/nope/agent", cx));
+            settings.runtime_typed(super::providers::Field::Binary, cx);
+        })
+    });
+    cx.run_until_parked();
+    let file = dir.path().join("provider-runtime.json");
+    let saved = std::fs::read_to_string(&file).unwrap();
+    assert!(saved.contains("/nope/agent"), "{saved}");
+    cx.update(|_, cx| {
+        let settings = settings.read(cx);
+        let provider = settings.providers.current().unwrap();
+        assert_eq!(provider.id.0, binary);
+        assert!(
+            matches!(&provider.health, HealthStatus::Degraded { .. }),
+            "{:?}",
+            provider.health
+        );
+    });
+    cx.update(|_, cx| settings.update(cx, |settings, cx| settings.clear_runtime(cx)));
+    cx.run_until_parked();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "{}");
+    cx.update(|_, cx| {
+        let settings = settings.read(cx);
+        assert!(settings.providers.binary.read(cx).text().is_empty());
+        assert!(!matches!(
+            settings.providers.current().unwrap().health,
+            HealthStatus::Degraded { .. }
+        ));
+    });
 }

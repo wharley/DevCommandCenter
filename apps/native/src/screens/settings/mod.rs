@@ -8,6 +8,7 @@ mod experimental;
 mod general;
 mod nav;
 mod preview;
+mod providers;
 mod shortcuts;
 #[cfg(test)]
 mod tests;
@@ -26,6 +27,11 @@ pub enum SettingsEvent {
     Theme(ThemePreference),
     Locale(Locale),
     Density(Density),
+    /// A model of "Provedores" is the default for new tasks.
+    DefaultPick(crate::data::provider_selection::Pick),
+    /// A provider turned on or off, rechecked or launched another way: the
+    /// composer reads the catalog again.
+    ProvidersChanged,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,9 +116,10 @@ impl SectionId {
 }
 
 /// The sections the native app has, in the desktop's array order.
-pub const AVAILABLE: [SectionId; 4] = [
+pub const AVAILABLE: [SectionId; 5] = [
     SectionId::General,
     SectionId::Appearance,
+    SectionId::Model,
     SectionId::Shortcuts,
     SectionId::Experimental,
 ];
@@ -130,6 +137,7 @@ pub struct Settings {
     scroll: ScrollHandle,
     general: general::General,
     shortcuts: shortcuts::Shortcuts,
+    providers: providers::Providers,
     _search_events: Subscription,
 }
 
@@ -141,6 +149,8 @@ pub struct SettingsState {
     pub density: Density,
     /// The task's name and checkout.
     pub workspace: (Option<String>, Option<String>),
+    /// New tasks' provider and model.
+    pub default_pick: Option<crate::data::provider_selection::Pick>,
 }
 
 impl Settings {
@@ -186,10 +196,12 @@ impl Settings {
                 crate::data::desktop_api::DesktopApi::load()
             }),
             shortcuts: shortcuts::Shortcuts::new(cx),
+            providers: providers::Providers::new(state.default_pick, window, cx),
             _search_events: events,
         };
         settings.load_general(cx);
         settings.load_shortcuts(cx);
+        settings.load_providers(cx);
         settings
     }
 
@@ -200,9 +212,12 @@ impl Settings {
         data_dir: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
+        self.providers
+            .set_runtime_path(data_dir.join("provider-runtime.json"));
         self.general.set_api(api, data_dir);
         self.load_general(cx);
         self.load_shortcuts(cx);
+        self.load_providers(cx);
     }
 
     pub fn search_input(&self) -> Entity<TextInput> {

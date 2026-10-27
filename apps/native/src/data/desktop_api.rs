@@ -13,7 +13,7 @@ use std::time::Duration;
 use dcc_core::domain::objective::{ObjectiveTransition, SessionObjective, SessionObjectiveDraft};
 use dcc_core::domain::provider::ProviderDescriptor;
 use dcc_core::domain::session::QueuedTurn;
-use dcc_core::ports::provider::ProviderUserInputAnswer;
+use dcc_core::ports::provider::{ProviderRuntimeConfig, ProviderUserInputAnswer};
 use serde_json::{Value, json};
 
 const DEFAULT_PORT: u16 = 9876;
@@ -95,6 +95,9 @@ pub struct TurnOptions {
     pub fast_mode: bool,
     /// Background instructions (delegation, a provider handoff).
     pub tool_instructions: Option<String>,
+    /// Settings → Providers → Advanced for the turn's provider; empty means
+    /// "cleared" (the backend keeps the conversation's account).
+    pub provider_runtime: Option<ProviderRuntimeConfig>,
 }
 
 impl TurnOptions {
@@ -112,6 +115,9 @@ impl TurnOptions {
         set("effort", self.effort.as_ref());
         set("approvalPolicy", self.approval_policy.as_ref());
         set("toolInstructions", self.tool_instructions.as_ref());
+        if let Some(runtime) = &self.provider_runtime {
+            map.insert("providerRuntime".into(), json!(runtime));
+        }
         map.insert("planMode".into(), Value::Bool(self.plan_mode));
         map.insert("fastMode".into(), Value::Bool(self.fast_mode));
     }
@@ -513,6 +519,7 @@ impl DesktopApi {
                 "providerId": provider_id,
                 "model": model,
                 "title": title,
+                "providerRuntime": crate::data::provider_runtime::for_provider(provider_id),
             }),
         )?;
         value

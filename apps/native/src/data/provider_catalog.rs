@@ -76,6 +76,22 @@ fn with_switches(
     providers
 }
 
+impl crate::data::desktop_api::DesktopApi {
+    /// `set_provider_availability`: the desktop owns the switch (it stops
+    /// the provider's running turns when it goes off).
+    pub fn set_provider_availability(
+        &self,
+        provider_id: &str,
+        enabled: bool,
+    ) -> Result<(), crate::data::desktop_api::ApiError> {
+        self.put(
+            &format!("/api/v1/providers/{provider_id}/availability"),
+            &serde_json::json!({ "enabled": enabled }),
+        )
+        .map(|_| ())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use dcc_infra::db::ProviderAvailabilityRecord;

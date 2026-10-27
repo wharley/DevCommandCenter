@@ -225,6 +225,23 @@ impl Composer {
         cx.notify();
     }
 
+    /// Settings → Providers chose the default for new tasks.
+    pub(crate) fn set_default_pick(
+        &mut self,
+        pick: crate::data::provider_selection::Pick,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.global_pick = Some(pick);
+        self.save_settings();
+        cx.notify();
+    }
+
+    /// Settings changed a provider: the catalog is read again.
+    pub(crate) fn invalidate_catalog(&mut self, cx: &mut Context<Self>) {
+        self.catalog_at = None;
+        self.refresh_catalog(cx);
+    }
+
     fn save_settings(&self) {
         if cfg!(test) {
             return;
@@ -264,6 +281,10 @@ impl Composer {
                 .map(|policy| composer_settings::policy_key(policy).to_string()),
             plan_mode: self.plan_mode(),
             fast_mode: self.settings.fast,
+            // Read at each send: Settings may have just changed it.
+            provider_runtime: self
+                .provider()
+                .map(|provider| crate::data::provider_runtime::load().runtime_for(provider)),
         }
     }
 
@@ -306,7 +327,8 @@ impl Composer {
                 })
                 .await;
             let offline = match live {
-                Ok(providers) => {
+                Ok(mut providers) => {
+                    crate::data::provider_runtime::load().apply_executable_health(&mut providers);
                     let _ = this.update(cx, |this, cx| {
                         this.catalog_loading = false;
                         this.catalog = Some(Arc::new(providers));
@@ -337,7 +359,8 @@ impl Composer {
             };
             let _ = this.update(cx, |this, cx| {
                 this.catalog_loading = false;
-                if let Some(providers) = checked {
+                if let Some(mut providers) = checked {
+                    crate::data::provider_runtime::load().apply_executable_health(&mut providers);
                     this.catalog = Some(Arc::new(providers));
                     this.catalog_at = Some(Instant::now());
                 }

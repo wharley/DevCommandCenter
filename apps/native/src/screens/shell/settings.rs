@@ -32,12 +32,23 @@ impl Shell {
             locale: self.prefs.locale,
             density: self.prefs.density,
             workspace: (name, root),
+            default_pick: conversation.composer.read(cx).settings.global_pick.clone(),
         };
         let settings = cx.new(|cx| Settings::new(state, section, window, cx));
         let events = cx.subscribe_in(&settings, window, |shell, _, event, window, cx| {
             match event {
                 SettingsEvent::Closed => shell.settings = None,
                 SettingsEvent::OpenShortcuts => shell.shortcuts_open = true,
+                SettingsEvent::DefaultPick(pick) => {
+                    let composer = shell.conversation.read(cx).composer.clone();
+                    composer.update(cx, |composer, cx| {
+                        composer.set_default_pick(pick.clone(), cx)
+                    });
+                }
+                SettingsEvent::ProvidersChanged => {
+                    let composer = shell.conversation.read(cx).composer.clone();
+                    composer.update(cx, |composer, cx| composer.invalidate_catalog(cx));
+                }
                 SettingsEvent::Theme(theme) => {
                     shell.update_prefs(|prefs| prefs.theme = *theme);
                     crate::theme::Theme::init(*theme, cx);
