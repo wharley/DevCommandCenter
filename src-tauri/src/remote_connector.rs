@@ -1283,6 +1283,7 @@ pub fn remote_path_allowed(path: &str) -> bool {
         && !route.starts_with("/api/v1/ai-memory/outbox")
         && !route.starts_with("/api/v1/app/")
         && !route.starts_with("/api/v1/workspaces/automation")
+        && !route.starts_with("/api/v1/mcp/")
         && !matches!(
             route,
             "/api/v1/forge/cli-status"
@@ -1778,6 +1779,7 @@ mod tests {
         assert!(!remote_path_allowed("/api/v1/app/restart"));
         assert!(!remote_path_allowed("/api/v1/forge/select-login"));
         assert!(!remote_path_allowed("/api/v1/workspaces/automation/run"));
+        assert!(!remote_path_allowed("/api/v1/mcp/connect/start"));
         assert!(remote_path_allowed("/api/v1/forge/accounts"));
         assert!(!remote_path_allowed("/api/v1/remote/pairing/offers"));
         assert!(!remote_path_allowed("/api/v1/terminals/spawn"));

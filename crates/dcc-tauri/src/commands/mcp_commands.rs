@@ -291,6 +291,13 @@ type McpCommandResult<T> = Result<T, McpCommandError>;
 pub async fn list_mcp_integrations(
     state: State<'_, WorkspaceCommandState>,
 ) -> Result<ListMcpIntegrationsOutput, String> {
+    list_mcp_integrations_with(&state).await
+}
+
+/// `list_mcp_integrations` for the HTTP API (no Tauri `State`).
+pub async fn list_mcp_integrations_with(
+    state: &WorkspaceCommandState,
+) -> Result<ListMcpIntegrationsOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     list_integrations(&repo)
         .await
@@ -302,6 +309,14 @@ pub async fn create_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
     input: CreateMcpIntegrationInput,
 ) -> Result<CreateMcpIntegrationOutput, String> {
+    create_mcp_integration_with(&state, input).await
+}
+
+/// `create_mcp_integration` for the HTTP API (no Tauri `State`).
+pub async fn create_mcp_integration_with(
+    state: &WorkspaceCommandState,
+    input: CreateMcpIntegrationInput,
+) -> Result<CreateMcpIntegrationOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     create_integration(&repo, &SystemCredentialStore::default(), input)
         .await
@@ -311,6 +326,14 @@ pub async fn create_mcp_integration(
 #[tauri::command]
 pub async fn activate_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
+    input: ActivateMcpDefinitionInput,
+) -> Result<ActivateMcpIntegrationOutput, String> {
+    activate_mcp_integration_with(&state, input).await
+}
+
+/// `activate_mcp_integration` for the HTTP API (no Tauri `State`).
+pub async fn activate_mcp_integration_with(
+    state: &WorkspaceCommandState,
     input: ActivateMcpDefinitionInput,
 ) -> Result<ActivateMcpIntegrationOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
@@ -335,6 +358,14 @@ pub async fn remove_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
     input: RemoveMcpIntegrationInput,
 ) -> Result<RemoveMcpIntegrationOutput, String> {
+    remove_mcp_integration_with(&state, input).await
+}
+
+/// `remove_mcp_integration` for the HTTP API (no Tauri `State`).
+pub async fn remove_mcp_integration_with(
+    state: &WorkspaceCommandState,
+    input: RemoveMcpIntegrationInput,
+) -> Result<RemoveMcpIntegrationOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     remove_integration(&repo, &SystemCredentialStore::default(), input)
         .await
@@ -356,6 +387,15 @@ pub async fn set_mcp_tool_policy(
 pub async fn start_mcp_connect(
     state: State<'_, WorkspaceCommandState>,
     coordinator: State<'_, McpConnectCoordinator>,
+    input: StartMcpConnectInput,
+) -> Result<StartMcpConnectOutput, String> {
+    start_mcp_connect_with(&state, &coordinator, input).await
+}
+
+/// `start_mcp_connect` for the HTTP API (no Tauri `State`).
+pub async fn start_mcp_connect_with(
+    state: &WorkspaceCommandState,
+    coordinator: &McpConnectCoordinator,
     input: StartMcpConnectInput,
 ) -> Result<StartMcpConnectOutput, String> {
     let stores = connect_stores(&state)?;
@@ -400,6 +440,15 @@ pub async fn wait_mcp_connect(
     gateway: State<'_, ConnectorGateway>,
     input: McpConnectLoginInput,
 ) -> Result<WaitMcpConnectOutput, String> {
+    wait_mcp_connect_with(&coordinator, &gateway, input).await
+}
+
+/// `wait_mcp_connect` for the HTTP API (no Tauri `State`).
+pub async fn wait_mcp_connect_with(
+    coordinator: &McpConnectCoordinator,
+    gateway: &ConnectorGateway,
+    input: McpConnectLoginInput,
+) -> Result<WaitMcpConnectOutput, String> {
     Ok(match coordinator.wait(&input.login_id).await {
         // The follow-up check gives Settings the tool count right away.
         Ok(definition) => WaitMcpConnectOutput::Connected {
@@ -417,6 +466,14 @@ pub async fn cancel_mcp_connect(
     coordinator: State<'_, McpConnectCoordinator>,
     input: McpConnectLoginInput,
 ) -> Result<CancelMcpConnectOutput, String> {
+    cancel_mcp_connect_with(&coordinator, input).await
+}
+
+/// `cancel_mcp_connect` for the HTTP API (no Tauri `State`).
+pub async fn cancel_mcp_connect_with(
+    coordinator: &McpConnectCoordinator,
+    input: McpConnectLoginInput,
+) -> Result<CancelMcpConnectOutput, String> {
     Ok(CancelMcpConnectOutput {
         cancelled: coordinator.cancel(&input.login_id),
     })
@@ -426,6 +483,15 @@ pub async fn cancel_mcp_connect(
 pub async fn disconnect_mcp_connector(
     state: State<'_, WorkspaceCommandState>,
     coordinator: State<'_, McpConnectCoordinator>,
+    input: DisconnectMcpConnectorInput,
+) -> Result<DisconnectMcpConnectorOutput, String> {
+    disconnect_mcp_connector_with(&state, &coordinator, input).await
+}
+
+/// `disconnect_mcp_connector` for the HTTP API (no Tauri `State`).
+pub async fn disconnect_mcp_connector_with(
+    state: &WorkspaceCommandState,
+    coordinator: &McpConnectCoordinator,
     input: DisconnectMcpConnectorInput,
 ) -> Result<DisconnectMcpConnectorOutput, String> {
     let stores = connect_stores(&state)?;
@@ -441,6 +507,14 @@ pub async fn disconnect_mcp_connector(
 #[tauri::command]
 pub async fn set_mcp_connector_scopes(
     state: State<'_, WorkspaceCommandState>,
+    input: SetMcpConnectorScopesInput,
+) -> Result<McpConnectorDetailsOutput, String> {
+    set_mcp_connector_scopes_with(&state, input).await
+}
+
+/// `set_mcp_connector_scopes` for the HTTP API (no Tauri `State`).
+pub async fn set_mcp_connector_scopes_with(
+    state: &WorkspaceCommandState,
     input: SetMcpConnectorScopesInput,
 ) -> Result<McpConnectorDetailsOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
@@ -724,6 +798,15 @@ pub async fn set_mcp_project_enabled(
 pub async fn test_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
     gateway: State<'_, ConnectorGateway>,
+    input: TestMcpIntegrationInput,
+) -> Result<TestMcpIntegrationOutput, String> {
+    test_mcp_integration_with(&state, &gateway, input).await
+}
+
+/// `test_mcp_integration` for the HTTP API (no Tauri `State`).
+pub async fn test_mcp_integration_with(
+    state: &WorkspaceCommandState,
+    gateway: &ConnectorGateway,
     input: TestMcpIntegrationInput,
 ) -> Result<TestMcpIntegrationOutput, String> {
     let stores = connect_stores(&state)?;

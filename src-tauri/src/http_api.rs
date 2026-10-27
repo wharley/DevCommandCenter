@@ -72,6 +72,7 @@ mod forge;
 mod git_changes;
 mod git_conflicts;
 mod keep_awake;
+mod mcp;
 mod mobile;
 mod provider_accounts;
 mod provider_usage;
@@ -851,6 +852,15 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/forge/change-request-context",
             post(forge::change_request_context),
         )
+        .route("/api/v1/mcp/integrations", get(mcp::list).post(mcp::create))
+        .route("/api/v1/mcp/integrations/activate", post(mcp::activate))
+        .route("/api/v1/mcp/integrations/remove", post(mcp::remove))
+        .route("/api/v1/mcp/scopes", post(mcp::set_scopes))
+        .route("/api/v1/mcp/connect/start", post(mcp::start_connect))
+        .route("/api/v1/mcp/connect/wait", post(mcp::wait_connect))
+        .route("/api/v1/mcp/connect/cancel", post(mcp::cancel_connect))
+        .route("/api/v1/mcp/disconnect", post(mcp::disconnect))
+        .route("/api/v1/mcp/test", post(mcp::test))
         .route(
             "/api/v1/workspaces/automation",
             post(automation::config).put(automation::save),
@@ -1723,6 +1733,16 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/git/delivery-recovery",
             "POST /api/v1/forge/context",
             "POST /api/v1/forge/change-request-context",
+            "GET /api/v1/mcp/integrations",
+            "POST /api/v1/mcp/integrations",
+            "POST /api/v1/mcp/integrations/activate",
+            "POST /api/v1/mcp/integrations/remove",
+            "POST /api/v1/mcp/scopes",
+            "POST /api/v1/mcp/connect/start",
+            "POST /api/v1/mcp/connect/wait",
+            "POST /api/v1/mcp/connect/cancel",
+            "POST /api/v1/mcp/disconnect",
+            "POST /api/v1/mcp/test",
             "POST /api/v1/workspaces/automation",
             "PUT /api/v1/workspaces/automation",
             "POST /api/v1/workspaces/automation/run",
@@ -5788,6 +5808,58 @@ mod tests {
         )
         .await;
         assert_ne!(status, StatusCode::OK);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn connectors_are_added_activated_and_removed_through_the_desktop() {
+        let fixture = embedded_fixture().await;
+        let (status, empty) = get_json(&fixture.app, "/api/v1/mcp/integrations").await;
+        assert_eq!(status, StatusCode::OK, "{empty}");
+        assert_eq!(empty["integrations"], json!([]));
+        let (status, created) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/integrations",
+            json!({ "displayName": "Linear", "transport": { "type": "http",
+                "url": "https://mcp.linear.app/mcp" }, "scope": { "type": "global" },
+                "credentials": [] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let definition = &created["integration"]["definition"];
+        let id = definition["id"].clone();
+        let (status, activated) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/integrations/activate",
+            json!({ "definitionId": id,
+                "expectedFingerprint": definition["trust"]["currentFingerprint"] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{activated}");
+        assert_eq!(activated["integration"]["definition"]["enabled"], true);
+        let (status, scoped) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/scopes",
+            json!({ "definitionId": id, "scopes": "read  write" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{scoped}");
+        // No desktop app around this backend: no sign-in to start.
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/connect/start",
+            json!({ "definitionId": id }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, removed) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/integrations/remove",
+            json!({ "definitionId": id, "deleteCredentials": true }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{removed}");
+        let (_, after) = get_json(&fixture.app, "/api/v1/mcp/integrations").await;
+        assert_eq!(after["integrations"], json!([]));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
