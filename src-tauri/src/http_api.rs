@@ -58,6 +58,7 @@ use uuid::Uuid;
 
 mod agents;
 mod ai_memory;
+mod ai_memory_settings;
 mod attention;
 mod browser_bridge;
 mod browser_opens;
@@ -888,6 +889,20 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         )
         .route("/api/v1/ai-memory/sidecar", get(ai_memory::sidecar_status))
         .route(
+            "/api/v1/ai-memory/settings",
+            get(ai_memory_settings::settings).put(ai_memory_settings::save),
+        )
+        .route("/api/v1/ai-memory/outbox", get(ai_memory_settings::outbox))
+        .route(
+            "/api/v1/ai-memory/outbox/:session_id/retry",
+            post(ai_memory_settings::retry),
+        )
+        .route(
+            "/api/v1/ai-memory/export-history",
+            get(ai_memory_settings::history),
+        )
+        .route("/api/v1/app/restart", post(ai_memory_settings::restart))
+        .route(
             "/api/v1/sessions/:session_id/agent",
             post(agents::bind_session),
         )
@@ -1713,6 +1728,12 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/ai-memory/source-actions",
             "POST /api/v1/ai-memory/source-actions",
             "GET /api/v1/ai-memory/sidecar",
+            "GET /api/v1/ai-memory/settings",
+            "PUT /api/v1/ai-memory/settings",
+            "GET /api/v1/ai-memory/outbox",
+            "POST /api/v1/ai-memory/outbox/:session_id/retry",
+            "GET /api/v1/ai-memory/export-history",
+            "POST /api/v1/app/restart",
             "GET /api/v1/keep-awake",
             "PUT /api/v1/keep-awake",
             "PUT /api/v1/providers/:provider_id/availability",
@@ -5623,6 +5644,30 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ai_memory_outbox_history_and_restart_go_through_the_desktop() {
+        let fixture = embedded_fixture().await;
+        let (status, outbox) = get_json(&fixture.app, "/api/v1/ai-memory/outbox?limit=5").await;
+        assert_eq!(status, StatusCode::OK, "{outbox}");
+        assert_eq!(outbox, json!([]));
+        let (status, history) = get_json(&fixture.app, "/api/v1/ai-memory/export-history").await;
+        assert_eq!(status, StatusCode::OK, "{history}");
+        assert_eq!(history, json!([]));
+        // An invalid mode is refused before anything is written.
+        let (status, _) = send_json(
+            &fixture.app,
+            "PUT",
+            "/api/v1/ai-memory/settings",
+            json!({ "mode": "nope", "baseUrl": null, "workspace": "w", "project": "p",
+                "dataDir": null, "token": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // No desktop app around this backend: nothing to restart.
+        let (status, _) = send_json(&fixture.app, "POST", "/api/v1/app/restart", json!({})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

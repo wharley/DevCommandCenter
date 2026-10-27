@@ -559,6 +559,68 @@ pub fn ai_memory_export_history(
     state: State<'_, SessionCommandState>,
     limit: Option<usize>,
 ) -> Result<Vec<AiMemoryExportHistoryOutput>, String> {
+    ai_memory_export_history_for_state(&state, limit)
+}
+
+/// The sessions waiting to be exported, with their events counted.
+pub async fn ai_memory_outbox_list_for_state(
+    state: &SessionCommandState,
+    limit: Option<usize>,
+) -> Result<Vec<AiMemoryOutboxStatusOutput>, String> {
+    let entries = state
+        .list_ai_memory_exports(limit.unwrap_or(50))
+        .map_err(|error| error.to_string())?;
+    let mut output = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let event_count =
+            dcc_core::ports::SessionEventRepo::list_events_by_session(state, &entry.session_id)
+                .await
+                .map(|events| events.len())
+                .unwrap_or_default();
+        output.push(AiMemoryOutboxStatusOutput {
+            session_id: entry.session_id.0,
+            attempts: entry.attempts,
+            next_attempt_at: entry.next_attempt_at,
+            last_error: entry.last_error,
+            event_count,
+        });
+    }
+    Ok(output)
+}
+
+/// Exports a waiting session again now.
+pub async fn ai_memory_outbox_retry_for_state(
+    state: &SessionCommandState,
+    session_id: &str,
+) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() || session_id.len() > 200 {
+        return Err("sessionId is required".to_string());
+    }
+    let session_id = dcc_core::domain::session::SessionId(session_id.to_string());
+    state
+        .retry_ai_memory_export(&session_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    state
+        .ai_memory_export_status(&session_id)
+        .map(|status| {
+            status.map(|entry| AiMemoryOutboxStatusOutput {
+                session_id: entry.session_id.0,
+                attempts: entry.attempts,
+                next_attempt_at: entry.next_attempt_at,
+                last_error: entry.last_error,
+                event_count: 0,
+            })
+        })
+        .map_err(|error| error.to_string())
+}
+
+/// What the outbox exported, newest first.
+pub fn ai_memory_export_history_for_state(
+    state: &SessionCommandState,
+    limit: Option<usize>,
+) -> Result<Vec<AiMemoryExportHistoryOutput>, String> {
     state
         .list_ai_memory_export_history(limit.unwrap_or(100))
         .map(|entries| {
