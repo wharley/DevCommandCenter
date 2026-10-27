@@ -1885,7 +1885,15 @@ pub async fn workspace_save_project_automation(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceSaveProjectAutomationInput,
 ) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
+    workspace_save_project_automation_with_state(&state, input).await
+}
+
+/// `workspace_save_project_automation` for the HTTP API.
+pub async fn workspace_save_project_automation_with_state(
+    state: &WorkspaceCommandState,
+    input: WorkspaceSaveProjectAutomationInput,
+) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
+    preflight_workspace_root(state, &input.workspace_root).await?;
     let root = input.workspace_root.trim();
     if root.is_empty() {
         return Err("workspace_root is empty".to_string());
@@ -1996,7 +2004,7 @@ pub async fn workspace_save_project_automation(
         })
         .await
         .map_err(workspace_mutation_error)?;
-    workspace_project_automation_config(
+    workspace_project_automation_config_with_state(
         state,
         WorkspaceGitConflictStateInput {
             workspace_root: root.to_string(),

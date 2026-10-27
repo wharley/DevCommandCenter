@@ -60,6 +60,7 @@ mod agents;
 mod ai_memory;
 mod ai_memory_settings;
 mod attention;
+mod automation;
 mod browser_bridge;
 mod browser_opens;
 mod computer_bridge;
@@ -850,6 +851,11 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/forge/change-request-context",
             post(forge::change_request_context),
         )
+        .route(
+            "/api/v1/workspaces/automation",
+            post(automation::config).put(automation::save),
+        )
+        .route("/api/v1/workspaces/automation/run", post(automation::run))
         .route("/api/v1/forge/accounts", post(forge::accounts))
         .route("/api/v1/forge/cli-status", post(forge::cli_status))
         .route("/api/v1/forge/hosts", post(forge::hosts))
@@ -1717,6 +1723,9 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/git/delivery-recovery",
             "POST /api/v1/forge/context",
             "POST /api/v1/forge/change-request-context",
+            "POST /api/v1/workspaces/automation",
+            "PUT /api/v1/workspaces/automation",
+            "POST /api/v1/workspaces/automation/run",
             "POST /api/v1/forge/accounts",
             "POST /api/v1/forge/cli-status",
             "POST /api/v1/forge/hosts",
@@ -5703,6 +5712,82 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn project_automation_is_read_saved_and_run_in_the_tasks_checkout() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        let fixture = embedded_fixture().await;
+        let base = tempfile::tempdir().expect("checkout");
+        let repo = std::fs::canonicalize(base.path()).unwrap().to_path_buf();
+        git(&repo, &["init", "-b", "main"]);
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        dcc_core::ports::WorkspaceRepo::save_workspace(
+            &workspaces,
+            &Workspace {
+                id: WorkspaceId("w-automation".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: None,
+                root_path: repo.to_string_lossy().to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-27T00:00:00Z".to_string(),
+                updated_at: "2026-10-27T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let root = repo.to_string_lossy().to_string();
+        let (status, empty) = post_json(
+            &fixture.app,
+            "/api/v1/workspaces/automation",
+            json!({ "workspaceRoot": root }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{empty}");
+        assert_eq!(empty["tasks"], json!([]));
+        assert_eq!(empty["configHash"], Value::Null);
+        let task = json!({ "id": "check_1", "label": "Echo", "command": "echo ok",
+            "kind": "check", "cwd": null, "timeoutSeconds": 60 });
+        let (status, saved) = send_json(
+            &fixture.app,
+            "PUT",
+            "/api/v1/workspaces/automation",
+            json!({ "workspaceRoot": root, "setupCommand": null, "tasks": [task],
+                "beforeMerge": ["check_1"], "beforePush": [],
+                "deliveryPolicy": { "minimumApprovals": 1, "requirePipeline": false,
+                    "requireResolvedDiscussions": false, "requireCurrentBase": false,
+                    "requireBeforeMergeChecks": false },
+                "expectedConfigHash": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["tasks"][0]["id"], "check_1");
+        assert!(repo.join(".dcc.toml").is_file());
+        let (status, ran) = post_json(
+            &fixture.app,
+            "/api/v1/workspaces/automation/run",
+            json!({ "workspaceRoot": root, "taskIds": ["check_1"],
+                "expectedConfigHash": saved["configHash"] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{ran}");
+        assert_eq!(ran["report"]["status"], "passed", "{ran}");
+        // A folder that is no task's checkout is refused.
+        let other = tempfile::tempdir().expect("other");
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/workspaces/automation",
+            json!({ "workspaceRoot": other.path().to_string_lossy() }),
+        )
+        .await;
+        assert_ne!(status, StatusCode::OK);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
