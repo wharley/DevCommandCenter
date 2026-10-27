@@ -16,6 +16,7 @@ pub mod workspace_cleanup;
 pub mod workspace_deletion;
 pub mod workspace_file_preview;
 pub mod workspace_git;
+pub mod workspace_search;
 mod git_command;
 mod git_parsing;
 #[cfg(feature = "guarded-undo-capture-v2")]

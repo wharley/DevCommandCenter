@@ -7206,40 +7206,6 @@ pub async fn write_workspace_file_with_state(
         .map_err(workspace_mutation_error)
 }
 
-const SEARCH_WORKSPACE_MAX_RESULTS: usize = 200;
-
-fn parse_git_grep_z_output(stdout: &[u8], max_results: usize) -> SearchWorkspaceOutput {
-    let mut matches = Vec::new();
-    let mut truncated = false;
-    let stdout = String::from_utf8_lossy(stdout);
-    for record in stdout.split('\n') {
-        if record.is_empty() {
-            continue;
-        }
-        // Record format: "<path>\0<line>:<text>"
-        let Some((path, rest)) = record.split_once('\0') else {
-            continue;
-        };
-        let Some((line_str, text)) = rest.split_once(':') else {
-            continue;
-        };
-        let Ok(line) = line_str.trim().parse::<u32>() else {
-            continue;
-        };
-        if matches.len() >= max_results {
-            truncated = true;
-            break;
-        }
-        matches.push(SearchWorkspaceMatch {
-            path: path.to_string(),
-            line,
-            text: text.chars().take(400).collect(),
-        });
-    }
-
-    SearchWorkspaceOutput { matches, truncated }
-}
-
 #[cfg(test)]
 mod editor_workspace_file_tests {
     use super::*;
@@ -10782,23 +10748,6 @@ mod editor_workspace_file_tests {
             .expect_err("write should reject symlink escape");
         assert!(write_error.contains("escapes workspace"));
     }
-
-    #[test]
-    fn git_grep_parser_handles_colon_paths_and_truncation() {
-        let mut input = Vec::new();
-        input.extend_from_slice(b"src/with:colon.rs");
-        input.push(0);
-        input.extend_from_slice(b"12:let value = 1;\nsrc/lib.rs");
-        input.push(0);
-        input.extend_from_slice(b"3:needle\n");
-        let output = parse_git_grep_z_output(&input, 1);
-
-        assert!(output.truncated);
-        assert_eq!(output.matches.len(), 1);
-        assert_eq!(output.matches[0].path, "src/with:colon.rs");
-        assert_eq!(output.matches[0].line, 12);
-        assert_eq!(output.matches[0].text, "let value = 1;");
-    }
 }
 
 /// Content search across tracked files via `git grep` (on demand, capped). Fixed
@@ -10810,26 +10759,19 @@ pub async fn search_workspace(
 ) -> Result<SearchWorkspaceOutput, String> {
     preflight_workspace_root(&state, &input.workspace_root).await?;
 
-    let root = input.workspace_root.trim();
-    let query = input.query.trim();
-    if root.is_empty() || query.is_empty() {
-        return Ok(SearchWorkspaceOutput {
-            matches: Vec::new(),
-            truncated: false,
-        });
-    }
-
-    // `-z` makes the path delimiter NUL, so paths containing `:` parse cleanly.
-    // git grep exits 1 with empty output when there are no matches (not an error).
-    let output = run_git_output(
-        root,
-        &["grep", "-z", "-n", "-I", "-i", "-F", "-e", query, "--"],
-    )?;
-
-    Ok(parse_git_grep_z_output(
-        &output.stdout,
-        SEARCH_WORKSPACE_MAX_RESULTS,
-    ))
+    let found = dcc_infra::workspace_search::search_workspace(&input.workspace_root, &input.query)?;
+    Ok(SearchWorkspaceOutput {
+        matches: found
+            .matches
+            .into_iter()
+            .map(|found| SearchWorkspaceMatch {
+                path: found.path,
+                line: found.line,
+                text: found.text,
+            })
+            .collect(),
+        truncated: found.truncated,
+    })
 }
 
 /// Mission specs are intentionally scoped to DCC-owned worktree state.
