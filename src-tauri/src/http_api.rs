@@ -5213,6 +5213,22 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn a_session_s_computer_use_grant_ends_through_the_bridge() {
+        let fixture = embedded_fixture().await;
+        let body = json!({ "sessionId": "s-1" });
+        let (status, _) = post_json(&fixture.app, "/api/v1/computer/bridge/disarm", body.clone()).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        let _ = fixture
+            .backend
+            .desktop_computer
+            .set(Arc::new(computer_bridge::tests::Fixed(json!([]))));
+        let (status, grant) = post_json(&fixture.app, "/api/v1/computer/bridge/disarm", body).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(grant, json!({ "sessionId": "s-1", "armed": false }));
+        assert!(!crate::remote_connector::remote_path_allowed("/api/v1/computer/bridge/disarm"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn computer_use_from_the_phone_needs_apps_from_the_list() {
         use crate::agent_requests::{AgentRequestApp, AgentRequestDetail};
         let fixture = embedded_fixture().await;

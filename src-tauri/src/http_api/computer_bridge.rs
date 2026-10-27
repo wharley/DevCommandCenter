@@ -4,7 +4,8 @@
 //! requests: it gets the ones waiting for the person (`control-requests`,
 //! again whenever they change), reads the Mac's state for one (`status`:
 //! the permissions, the conversation's runtime, the apps with a window),
-//! opens a permission's system settings (`access`) and answers (`respond`,
+//! opens a permission's system settings (`access`), ends a session's grant
+//! (`disarm`, Settings' "Desativar agora") and answers (`respond`,
 //! first answer wins, shared with the phone). The desktop's own dialog
 //! stays quiet meanwhile. The stream also carries what the agent does
 //! (`computer-activity`) and when the preview's frame changes, for the
@@ -27,6 +28,9 @@ pub trait DesktopComputer: Send + Sync {
     /// The session's latest preview frame (`ComputerUsePreviewFrame` or
     /// null); `refresh` captures a new one first.
     fn preview(&self, session_id: String, refresh: bool) -> BrowserFuture<Value>;
+    /// `computer_use_disarm`: the session's grant ends now
+    /// (`ComputerUseGrantStatus`).
+    fn disarm(&self, session_id: String) -> BrowserFuture<Value>;
     /// `computer_use_respond_control_request`
     fn respond(
         &self,
@@ -70,6 +74,7 @@ pub(super) fn routes() -> Router<HttpState> {
         .route("/api/v1/computer/bridge/status", post(status))
         .route("/api/v1/computer/bridge/access", post(access))
         .route("/api/v1/computer/bridge/preview", post(preview))
+        .route("/api/v1/computer/bridge/disarm", post(disarm))
         .route(
             "/api/v1/computer/bridge/requests/:id/respond",
             post(respond),
@@ -121,6 +126,23 @@ async fn preview(
         .await
         .map_err(HttpApiError::bad_request)?;
     Ok(Json(json!({ "frame": frame })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DisarmInput {
+    session_id: String,
+}
+
+async fn disarm(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<DisarmInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let grant = host(&backend)?
+        .disarm(input.session_id)
+        .await
+        .map_err(HttpApiError::bad_request)?;
+    Ok(Json(grant))
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,10 +235,10 @@ async fn stream(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
-    struct Fixed(Value);
+    pub(crate) struct Fixed(pub(crate) Value);
 
     impl DesktopComputer for Fixed {
         fn pending(&self) -> Value {
@@ -230,6 +252,9 @@ mod tests {
         }
         fn preview(&self, _: String, _: bool) -> BrowserFuture<Value> {
             Box::pin(async { Ok(Value::Null) })
+        }
+        fn disarm(&self, session_id: String) -> BrowserFuture<Value> {
+            Box::pin(async move { Ok(json!({ "sessionId": session_id, "armed": false })) })
         }
         fn respond(&self, _: String, _: bool, _: Vec<String>) -> BrowserFuture<Value> {
             Box::pin(async { Ok(json!({})) })

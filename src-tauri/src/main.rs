@@ -4297,6 +4297,20 @@ impl dev_command_center_tauri::http_api::DesktopComputer for HttpComputer {
         })
     }
 
+    fn disarm(
+        &self,
+        session_id: String,
+    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
+        let app = self.0.clone();
+        Box::pin(async move {
+            let state = app.state::<computer_use_commands::ComputerUseState>();
+            let grant = state.disarm(&session_id);
+            computer_use_commands::publish_preview_cleared(&session_id);
+            let _ = app.emit("computer-use-preview-cleared", session_id);
+            serde_json::to_value(grant).map_err(|error| error.to_string())
+        })
+    }
+
     fn respond(
         &self,
         request_id: String,
