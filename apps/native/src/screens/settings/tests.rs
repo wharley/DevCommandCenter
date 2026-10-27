@@ -63,8 +63,8 @@ pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
 
 #[gpui::test]
 fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) {
-    // "Decision Provider" is not here yet: the first section the native app has.
-    let (settings, cx, events) = open(Some(SectionId::DecisionProvider), cx);
+    // "AI Memory" is not here yet: the first section the native app has.
+    let (settings, cx, events) = open(Some(SectionId::AiMemory), cx);
     assert_eq!(
         cx.update(|_, cx| settings.read(cx).active),
         SectionId::General
@@ -74,8 +74,9 @@ fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) 
     assert!(cx.debug_bounds("settings-section-model").is_some());
     assert!(
         cx.debug_bounds("settings-section-decisionProvider")
-            .is_none()
+            .is_some()
     );
+    assert!(cx.debug_bounds("settings-section-aiMemory").is_none());
     cx.simulate_input("experim");
     cx.run_until_parked();
     assert!(cx.debug_bounds("settings-section-appearance").is_none());
@@ -262,4 +263,94 @@ fn shortcuts_record_a_global_key_before_the_app_bindings(cx: &mut TestAppContext
     assert_eq!(*fired.borrow(), 1);
     click(cx, "settings-open-cheatsheet");
     assert_eq!(events.borrow().as_slice(), ["shortcuts"]);
+}
+
+#[gpui::test]
+fn decision_provider_saves_the_form_and_shows_the_history(cx: &mut TestAppContext) {
+    use crate::data::decision_provider::Point;
+    use crate::test_support::fake_desktop_routes;
+    let (settings, cx, _) = open(Some(SectionId::DecisionProvider), cx);
+    assert!(cx.debug_bounds("settings-decision-configuration").is_some());
+    let saved = |mode: &str| {
+        serde_json::json!({
+            "provider": "typesafe", "mode": mode, "modelRouting": "manual",
+            "memoryFilterEnabled": true, "skillRouterEnabled": true, "modelRouterEnabled": true,
+            "completionReviewEnabled": true, "toolGuardEnabled": true,
+            "baseUrl": "https://api.typesafe.ai", "model": "jev-latest", "memoryThreshold": 0.65,
+            "skillConfidenceThreshold": 0.65, "modelConfidenceThreshold": 0.8,
+            "completionThreshold": 0.8, "toolRiskThreshold": 0.65,
+            "apiKeyConfigured": true, "restartRequired": false,
+        })
+        .to_string()
+    };
+    let history = serde_json::json!([{
+        "evaluation": { "version": "1", "contextTruncated": true,
+            "scores": [{ "key": "validation", "probability": 0.42 }] },
+        "id": 7, "sessionId": "s", "turnId": null, "decisionPoint": "completion_review",
+        "provider": "typesafe", "mode": "observe", "status": "completed", "model": "jev-latest",
+        "candidateCount": 4, "selectedCount": 1, "selectedIndices": [], "selectedLabels": ["needs_review:validation"],
+        "threshold": 0.8, "durationMs": 120, "error": null, "createdAt": "2026-10-27T12:00:00Z",
+    }])
+    .to_string();
+    let (port, server) = fake_desktop_routes(vec![
+        ("/api/v1/decision-provider/settings", 200, saved("observe")),
+        ("/api/v1/decision-provider/settings", 200, saved("enforce")),
+        ("/api/v1/decision-provider/history?limit=100", 200, history),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.set_api(
+                crate::data::desktop_api::DesktopApi::new(port, "k"),
+                dir.path().to_path_buf(),
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    // The saved key is never shown: "Remover chave salva" is offered.
+    assert!(cx.debug_bounds("settings-decision-clear-key").is_some());
+    // A new key typed shows as dots and cannot be copied.
+    click(cx, "settings-decision-key");
+    cx.simulate_input("sk-1");
+    cx.simulate_keystrokes("cmd-a cmd-c");
+    cx.update(|_, cx| {
+        let settings = settings.read(cx);
+        assert_eq!(settings.decision.draft.api_key.as_deref(), Some("sk-1"));
+        assert_eq!(settings.decision.api_key.read(cx).display_text(), "••••");
+        assert!(cx.read_from_clipboard().is_none());
+    });
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.update_decision(
+                |draft| {
+                    draft.mode = "enforce".into();
+                    draft.set_threshold(Point::ToolGuard, "0.4");
+                },
+                cx,
+            )
+        })
+    });
+    // (The button sits below the fold of the test window.)
+    cx.update(|_, cx| settings.update(cx, |settings, cx| settings.save_decision(cx)));
+    cx.run_until_parked();
+    // Saved: the form shows what the desktop kept, the key field empty.
+    cx.update(|_, cx| {
+        let settings = settings.read(cx);
+        assert_eq!(settings.decision.draft.mode, "enforce");
+        assert!(settings.decision.api_key.read(cx).text().is_empty());
+    });
+    // The history, with the criteria on demand.
+    cx.update(|_, cx| settings.update(cx, |settings, cx| settings.select_decision_tab(1, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("settings-decision-history").is_some());
+    click(cx, "settings-decision-details-7");
+    assert!(cx.update(|_, cx| settings.read(cx).decision.open_details.contains(&7)));
+    let seen = server.join().unwrap();
+    assert_eq!(seen[1].0, "PUT /api/v1/decision-provider/settings");
+    let body: serde_json::Value = serde_json::from_str(&seen[1].1).unwrap();
+    assert_eq!(body["apiKey"], "sk-1");
+    assert_eq!(body["mode"], "enforce");
+    assert_eq!(body["toolRiskThreshold"], 0.4);
+    assert_eq!(body["clearApiKey"], false);
 }

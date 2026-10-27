@@ -4,6 +4,7 @@
 //! native app has.
 
 mod appearance;
+mod decision;
 mod experimental;
 mod general;
 mod nav;
@@ -118,10 +119,11 @@ impl SectionId {
 }
 
 /// The sections the native app has, in the desktop's array order.
-pub const AVAILABLE: [SectionId; 5] = [
+pub const AVAILABLE: [SectionId; 6] = [
     SectionId::General,
     SectionId::Appearance,
     SectionId::Model,
+    SectionId::DecisionProvider,
     SectionId::Shortcuts,
     SectionId::Experimental,
 ];
@@ -140,6 +142,7 @@ pub struct Settings {
     general: general::General,
     shortcuts: shortcuts::Shortcuts,
     providers: providers::Providers,
+    decision: decision::Decision,
     _search_events: Subscription,
 }
 
@@ -199,11 +202,13 @@ impl Settings {
             }),
             shortcuts: shortcuts::Shortcuts::new(cx),
             providers: providers::Providers::new(state.default_pick, window, cx),
+            decision: decision::Decision::new(window, cx),
             _search_events: events,
         };
         settings.load_general(cx);
         settings.load_shortcuts(cx);
         settings.load_providers(cx);
+        settings.load_decision(cx);
         settings
     }
 
@@ -220,6 +225,7 @@ impl Settings {
         self.load_general(cx);
         self.load_shortcuts(cx);
         self.load_providers(cx);
+        self.load_decision(cx);
     }
 
     pub fn search_input(&self) -> Entity<TextInput> {

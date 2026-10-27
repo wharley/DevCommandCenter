@@ -23,6 +23,7 @@ impl Render for Settings {
             SectionId::General => self.general(cx),
             SectionId::Appearance => self.appearance(cx),
             SectionId::Model => self.providers_section(cx),
+            SectionId::DecisionProvider => self.decision_section(cx),
             SectionId::Shortcuts => self.shortcuts_section(cx),
             SectionId::Experimental => self.experimental(cx),
             _ => div().into_any_element(),

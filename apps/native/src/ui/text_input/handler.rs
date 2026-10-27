@@ -115,11 +115,11 @@ impl EntityInputHandler for TextInput {
         let range = self.range_from_utf16(&range_utf16);
         Some(Bounds::from_corners(
             point(
-                bounds.left() + layout.x_for_index(range.start),
+                bounds.left() + layout.x_for_index(self.to_display(range.start)),
                 bounds.top(),
             ),
             point(
-                bounds.left() + layout.x_for_index(range.end),
+                bounds.left() + layout.x_for_index(self.to_display(range.end)),
                 bounds.bottom(),
             ),
         ))
@@ -133,7 +133,7 @@ impl EntityInputHandler for TextInput {
     ) -> Option<usize> {
         let local = self.last_bounds?.localize(&point)?;
         let layout = self.last_layout.as_ref()?;
-        let utf8 = layout.index_for_x(point.x - local.x)?;
+        let utf8 = self.to_content(layout.index_for_x(point.x - local.x)?);
         Some(self.offset_to_utf16(utf8))
     }
 }

@@ -62,6 +62,9 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
+/// What a masked field shows per character (`•`).
+const MASK: &str = "\u{2022}";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TextInputEvent {
     Changed,
@@ -75,6 +78,8 @@ pub struct TextInput {
     content: SharedString,
     placeholder: SharedString,
     max_len: Option<usize>,
+    /// `type="password"`: dots on screen, nothing to copy.
+    masked: bool,
     selected_range: Range<usize>,
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
@@ -97,6 +102,7 @@ impl TextInput {
             content: SharedString::default(),
             placeholder: SharedString::default(),
             max_len: None,
+            masked: false,
             selected_range: 0..0,
             selection_reversed: false,
             marked_range: None,
@@ -110,6 +116,54 @@ impl TextInput {
     pub fn with_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
         self
+    }
+
+    pub fn set_placeholder(
+        &mut self,
+        placeholder: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        self.placeholder = placeholder.into();
+        cx.notify();
+    }
+
+    /// `type="password"`: each character shows as a dot, and the text
+    /// cannot be copied or cut.
+    pub fn masked(mut self) -> Self {
+        self.masked = true;
+        self
+    }
+
+    /// The line on screen: the text, or a dot per character when masked.
+    pub(crate) fn display_text(&self) -> SharedString {
+        if self.masked {
+            MASK.repeat(self.content.chars().count()).into()
+        } else {
+            self.content.clone()
+        }
+    }
+
+    /// A text offset as an offset of the line on screen.
+    pub(super) fn to_display(&self, offset: usize) -> usize {
+        if self.masked {
+            self.content[..offset.min(self.content.len())]
+                .chars()
+                .count()
+                * MASK.len()
+        } else {
+            offset
+        }
+    }
+
+    /// An offset of the line on screen as a text offset.
+    pub(super) fn to_content(&self, offset: usize) -> usize {
+        if !self.masked {
+            return offset;
+        }
+        self.content
+            .char_indices()
+            .nth(offset / MASK.len())
+            .map_or(self.content.len(), |(at, _)| at)
     }
 
     /// Characters accepted, like the HTML `maxLength`.
@@ -249,7 +303,7 @@ impl TextInput {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.selected_range.is_empty() {
+        if !self.selected_range.is_empty() && !self.masked {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
             ));
@@ -257,7 +311,7 @@ impl TextInput {
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.selected_range.is_empty() {
+        if !self.selected_range.is_empty() && !self.masked {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
             ));
@@ -304,7 +358,7 @@ impl TextInput {
         if position.y > bounds.bottom() {
             return self.content.len();
         }
-        line.closest_index_for_x(position.x - bounds.left())
+        self.to_content(line.closest_index_for_x(position.x - bounds.left()))
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {

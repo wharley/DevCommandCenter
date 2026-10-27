@@ -74,9 +74,14 @@ impl Element for TextElement {
         let selection_color = theme.colors.sidebar_primary.opacity(0.26);
         let placeholder_color = theme.colors.muted_foreground;
         let input = self.input.read(cx);
-        let content = input.content.clone();
-        let selected_range = input.selected_range.clone();
-        let cursor = input.cursor_offset();
+        let content = input.display_text();
+        let selected_range = input.to_display(input.selected_range.start)
+            ..input.to_display(input.selected_range.end);
+        let cursor = input.to_display(input.cursor_offset());
+        let marked_range = input
+            .marked_range
+            .as_ref()
+            .map(|marked| input.to_display(marked.start)..input.to_display(marked.end));
         let style = window.text_style();
         let (display_text, color) = if content.is_empty() {
             (input.placeholder.clone(), placeholder_color)
@@ -91,7 +96,7 @@ impl Element for TextElement {
             underline: None,
             strikethrough: None,
         };
-        let runs = match input.marked_range.as_ref() {
+        let runs = match marked_range.as_ref() {
             Some(marked) => [
                 TextRun {
                     len: marked.start,

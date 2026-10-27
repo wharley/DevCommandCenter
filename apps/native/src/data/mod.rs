@@ -16,6 +16,7 @@ pub mod computer_use;
 pub mod conflict_api;
 pub mod conversation;
 pub mod daily_recap;
+pub mod decision_provider;
 pub mod delegation_lineage;
 pub mod deletion;
 pub mod desktop_api;
