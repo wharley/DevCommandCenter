@@ -6,7 +6,9 @@
 
 mod activity;
 mod delegation;
+mod details;
 mod feed;
+mod forge;
 
 #[cfg(test)]
 mod tests;
@@ -62,6 +64,10 @@ pub struct SessionPanel {
     pub(crate) last_event: Option<String>,
     session: Option<String>,
     pub(crate) api: Option<DesktopApi>,
+    /// "Detalhes"' forge group.
+    pub(crate) forge: forge::ForgeDetails,
+    /// The folded groups that are open (`runtime`, `forge`, `providers`).
+    pub(crate) open: std::collections::HashSet<&'static str>,
     _conversation: Subscription,
 }
 
@@ -82,10 +88,12 @@ impl SessionPanel {
                 .read(cx)
                 .data()
                 .and_then(|data| data.session_id.clone());
-            // Another conversation opens on its activity.
+            // Another conversation opens on its activity (not the first one read).
             if session != panel.session {
+                if panel.session.is_some() {
+                    panel.tab = SessionTab::Activity;
+                }
                 panel.session = session;
-                panel.tab = SessionTab::Activity;
             }
             cx.notify();
         });
@@ -99,6 +107,8 @@ impl SessionPanel {
             last_event: None,
             session,
             api: if cfg!(test) { None } else { DesktopApi::load() },
+            forge: forge::ForgeDetails::default(),
+            open: std::collections::HashSet::new(),
             _conversation: observe,
         }
     }

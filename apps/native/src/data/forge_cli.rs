@@ -219,6 +219,19 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// `retryRepositoryForgeBinding`: the repository bound again to a login
+    /// now signed in; which one, if any.
+    pub fn retry_forge_binding(&self, repository_id: &str) -> Result<Option<String>, ApiError> {
+        let value = self.post(
+            "/api/v1/forge/retry-binding",
+            &json!({ "repositoryId": repository_id }),
+        )?;
+        Ok(value
+            .get("login")
+            .and_then(Value::as_str)
+            .map(str::to_string))
+    }
+
     /// `backfillForgeRepoBindings`: how many repositories got the login.
     pub fn backfill_forge_bindings(&self) -> Result<usize, ApiError> {
         let value = self.post("/api/v1/forge/backfill-bindings", &json!({}))?;

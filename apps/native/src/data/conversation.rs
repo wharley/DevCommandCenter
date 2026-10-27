@@ -81,9 +81,25 @@ pub struct Conversation {
     pub turn_tokens: Arc<HashMap<String, TurnTokenTotals>>,
     /// Highest event sequence read, so a refresh only reads what is new.
     pub last_sequence: u64,
+    /// The task's repository (`currentRepository.id`), for the forge's
+    /// binding after a sign-in.
+    pub repository_id: Option<String>,
+    /// What the Session tab's runtime shows (`sessionSnapshot`).
+    pub facts: Option<SessionFacts>,
     /// The session's last 12 events since this run first read it (the
     /// desktop's live `activityEvents`), for the Session tab.
     pub activity: Arc<Vec<SessionEventRecord>>,
+}
+
+/// `SessionSnapshot`, what "Runtime da sessão" reads.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionFacts {
+    /// `idle` | `active` | `completed` | `aborted`
+    pub state: String,
+    pub turn_count: u32,
+    pub checkpoint_count: u32,
+    pub last_turn_prompt: Option<String>,
+    pub provider_id: String,
 }
 
 /// The session history read so far, kept by whoever refreshes the
@@ -339,10 +355,11 @@ pub fn load(
             .clone()
             .unwrap_or_else(|| record.root_path.clone());
         let repositories = block_on(workspaces.list_repositories())?;
-        let project = repositories
+        let repository = repositories
             .iter()
-            .find(|repository| repository.root_path == record.root_path)
-            .map(crate::data::tasks::Project::from_repository);
+            .find(|repository| repository.root_path == record.root_path);
+        conversation.repository_id = repository.map(|repository| repository.id.0.clone());
+        let project = repository.map(crate::data::tasks::Project::from_repository);
         conversation.context = Some(ExecutionContext {
             project_label: project.as_ref().map(|project| project.display_name.clone()),
             project_icon: project.as_ref().and_then(|project| project.icon.clone()),
@@ -373,6 +390,19 @@ pub fn load(
     let session_id = summary.session.id.0.clone();
     conversation.session_id = Some(session_id.clone());
     conversation.provider_id = Some(summary.session.provider_id.clone());
+    conversation.facts = Some(SessionFacts {
+        state: match summary.projection.state {
+            dcc_core::domain::session::SessionState::Draft => "idle",
+            dcc_core::domain::session::SessionState::Active => "active",
+            dcc_core::domain::session::SessionState::Completed => "completed",
+            dcc_core::domain::session::SessionState::Aborted => "aborted",
+        }
+        .into(),
+        turn_count: summary.projection.turn_count,
+        checkpoint_count: summary.projection.checkpoint_count,
+        last_turn_prompt: summary.last_turn_prompt.clone(),
+        provider_id: summary.projection.provider_id.clone(),
+    });
     conversation.model = summary.session.model.clone();
     conversation.running = activity.is_running();
     conversation.waiting = activity.waiting_reason().is_some();

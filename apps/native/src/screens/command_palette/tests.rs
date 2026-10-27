@@ -119,8 +119,9 @@ fn with_a_task_it_lists_commands_tasks_sessions_and_files(cx: &mut TestAppContex
     };
     let (palette, cx, ran) = open(context, cx);
     let found = labels(&palette, cx);
-    // 9 workbench commands + 7 global, 2 tasks, 1 conversation, 1 file.
-    assert_eq!(found.len(), 20, "{found:?}");
+    // 10 workbench commands + 7 global, 2 tasks, 1 conversation, 1 file.
+    assert_eq!(found.len(), 21, "{found:?}");
+    assert!(found.contains(&"Abrir detalhes do workspace".to_string()));
     assert!(found.contains(&"Abrir atividade da sessão".to_string()));
     assert!(found.contains(&"Retry no checkout".to_string()));
     assert!(found.contains(&"main.rs".to_string()));

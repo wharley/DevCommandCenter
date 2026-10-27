@@ -192,6 +192,11 @@ impl Shell {
                 window,
                 cx,
             ),
+            WorkbenchCommand::Details => self.open_session_tab(
+                Some(crate::screens::session_panel::SessionTab::Context),
+                window,
+                cx,
+            ),
         }
     }
 

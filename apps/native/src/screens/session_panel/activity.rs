@@ -61,7 +61,7 @@ impl SessionPanel {
                 .filter(|event| is_milestone(event))
                 .count()
         });
-        let tabs = [SessionTab::Activity]
+        let tabs = [SessionTab::Activity, SessionTab::Context]
             .into_iter()
             .map(|tab| {
                 let active = self.tab == tab;
@@ -100,7 +100,8 @@ impl SessionPanel {
                 .child(self.delegations(cx))
                 .child(self.feed(cx))
                 .into_any_element(),
-            _ => div().into_any_element(),
+            SessionTab::Context => self.details(cx),
+            SessionTab::Spec => div().into_any_element(),
         };
         div()
             .debug_selector(|| "session-panel".into())
@@ -168,6 +169,7 @@ impl SessionPanel {
                     .children(tabs),
             )
             .child(content)
+            .children(self.connect_dialog(cx))
             .into_any_element()
     }
 

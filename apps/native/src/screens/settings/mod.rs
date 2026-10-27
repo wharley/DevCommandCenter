@@ -3,7 +3,7 @@
 //! arrive one by one (screen 9g); the navigation only lists the ones the
 //! native app has.
 
-mod account;
+pub(crate) mod account;
 mod appearance;
 mod computer;
 mod connections;

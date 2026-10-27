@@ -3,7 +3,7 @@
 //! "Conectar no app" / "Trocar conta" with the embedded sign-in. CodeRabbit
 //! is not part of the native app.
 
-mod connect;
+pub(crate) mod connect;
 mod view;
 
 use std::collections::{HashMap, HashSet};

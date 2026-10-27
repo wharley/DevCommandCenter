@@ -12,6 +12,7 @@ pub struct ForgeContext {
     /// `github` | `gitlab`
     pub provider: Option<String>,
     pub host: Option<String>,
+    pub remote_name: Option<String>,
     pub namespace: Option<String>,
     pub repo: Option<String>,
     /// The CLI's state: `ready` when it can act.
@@ -20,6 +21,9 @@ pub struct ForgeContext {
     pub remote_state: Option<String>,
     pub bound_login: Option<String>,
     pub effective_login: Option<String>,
+    pub known_hosts: Vec<String>,
+    /// What the CLI said when it is not ready.
+    pub message: Option<String>,
 }
 
 impl ForgeContext {
