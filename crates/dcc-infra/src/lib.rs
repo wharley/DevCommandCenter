@@ -8,6 +8,7 @@ pub mod delegation_apply;
 pub mod decision_context;
 pub mod decision_provider;
 pub mod events;
+pub mod feedback;
 pub mod fs;
 pub mod forge;
 pub mod git;
