@@ -19,6 +19,7 @@ pub const MAX_ACTIVE_DEVICES: i64 = 10;
 
 /// Public representation of a paired device (no key material).
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PairedDeviceSummary {
     pub device_id: String,
     pub device_name: String,
@@ -317,6 +318,14 @@ pub fn touch_device(conn: &Connection, device_id: &str) {
 
 // ---------- device management ----------
 
+/// The pairing tables in the app's database, brought up to date
+/// (idempotent).
+pub fn open_pairing_db(path: &std::path::Path) -> Result<Connection, PairingError> {
+    let conn = Connection::open(path).map_err(|e| PairingError::Database(e.to_string()))?;
+    ensure_pairing_schema(&conn)?;
+    Ok(conn)
+}
+
 pub fn list_paired_devices(
     conn: &Connection,
     include_revoked: bool,
@@ -487,6 +496,7 @@ pub fn push_targets(conn: &Connection, now: &str) -> Result<Vec<PushTarget>, Pai
 
 /// Read recent audit-log entries, newest first.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AuditEntry {
     pub id: i64,
     pub event: String,

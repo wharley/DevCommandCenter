@@ -4453,22 +4453,7 @@ async fn pair_list_devices(app: AppHandle, include_revoked: Option<bool>) -> Api
         let devices =
             dev_command_center_tauri::pairing::list_paired_devices(&conn, include_revoked)
                 .map_err(pairing_error_to_api)?;
-        let json_devices: Vec<Value> = devices
-            .into_iter()
-            .map(|d| {
-                serde_json::json!({
-                    "deviceId": d.device_id,
-                    "deviceName": d.device_name,
-                    "userAgent": d.user_agent,
-                    "createdAt": d.created_at,
-                    "lastUsedAt": d.last_used_at,
-                    "lastIp": d.last_ip,
-                    "revoked": d.revoked,
-                    "kind": d.kind,
-                })
-            })
-            .collect();
-        Ok(serde_json::json!({ "devices": json_devices }))
+        Ok(serde_json::json!({ "devices": devices }))
     })
     .await
     .map_err(|e| db_error(format!("pair_list_devices task failed: {e}")))?
@@ -4499,21 +4484,7 @@ async fn pair_audit_log(app: AppHandle, limit: Option<i64>) -> ApiResult<Value> 
         let conn = open_pairing_conn(&app)?;
         let entries = dev_command_center_tauri::pairing::list_audit_log(&conn, limit)
             .map_err(pairing_error_to_api)?;
-        let json_entries: Vec<Value> = entries
-            .into_iter()
-            .map(|e| {
-                serde_json::json!({
-                    "id": e.id,
-                    "event": e.event,
-                    "deviceId": e.device_id,
-                    "ip": e.ip,
-                    "userAgent": e.user_agent,
-                    "detailsJson": e.details_json,
-                    "createdAt": e.created_at,
-                })
-            })
-            .collect();
-        Ok(serde_json::json!({ "entries": json_entries }))
+        Ok(serde_json::json!({ "entries": entries }))
     })
     .await
     .map_err(|e| db_error(format!("pair_audit_log task failed: {e}")))?

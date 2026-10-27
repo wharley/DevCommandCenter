@@ -77,6 +77,7 @@ mod mobile;
 mod provider_accounts;
 mod provider_usage;
 mod providers;
+mod remote_devices;
 mod shortcuts;
 mod skills;
 mod terminals;
@@ -1006,7 +1007,8 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/remote/pairing/approvals/:approval_id",
             post(remote_respond_approval_handler),
-        );
+        )
+        .merge(remote_devices::routes());
     let protected_routes = if backend.terminals {
         protected_routes.merge(terminal_routes)
     } else {
@@ -1749,6 +1751,10 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/mcp/integrations/remove",
             "POST /api/v1/mcp/integrations/disable",
             "POST /api/v1/mcp/runtime",
+            "GET /api/v1/remote/devices",
+            "POST /api/v1/remote/devices/revoke",
+            "GET /api/v1/remote/audit",
+            "POST /api/v1/remote/relay",
             "POST /api/v1/mcp/scopes",
             "POST /api/v1/mcp/connect/start",
             "POST /api/v1/mcp/connect/wait",
@@ -5210,6 +5216,46 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn paired_phones_are_listed_revoked_and_audited_by_the_operator_only() {
+        let fixture = embedded_fixture().await;
+        let conn = crate::pairing::open_pairing_db(&fixture.backend.workspace.db_path).unwrap();
+        conn.execute(
+            "INSERT INTO paired_devices (device_id, device_name, public_key_spki, noise_public_key)
+             VALUES ('phone-1', 'Pixel', x'00', x'01')",
+            [],
+        )
+        .unwrap();
+        let (status, listed) = get_json(&fixture.app, "/api/v1/remote/devices").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed["devices"][0]["deviceId"], "phone-1");
+        assert_eq!(listed["devices"][0]["deviceName"], "Pixel");
+        assert_eq!(listed["devices"][0]["kind"], "relay");
+        // A paired phone cannot manage phones, even with the key.
+        let (status, _) = call(&fixture.app, "GET", "/api/v1/remote/devices", None, Some("phone-1"), true).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let revoke = json!({ "deviceId": "phone-1" });
+        let (status, _) = call(&fixture.app, "POST", "/api/v1/remote/devices/revoke", Some(revoke.clone()), Some("phone-1"), true).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, revoked) = post_json(&fixture.app, "/api/v1/remote/devices/revoke", revoke).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(revoked, json!({ "revoked": true }));
+        let (_, listed) = get_json(&fixture.app, "/api/v1/remote/devices").await;
+        assert_eq!(listed["devices"], json!([]));
+        let (_, listed) = get_json(&fixture.app, "/api/v1/remote/devices?includeRevoked=true").await;
+        assert_eq!(listed["devices"][0]["revoked"], true);
+        let (status, audit) = get_json(&fixture.app, "/api/v1/remote/audit?limit=50").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(audit["entries"][0]["event"], "revoke");
+        assert_eq!(audit["entries"][0]["deviceId"], "phone-1");
+        // Without the relay running there is nothing to save.
+        let (status, _) = post_json(&fixture.app, "/api/v1/remote/relay", json!({ "relayUrl": null })).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        for path in ["/api/v1/remote/devices", "/api/v1/remote/devices/revoke", "/api/v1/remote/audit", "/api/v1/remote/relay"] {
+            assert!(!crate::remote_connector::remote_path_allowed(path), "{path}");
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
