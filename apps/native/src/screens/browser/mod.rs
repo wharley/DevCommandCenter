@@ -13,6 +13,10 @@ mod download;
 mod evidence;
 mod input;
 pub mod layout;
+#[cfg(target_os = "linux")]
+// Tests never start GTK: its loop is only used outside them.
+#[cfg_attr(test, allow(dead_code))]
+mod linux;
 pub mod page;
 mod popup;
 pub mod sessions;

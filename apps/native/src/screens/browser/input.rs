@@ -7,9 +7,11 @@
 //! size, at most 2048px and 4 MB of PNG.
 
 /// `MAX_SNAPSHOT_BYTES`
+#[cfg(target_os = "macos")]
 pub const MAX_SNAPSHOT_BYTES: usize = 4 * 1024 * 1024;
 
 /// The key, its macOS key code and its characters (`browser_input_macos.m`).
+#[cfg(any(target_os = "macos", test))]
 pub fn key_entry(key: &str) -> Option<(u16, &'static str)> {
     Some(match key {
         "Enter" => (36, "\r"),

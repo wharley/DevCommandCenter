@@ -227,6 +227,13 @@ impl BrowserSurface {
         let Some(url) = self.pending.take() else {
             return;
         };
+        // WebKitGTK needs GTK, started once and run between GPUI's frames.
+        #[cfg(all(target_os = "linux", not(test)))]
+        if let Err(error) = super::linux::ensure_gtk(cx) {
+            self.loading = false;
+            self.error = Some(error);
+            return;
+        }
         let (sender, mut receiver) = unbounded::<PageEvent>();
         match (self.make_page)(window, &url, sender.clone()) {
             Ok(page) => {

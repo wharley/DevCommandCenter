@@ -3,7 +3,8 @@
 //! policy — only HTTPS or local HTTP, no background throttling, a
 //! Browser-only data store, sign-in windows of their own, downloads only
 //! where the person picks — and what it reports back (loading, the URL,
-//! the title). Tests drive a fake page instead: the headless GPUI window
+//! the title). WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux
+//! (`linux.rs`). Tests drive a fake page instead: the headless GPUI window
 //! has no native view to host one.
 
 use std::rc::Rc;
@@ -76,6 +77,12 @@ pub struct WryPage {
     view: Rc<wry::WebView>,
     /// The sign-in windows it opened, closed with it.
     popups: super::popup::Popups,
+    /// GPUI's scale when it opened: on Linux wry takes device pixels.
+    #[cfg(target_os = "linux")]
+    scale: f32,
+    /// Its window-relative top left, for the presses GPUI gets from it.
+    #[cfg(target_os = "linux")]
+    origin: Rc<std::cell::Cell<gpui::Point<Pixels>>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -100,45 +107,57 @@ impl WryPage {
         url: &str,
         events: UnboundedSender<PageEvent>,
     ) -> Result<Self, String> {
-        let loads = events.clone();
-        let titles = events;
         let popups = super::popup::Popups::default();
-        let requests = popups.clone();
-        let builder = wry::WebViewBuilder::new()
-            .with_url(url)
-            .with_visible(false)
-            .with_background_throttling(wry::BackgroundThrottlingPolicy::Disabled)
-            // `on_navigation`: anything else is cancelled, like the desktop.
-            .with_navigation_handler(|url| validate_browser_url(&url).is_ok())
-            // Sign-in windows of their own; a download only where the person picks.
-            .with_new_window_req_handler(move |url, features| requests.request(url, features))
-            .with_download_started_handler(|_, destination| super::download::requested(destination))
-            .with_download_completed_handler(|_, _, _| {})
-            .with_on_page_load_handler(move |event, url| {
-                let _ = loads.unbounded_send(match event {
-                    wry::PageLoadEvent::Started => PageEvent::Loading(url),
-                    wry::PageLoadEvent::Finished => PageEvent::Loaded(url),
-                });
-            })
-            .with_document_title_changed_handler(move |title| {
-                let _ = titles.unbounded_send(PageEvent::Title(title));
-            });
         #[cfg(target_os = "macos")]
-        let builder = {
+        {
             use wry::WebViewBuilderExtDarwin;
-            if named_store_available() {
+            let builder = configure(wry::WebViewBuilder::new(), url, events, &popups);
+            let builder = if named_store_available() {
                 builder.with_data_store_identifier(DATA_STORE_IDENTIFIER)
             } else {
                 builder.with_incognito(true)
-            }
-        };
+            };
+            Self::build(builder, window, popups)
+        }
         #[cfg(not(target_os = "macos"))]
-        let builder = {
-            let profile = crate::prefs::native_file("browser-profile");
-            std::fs::create_dir_all(&profile).map_err(|error| error.to_string())?;
-            let context = Box::leak(Box::new(wry::WebContext::new(Some(profile))));
-            builder.with_web_context(context)
-        };
+        with_profile(|profile| {
+            let builder = wry::WebViewBuilder::new_with_web_context(profile);
+            Self::build(
+                configure(builder, url, events, &popups),
+                window,
+                popups.clone(),
+            )
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    fn build(
+        builder: wry::WebViewBuilder,
+        window: &gpui::Window,
+        popups: super::popup::Popups,
+    ) -> Result<Self, String> {
+        let parent = super::linux::X11Parent::new(window)?;
+        let webview = builder
+            .build_as_child(&parent)
+            .map_err(|error| error.to_string())?;
+        let scale = window.scale_factor();
+        let origin = Rc::new(std::cell::Cell::new(gpui::Point::default()));
+        super::linux::match_scale(&webview, scale);
+        super::linux::forward_presses(&webview, window.window_handle(), scale, origin.clone());
+        Ok(Self {
+            view: Rc::new(webview),
+            popups,
+            scale,
+            origin,
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn build(
+        builder: wry::WebViewBuilder,
+        window: &gpui::Window,
+        popups: super::popup::Popups,
+    ) -> Result<Self, String> {
         builder
             .build_as_child(window)
             .map(|webview| Self {
@@ -149,6 +168,57 @@ impl WryPage {
     }
 }
 
+/// The desktop's policy on a new builder: only HTTPS or local HTTP, no
+/// background throttling, sign-in windows of their own, downloads only
+/// where the person picks, and loading/title reported back.
+fn configure<'a>(
+    builder: wry::WebViewBuilder<'a>,
+    url: &str,
+    events: UnboundedSender<PageEvent>,
+    popups: &super::popup::Popups,
+) -> wry::WebViewBuilder<'a> {
+    let loads = events.clone();
+    let titles = events;
+    let requests = popups.clone();
+    builder
+        .with_url(url)
+        .with_visible(false)
+        .with_background_throttling(wry::BackgroundThrottlingPolicy::Disabled)
+        // `on_navigation`: anything else is cancelled, like the desktop.
+        .with_navigation_handler(|url| validate_browser_url(&url).is_ok())
+        // Sign-in windows of their own; a download only where the person picks.
+        .with_new_window_req_handler(move |url, features| requests.request(url, features))
+        .with_download_started_handler(|_, destination| super::download::requested(destination))
+        .with_download_completed_handler(|_, _, _| {})
+        .with_on_page_load_handler(move |event, url| {
+            let _ = loads.unbounded_send(match event {
+                wry::PageLoadEvent::Started => PageEvent::Loading(url),
+                wry::PageLoadEvent::Finished => PageEvent::Loaded(url),
+            });
+        })
+        .with_document_title_changed_handler(move |title| {
+            let _ = titles.unbounded_send(PageEvent::Title(title));
+        })
+}
+
+/// Off macOS the Browser's own profile is a data directory: one context
+/// for every page, so cookies are shared and the engine opens it once.
+#[cfg(not(target_os = "macos"))]
+fn with_profile<T>(
+    build: impl FnOnce(&mut wry::WebContext) -> Result<T, String>,
+) -> Result<T, String> {
+    thread_local! {
+        static PROFILE: std::cell::RefCell<Option<wry::WebContext>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    let directory = crate::prefs::native_file("browser-profile");
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    PROFILE.with_borrow_mut(|profile| {
+        build(profile.get_or_insert_with(|| wry::WebContext::new(Some(directory))))
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
 fn rect(bounds: Bounds<Pixels>) -> wry::Rect {
     wry::Rect {
         position: wry::dpi::Position::Logical(wry::dpi::LogicalPosition::new(
@@ -172,6 +242,14 @@ impl Page for WryPage {
     }
 
     fn set_bounds(&self, bounds: Bounds<Pixels>) {
+        #[cfg(target_os = "linux")]
+        {
+            self.origin.set(bounds.origin);
+            let _ = self
+                .view
+                .set_bounds(super::linux::device_rect(bounds, self.scale));
+        }
+        #[cfg(not(target_os = "linux"))]
         let _ = self.view.set_bounds(rect(bounds));
     }
 

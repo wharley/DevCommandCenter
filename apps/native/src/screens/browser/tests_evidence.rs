@@ -94,7 +94,10 @@ fn evidence_goes_to_the_agent_and_the_activity_reads_newest_first(cx: &mut TestA
     assert!(
         sent[0].starts_with("<browser_evidence>\nurl: https://example.com/docs\ntitle: Docs\n")
     );
-    assert!(sent[0].contains("texto da página ao iniciar (texto visível da página):\nGuia &lt;checkout>"));
+    assert!(
+        sent[0]
+            .contains("texto da página ao iniciar (texto visível da página):\nGuia &lt;checkout>")
+    );
     assert!(sent[0].contains("1. [consoleError] boom | at=3:9"));
     // The activity: newest first, with who did it and how it ended.
     cx.update(|_, cx| surface.update(cx, |surface, cx| surface.set_audit_open(true, cx)));

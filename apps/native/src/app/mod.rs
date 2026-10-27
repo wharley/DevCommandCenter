@@ -9,40 +9,49 @@ use crate::i18n::I18n;
 use crate::prefs::{self, Prefs};
 use crate::theme::{self, Theme};
 
+/// The platform to run on. On Linux, X11 — natively or through XWayland on
+/// a Wayland session — since the Browser's WebKitGTK only embeds into an
+/// X11 window; with no X server at all, whatever the session offers.
+fn platform() -> gpui::Application {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("DISPLAY").is_some_and(|display| !display.is_empty()) {
+        return gpui_platform::linux(gpui::WindowingModes::X11);
+    }
+    gpui_platform::application()
+}
+
 pub fn run() {
     crate::data::provider_catalog::locate_claude_helper();
     let prefs_path = prefs::default_path();
     let prefs = Prefs::load(&prefs_path);
 
-    gpui_platform::application()
-        .with_assets(Assets)
-        .run(move |cx| {
-            if let Err(error) = theme::fonts::register(cx) {
-                eprintln!("[dcc-native] fonts unavailable, using the system font: {error:#}");
-            }
-            Theme::init(prefs.theme, cx);
-            I18n::init(prefs.locale, cx);
-            menus::install(cx);
-            crate::ui::text_input::bind_keys(cx);
-            crate::ui::text_area::bind_keys(cx);
-            crate::screens::shell::bind_keys(cx);
-            crate::screens::conversation::bind_keys(cx);
-            crate::screens::stage::bind_keys(cx);
-            crate::screens::file_view::bind_keys(cx);
-            crate::screens::annotation::bind_keys(cx);
-            crate::ui::Toaster::init(cx);
-            cx.on_window_closed(|cx, _| {
-                if cx.windows().is_empty() {
-                    cx.quit();
-                }
-            })
-            .detach();
-
-            if let Err(error) = window::open_main(prefs, prefs_path, cx) {
-                eprintln!("[dcc-native] could not open the window: {error:#}");
+    platform().with_assets(Assets).run(move |cx| {
+        if let Err(error) = theme::fonts::register(cx) {
+            eprintln!("[dcc-native] fonts unavailable, using the system font: {error:#}");
+        }
+        Theme::init(prefs.theme, cx);
+        I18n::init(prefs.locale, cx);
+        menus::install(cx);
+        crate::ui::text_input::bind_keys(cx);
+        crate::ui::text_area::bind_keys(cx);
+        crate::screens::shell::bind_keys(cx);
+        crate::screens::conversation::bind_keys(cx);
+        crate::screens::stage::bind_keys(cx);
+        crate::screens::file_view::bind_keys(cx);
+        crate::screens::annotation::bind_keys(cx);
+        crate::ui::Toaster::init(cx);
+        cx.on_window_closed(|cx, _| {
+            if cx.windows().is_empty() {
                 cx.quit();
-                return;
             }
-            cx.activate(true);
-        });
+        })
+        .detach();
+
+        if let Err(error) = window::open_main(prefs, prefs_path, cx) {
+            eprintln!("[dcc-native] could not open the window: {error:#}");
+            cx.quit();
+            return;
+        }
+        cx.activate(true);
+    });
 }

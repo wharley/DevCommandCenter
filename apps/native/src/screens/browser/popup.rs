@@ -6,6 +6,9 @@
 //! a time; one opens only on `about:blank` or an allowed URL; inside, the
 //! blank page is allowed once, then only what the Browser allows. They
 //! close with the page that opened them (the Browser closed, another task).
+//! On Linux the window is GTK's, its view related to the opener's; on
+//! Windows WebView2 opens its own popup window (same environment and
+//! profile), as the desktop's Tauri windows share them.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -38,12 +41,18 @@ struct Popup {
     _webview: wry::WebView,
 }
 
+#[cfg(target_os = "linux")]
+struct Popup {
+    window: gtk::Window,
+    _webview: wry::WebView,
+}
+
 /// The sign-in windows a page opened.
 #[derive(Default, Clone)]
 pub struct Popups {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     open: Rc<RefCell<Vec<Popup>>>,
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     open: Rc<RefCell<Vec<()>>>,
 }
 
@@ -54,7 +63,12 @@ impl Popups {
         for popup in self.open.borrow_mut().drain(..) {
             popup.window.close();
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
+        for popup in self.open.borrow_mut().drain(..) {
+            use gtk::prelude::GtkWindowExt as _;
+            popup.window.close();
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         self.open.borrow_mut().clear();
     }
 
@@ -68,11 +82,65 @@ impl Popups {
             self.open_macos(features)
                 .unwrap_or(wry::NewWindowResponse::Deny)
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
+        {
+            self.open_gtk(features)
+                .unwrap_or(wry::NewWindowResponse::Deny)
+        }
+        // WebView2's own popup window: the same environment and profile,
+        // `window.opener` kept.
+        #[cfg(windows)]
+        {
+            let _ = features;
+            wry::NewWindowResponse::Allow
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
         {
             let _ = features;
             wry::NewWindowResponse::Deny
         }
+    }
+
+    /// A GTK window with a WebKitGTK view related to the opener (its
+    /// session and `window.opener`).
+    #[cfg(target_os = "linux")]
+    fn open_gtk(&self, features: wry::NewWindowFeatures) -> Option<wry::NewWindowResponse> {
+        use gtk::prelude::*;
+        use wry::{WebViewBuilderExtUnix, WebViewExtUnix};
+
+        // Ones the person closed leave the count.
+        self.open
+            .borrow_mut()
+            .retain(|popup| popup.window.is_visible());
+        if self.open.borrow().len() >= MAX_POPUPS {
+            return None;
+        }
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_title(POPUP_TITLE);
+        let (width, height) = features
+            .size
+            .map(|size| (size.width as i32, size.height as i32))
+            .unwrap_or((480, 640));
+        window.set_default_size(width, height);
+        window.set_position(gtk::WindowPosition::Center);
+        let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        window.add(&container);
+        let blank_used = Cell::new(false);
+        let webview = wry::WebViewBuilder::new()
+            .with_related_view(features.opener.webview)
+            .with_navigation_handler(move |url| navigation_allowed(&url, &blank_used))
+            .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
+            .with_download_started_handler(|_, destination| super::download::requested(destination))
+            .with_download_completed_handler(|_, _, _| {})
+            .build_gtk(&container)
+            .ok()?;
+        window.show_all();
+        let target = webview.webview();
+        self.open.borrow_mut().push(Popup {
+            window,
+            _webview: webview,
+        });
+        Some(wry::NewWindowResponse::Create { webview: target })
     }
 
     #[cfg(target_os = "macos")]

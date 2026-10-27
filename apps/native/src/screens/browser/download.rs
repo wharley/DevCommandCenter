@@ -19,6 +19,7 @@ pub fn requested(destination: &mut PathBuf) -> bool {
 }
 
 /// "download" when the page names nothing.
+#[cfg(any(target_os = "macos", test))]
 pub fn suggested_name(destination: &Path) -> String {
     destination
         .file_name()
