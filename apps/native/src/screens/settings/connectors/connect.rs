@@ -101,6 +101,9 @@ impl ConnectorConnect {
 
     /// The logo already saved for this connector, outside the catalog.
     pub(super) fn logo_uri(&self) -> Option<String> {
+        if let Some(logo) = &self.target.logo {
+            return Some(logo.clone());
+        }
         if self.target.preset.is_some() {
             return None;
         }

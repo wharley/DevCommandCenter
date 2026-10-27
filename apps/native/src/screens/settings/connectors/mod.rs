@@ -6,7 +6,11 @@
 
 mod connect;
 mod connect_view;
+mod custom;
 mod glyph;
+mod import;
+mod manage;
+mod manage_tools;
 mod view;
 
 use gpui::{AppContext, Context, Entity, Subscription, Window};
@@ -18,6 +22,8 @@ use crate::i18n::{Args, Translate};
 use crate::ui::Toaster;
 use crate::ui::text_input::{TextInput, TextInputEvent};
 pub(super) use connect::{ConnectEvent, ConnectorConnect};
+#[cfg(test)]
+pub(super) use custom::ConnectorCustom;
 
 /// What waits for "Desconectar …?" / "Remover …?".
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +40,11 @@ pub(super) struct Connectors {
     pub(super) busy: Option<String>,
     pub(super) confirm: Option<Confirm>,
     pub(super) connect: Option<(Entity<ConnectorConnect>, Subscription)>,
+    /// "Adicionar conector personalizado".
+    pub(super) custom: Option<(Entity<custom::ConnectorCustom>, Subscription)>,
+    /// "Gerenciar" for this one.
+    pub(super) managed: Option<manage::Managed>,
+    pub(super) import: import::Import,
     started: bool,
     _search_events: Subscription,
 }
@@ -61,6 +72,9 @@ impl Connectors {
             busy: None,
             confirm: None,
             connect: None,
+            custom: None,
+            managed: None,
+            import: import::Import::default(),
             started: false,
             _search_events: events,
         }
@@ -76,6 +90,9 @@ impl Connectors {
     #[cfg(test)]
     pub(super) fn reset(&mut self) {
         self.integrations = None;
+        let path = self.import.path.take();
+        self.import = import::Import::default();
+        self.import.path = path;
         self.started = false;
     }
 }
@@ -105,7 +122,11 @@ impl Settings {
                 .spawn(async move { api.ok_or(ApiError::DesktopClosed)?.connectors() })
                 .await;
             let _ = this.update(cx, |settings, cx| {
+                let loaded = read.is_ok();
                 settings.connectors.integrations = Some(read.map_err(|error| message(error, cx)));
+                if loaded {
+                    settings.ensure_import_offer(cx);
+                }
                 cx.notify();
             });
         })
@@ -135,6 +156,29 @@ impl Settings {
         cx.notify();
     }
 
+    pub(super) fn open_custom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.connectors.custom.is_some() {
+            return;
+        }
+        let dialog = cx.new(|cx| custom::ConnectorCustom::new(window, cx));
+        let events = cx.subscribe_in(
+            &dialog,
+            window,
+            |settings, _, event, window, cx| match event {
+                custom::CustomEvent::Closed => {
+                    settings.connectors.custom = None;
+                    cx.notify();
+                }
+                custom::CustomEvent::Submitted(target) => {
+                    settings.connectors.custom = None;
+                    settings.open_connect(target.clone(), window, cx);
+                }
+            },
+        );
+        self.connectors.custom = Some((dialog, events));
+        cx.notify();
+    }
+
     /// `reconnect`: a remote connector's sign-in again.
     pub(super) fn reconnect(&mut self, view: &View, window: &mut Window, cx: &mut Context<Self>) {
         let Some(url) = view.integration.url() else {
@@ -144,6 +188,7 @@ impl Settings {
             name: view.name.clone(),
             url: url.to_string(),
             preset: view.preset,
+            ..Target::default()
         };
         self.open_connect(target, window, cx);
     }

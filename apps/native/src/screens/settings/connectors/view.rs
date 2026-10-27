@@ -26,7 +26,7 @@ fn matches(query: &str, values: &[&str]) -> bool {
 }
 
 /// `Intl.ListFormat(language, { style: "long", type: "conjunction" })`.
-fn joined(items: &[String], locale: Locale) -> String {
+pub(super) fn joined(items: &[String], locale: Locale) -> String {
     let and = if locale == Locale::En { "and" } else { "e" };
     match items {
         [] => String::new(),
@@ -248,18 +248,42 @@ impl Settings {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .h(px(32.0))
-                    .px(px(12.0))
-                    .rounded_full()
-                    .border_1()
-                    .border_color(colors.input)
-                    .text_size(px(12.0))
                     .child(
-                        Icon::new("search")
-                            .size(14.0)
-                            .color(colors.muted_foreground),
+                        div()
+                            .flex()
+                            .flex_1()
+                            .min_w_0()
+                            .items_center()
+                            .gap(px(8.0))
+                            .h(px(32.0))
+                            .px(px(12.0))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(colors.input)
+                            .text_size(px(12.0))
+                            .child(
+                                Icon::new("search")
+                                    .size(14.0)
+                                    .color(colors.muted_foreground),
+                            )
+                            .child(panel.search.clone()),
                     )
-                    .child(panel.search.clone()),
+                    .child(
+                        Button::new("settings-connectors-add")
+                            .size(ButtonSize::Sm)
+                            .text_size(12.0)
+                            .on_click(cx.listener(|settings, _, window, cx| {
+                                settings.open_custom(window, cx)
+                            }))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(Icon::new("plus").size(14.0))
+                                    .child(cx.t("settings.connectors.addCustom")),
+                            ),
+                    ),
             )
             .when(self.general.api().is_none(), |column| {
                 column.child(
@@ -270,6 +294,7 @@ impl Settings {
                 )
             })
             .children(state)
+            .children(self.import_offer(cx))
             .when(!connected_rows.is_empty(), |column| {
                 column.child(shelf(
                     cx.t("settings.connectors.connectedTitle"),
@@ -322,6 +347,7 @@ impl Settings {
         let this = cx.entity().downgrade();
         let menu_view = view.clone();
         let labels = (
+            cx.t("settings.connectors.actions.manage"),
             cx.t("settings.connectors.actions.test"),
             cx.t("settings.connectors.actions.reconnect"),
             cx.t("settings.connectors.actions.disconnect"),
@@ -360,20 +386,24 @@ impl Settings {
                         let _ = this.update(cx, |settings, cx| action(settings, &view, window, cx));
                     })
                 };
-                let mut entries = vec![MenuEntry::Item(item(
-                    labels.0.clone(),
-                    |settings, view, _, cx| settings.test_connector(view, cx),
-                ))];
+                let mut entries = vec![
+                    MenuEntry::Item(item(labels.0.clone(), |settings, view, window, cx| {
+                        settings.open_manage(view, window, cx)
+                    })),
+                    MenuEntry::Item(item(labels.1.clone(), |settings, view, _, cx| {
+                        settings.test_connector(view, cx)
+                    })),
+                ];
                 if view.remote && view.status != Status::NeedsAuth {
                     entries.push(MenuEntry::Item(item(
-                        labels.1.clone(),
+                        labels.2.clone(),
                         |settings, view, window, cx| settings.reconnect(view, window, cx),
                     )));
                 }
                 entries.push(MenuEntry::Separator);
                 if view.signed_in {
                     entries.push(MenuEntry::Item(
-                        item(labels.2.clone(), |settings, view, _, cx| {
+                        item(labels.3.clone(), |settings, view, _, cx| {
                             settings.connectors.confirm = Some(Confirm::Disconnect(view.clone()));
                             cx.notify();
                         })
@@ -381,7 +411,7 @@ impl Settings {
                     ));
                 }
                 entries.push(MenuEntry::Item(
-                    item(labels.3.clone(), |settings, view, _, cx| {
+                    item(labels.4.clone(), |settings, view, _, cx| {
                         settings.connectors.confirm = Some(Confirm::Remove(view.clone()));
                         cx.notify();
                     })

@@ -258,3 +258,173 @@ fn connect_signs_in_through_the_browser_or_with_a_token(cx: &mut TestAppContext)
     );
     assert!(cx.debug_bounds("connector-connect").is_none());
 }
+
+#[gpui::test]
+fn a_custom_connector_gets_its_name_and_scopes_before_connecting(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    let (settings, cx, _) = open(Some(SectionId::Integrations), cx);
+    let acme = record(
+        "acme-1",
+        "Acme",
+        "https://mcp.acme.dev/mcp",
+        false,
+        &[],
+        Value::Null,
+    );
+    let acme_on = record(
+        "acme-1",
+        "Acme",
+        "https://mcp.acme.dev/mcp",
+        true,
+        &[],
+        Value::Null,
+    );
+    let (port, server) = fake_desktop_routes(vec![
+        ("/api/v1/mcp/integrations", 200, list(vec![])),
+        (
+            "/api/v1/mcp/integrations",
+            200,
+            json!({ "integration": acme }).to_string(),
+        ),
+        (
+            "/api/v1/mcp/scopes",
+            200,
+            r#"{"scopes":"read write","logo":null}"#.into(),
+        ),
+        (
+            "/api/v1/mcp/integrations/activate",
+            200,
+            json!({ "integration": acme_on }).to_string(),
+        ),
+        (
+            "/api/v1/mcp/connect/start",
+            200,
+            r#"{"kind":"noAuthRequired"}"#.into(),
+        ),
+        (
+            "/api/v1/mcp/test",
+            200,
+            r#"{"check":{"state":"connected","tools":[],"message":null}}"#.into(),
+        ),
+    ]);
+    attach(&settings, port, cx);
+    click(cx, "settings-connectors-add");
+    assert!(cx.debug_bounds("connector-custom").is_some());
+    type Pick =
+        fn(&super::connectors::ConnectorCustom) -> gpui::Entity<crate::ui::text_input::TextInput>;
+    let field = |pick: Pick, cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| {
+            let (dialog, _) = settings
+                .read(cx)
+                .connectors
+                .custom
+                .as_ref()
+                .expect("the custom dialog");
+            pick(dialog.read(cx))
+        })
+    };
+    let focus = |pick: Pick, cx: &mut gpui::VisualTestContext| {
+        let input = field(pick, cx);
+        cx.update(|window, cx| {
+            let handle = gpui::Focusable::focus_handle(input.read(cx), cx);
+            window.focus(&handle, cx);
+        });
+    };
+    // An address that is not one says so.
+    focus(|dialog| dialog.url.clone(), cx);
+    cx.simulate_input("http://acme.dev");
+    click(cx, "custom-connector-continue");
+    assert!(cx.debug_bounds("connector-custom").is_some());
+    cx.simulate_keystrokes("cmd-a backspace");
+    cx.simulate_input("https://mcp.acme.dev/mcp");
+    cx.run_until_parked();
+    let name_input = field(|dialog| dialog.name.clone(), cx);
+    let name = cx.update(|_, cx| name_input.read(cx).text().to_string());
+    assert_eq!(name, "Acme");
+    click(cx, "custom-connector-more");
+    focus(|dialog| dialog.scopes.clone(), cx);
+    cx.simulate_input("read  write");
+    click(cx, "custom-connector-continue");
+    assert!(cx.debug_bounds("connector-custom").is_none());
+    assert!(cx.debug_bounds("connector-connect").is_some());
+    click(cx, "connector-continue");
+    let seen = server.join().unwrap();
+    cx.run_until_parked();
+    let created: Value = serde_json::from_str(&seen[1].1).unwrap();
+    assert_eq!(created["displayName"], "Acme");
+    assert!(
+        seen[2].1.contains(r#""scopes":"read write""#),
+        "{}",
+        seen[2].1
+    );
+    assert_eq!(seen[5].0, "POST /api/v1/mcp/test");
+    assert!(cx.debug_bounds("connector-connect").is_none());
+}
+
+#[gpui::test]
+fn manage_sets_tool_policies_and_projects_and_the_import_offer_is_dismissed(
+    cx: &mut TestAppContext,
+) {
+    use crate::test_support::fake_desktop_routes;
+    let (settings, cx, _) = open(Some(SectionId::Integrations), cx);
+    let mut acme = record(
+        "acme-1",
+        "Acme",
+        "https://mcp.acme.dev/mcp",
+        true,
+        &["dcc"],
+        json!({
+            "state": "connected", "message": null, "checkedAt": "2026-10-27T12:00:00Z",
+            "tools": [{ "name": "search", "annotations": { "readOnlyHint": true } }],
+        }),
+    );
+    acme["bindings"] = json!([{ "scope": { "type": "global" }, "enabled": true }]);
+    let natives = json!({ "servers": [
+        { "app": "claudeCode", "name": "linear", "url": "https://mcp.linear.app/mcp", "hasHeaders": false },
+    ] })
+    .to_string();
+    let (port, server) = fake_desktop_routes(vec![
+        ("/api/v1/mcp/integrations", 200, list(vec![acme.clone()])),
+        ("/api/v1/mcp/native-servers", 200, natives),
+        ("/api/v1/mcp/tool-policy", 200, r#"{"policy":{}}"#.into()),
+        ("/api/v1/mcp/integrations", 200, list(vec![acme.clone()])),
+        (
+            "/api/v1/mcp/project",
+            200,
+            r#"{"excludedProjectIds":["p-1"]}"#.into(),
+        ),
+        ("/api/v1/mcp/integrations", 200, list(vec![acme.clone()])),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let offered = dir.path().join("offered.json");
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, _| {
+            settings.connectors.import.path = Some(offered.clone())
+        })
+    });
+    attach(&settings, port, cx);
+    // "Encontramos Linear em Claude Code."
+    assert!(cx.debug_bounds("settings-connectors-import").is_some());
+    click(cx, "settings-connectors-import-later");
+    assert!(cx.debug_bounds("settings-connectors-import").is_none());
+    assert_eq!(
+        crate::data::connector_custom::read_offered(&offered),
+        ["https://mcp.linear.app/mcp"]
+    );
+    let view = cx.update(|_, cx| View::of(&settings.read(cx).connectors.list()[0].clone()));
+    cx.update(|window, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.open_manage(&view, window, cx);
+            settings.set_manage_projects(vec![("p-1".into(), "Zedy".into())]);
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("connector-manage").is_some());
+    click(cx, "manage-policy-search-allow");
+    cx.run_until_parked();
+    click(cx, "manage-project-p-1");
+    let seen = server.join().unwrap();
+    cx.run_until_parked();
+    assert!(seen[2].1.contains(r#""decision":"allow""#), "{}", seen[2].1);
+    assert!(seen[4].1.contains(r#""enabled":false"#), "{}", seen[4].1);
+}

@@ -52,6 +52,36 @@ pub struct SidebarData {
     pub linked_folders: HashMap<String, dcc_core::application::linked_task::LinkedFolders>,
 }
 
+/// One row per project, by name (`listRepositories` folded by
+/// `projectId`): for the connectors switched off per project.
+pub fn project_names(db_path: &Path) -> Vec<(String, String)> {
+    let Ok(workspaces) = (db_path.exists())
+        .then(|| SqliteWorkspaceRepo::open(db_path))
+        .transpose()
+    else {
+        return Vec::new();
+    };
+    let Some(workspaces) = workspaces else {
+        return Vec::new();
+    };
+    let mut projects: Vec<(String, String)> = Vec::new();
+    for repository in block_on(workspaces.list_repositories()).unwrap_or_default() {
+        if !projects
+            .iter()
+            .any(|(id, _)| *id == repository.project_id.0)
+        {
+            let name = repository
+                .display_name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| repository.name.clone());
+            projects.push((repository.project_id.0.clone(), name));
+        }
+    }
+    projects.sort_by_key(|(_, name)| name.to_lowercase());
+    projects
+}
+
 pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
     if !db_path.exists() {
         return Ok(SidebarData::default());

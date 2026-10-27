@@ -39,6 +39,13 @@ impl Render for Settings {
             .or_else(|| self.forge_connect_dialog(cx))
             .or_else(|| self.automation_dialog())
             .or_else(|| self.connector_confirm_dialog(cx))
+            .or_else(|| self.manage_dialog(cx))
+            .or_else(|| {
+                self.connectors
+                    .custom
+                    .as_ref()
+                    .map(|(dialog, _)| dialog.clone().into_any_element())
+            })
             .or_else(|| {
                 self.connectors
                     .connect

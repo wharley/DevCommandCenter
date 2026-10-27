@@ -56,8 +56,73 @@ pub struct Definition {
 pub struct Check {
     /// `connected` | `needsAuth` | `failed`
     pub state: String,
-    pub tools: Vec<Value>,
+    pub tools: Vec<Tool>,
     pub message: Option<String>,
+    pub checked_at: Option<String>,
+}
+
+/// `McpToolAnnotations`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Annotations {
+    pub read_only_hint: Option<bool>,
+    pub destructive_hint: Option<bool>,
+    pub idempotent_hint: Option<bool>,
+    pub open_world_hint: Option<bool>,
+}
+
+/// `McpToolSummary`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Tool {
+    pub name: String,
+    pub annotations: Annotations,
+}
+
+impl Tool {
+    /// `listMcpToolAnnotationHints`: `settings.integrations.toolAnnotation.<hint>`.
+    pub fn hints(&self) -> Vec<&'static str> {
+        let hints = &self.annotations;
+        [
+            hints
+                .read_only_hint
+                .map(|on| if on { "readOnly" } else { "mayModify" }),
+            hints
+                .destructive_hint
+                .map(|on| if on { "destructive" } else { "nonDestructive" }),
+            hints
+                .idempotent_hint
+                .map(|on| if on { "idempotent" } else { "nonIdempotent" }),
+            hints
+                .open_world_hint
+                .map(|on| if on { "openWorld" } else { "closedWorld" }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BindingScope {
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Binding {
+    pub scope: BindingScope,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ToolPolicy {
+    pub tool_name: String,
+    /// `ask` | `allow` | `deny`
+    pub decision: String,
 }
 
 /// `McpIntegrationRecord` (what the panel reads of it).
@@ -69,9 +134,29 @@ pub struct Integration {
     pub connection_check: Option<Check>,
     /// A `data:` image for connectors outside the catalog.
     pub logo: Option<String>,
+    pub bindings: Vec<Binding>,
+    pub tool_policies: Vec<ToolPolicy>,
+    pub excluded_project_ids: Vec<String>,
+    /// Scopes the person chose; none uses the server's suggestion.
+    pub scopes: Option<String>,
 }
 
 impl Integration {
+    /// `getMcpToolPolicyDecision`: `ask` unless set.
+    pub fn tool_decision(&self, tool: &str) -> &str {
+        self.tool_policies
+            .iter()
+            .find(|policy| policy.tool_name == tool)
+            .map_or("ask", |policy| policy.decision.as_str())
+    }
+
+    /// Bound everywhere: it can be switched off per project.
+    pub fn global(&self) -> bool {
+        self.bindings
+            .iter()
+            .any(|binding| binding.enabled && binding.scope.kind == "global")
+    }
+
     /// `connectorUrl`
     pub fn url(&self) -> Option<&str> {
         (self.definition.transport.kind == "http")
@@ -351,6 +436,33 @@ impl DesktopApi {
         decode(value.get("check").cloned().unwrap_or(Value::Null))
     }
 
+    /// `applyNewConnectorDetails`: the scopes chosen (or the preset's), and
+    /// the uploaded logo — without one, the site's icon is looked for later.
+    fn apply_new_details(
+        &self,
+        integration: &Integration,
+        target: &Target,
+    ) -> Result<(), ApiError> {
+        let id = &integration.definition.id;
+        let scopes = target
+            .scopes
+            .clone()
+            .filter(|scopes| !scopes.trim().is_empty())
+            .or_else(|| target.preset.and_then(Preset::scopes));
+        if let Some(scopes) = scopes {
+            self.set_connector_scopes(id, &scopes)?;
+        }
+        if let Some(logo) = &target.logo {
+            self.set_connector_logo(id, Some(logo))?;
+        } else if target.preset.is_none() {
+            let (api, id) = (self.clone(), id.clone());
+            std::thread::spawn(move || {
+                let _ = api.fetch_connector_logo(&id);
+            });
+        }
+        Ok(())
+    }
+
     /// `ensureConnectorIntegration`: an enabled, trusted integration for the
     /// target, reusing one with the same URL (a token always makes a new one).
     pub fn ensure_connector(
@@ -367,9 +479,7 @@ impl DesktopApi {
             Some(integration) => integration,
             None => {
                 let created = self.create_connector(&target.name, &target.url, token)?;
-                if let Some(scopes) = target.preset.and_then(Preset::scopes) {
-                    self.set_connector_scopes(&created.definition.id, &scopes)?;
-                }
+                self.apply_new_details(&created, target)?;
                 created
             }
         };
@@ -381,11 +491,15 @@ impl DesktopApi {
 }
 
 /// `ConnectorTarget`: what the person is connecting.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Target {
     pub name: String,
     pub url: String,
     pub preset: Option<&'static Preset>,
+    /// A custom connector's scopes instead of the server's.
+    pub scopes: Option<String>,
+    /// A custom connector's uploaded logo (`data:` URI).
+    pub logo: Option<String>,
 }
 
 impl Target {
@@ -394,6 +508,7 @@ impl Target {
             name: preset.name.into(),
             url: preset.url.into(),
             preset: Some(preset),
+            ..Self::default()
         }
     }
 

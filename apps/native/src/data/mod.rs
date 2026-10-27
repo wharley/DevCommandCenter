@@ -17,6 +17,7 @@ pub mod composer_settings;
 pub mod computer_use;
 pub mod conflict_api;
 pub mod connector_catalog;
+pub mod connector_custom;
 pub mod connector_marks;
 pub mod connectors;
 pub mod conversation;
