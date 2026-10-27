@@ -266,6 +266,32 @@ impl Settings {
                 .into_any_element(),
             ),
         };
+        let shows_usage = signed_in && provider.capabilities.supports_account_usage;
+        let open = shows_usage && self.providers.usage.open.contains(&key);
+        let meter = shows_usage.then(|| self.plan_meter(&key, cx)).flatten();
+        let toggle_key = key.clone();
+        let toggle = shows_usage.then(|| {
+            Button::new(SharedString::from(format!("settings-account-usage-{slug}")))
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::IconSm)
+                .on_click(cx.listener(move |settings, _, _, cx| {
+                    let usage = &mut settings.providers.usage;
+                    if !usage.open.remove(&toggle_key) {
+                        usage.open.insert(toggle_key.clone());
+                    }
+                    cx.notify();
+                }))
+                .child(Icon::new(if open { "chevron-up" } else { "chevron-down" }).size(14.0))
+        });
+        let details = open.then(|| {
+            div()
+                .border_t_1()
+                .border_color(colors.border.opacity(0.5))
+                .bg(colors.muted.opacity(0.2))
+                .px(px(12.0))
+                .py(px(12.0))
+                .child(self.usage_details(provider, &key, cx))
+        });
         let command = match &status {
             Status::Ready(ready) if !ready.signed_in() && !signing_in => {
                 ready.login_command.clone()
@@ -299,6 +325,8 @@ impl Settings {
                         ),
                     )
                     .children(actions)
+                    .children(meter)
+                    .children(toggle)
                     .children(trailing),
             )
             .children(command.map(|command| {
@@ -344,6 +372,7 @@ impl Settings {
                             .child(Icon::new("copy").size(12.0)),
                     )
             }))
+            .children(details)
             .into_any_element()
     }
 

@@ -122,6 +122,7 @@ impl Settings {
                         Err(error) => Status::Failed(message(error, cx)),
                     };
                     settings.providers.accounts.statuses.insert(key, status);
+                    settings.ensure_usage(cx);
                     cx.notify();
                 });
                 if updated.is_err() {

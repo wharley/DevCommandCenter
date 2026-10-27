@@ -5,7 +5,10 @@
 
 mod account_rows;
 mod accounts;
+mod antigravity;
 mod runtime;
+mod usage;
+mod usage_resets;
 mod view;
 
 #[cfg(test)]
@@ -49,6 +52,8 @@ pub(super) struct Providers {
     pub(super) home: Entity<TextInput>,
     pub(super) shadow_home: Entity<TextInput>,
     pub(super) accounts: accounts::Accounts,
+    pub(super) usage: usage::Usage,
+    pub(super) antigravity: antigravity::Antigravity,
     _inputs: Vec<Subscription>,
 }
 
@@ -97,6 +102,8 @@ impl Providers {
             home,
             shadow_home,
             accounts: accounts::Accounts::new(window, cx),
+            usage: usage::Usage::default(),
+            antigravity: antigravity::Antigravity::default(),
             _inputs: inputs,
         }
     }
@@ -160,6 +167,8 @@ impl Settings {
                 settings.providers.catalog = Some(providers);
                 settings.providers.checking = false;
                 settings.fill_runtime_fields(cx);
+                settings.ensure_usage(cx);
+                settings.ensure_antigravity(cx);
                 cx.notify();
             });
         })
@@ -170,6 +179,8 @@ impl Settings {
         self.providers.chosen = Some(provider_id);
         self.fill_runtime_fields(cx);
         self.load_account_statuses(cx);
+        self.ensure_usage(cx);
+        self.ensure_antigravity(cx);
         cx.notify();
     }
 

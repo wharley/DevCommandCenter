@@ -12,6 +12,8 @@ mod providers;
 mod shortcuts;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_providers;
 mod view;
 
 use gpui::{AppContext, Context, Entity, EventEmitter, ScrollHandle, Subscription, Window};

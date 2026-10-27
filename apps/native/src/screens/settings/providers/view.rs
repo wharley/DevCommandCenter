@@ -329,6 +329,26 @@ impl Settings {
             .flex_1()
             .min_w_0()
             .child(header)
+            .children((id == "antigravity").then(|| {
+                detail_section(
+                    cx.t("settings.model.antigravitySetupTitle"),
+                    None,
+                    self.antigravity_setup(provider, cx),
+                    cx,
+                )
+            }))
+            .children(
+                (!provider.capabilities.supports_accounts
+                    && provider.capabilities.supports_account_usage)
+                    .then(|| {
+                        detail_section(
+                            cx.t("settings.model.usageTitle"),
+                            None,
+                            self.usage_details(provider, &(id.clone(), None), cx),
+                            cx,
+                        )
+                    }),
+            )
             .children(provider.capabilities.supports_accounts.then(|| {
                 detail_section(
                     cx.t("settings.model.accountsTitle"),
