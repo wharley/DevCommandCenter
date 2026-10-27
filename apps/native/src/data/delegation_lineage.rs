@@ -108,6 +108,7 @@ mod tests {
             archived: false,
             depth: 0,
             updated_at: String::new(),
+            created_at: String::new(),
         }
     }
 

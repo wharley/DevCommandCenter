@@ -311,6 +311,7 @@ impl Settings {
                     .text_color(colors.muted_foreground)
                     .child(footer),
             )
+            .child(self.advanced_section(cx))
             .into_any_element()
     }
 

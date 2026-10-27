@@ -1,9 +1,9 @@
 //! "Conectores" (`ConnectorsPanel`): the search, the connected ones (status,
 //! "Reconectar", and a menu to test, reconnect, sign out or remove), then
-//! the catalog by category, and "Conectar" with DCC's own sign-in. Adding a
-//! custom one, managing one and the advanced MCP panel come with the next
-//! parts.
+//! the catalog by category, "Conectar" with DCC's own sign-in, a custom
+//! one, managing one, and "Avançado" (servers added by hand).
 
+mod advanced;
 mod connect;
 mod connect_view;
 mod custom;
@@ -21,6 +21,8 @@ use crate::data::desktop_api::ApiError;
 use crate::i18n::{Args, Translate};
 use crate::ui::Toaster;
 use crate::ui::text_input::{TextInput, TextInputEvent};
+#[cfg(test)]
+pub(super) use advanced::{Form, Panel};
 pub(super) use connect::{ConnectEvent, ConnectorConnect};
 #[cfg(test)]
 pub(super) use custom::ConnectorCustom;
@@ -45,6 +47,8 @@ pub(super) struct Connectors {
     /// "Gerenciar" for this one.
     pub(super) managed: Option<manage::Managed>,
     pub(super) import: import::Import,
+    /// "Avançado": servers added by hand.
+    pub(super) advanced: advanced::Advanced,
     started: bool,
     _search_events: Subscription,
 }
@@ -75,6 +79,7 @@ impl Connectors {
             custom: None,
             managed: None,
             import: import::Import::default(),
+            advanced: advanced::Advanced::default(),
             started: false,
             _search_events: events,
         }
@@ -93,6 +98,7 @@ impl Connectors {
         let path = self.import.path.take();
         self.import = import::Import::default();
         self.import.path = path;
+        self.advanced = advanced::Advanced::default();
         self.started = false;
     }
 }

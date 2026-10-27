@@ -3,20 +3,16 @@
 //! (working, needs reconnecting, off…), the curated catalog, the Slack app
 //! the person creates, and the calls of DCC's own sign-in.
 
-use std::time::Duration;
-
 use dcc_core::domain::provider::{McpSupportLevel, ProviderDescriptor};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 pub use super::connector_catalog::*;
+pub use super::connector_sign_in::{Finish, Start};
 use super::desktop_api::{ApiError, DesktopApi};
 
 /// `DCC_GRANT_OWNER`: sign-ins DCC performs itself.
 pub const DCC_GRANT_OWNER: &str = "dcc";
-
-/// A browser sign-in may take this long.
-const SIGN_IN_WAIT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -24,6 +20,10 @@ pub struct Transport {
     #[serde(rename = "type")]
     pub kind: String,
     pub url: Option<String>,
+    /// stdio: the program, its arguments and folder.
+    pub executable: Option<String>,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -49,6 +49,21 @@ pub struct Definition {
     pub transport: Transport,
     pub enabled: bool,
     pub trust: Trust,
+    pub updated_at: String,
+    /// Where each credential goes (a header or a variable), never its value.
+    pub secret_refs: Vec<SecretRef>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SecretRef {
+    pub target: SecretTarget,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SecretTarget {
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -108,6 +123,8 @@ impl Tool {
 pub struct BindingScope {
     #[serde(rename = "type")]
     pub kind: String,
+    pub session_id: Option<String>,
+    pub project_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -115,6 +132,8 @@ pub struct BindingScope {
 pub struct Binding {
     pub scope: BindingScope,
     pub enabled: bool,
+    pub provider_exclusions: Vec<String>,
+    pub updated_at: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -123,6 +142,7 @@ pub struct ToolPolicy {
     pub tool_name: String,
     /// `ask` | `allow` | `deny`
     pub decision: String,
+    pub updated_at: String,
 }
 
 /// `McpIntegrationRecord` (what the panel reads of it).
@@ -137,6 +157,7 @@ pub struct Integration {
     pub bindings: Vec<Binding>,
     pub tool_policies: Vec<ToolPolicy>,
     pub excluded_project_ids: Vec<String>,
+    pub credential_count: usize,
     /// Scopes the person chose; none uses the server's suggestion.
     pub scopes: Option<String>,
 }
@@ -286,37 +307,6 @@ pub fn providers_without_connectors(providers: &[ProviderDescriptor]) -> Vec<Str
         .collect()
 }
 
-/// `StartMcpConnectOutput`
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum Start {
-    NoAuthRequired,
-    Authorize {
-        login_id: String,
-        authorization_url: String,
-    },
-    Failed {
-        reason: String,
-        message: String,
-    },
-}
-
-/// `WaitMcpConnectOutput`
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum Finish {
-    Connected { check: Option<Check> },
-    Failed { reason: String, message: String },
-}
-
 fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
     serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
 }
@@ -388,38 +378,6 @@ impl DesktopApi {
         self.post(
             "/api/v1/mcp/scopes",
             &json!({ "definitionId": id, "scopes": scopes }),
-        )
-        .map(|_| ())
-    }
-
-    /// `startMcpConnect`
-    pub fn start_connect(
-        &self,
-        id: &str,
-        client_id: Option<&str>,
-        client_secret: Option<&str>,
-    ) -> Result<Start, ApiError> {
-        decode(self.post(
-            "/api/v1/mcp/connect/start",
-            &json!({ "definitionId": id, "clientId": client_id, "clientSecret": client_secret }),
-        )?)
-    }
-
-    /// `waitMcpConnect`: once the person authorized in the browser.
-    pub fn wait_connect(&self, login_id: &str) -> Result<Finish, ApiError> {
-        decode(self.request_waiting(
-            "POST",
-            "/api/v1/mcp/connect/wait",
-            Some(&json!({ "loginId": login_id })),
-            SIGN_IN_WAIT,
-        )?)
-    }
-
-    /// `cancelMcpConnect`
-    pub fn cancel_connect(&self, login_id: &str) -> Result<(), ApiError> {
-        self.post(
-            "/api/v1/mcp/connect/cancel",
-            &json!({ "loginId": login_id }),
         )
         .map(|_| ())
     }

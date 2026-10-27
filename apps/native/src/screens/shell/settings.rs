@@ -7,6 +7,7 @@
 use gpui::{AnyElement, AppContext, Context, Entity, IntoElement, Subscription, Window};
 
 use super::Shell;
+use crate::data::mcp_advanced::SessionContext;
 use crate::prefs::Prefs;
 use crate::screens::settings::{SectionId, Settings, SettingsEvent, SettingsState};
 
@@ -27,12 +28,33 @@ impl Shell {
         let name = conversation
             .data()
             .and_then(|data| self.sidebar.read(cx).task_name(&data.task_id));
+        let session = conversation
+            .data()
+            .map(|data| SessionContext {
+                project_id: self
+                    .sidebar
+                    .read(cx)
+                    .tasks()
+                    .iter()
+                    .find(|task| task.id == data.task_id)
+                    .map(|task| task.project_id.clone()),
+                session_id: data.session_id.clone(),
+                provider_id: data.provider_id.clone(),
+                created_at: data.session_id.as_ref().and_then(|id| {
+                    data.sessions
+                        .iter()
+                        .find(|row| &row.id == id)
+                        .map(|row| row.created_at.clone())
+                }),
+            })
+            .unwrap_or_default();
         let state = SettingsState {
             theme: self.prefs.theme,
             locale: self.prefs.locale,
             density: self.prefs.density,
             workspace: (name, root),
             default_pick: conversation.composer.read(cx).settings.global_pick.clone(),
+            session,
         };
         let settings = cx.new(|cx| Settings::new(state, section, window, cx));
         let events = cx.subscribe_in(&settings, window, |shell, _, event, window, cx| {

@@ -22,6 +22,8 @@ mod tests_account;
 #[cfg(test)]
 mod tests_connectors;
 #[cfg(test)]
+mod tests_mcp_advanced;
+#[cfg(test)]
 mod tests_providers;
 mod view;
 
@@ -145,6 +147,8 @@ pub struct Settings {
     search: Entity<TextInput>,
     /// The open task's name and checkout, for the navigation's footer.
     workspace: (Option<String>, Option<String>),
+    /// The open session, for the advanced MCP panel.
+    session: crate::data::mcp_advanced::SessionContext,
     /// What `prefs` holds now (the dialog shows it, the shell keeps it).
     theme: ThemePreference,
     locale: Locale,
@@ -176,6 +180,8 @@ pub struct SettingsState {
     pub workspace: (Option<String>, Option<String>),
     /// New tasks' provider and model.
     pub default_pick: Option<crate::data::provider_selection::Pick>,
+    /// The open task's project and session.
+    pub session: crate::data::mcp_advanced::SessionContext,
 }
 
 impl Settings {
@@ -210,6 +216,7 @@ impl Settings {
             active,
             search,
             workspace: state.workspace,
+            session: state.session,
             theme: state.theme,
             locale: state.locale,
             density: state.density,

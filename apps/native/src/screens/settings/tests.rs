@@ -28,6 +28,7 @@ pub(super) fn open(
         density: Density::Comfortable,
         workspace: (Some("Checkout".into()), Some("/repo".into())),
         default_pick: None,
+        session: Default::default(),
     };
     let (settings, cx) =
         cx.add_window_view(move |window, cx| Settings::new(state, section, window, cx));

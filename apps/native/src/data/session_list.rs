@@ -23,6 +23,7 @@ pub struct SessionRow {
     pub depth: u8,
     /// The session's own `updatedAt` (the palette lists the newest first).
     pub updated_at: String,
+    pub created_at: String,
 }
 
 fn state_name(state: &SessionState) -> &'static str {
@@ -47,6 +48,7 @@ fn row(summary: &WorkspaceSessionSummary, depth: u8) -> SessionRow {
         archived: summary.thread.archived_at.is_some(),
         depth,
         updated_at: summary.session.updated_at.clone(),
+        created_at: summary.session.created_at.clone(),
     }
 }
 

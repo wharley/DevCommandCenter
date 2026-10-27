@@ -5,6 +5,7 @@
 use gpui::{App, FontWeight, SharedString, Window, div, prelude::*, px};
 
 use crate::theme::ActiveTheme;
+use crate::theme::color::mix_oklab;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BadgeVariant {
@@ -12,6 +13,14 @@ pub enum BadgeVariant {
     Outline,
     /// `bg-secondary text-secondary-foreground`
     Secondary,
+    /// `bg-destructive/10 text-destructive`
+    Destructive,
+    /// `bg-transparent text-foreground`
+    Ghost,
+    /// `color-mix(in oklab, var(--success) 20%, var(--secondary))`
+    Success,
+    /// `color-mix(in oklab, var(--warning) 20%, var(--secondary))`
+    Warn,
 }
 
 #[derive(IntoElement)]
@@ -22,6 +31,7 @@ pub struct Badge {
     padding_x: f32,
     text_size: f32,
     weight: FontWeight,
+    icon: Option<&'static str>,
 }
 
 impl Badge {
@@ -33,7 +43,14 @@ impl Badge {
             padding_x: 8.0,
             text_size: 12.0,
             weight: FontWeight::MEDIUM,
+            icon: None,
         }
+    }
+
+    /// A 12px icon before the text (`gap-1`).
+    pub fn icon(mut self, icon: &'static str) -> Self {
+        self.icon = Some(icon);
+        self
     }
 
     pub fn height(mut self, height: f32) -> Self {
@@ -82,7 +99,24 @@ impl RenderOnce for Badge {
                     .border_color(gpui::transparent_black())
                     .bg(colors.secondary)
                     .text_color(colors.secondary_foreground),
+                BadgeVariant::Destructive => badge
+                    .border_color(gpui::transparent_black())
+                    .bg(colors.destructive.opacity(0.1))
+                    .text_color(colors.destructive),
+                BadgeVariant::Ghost => badge
+                    .border_color(gpui::transparent_black())
+                    .text_color(colors.foreground),
+                BadgeVariant::Success => badge
+                    .border_color(gpui::transparent_black())
+                    .bg(mix_oklab(colors.success, 0.2, colors.secondary))
+                    .text_color(colors.foreground),
+                BadgeVariant::Warn => badge
+                    .border_color(gpui::transparent_black())
+                    .bg(mix_oklab(colors.warning, 0.2, colors.secondary))
+                    .text_color(colors.foreground),
             })
+            .gap(px(4.0))
+            .children(self.icon.map(|icon| crate::ui::Icon::new(icon).size(12.0)))
             .child(self.label)
     }
 }
