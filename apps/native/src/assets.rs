@@ -17,7 +17,9 @@ impl AssetSource for Assets {
         if let Some(svg) = provider_mark(path).or_else(|| editor_mark(path)) {
             return Ok(Some(Cow::Borrowed(svg.as_bytes())));
         }
-        Ok(icon_svg(path).map(|svg| Cow::Owned(svg.into_bytes())))
+        Ok(icon_svg(path)
+            .or_else(|| crate::data::connector_marks::svg(path))
+            .map(|svg| Cow::Owned(svg.into_bytes())))
     }
 
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {

@@ -63,8 +63,8 @@ pub(super) fn click(cx: &mut VisualTestContext, selector: &'static str) {
 
 #[gpui::test]
 fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) {
-    // "Conectores" is not here yet: the first section the native app has.
-    let (settings, cx, events) = open(Some(SectionId::Integrations), cx);
+    // "Computer Use" is not here yet: the first section the native app has.
+    let (settings, cx, events) = open(Some(SectionId::ComputerUse), cx);
     assert_eq!(
         cx.update(|_, cx| settings.read(cx).active),
         SectionId::General
@@ -77,7 +77,8 @@ fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) 
             .is_some()
     );
     assert!(cx.debug_bounds("settings-section-aiMemory").is_some());
-    assert!(cx.debug_bounds("settings-section-integrations").is_none());
+    assert!(cx.debug_bounds("settings-section-integrations").is_some());
+    assert!(cx.debug_bounds("settings-section-computerUse").is_none());
     cx.simulate_input("experim");
     cx.run_until_parked();
     assert!(cx.debug_bounds("settings-section-appearance").is_none());

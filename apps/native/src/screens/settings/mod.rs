@@ -5,6 +5,7 @@
 
 mod account;
 mod appearance;
+mod connectors;
 mod decision;
 mod experimental;
 mod general;
@@ -18,6 +19,8 @@ mod shortcuts;
 mod tests;
 #[cfg(test)]
 mod tests_account;
+#[cfg(test)]
+mod tests_connectors;
 #[cfg(test)]
 mod tests_providers;
 mod view;
@@ -124,12 +127,13 @@ impl SectionId {
 }
 
 /// The sections the native app has, in the desktop's array order.
-pub const AVAILABLE: [SectionId; 9] = [
+pub const AVAILABLE: [SectionId; 10] = [
     SectionId::General,
     SectionId::Appearance,
     SectionId::Model,
     SectionId::DecisionProvider,
     SectionId::AiMemory,
+    SectionId::Integrations,
     SectionId::Shortcuts,
     SectionId::Git,
     SectionId::Experimental,
@@ -153,6 +157,7 @@ pub struct Settings {
     decision: decision::Decision,
     memory: memory::Memory,
     account: account::Account,
+    connectors: connectors::Connectors,
     /// "Automação do projeto" over Settings.
     automation: Option<(
         Entity<crate::screens::automation::ProjectAutomation>,
@@ -220,6 +225,7 @@ impl Settings {
             decision: decision::Decision::new(window, cx),
             memory: memory::Memory::new(window, cx),
             account: account::Account::new(window, cx),
+            connectors: connectors::Connectors::new(window, cx),
             automation: None,
             _search_events: events,
         };
@@ -230,6 +236,9 @@ impl Settings {
         settings.load_memory(cx);
         if settings.active == SectionId::Account {
             settings.ensure_account(cx);
+        }
+        if settings.active == SectionId::Integrations {
+            settings.ensure_connectors(cx);
         }
         settings
     }
@@ -253,6 +262,10 @@ impl Settings {
         if self.active == SectionId::Account {
             self.ensure_account(cx);
         }
+        self.connectors.reset();
+        if self.active == SectionId::Integrations {
+            self.ensure_connectors(cx);
+        }
     }
 
     pub fn search_input(&self) -> Entity<TextInput> {
@@ -263,6 +276,9 @@ impl Settings {
         self.active = section;
         if section == SectionId::Account {
             self.ensure_account(cx);
+        }
+        if section == SectionId::Integrations {
+            self.ensure_connectors(cx);
         }
         // A new section starts at its top.
         self.scroll
@@ -299,4 +315,10 @@ impl Settings {
         self.metrics.clear();
         cx.notify();
     }
+}
+
+/// A removal waiting for its confirmation, for the tests.
+#[cfg(test)]
+fn connectors_confirm_remove(view: crate::data::connectors::View) -> connectors::Confirm {
+    connectors::Confirm::Remove(view)
 }
