@@ -256,6 +256,7 @@ impl Shell {
             crate::screens::computer_use::approval::ComputerApprovals::new(api, computer_titles, cx)
         });
         let computer_subscriptions = computer::link(&computer_approvals, &conversation, window, cx);
+        browser::trim_cache_daily(cx);
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
         Self {

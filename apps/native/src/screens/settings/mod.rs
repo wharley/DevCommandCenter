@@ -5,6 +5,7 @@
 
 mod appearance;
 mod experimental;
+mod general;
 mod nav;
 mod preview;
 #[cfg(test)]
@@ -106,7 +107,11 @@ impl SectionId {
 }
 
 /// The sections the native app has, in the desktop's array order.
-pub const AVAILABLE: [SectionId; 2] = [SectionId::Appearance, SectionId::Experimental];
+pub const AVAILABLE: [SectionId; 3] = [
+    SectionId::General,
+    SectionId::Appearance,
+    SectionId::Experimental,
+];
 
 pub struct Settings {
     active: SectionId,
@@ -119,6 +124,7 @@ pub struct Settings {
     density: Density,
     metrics: std::collections::HashMap<String, crate::data::ux_metrics::Metric>,
     scroll: ScrollHandle,
+    general: general::General,
     _search_events: Subscription,
 }
 
@@ -160,7 +166,7 @@ impl Settings {
         let active = section
             .filter(|section| AVAILABLE.contains(section))
             .unwrap_or(AVAILABLE[0]);
-        Self {
+        let mut settings = Self {
             active,
             search,
             workspace: state.workspace,
@@ -169,8 +175,26 @@ impl Settings {
             density: state.density,
             metrics: crate::data::ux_metrics::read(),
             scroll: ScrollHandle::new(),
+            general: general::General::new(if cfg!(test) {
+                None
+            } else {
+                crate::data::desktop_api::DesktopApi::load()
+            }),
             _search_events: events,
-        }
+        };
+        settings.load_general(cx);
+        settings
+    }
+
+    #[cfg(test)]
+    pub fn set_api(
+        &mut self,
+        api: crate::data::desktop_api::DesktopApi,
+        data_dir: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        self.general.set_api(api, data_dir);
+        self.load_general(cx);
     }
 
     pub fn search_input(&self) -> Entity<TextInput> {

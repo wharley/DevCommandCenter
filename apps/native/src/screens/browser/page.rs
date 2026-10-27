@@ -53,13 +53,13 @@ pub trait Page {
 /// A Browser-only WebKit store (macOS 14+), apart from anything else in
 /// the app; every Browser view of the native app shares its logins.
 #[cfg(target_os = "macos")]
-const DATA_STORE_IDENTIFIER: [u8; 16] = [
+pub(crate) const DATA_STORE_IDENTIFIER: [u8; 16] = [
     0x3d, 0xc1, 0x8e, 0x52, 0x07, 0x6a, 0x4f, 0x19, 0x9b, 0x2e, 0xd4, 0x61, 0xa8, 0x35, 0x7c, 0x0f,
 ];
 
 /// `named_browser_store_is_available`: `dataStoreForIdentifier` is macOS 14+.
 #[cfg(target_os = "macos")]
-fn named_store_available() -> bool {
+pub(crate) fn named_store_available() -> bool {
     static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *AVAILABLE.get_or_init(|| {
         std::process::Command::new("/usr/bin/sw_vers")

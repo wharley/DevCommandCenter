@@ -173,6 +173,10 @@ impl DesktopApi {
         self.request("GET", path, None)
     }
 
+    pub(crate) fn put(&self, path: &str, body: &Value) -> Result<Value, ApiError> {
+        self.request("PUT", path, Some(body))
+    }
+
     /// A long-lived `GET` (server-sent events): the response's body, past
     /// its head, and whether it comes chunked. `read_timeout` bounds the
     /// wait between two reads (the server's keep-alive is every 15s).

@@ -57,15 +57,15 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 
 #[gpui::test]
 fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) {
-    // "Geral" is not here yet: the first section the native app has.
-    let (settings, cx, events) = open(Some(SectionId::General), cx);
+    // "Provedores" is not here yet: the first section the native app has.
+    let (settings, cx, events) = open(Some(SectionId::Model), cx);
     assert_eq!(
         cx.update(|_, cx| settings.read(cx).active),
-        SectionId::Appearance
+        SectionId::General
     );
     assert!(cx.debug_bounds("settings-section-appearance").is_some());
     assert!(cx.debug_bounds("settings-section-experimental").is_some());
-    assert!(cx.debug_bounds("settings-section-general").is_none());
+    assert!(cx.debug_bounds("settings-section-model").is_none());
     cx.simulate_input("experim");
     cx.run_until_parked();
     assert!(cx.debug_bounds("settings-section-appearance").is_none());
@@ -90,7 +90,7 @@ fn it_opens_on_a_section_it_has_and_the_search_narrows(cx: &mut TestAppContext) 
 
 #[gpui::test]
 fn the_appearance_choices_go_out(cx: &mut TestAppContext) {
-    let (settings, cx, events) = open(None, cx);
+    let (settings, cx, events) = open(Some(SectionId::Appearance), cx);
     click(cx, "settings-theme-dark");
     click(cx, "settings-locale-1");
     click(cx, "settings-density-1");
@@ -105,4 +105,63 @@ fn the_appearance_choices_go_out(cx: &mut TestAppContext) {
     });
     click(cx, "settings-section-experimental");
     assert!(cx.debug_bounds("settings-reset-metrics").is_some());
+}
+
+#[gpui::test]
+fn general_keeps_the_mac_awake_for_the_limit_through_the_desktop(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    let (settings, cx, _) = open(None, cx);
+    assert_eq!(
+        cx.update(|_, cx| settings.read(cx).active),
+        SectionId::General
+    );
+    // No desktop: no keep-awake card.
+    assert!(cx.debug_bounds("settings-keep-awake").is_none());
+    assert!(cx.debug_bounds("settings-copy-diagnostics").is_some());
+    let (port, server) = fake_desktop_routes(vec![
+        (
+            "/api/v1/keep-awake",
+            200,
+            r#"{"supported":true,"mode":"off","active":null}"#.into(),
+        ),
+        (
+            "/api/v1/keep-awake",
+            200,
+            r#"{"supported":true,"mode":"during_agents","active":{"reason":{"kind":"agentsWorking","count":1},"label":"x"}}"#.into(),
+        ),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.set_api(
+                crate::data::desktop_api::DesktopApi::new(port, "k"),
+                data.clone(),
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("settings-keep-awake").is_some());
+    // On by default for new tasks: the Mac may sleep, so the warning offers
+    // the hold. (The cards sit below the fold of the test window: the
+    // handlers are called as the clicks would.)
+    cx.update(|_, cx| settings.update(cx, |settings, cx| settings.set_auto_resume(true, cx)));
+    cx.run_until_parked();
+    assert!(dcc_infra::usage_limit_settings::load_settings(&data).auto_resume);
+    assert!(cx.debug_bounds("settings-limit-keep-awake").is_some());
+    cx.update(|_, cx| {
+        settings.update(cx, |settings, cx| {
+            settings.set_keep_awake(crate::data::keep_awake::Mode::DuringAgents, cx)
+        })
+    });
+    cx.run_until_parked();
+    let seen = server.join().unwrap();
+    assert_eq!(seen[1].0, "PUT /api/v1/keep-awake");
+    assert!(seen[1].1.contains("during_agents"), "{}", seen[1].1);
+    assert!(cx.debug_bounds("settings-limit-keep-awake").is_none());
+    // Copying the diagnostics says so.
+    click(cx, "settings-copy-diagnostics");
+    let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+    assert!(copied.unwrap().contains("schemaVersion"));
 }

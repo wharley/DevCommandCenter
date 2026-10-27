@@ -327,3 +327,39 @@ impl Shell {
             .into_any_element()
     }
 }
+
+/// `spawn_cache_limit`: three minutes after start and then daily, the
+/// Browser's caches go once they pass 500 MB; logins stay.
+pub(super) fn trim_cache_daily(cx: &mut gpui::Context<Shell>) {
+    use crate::screens::browser::data_store;
+    if cfg!(test) || !data_store::usage().supported {
+        return;
+    }
+    cx.spawn(async move |this, cx| {
+        cx.background_executor()
+            .timer(std::time::Duration::from_secs(180))
+            .await;
+        loop {
+            let before = data_store::usage().cache_bytes;
+            if before > data_store::CACHE_LIMIT_BYTES {
+                let trimmed = this.update(cx, |_, _| {
+                    data_store::clear(false, move |result| match result {
+                        Ok(()) => eprintln!(
+                            "[dcc-native] Browser cache trimmed: {} MB -> {} MB",
+                            before / (1024 * 1024),
+                            data_store::usage().cache_bytes / (1024 * 1024)
+                        ),
+                        Err(error) => eprintln!("[dcc-native] Browser cache left as is: {error}"),
+                    })
+                });
+                if trimmed.is_err() {
+                    return;
+                }
+            }
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(24 * 60 * 60))
+                .await;
+        }
+    })
+    .detach();
+}

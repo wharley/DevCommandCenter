@@ -20,10 +20,12 @@ impl Render for Settings {
         let key = self.active.key();
         let navigation = self.navigation(window, cx);
         let content = match self.active {
+            SectionId::General => self.general(cx),
             SectionId::Appearance => self.appearance(cx),
             SectionId::Experimental => self.experimental(cx),
             _ => div().into_any_element(),
         };
+        let confirm = self.confirm_dialog(cx);
         let close = cx.entity().downgrade();
         let focus = gpui::Focusable::focus_handle(self.search.read(cx), cx);
         Dialog::new("settings-dialog", move |_: &mut Window, cx| {
@@ -105,7 +107,8 @@ impl Render for Settings {
                                 .pb(px(30.0))
                                 .child(content),
                         ),
-                ),
+                )
+                .children(confirm),
         )
     }
 }

@@ -744,6 +744,7 @@ fn settings_apply_the_theme_language_and_density_at_once(cx: &mut TestAppContext
     cx.run_until_parked();
     assert!(cx.debug_bounds("settings-dialog").is_some());
     for selector in [
+        "settings-section-appearance",
         "settings-theme-dark",
         "settings-locale-1",
         "settings-density-1",

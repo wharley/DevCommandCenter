@@ -9,6 +9,7 @@ mod bridge;
 mod context;
 mod control;
 mod cookies;
+pub mod data_store;
 mod download;
 mod evidence;
 mod input;
