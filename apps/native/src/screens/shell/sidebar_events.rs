@@ -123,6 +123,7 @@ impl Shell {
                 });
                 self.show(Surface::Conversation, cx);
             }
+            SidebarEvent::OpenAgent(id) => self.open_agent(id.clone(), cx),
             _ => self.save_layout(cx),
         }
     }

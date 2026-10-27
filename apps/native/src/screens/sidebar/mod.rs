@@ -4,6 +4,7 @@
 
 mod actions;
 mod agents;
+pub use agents::AgentPageData;
 mod arrival;
 mod attention;
 mod child_task_row;
@@ -314,6 +315,12 @@ impl Sidebar {
                 }
             }
         })
+    }
+
+    /// Data as if just read, for other screens' tests.
+    #[cfg(test)]
+    pub(crate) fn apply_for_tests(&mut self, data: SidebarData, cx: &mut Context<Self>) {
+        self.apply(data, cx);
     }
 
     fn apply(&mut self, data: SidebarData, cx: &mut Context<Self>) {

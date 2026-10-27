@@ -389,6 +389,45 @@ pub fn local_date(value: &str, english: bool) -> String {
         .unwrap_or_else(|_| value.to_string())
 }
 
+/// `Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle:
+/// "short" })`: `27 de out. de 2026, 10:05` or `Oct 27, 2026, 10:05 AM`.
+pub fn medium_date_time(value: &str, english: bool) -> String {
+    use chrono::{Datelike, Timelike};
+    let Ok(at) = chrono::DateTime::parse_from_rfc3339(value) else {
+        return value.to_string();
+    };
+    let at = at.with_timezone(&chrono::Local);
+    let month = at.month0() as usize;
+    if english {
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        let (pm, hour) = at.hour12();
+        format!(
+            "{} {}, {}, {}:{:02} {}",
+            MONTHS[month],
+            at.day(),
+            at.year(),
+            hour,
+            at.minute(),
+            if pm { "PM" } else { "AM" }
+        )
+    } else {
+        const MONTHS: [&str; 12] = [
+            "jan.", "fev.", "mar.", "abr.", "mai.", "jun.", "jul.", "ago.", "set.", "out.", "nov.",
+            "dez.",
+        ];
+        format!(
+            "{} de {} de {}, {:02}:{:02}",
+            at.day(),
+            MONTHS[month],
+            at.year(),
+            at.hour(),
+            at.minute()
+        )
+    }
+}
+
 /// `toLocaleTimeString()` of a millisecond time (`14:03:22`, `2:03:22 PM`);
 /// `None` when it is not one (`browserAuditTime`).
 pub fn local_clock(at_ms: i64, english: bool) -> Option<String> {

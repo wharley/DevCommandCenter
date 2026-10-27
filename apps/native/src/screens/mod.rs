@@ -1,5 +1,6 @@
 //! One folder per screen, migrated one at a time (docs/PLANO_MIGRACAO_GPUI.md).
 
+pub mod agent_page;
 pub mod annotation;
 pub mod automation;
 pub mod browser;

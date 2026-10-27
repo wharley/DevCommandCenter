@@ -45,6 +45,9 @@ pub struct SidebarData {
     pub review_pending: HashMap<String, usize>,
     /// Resident agents with their sessions' state.
     pub agents: Vec<super::agents::AgentRecord>,
+    /// The tasks that are still ideas, by id with their name (the
+    /// Researcher's page lists only those).
+    pub idea_tasks: HashMap<String, String>,
     /// Tasks an agent proposed or started, by the task they hang under.
     pub child_tasks: HashMap<String, Vec<super::child_tasks::ChildTask>>,
     /// The folders each project links, by repository id, and which of them
@@ -110,6 +113,11 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
             let folders = context_folders.remove(&workspace.id.0).unwrap_or_default();
             TaskSummary::from_workspace(workspace, folders, untitled)
         })
+        .collect();
+    let idea_tasks: HashMap<String, String> = tasks
+        .iter()
+        .filter(|task| ideas.contains(&task.root_path))
+        .map(|task| (task.id.clone(), task.name.clone()))
         .collect();
     let bundles = block_on(workspaces.list_workspace_bundles())?;
     let tasks: Vec<TaskSummary> = fold_bundles(tasks, &bundles, &projects)
@@ -177,6 +185,7 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         open_notes,
         review_pending,
         agents,
+        idea_tasks,
         child_tasks,
     })
 }

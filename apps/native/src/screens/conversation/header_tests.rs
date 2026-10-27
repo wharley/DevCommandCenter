@@ -413,6 +413,8 @@ fn agent(id: &str, name: &str, preset: Option<&str>) -> crate::data::agents::Age
         model: None,
         effort: None,
         kickoff_prompt: "Escreva o guia do checkout".into(),
+        role: String::new(),
+        extra_instructions: String::new(),
         sessions: Vec::new(),
     }
 }

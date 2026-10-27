@@ -80,6 +80,66 @@ impl Sidebar {
     }
 }
 
+/// What the agent's page reads (`AgentView` in `use-agents.ts`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AgentPageData {
+    pub agent: AgentRecord,
+    pub state: AgentState,
+    /// Per session, whether its finished result is unread.
+    pub unread: Vec<bool>,
+    /// Task names by id (`workspaceNames`), idea tasks included.
+    pub task_names: std::collections::HashMap<String, String>,
+    /// Project names by project id (`projectLabels`).
+    pub project_labels: std::collections::HashMap<String, String>,
+    /// The tasks that are still ideas (`ideaWorkspaceIds`).
+    pub idea_tasks: std::collections::HashSet<String>,
+}
+
+impl Sidebar {
+    pub fn agent_page(&self, id: &str) -> Option<AgentPageData> {
+        let view = self
+            .agent_views()
+            .into_iter()
+            .find(|view| view.agent.id == id)?;
+        let unread = view
+            .agent
+            .sessions
+            .iter()
+            .map(|session| {
+                session.state == AgentState::Done
+                    && self
+                        .agent_markers
+                        .seen
+                        .is_unread(&session.session_id, session.completed_at.as_deref())
+            })
+            .collect();
+        let data = &self.state.data;
+        let mut task_names: std::collections::HashMap<String, String> = data
+            .tasks
+            .iter()
+            .map(|task| (task.id.clone(), task.name.clone()))
+            .collect();
+        task_names.extend(data.idea_tasks.clone());
+        Some(AgentPageData {
+            agent: view.agent.clone(),
+            state: view.state,
+            unread,
+            task_names,
+            project_labels: data
+                .projects
+                .iter()
+                .map(|project| (project.project_id.clone(), project.display_name.clone()))
+                .collect(),
+            idea_tasks: data.idea_tasks.keys().cloned().collect(),
+        })
+    }
+
+    pub fn set_active_agent(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+        self.active_agent_id = id;
+        cx.notify();
+    }
+}
+
 fn state_text(state: AgentState, cx: &Context<Sidebar>) -> SharedString {
     cx.t(state.i18n_key())
 }

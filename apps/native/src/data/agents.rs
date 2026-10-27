@@ -40,6 +40,10 @@ pub struct AgentSession {
     pub state: AgentState,
     /// When its last turn finished, if it did.
     pub completed_at: Option<String>,
+    pub project_id: String,
+    /// The conversation's title, when the task has no name here.
+    pub title: Option<String>,
+    pub updated_at: String,
 }
 
 /// An agent as stored, with its sessions' live state; whether a finished
@@ -56,6 +60,10 @@ pub struct AgentRecord {
     pub effort: Option<String>,
     /// What a call asks it first.
     pub kickoff_prompt: String,
+    /// DCC's role text, shown on request.
+    pub role: String,
+    /// The person's own instructions on top of the role.
+    pub extra_instructions: String,
     pub sessions: Vec<AgentSession>,
 }
 
@@ -204,6 +212,9 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                         workspace_id: binding.workspace_id.clone(),
                         state: session_state(input.map(|(input, _)| input)),
                         completed_at: input.and_then(|(_, completed)| completed.clone()),
+                        project_id: binding.project_id.clone(),
+                        title: binding.title.clone(),
+                        updated_at: binding.updated_at.clone(),
                     }
                 })
                 .collect();
@@ -216,6 +227,8 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                 model: agent.model,
                 effort: agent.effort,
                 kickoff_prompt: agent.kickoff_prompt,
+                role: agent.role,
+                extra_instructions: agent.extra_instructions,
                 sessions,
             }
         })

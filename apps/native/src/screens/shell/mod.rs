@@ -1,6 +1,7 @@
 //! The window's frame: sidebar, resize separator and main area
 //! (`App.tsx` root `<main>`). Owns the layout and follows the OS theme.
 
+mod agents;
 mod annotation;
 mod bootstrap;
 mod browser;
@@ -49,6 +50,8 @@ use regions::{MainRegion, SidebarRegion};
 pub enum Surface {
     Conversation,
     NewTask,
+    /// A DCC agent's page (`globalSurface: "agent"`).
+    Agent,
 }
 
 gpui::actions!(
@@ -101,6 +104,8 @@ pub struct Shell {
     bootstrap_provider: Option<(String, Option<String>)>,
     /// "Abrir projeto", while open.
     open_project: Option<(Entity<OpenProjectDialog>, Subscription)>,
+    /// The agent's page, once one was opened.
+    agent_page: Option<agents::OpenAgentPage>,
     /// The merge conflict resolver, while open.
     merge: Option<(Entity<crate::screens::merge::MergeResolver>, Subscription)>,
     /// "Enviar trecho ao agente", while open.
@@ -291,6 +296,7 @@ impl Shell {
             surface: Surface::Conversation,
             focus_on_open: None,
             open_project: None,
+            agent_page: None,
             merge: None,
             annotation: None,
             bootstrap_provider: None,
@@ -534,8 +540,12 @@ impl Shell {
     fn show(&mut self, surface: Surface, cx: &mut Context<Self>) {
         self.surface = surface;
         let page = (surface == Surface::NewTask).then_some(NavPage::NewTask);
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.set_current_page(page, cx));
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.set_current_page(page, cx);
+            if surface != Surface::Agent {
+                sidebar.set_active_agent(None, cx);
+            }
+        });
         cx.notify();
     }
 
@@ -822,6 +832,10 @@ impl Render for Shell {
                 Surface::NewTask => {
                     self.hide_browser_page(cx);
                     self.new_task.clone().into_any_element()
+                }
+                Surface::Agent => {
+                    self.hide_browser_page(cx);
+                    self.agent_page_element()
                 }
             }))
             .child(self.delivery.overlay.clone())
