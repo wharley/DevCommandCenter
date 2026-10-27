@@ -648,3 +648,48 @@ fn cmd_p_and_cmd_shift_f_open_a_checkout_file_on_the_stage(cx: &mut TestAppConte
         )
     });
 }
+
+#[gpui::test]
+fn cmd_k_opens_the_palette_and_runs_what_is_picked(cx: &mut TestAppContext) {
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    cx.update(|_, cx| {
+        super::bind_keys(cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    // No task open: the palette still opens, with the global actions.
+    cx.simulate_keystrokes("cmd-k");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("command-palette-field").is_some());
+    cx.simulate_input("atalhos");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("command-palette-field").is_none());
+    assert!(cx.debug_bounds("shortcuts-dialog").is_some());
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    // With a task: "Abrir Arquivos" shows the code column on "Arquivos".
+    let repo = crate::test_support::git_checkout(&[("a.rs", "fn a() {}\n")]);
+    let conversation = shell.read_with(cx, |shell, _| shell.conversation.clone());
+    conversation.update(cx, |view, cx| {
+        let data = crate::data::conversation::Conversation {
+            task_id: "t".into(),
+            workspace_path: Some(repo.path().to_string_lossy().into_owned()),
+            last_sequence: 1,
+            ..Default::default()
+        };
+        view.show_loaded(data, cx);
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("cmd-shift-p");
+    cx.run_until_parked();
+    let label = cx.update(|_, cx| {
+        crate::i18n::Translate::t(cx, "commandPalette.workbench.inspectorFiles").to_string()
+    });
+    cx.simulate_input(&label.to_lowercase());
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    shell.read_with(cx, |shell, _| {
+        assert!(shell.prefs.code_column_open);
+        assert_eq!(shell.prefs.code_column_tab, CodeColumnTab::Files);
+    });
+}

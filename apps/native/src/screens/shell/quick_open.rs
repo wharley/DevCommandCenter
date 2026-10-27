@@ -94,7 +94,7 @@ impl Shell {
     }
 
     /// `requestSurfaceSelection({ kind: "file-edit", focusLine })`.
-    fn open_checkout_file(
+    pub(super) fn open_checkout_file(
         &mut self,
         path: String,
         line: Option<u32>,

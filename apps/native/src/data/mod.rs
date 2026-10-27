@@ -10,6 +10,7 @@ pub mod browser_bridge;
 pub mod browser_opens;
 pub mod child_tasks;
 pub mod code_tree;
+pub mod command_palette;
 pub mod composer_settings;
 pub mod computer_use;
 pub mod conflict_api;

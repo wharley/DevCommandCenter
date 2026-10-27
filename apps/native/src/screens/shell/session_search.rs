@@ -38,7 +38,18 @@ impl Shell {
         self.session_search = None;
         cx.notify();
         let archived = result.archived_at.is_some();
-        let session = result.session_id.0.clone();
+        self.open_session(result.workspace_id.0, result.session_id.0, archived, cx);
+    }
+
+    /// `handleSelectSessionSearchResult`: the conversation's task opens on
+    /// it, restored first when it was archived.
+    pub(super) fn open_session(
+        &mut self,
+        task: String,
+        session: String,
+        archived: bool,
+        cx: &mut Context<Self>,
+    ) {
         cx.spawn(async move |this, cx| {
             if archived {
                 let id = session.clone();
@@ -56,7 +67,6 @@ impl Shell {
                 }
             }
             let _ = this.update(cx, |shell, cx| {
-                let task = result.workspace_id.0.clone();
                 shell
                     .sidebar
                     .update(cx, |sidebar, cx| sidebar.reveal_task(&task, cx));

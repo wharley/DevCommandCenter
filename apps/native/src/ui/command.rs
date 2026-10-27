@@ -36,6 +36,51 @@ pub fn command_dialog(
         .initial_focus(focus)
 }
 
+/// The band over the field (`border-b border-border/60 bg-muted/20 px-4
+/// py-3`): the kicker (10px semibold, uppercase, `tracking-[0.08em]`) and a
+/// line of description.
+pub fn command_banner(
+    title: impl Into<gpui::SharedString>,
+    description: impl Into<gpui::SharedString>,
+    cx: &App,
+) -> Div {
+    let colors = &cx.theme().colors;
+    let title: gpui::SharedString = title.into();
+    div()
+        .border_b_1()
+        .border_color(colors.border.opacity(0.6))
+        .bg(colors.muted.opacity(0.2))
+        .px(px(16.0))
+        .py(px(12.0))
+        .text_color(colors.muted_foreground)
+        .child(
+            div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(super::Tracked::new(title.to_uppercase(), 10.0, 0.08)),
+        )
+        .child(
+            div()
+                .mt(px(4.0))
+                .text_size(px(12.0))
+                .line_height(px(19.5))
+                .child(description.into()),
+        )
+}
+
+/// `CommandSeparator`: `-mx-1 h-px bg-border`.
+pub fn command_separator(cx: &App) -> Div {
+    div().h(px(1.0)).w_full().bg(cx.theme().colors.border)
+}
+
+/// `CommandShortcut`: `ml-auto text-xs tracking-widest text-muted-foreground`.
+pub fn command_shortcut(text: impl Into<gpui::SharedString>, cx: &App) -> Div {
+    div()
+        .ml_auto()
+        .flex_none()
+        .text_color(cx.theme().colors.muted_foreground)
+        .child(super::Tracked::new(text, 12.0, 0.1))
+}
+
 /// `CommandList className="max-h-[min(58vh,32rem)]"`
 pub fn command_list_height(window: &Window) -> f32 {
     (f32::from(window.viewport_size().height) * 0.58).min(512.0)

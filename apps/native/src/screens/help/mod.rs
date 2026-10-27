@@ -13,6 +13,32 @@ use gpui::{AppContext, Context, Entity, EventEmitter, Subscription, Window};
 use topics::TopicCopy;
 pub use topics::{DEFAULT_TOPIC, TOPICS};
 
+/// `helpTopicActions`: while typing, the topics whose label, summary or
+/// keywords hold every word, as (id, "Ajuda: …" label, keywords).
+pub fn palette_topics(query: &str, i18n: &I18n) -> Vec<(&'static str, gpui::SharedString, String)> {
+    if query.trim().is_empty() {
+        return Vec::new();
+    }
+    TOPICS
+        .iter()
+        .filter_map(|id| {
+            let topic = TopicCopy::read(id, i18n);
+            let keywords = topic.palette_keywords();
+            crate::data::text_match::matches_all_words(
+                &format!("{} {keywords}", topic.label),
+                query,
+            )
+            .then(|| {
+                let label = i18n.t_with(
+                    "commandPalette.helpTopic",
+                    &crate::i18n::Args::default().with("topic", topic.label.to_string()),
+                );
+                (*id, label, keywords)
+            })
+        })
+        .collect()
+}
+
 use crate::i18n::I18n;
 use crate::ui::text_input::{TextInput, TextInputEvent};
 

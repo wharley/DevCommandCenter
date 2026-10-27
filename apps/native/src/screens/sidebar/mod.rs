@@ -392,6 +392,11 @@ impl Sidebar {
         &self.state.data.agents
     }
 
+    /// Every task the list has (ideas excluded).
+    pub fn tasks(&self) -> &[crate::data::tasks::TaskSummary] {
+        &self.state.data.tasks
+    }
+
     pub fn projects(&self) -> &[Project] {
         &self.state.data.projects
     }

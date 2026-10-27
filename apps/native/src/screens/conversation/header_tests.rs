@@ -29,6 +29,7 @@ fn row(id: &str, state: &str, running: bool, archived: bool, depth: u8) -> Sessi
         running,
         archived,
         depth,
+        updated_at: String::new(),
     }
 }
 

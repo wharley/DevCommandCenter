@@ -10,7 +10,8 @@ use crate::data::session_search::{updated_at_label, workspace_label};
 use crate::i18n::{Locale, Translate};
 use crate::theme::ActiveTheme;
 use crate::ui::command::{
-    command_dialog, command_field, command_group, command_heading, command_list_height,
+    command_banner, command_dialog, command_field, command_group, command_heading,
+    command_list_height,
 };
 use crate::ui::{Badge, BadgeVariant, Icon};
 
@@ -178,33 +179,15 @@ impl Render for SessionSearch {
             window,
             cx,
         )
-        .child(
-            div()
-                .border_b_1()
-                .border_color(colors.border.opacity(0.6))
-                .bg(colors.muted.opacity(0.2))
-                .px(px(16.0))
-                .py(px(12.0))
-                .child(
-                    div()
-                        .text_size(px(10.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(colors.muted_foreground)
-                        .child(cx.t("workbench.sessionSearch.title").to_uppercase()),
-                )
-                .child(
-                    div()
-                        .mt(px(4.0))
-                        .text_size(px(12.0))
-                        .line_height(px(19.5))
-                        .text_color(colors.muted_foreground)
-                        .child(if has_query {
-                            cx.t("workbench.sessionSearch.searchingDescription")
-                        } else {
-                            cx.t("workbench.sessionSearch.recentDescription")
-                        }),
-                ),
-        )
+        .child(command_banner(
+            cx.t("workbench.sessionSearch.title"),
+            if has_query {
+                cx.t("workbench.sessionSearch.searchingDescription")
+            } else {
+                cx.t("workbench.sessionSearch.recentDescription")
+            },
+            cx,
+        ))
         .child(
             command_field("session-search-field", self.input.clone(), cx).on_key_down(cx.listener(
                 |search, event: &KeyDownEvent, _, cx| {

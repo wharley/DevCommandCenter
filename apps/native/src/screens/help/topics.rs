@@ -141,6 +141,11 @@ impl TopicCopy {
         }
     }
 
+    /// The palette's keywords for this topic: summary and keywords.
+    pub fn palette_keywords(&self) -> String {
+        format!("{} {}", self.summary, self.keywords)
+    }
+
     /// What the search looks in: label, summary, keywords and "what is".
     pub fn matches(&self, query: &str) -> bool {
         let haystack = format!(
