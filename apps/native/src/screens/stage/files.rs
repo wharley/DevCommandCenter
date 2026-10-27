@@ -64,6 +64,7 @@ impl Stage {
         cx: &mut Context<Self>,
     ) {
         self.diff = None;
+        self.session = None;
         self.chat_active = false;
         let tabs = self.files.get_or_insert_with(|| FileTabs {
             root: root.clone(),

@@ -12,6 +12,7 @@ mod image;
 mod review;
 mod review_view;
 mod save;
+mod session;
 mod view;
 
 #[cfg(test)]
@@ -103,12 +104,16 @@ pub enum StageEvent {
         instruction: String,
         send: bool,
     },
+    /// "Abrir filha" in the Session tab.
+    OpenSession(String),
 }
 
 pub struct Stage {
     pub(crate) diff: Option<StageDiff>,
     /// Or the open files (one or the other: opening one replaces the other).
     pub(crate) files: Option<files::FileTabs>,
+    /// Or the "Sessão" tab (`SessionStageSurface`).
+    pub(crate) session: Option<session::StageSession>,
     /// The Chat tab is in front (the stage shows only its strip).
     pub(crate) chat_active: bool,
     /// The agent finished while the content was in front.
@@ -141,6 +146,7 @@ impl Stage {
         Self {
             diff: None,
             files: None,
+            session: None,
             chat_active: false,
             chat_unread: false,
             agent_working: false,
@@ -157,7 +163,7 @@ impl Stage {
 
     /// Something is on the stage.
     pub fn has_content(&self) -> bool {
-        self.diff.is_some() || self.files.is_some()
+        self.diff.is_some() || self.files.is_some() || self.session.is_some()
     }
 
     pub fn chat_active(&self) -> bool {
@@ -193,6 +199,7 @@ impl Stage {
         cx: &mut Context<Self>,
     ) {
         self.files = None;
+        self.session = None;
         self.chat_active = false;
         let dark = cx.theme_dark();
         let review = request
@@ -301,9 +308,11 @@ impl Stage {
 
     /// The tab's X (`onCloseSurface`).
     pub fn close(&mut self, cx: &mut Context<Self>) {
+        let session = self.session.take().is_some();
         let to_changes = match (self.diff.take(), self.files.take()) {
             (Some(diff), _) => diff.request.from_changes,
             (None, Some(_)) => false,
+            (None, None) if session => false,
             (None, None) => return,
         };
         self.chat_active = false;
@@ -314,7 +323,8 @@ impl Stage {
 
     /// Another task: the stage starts empty.
     pub fn clear(&mut self, cx: &mut Context<Self>) {
-        if self.diff.take().is_some() | self.files.take().is_some() {
+        if self.diff.take().is_some() | self.files.take().is_some() | self.session.take().is_some()
+        {
             self.chat_active = false;
             self.chat_unread = false;
             cx.notify();

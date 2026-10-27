@@ -298,6 +298,14 @@ impl ConversationView {
         self.apply(Rc::new(data), cx);
     }
 
+    /// A conversation as if it had just been read, for other screens' tests.
+    #[cfg(test)]
+    pub(crate) fn show_for_tests(&mut self, next: Conversation, cx: &mut Context<Self>) {
+        self.task_id = Some(next.task_id.clone());
+        self.loading = false;
+        self.apply(Rc::new(next), cx);
+    }
+
     fn apply(&mut self, next: Rc<Conversation>, cx: &mut Context<Self>) {
         if self.task_id.as_deref() != Some(next.task_id.as_str()) {
             return;

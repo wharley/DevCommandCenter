@@ -15,7 +15,11 @@ use crate::ui::tab_strip::TabStrip;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, spinner};
 
 /// `h-7 rounded-md px-2.5` with the active `bg-muted/60 shadow-sm`.
-fn tab_base(id: &'static str, active: bool, cx: &Context<Stage>) -> gpui::Stateful<gpui::Div> {
+pub(super) fn tab_base(
+    id: &'static str,
+    active: bool,
+    cx: &Context<Stage>,
+) -> gpui::Stateful<gpui::Div> {
     tab_base_named(id.into(), active, cx).debug_selector(move || id.to_string())
 }
 
@@ -277,15 +281,20 @@ impl Render for Stage {
                 tabs.active()
                     .map_or_else(SharedString::default, |file| file.path.clone().into()),
             ),
+            (None, false) if self.session.is_some() => (1, SharedString::from("session")),
             (None, false) => (1, SharedString::from("diff")),
         };
         self.strip.reveal(active, key);
         let file_count = self.files.as_ref().map_or(0, |tabs| tabs.files.len());
-        let tabs: Vec<AnyElement> = [Some(chat_tab(self, cx)), diff_tab(self, cx)]
-            .into_iter()
-            .flatten()
-            .chain((0..file_count).filter_map(|at| file_tab(self, at, cx)))
-            .collect();
+        let tabs: Vec<AnyElement> = [
+            Some(chat_tab(self, cx)),
+            diff_tab(self, cx),
+            super::session::session_tab(self, cx),
+        ]
+        .into_iter()
+        .flatten()
+        .chain((0..file_count).filter_map(|at| file_tab(self, at, cx)))
+        .collect();
         let actions = self.files.is_some().then(|| file_actions(self, cx));
         let strip = div()
             .flex()
@@ -307,7 +316,8 @@ impl Render for Stage {
                 DiffLoad::Failed(error) => centered(error.clone().into(), colors.destructive),
                 DiffLoad::Loading(_) => centered("Loading file...".into(), colors.muted_foreground),
             })
-            .or_else(|| file_body(self, cx));
+            .or_else(|| file_body(self, cx))
+            .or_else(|| super::session::session_body(self));
         div()
             .id("stage")
             .debug_selector(|| "stage".into())

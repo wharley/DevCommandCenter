@@ -16,6 +16,7 @@ pub mod merge;
 pub mod new_task;
 pub mod open_project;
 pub mod quick_open;
+pub mod session_panel;
 pub mod session_search;
 pub mod settings;
 pub mod shell;

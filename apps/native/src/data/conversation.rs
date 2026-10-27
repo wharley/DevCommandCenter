@@ -7,7 +7,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use dcc_core::domain::attention::SessionActivityInput;
-use dcc_core::domain::delegation::{Delegation, DelegationKind, DelegationStatus};
 use dcc_core::domain::session::{
     QueuedTurn, SessionEventRecord, SessionId, WorkspaceSessionSummary,
 };
@@ -17,6 +16,8 @@ use dcc_core::domain::workspace::WorkspaceId;
 use dcc_core::ports::{DelegationRepo, RepositoryRepo, SessionRepo, UsageRepo, WorkspaceRepo};
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 use futures::executor::block_on;
+
+pub use super::delegation_record::{ChildSession, DelegationRecord};
 
 /// How often the checkout's branch is read from git.
 const GIT_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
@@ -80,6 +81,9 @@ pub struct Conversation {
     pub turn_tokens: Arc<HashMap<String, TurnTokenTotals>>,
     /// Highest event sequence read, so a refresh only reads what is new.
     pub last_sequence: u64,
+    /// The session's last 12 events since this run first read it (the
+    /// desktop's live `activityEvents`), for the Session tab.
+    pub activity: Arc<Vec<SessionEventRecord>>,
 }
 
 /// The session history read so far, kept by whoever refreshes the
@@ -94,6 +98,9 @@ pub struct EventCache {
     queue: Arc<Vec<QueuedTurn>>,
     /// The checkout's branch and when git was last asked.
     current_branch: Option<(std::time::Instant, Option<String>)>,
+    /// Per session, the sequence read first in this run: what came after it
+    /// is the live activity.
+    live_from: HashMap<String, u64>,
 }
 
 /// A task with no conversation yet: what its first prompt starts one with
@@ -139,102 +146,6 @@ impl PartialEq for ExecutionContext {
 }
 
 impl Eq for ExecutionContext {}
-
-/// What a delegation card reads from the stored record.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DelegationRecord {
-    pub id: String,
-    pub status: DelegationStatus,
-    /// `review` | `implement` | `explain` | `test` | `research`
-    pub mode: String,
-    pub created_at: String,
-    pub started_at: Option<String>,
-    pub is_task: bool,
-    pub title: Option<String>,
-    pub instruction: String,
-    pub result_summary: Option<String>,
-    pub prompt: String,
-    pub touched_files: Vec<String>,
-    pub provider_id: String,
-    pub model_id: Option<String>,
-    pub child_session_id: Option<String>,
-    /// `mode === "implement"`: it edits files.
-    pub implement: bool,
-    pub parent_session_id: String,
-    /// The child's own folder (`workingDirectoryOverride`): an isolated
-    /// worktree waiting for review, when it has one.
-    pub worktree: Option<String>,
-}
-
-impl DelegationRecord {
-    /// An implementation whose worktree waits for the person (`review_pending`).
-    pub fn awaits_review(&self) -> bool {
-        self.implement && self.status == DelegationStatus::ReviewPending
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ChildSession {
-    pub title: String,
-    pub busy: bool,
-    pub waiting: bool,
-}
-
-/// `delegationInstruction`: the task as written, without DCC's wrapping.
-fn delegation_instruction(delegation: &Delegation) -> String {
-    if let Some(stored) = delegation
-        .instruction
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        return stored.to_string();
-    }
-    const MARKER: &str = "\nInstruction:\n";
-    let Some(start) = delegation.prompt.find(MARKER) else {
-        return delegation.prompt.trim().to_string();
-    };
-    let rest = &delegation.prompt[start + MARKER.len()..];
-    let end = [
-        "Git context",
-        "Mission spec",
-        "Recent parent session context",
-    ]
-    .iter()
-    .filter_map(|name| rest.find(&format!("\n\n{name}:\n")))
-    .min();
-    end.map_or(rest, |end| &rest[..end]).trim().to_string()
-}
-
-impl DelegationRecord {
-    fn from_delegation(delegation: &Delegation) -> Self {
-        let id_of = |value: serde_json::Result<serde_json::Value>| {
-            value
-                .ok()
-                .and_then(|value| value.as_str().map(str::to_string))
-                .unwrap_or_default()
-        };
-        Self {
-            id: delegation.id.0.clone(),
-            status: delegation.status.clone(),
-            mode: id_of(serde_json::to_value(&delegation.mode)),
-            created_at: delegation.created_at.clone(),
-            started_at: delegation.started_at.clone(),
-            is_task: delegation.kind == DelegationKind::Task,
-            title: delegation.title.clone(),
-            instruction: delegation_instruction(delegation),
-            result_summary: delegation.result_summary.clone(),
-            prompt: delegation.prompt.clone(),
-            touched_files: delegation.touched_files.clone(),
-            provider_id: delegation.target_provider_id.0.clone(),
-            model_id: delegation.target_model_id.clone(),
-            child_session_id: delegation.child_session_id.as_ref().map(|id| id.0.clone()),
-            implement: delegation.mode == dcc_core::domain::delegation::DelegationMode::Implement,
-            parent_session_id: delegation.parent_session_id.0.clone(),
-            worktree: None,
-        }
-    }
-}
 
 /// `effectiveSelectedSessionId` with nothing picked yet: the first open
 /// session that is not a delegated child, else the first open one.
@@ -474,10 +385,12 @@ pub fn load(
     if cache.session_id.as_deref() != Some(session_id.as_str()) {
         *cache = EventCache {
             session_id: Some(session_id.clone()),
+            live_from: std::mem::take(&mut cache.live_from),
             ..EventCache::default()
         };
     }
     let fresh = read_events(&sessions, &summary.session.id, cache.last_sequence)?;
+    let first_read = !cache.live_from.contains_key(&session_id);
     if let Some(last) = fresh.last() {
         cache.last_sequence = last.sequence;
         cache.events.extend(fresh);
@@ -530,8 +443,32 @@ pub fn load(
     conversation.queue = cache.queue.clone();
     conversation.turn_tokens = cache.turn_tokens.clone();
     conversation.last_sequence = cache.last_sequence;
+    if first_read {
+        cache
+            .live_from
+            .insert(session_id.clone(), cache.last_sequence);
+    }
+    let from = cache
+        .live_from
+        .get(&session_id)
+        .copied()
+        .unwrap_or(u64::MAX);
+    let live: Vec<_> = cache
+        .events
+        .iter()
+        .filter(|event| event.sequence > from)
+        .collect();
+    conversation.activity = Arc::new(
+        live[live.len().saturating_sub(MAX_ACTIVITY)..]
+            .iter()
+            .map(|event| (*event).clone())
+            .collect(),
+    );
     Ok(conversation)
 }
+
+/// `MAX_ACTIVITY_EVENTS`
+const MAX_ACTIVITY: usize = 12;
 
 impl Conversation {
     /// Same history and same state: nothing to redraw.

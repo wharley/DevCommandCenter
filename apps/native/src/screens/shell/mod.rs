@@ -355,6 +355,12 @@ impl Shell {
                 instruction,
                 send,
             } => self.thread_to_agent(annotation, instruction, *send, window, cx),
+            StageEvent::OpenSession(session) => {
+                let session = session.clone();
+                self.conversation.update(cx, |conversation, cx| {
+                    conversation.open_session(session, cx)
+                });
+            }
             StageEvent::Closed { to_changes } => {
                 self.code_column.update(cx, |column, cx| {
                     column.set_open_diff(None, cx);
@@ -365,6 +371,20 @@ impl Shell {
                 }
             }
         }
+    }
+
+    /// `openSessionTab(tab)`: the stage's Session tab, in front.
+    pub(super) fn open_session_tab(
+        &mut self,
+        tab: Option<crate::screens::session_panel::SessionTab>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let conversation = self.conversation.clone();
+        self.stage.update(cx, |stage, cx| {
+            stage.open_session(conversation, tab, window, cx)
+        });
+        cx.notify();
     }
 
     /// `handleReviewDelegation`: "Mudanças" opens on the delegation's review;

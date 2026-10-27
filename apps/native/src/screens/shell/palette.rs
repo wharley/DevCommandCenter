@@ -187,6 +187,11 @@ impl Shell {
                 self.set_code_column(true, Some(CodeColumnTab::Changes), cx)
             }
             WorkbenchCommand::Files => self.set_code_column(true, Some(CodeColumnTab::Files), cx),
+            WorkbenchCommand::Activity => self.open_session_tab(
+                Some(crate::screens::session_panel::SessionTab::Activity),
+                window,
+                cx,
+            ),
         }
     }
 

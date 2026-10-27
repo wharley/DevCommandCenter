@@ -26,6 +26,8 @@ pub enum WorkbenchCommand {
     NewTerminal,
     Changes,
     Files,
+    /// "Abrir atividade da sessão": the Session tab on its activity.
+    Activity,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -157,6 +159,12 @@ fn actions(selected: bool, cx: &App) -> Vec<Action> {
                 "inspectorFiles",
                 Some(keys(&[command, "Shift", "E"])),
                 WorkbenchCommand::Files,
+            ),
+            workbench(
+                "inspectorActivity",
+                "activity",
+                None,
+                WorkbenchCommand::Activity,
             ),
         ]);
     }
