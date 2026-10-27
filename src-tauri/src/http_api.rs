@@ -70,6 +70,7 @@ mod git_changes;
 mod git_conflicts;
 mod keep_awake;
 mod mobile;
+mod providers;
 mod shortcuts;
 mod skills;
 mod terminals;
@@ -754,6 +755,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/keep-awake",
             get(keep_awake::status).put(keep_awake::set_mode),
+        )
+        .route(
+            "/api/v1/providers/:provider_id/availability",
+            put(providers::set_availability),
         )
         .route(
             "/api/v1/quick-composer/status",
@@ -1659,6 +1664,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/ai-memory/sidecar",
             "GET /api/v1/keep-awake",
             "PUT /api/v1/keep-awake",
+            "PUT /api/v1/providers/:provider_id/availability",
             "GET /api/v1/quick-composer/status",
             "PUT /api/v1/quick-composer/shortcut",
             "POST /api/v1/quick-composer/toggle",
@@ -5426,6 +5432,26 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{set}");
         assert_eq!(set["mode"], "during_agents");
         assert_eq!(set["supported"], true);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn providers_are_turned_off_and_on_through_the_desktop() {
+        let fixture = embedded_fixture().await;
+        let path = "/api/v1/providers/codex/availability";
+        let (status, off) = send_json(&fixture.app, "PUT", path, json!({ "enabled": false })).await;
+        assert_eq!(status, StatusCode::OK, "{off}");
+        assert_eq!(off["availability"]["state"], "disabled", "{off}");
+        let (status, on) = send_json(&fixture.app, "PUT", path, json!({ "enabled": true })).await;
+        assert_eq!(status, StatusCode::OK, "{on}");
+        assert_eq!(on["availability"]["state"], "enabled", "{on}");
+        let (status, _) = send_json(
+            &fixture.app,
+            "PUT",
+            "/api/v1/providers/nope/availability",
+            json!({ "enabled": false }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
