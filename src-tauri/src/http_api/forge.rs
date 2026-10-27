@@ -6,8 +6,9 @@
 //! failure lives in this process); a checkout must be a task's.
 use super::*;
 use dcc_tauri::commands::forge_commands::{
-    self, ForgeCliAccountsInput, WorkspaceForgeContextInput, WorkspaceRequestReviewersInput,
-    WorkspaceReviewStateInput, WorkspaceReviewerCandidatesInput,
+    self, ForgeCliAccountsInput, ForgeCliHostsInput, ForgeCliSelectLoginInput, ForgeCliStatusInput,
+    WorkspaceForgeContextInput, WorkspaceRequestReviewersInput, WorkspaceReviewStateInput,
+    WorkspaceReviewerCandidatesInput,
 };
 use dcc_tauri::commands::workspace_commands::WorkspaceChangeRequestContextInput;
 use dcc_tauri::delivery_failure::{WorkspaceDeliveryFailureInput, WorkspaceDeliveryRecoveryInput};
@@ -44,6 +45,45 @@ pub(super) async fn accounts(
     Json(input): Json<ForgeCliAccountsInput>,
 ) -> Result<Json<Value>, HttpApiError> {
     reply(forge_commands::workspace_forge_cli_accounts_with_state(&backend.workspace, input).await)
+}
+
+/// Settings → Conta: who the CLI is signed in as on a host.
+pub(super) async fn cli_status(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<ForgeCliStatusInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(forge_commands::workspace_forge_cli_status_with_state(
+        &backend.workspace,
+        input,
+    ))
+}
+
+/// The hosts the CLI is signed in to.
+pub(super) async fn hosts(
+    Json(input): Json<ForgeCliHostsInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(forge_commands::forge_cli_hosts(input))
+}
+
+/// The login DCC uses on a host.
+pub(super) async fn select_login(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<ForgeCliSelectLoginInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(
+        forge_commands::workspace_forge_cli_select_login_with_state(&backend.workspace, input)
+            .map(|()| json!({ "ok": true })),
+    )
+}
+
+/// After a new sign-in: the repositories without a login get it.
+pub(super) async fn backfill_bindings(
+    State(backend): State<Arc<HttpBackend>>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(
+        forge_commands::workspace_backfill_forge_repo_bindings_with_state(&backend.workspace)
+            .map(|bound| json!({ "bound": bound })),
+    )
 }
 
 pub(super) async fn review_state(

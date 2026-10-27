@@ -737,9 +737,17 @@ pub async fn workspace_forge_cli_status(
     state: State<'_, WorkspaceCommandState>,
     input: ForgeCliStatusInput,
 ) -> Result<ForgeCliStatusOutput, String> {
+    workspace_forge_cli_status_with_state(&state, input)
+}
+
+/// `workspace_forge_cli_status` for the HTTP API.
+pub fn workspace_forge_cli_status_with_state(
+    state: &WorkspaceCommandState,
+    input: ForgeCliStatusInput,
+) -> Result<ForgeCliStatusOutput, String> {
     let host = forge_context::normalize_forge_host(input.provider, input.host)?;
     resolve_forge_cli_snapshot(
-        &state,
+        state,
         input.provider,
         &host,
         input.force_refresh.unwrap_or(false),
@@ -800,6 +808,11 @@ pub async fn workspace_forge_cli_hosts(
     _state: State<'_, WorkspaceCommandState>,
     input: ForgeCliHostsInput,
 ) -> Result<ForgeCliHostsOutput, String> {
+    forge_cli_hosts(input)
+}
+
+/// The hosts the forge CLI is signed in to.
+pub fn forge_cli_hosts(input: ForgeCliHostsInput) -> Result<ForgeCliHostsOutput, String> {
     let backend = crate::commands::forge::accounts::backend_for(input.provider);
     let hosts = backend.list_hosts(input.force_refresh.unwrap_or(false))?;
     Ok(ForgeCliHostsOutput {
@@ -812,6 +825,14 @@ pub async fn workspace_forge_cli_hosts(
 #[tauri::command]
 pub async fn workspace_forge_cli_select_login(
     state: State<'_, WorkspaceCommandState>,
+    input: ForgeCliSelectLoginInput,
+) -> Result<(), String> {
+    workspace_forge_cli_select_login_with_state(&state, input)
+}
+
+/// The login DCC uses on a host (`set_forge_login_preference`).
+pub fn workspace_forge_cli_select_login_with_state(
+    state: &WorkspaceCommandState,
     input: ForgeCliSelectLoginInput,
 ) -> Result<(), String> {
     let host = forge_context::normalize_forge_host(input.provider, input.host)?;
@@ -827,6 +848,13 @@ pub async fn workspace_forge_cli_select_login(
 #[tauri::command]
 pub async fn workspace_backfill_forge_repo_bindings(
     state: State<'_, WorkspaceCommandState>,
+) -> Result<usize, String> {
+    workspace_backfill_forge_repo_bindings_with_state(&state)
+}
+
+/// Binds the repositories without a forge login to the one now signed in.
+pub fn workspace_backfill_forge_repo_bindings_with_state(
+    state: &WorkspaceCommandState,
 ) -> Result<usize, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let summary = crate::commands::forge::accounts::backfill_repository_bindings(&repo)?;

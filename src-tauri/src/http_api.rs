@@ -851,6 +851,13 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(forge::change_request_context),
         )
         .route("/api/v1/forge/accounts", post(forge::accounts))
+        .route("/api/v1/forge/cli-status", post(forge::cli_status))
+        .route("/api/v1/forge/hosts", post(forge::hosts))
+        .route("/api/v1/forge/select-login", post(forge::select_login))
+        .route(
+            "/api/v1/forge/backfill-bindings",
+            post(forge::backfill_bindings),
+        )
         .route("/api/v1/forge/review-state", post(forge::review_state))
         .route(
             "/api/v1/forge/reviewer-candidates",
@@ -1711,6 +1718,10 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/forge/context",
             "POST /api/v1/forge/change-request-context",
             "POST /api/v1/forge/accounts",
+            "POST /api/v1/forge/cli-status",
+            "POST /api/v1/forge/hosts",
+            "POST /api/v1/forge/select-login",
+            "POST /api/v1/forge/backfill-bindings",
             "POST /api/v1/forge/review-state",
             "POST /api/v1/forge/reviewer-candidates",
             "POST /api/v1/forge/request-reviewers",
@@ -5668,6 +5679,30 @@ mod tests {
         // No desktop app around this backend: nothing to restart.
         let (status, _) = send_json(&fixture.app, "POST", "/api/v1/app/restart", json!({})).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn forge_logins_are_chosen_and_bound_through_the_desktop() {
+        let fixture = embedded_fixture().await;
+        let (status, chosen) = post_json(
+            &fixture.app,
+            "/api/v1/forge/select-login",
+            json!({ "provider": "github", "host": "github.com", "login": "ana" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{chosen}");
+        let (status, bound) =
+            post_json(&fixture.app, "/api/v1/forge/backfill-bindings", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{bound}");
+        assert_eq!(bound["bound"], 0);
+        // A host that is not one is refused before any CLI runs.
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/forge/select-login",
+            json!({ "provider": "github", "host": "bad host/x", "login": "ana" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

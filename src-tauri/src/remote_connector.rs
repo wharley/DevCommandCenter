@@ -1282,6 +1282,13 @@ pub fn remote_path_allowed(path: &str) -> bool {
         && !route.starts_with("/api/v1/ai-memory/settings")
         && !route.starts_with("/api/v1/ai-memory/outbox")
         && !route.starts_with("/api/v1/app/")
+        && !matches!(
+            route,
+            "/api/v1/forge/cli-status"
+                | "/api/v1/forge/hosts"
+                | "/api/v1/forge/select-login"
+                | "/api/v1/forge/backfill-bindings"
+        )
 }
 
 fn is_channel_route(path: &str) -> bool {
@@ -1768,6 +1775,8 @@ mod tests {
         assert!(!remote_path_allowed("/api/v1/ai-memory/settings"));
         assert!(!remote_path_allowed("/api/v1/ai-memory/outbox/s/retry"));
         assert!(!remote_path_allowed("/api/v1/app/restart"));
+        assert!(!remote_path_allowed("/api/v1/forge/select-login"));
+        assert!(remote_path_allowed("/api/v1/forge/accounts"));
         assert!(!remote_path_allowed("/api/v1/remote/pairing/offers"));
         assert!(!remote_path_allowed("/api/v1/terminals/spawn"));
         assert!(!remote_path_allowed("/api/v1/terminals/by-owner/terminal%3Ax"));
