@@ -38,6 +38,8 @@ pub enum PaletteCommand {
     Shortcuts,
     /// "DCC Usage".
     Usage,
+    /// Skills.
+    Skills,
     /// The help, on a topic when one was picked.
     Help(Option<&'static str>),
     OpenTask(String),
@@ -170,6 +172,12 @@ fn actions(selected: bool, cx: &App) -> Vec<Action> {
             "commandPalette.keywords.clone",
             None,
             PaletteCommand::Clone,
+        ),
+        action(
+            "commandPalette.manageSkills",
+            "commandPalette.keywords.skills",
+            None,
+            PaletteCommand::Skills,
         ),
         action(
             "commandPalette.openUsage",

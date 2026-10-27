@@ -8,7 +8,7 @@ use super::Sidebar;
 use dcc_infra::skills_context::{detect_context_sources, total_skill_context_count};
 
 impl Sidebar {
-    pub(super) fn refresh_skill_count(&mut self, cx: &mut Context<Self>) {
+    pub fn refresh_skill_count(&mut self, cx: &mut Context<Self>) {
         let root = self
             .state
             .selected_task_id

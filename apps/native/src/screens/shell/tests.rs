@@ -721,3 +721,16 @@ fn the_sidebars_speech_bubble_opens_the_feedback(cx: &mut TestAppContext) {
     // No GitHub account here: it asks to connect.
     assert!(cx.debug_bounds("feedback-connect-hint").is_some());
 }
+
+#[gpui::test]
+fn the_sidebars_sparkles_open_the_skills(cx: &mut TestAppContext) {
+    use crate::screens::sidebar::SidebarEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::OpenSkills));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("skills-dialog").is_some());
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("skills-dialog").is_none());
+}

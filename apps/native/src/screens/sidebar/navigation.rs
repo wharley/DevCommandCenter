@@ -7,7 +7,7 @@ use gpui::{
 
 use super::{Sidebar, SidebarEvent};
 use crate::i18n::Translate;
-use crate::theme::{ActiveTheme, Theme};
+use crate::theme::ActiveTheme;
 use crate::ui::{Icon, tabular_nums};
 
 /// The page a navigation row stands for, when it is the one on screen.
@@ -17,31 +17,20 @@ pub enum NavPage {
     PullRequests,
 }
 
-/// `--dcc-surface-edge`: the border at 80%.
-pub fn surface_edge(theme: &Theme) -> Hsla {
-    theme.colors.border.opacity(0.8)
-}
+pub use crate::ui::surface_edge;
 
 /// `aria-current="page"`: `--dcc-shadow-card` plus a 1px inset edge.
 fn current_shadow(edge: Hsla) -> Vec<BoxShadow> {
-    let shadow = |alpha: f32, y: f32, blur: f32| BoxShadow {
-        color: Hsla::black().opacity(alpha),
-        offset: point(px(0.0), px(y)),
-        blur_radius: px(blur),
-        spread_radius: px(0.0),
-        inset: false,
-    };
-    vec![
-        shadow(0.025, 2.0, 3.0),
-        shadow(0.04, 8.0, 24.0),
-        BoxShadow {
+    crate::ui::card_shadow()
+        .into_iter()
+        .chain([BoxShadow {
             color: edge,
             offset: point(px(0.0), px(0.0)),
             blur_radius: px(0.0),
             spread_radius: px(1.0),
             inset: true,
-        },
-    ]
+        }])
+        .collect()
 }
 
 struct Entry {

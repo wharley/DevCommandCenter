@@ -17,6 +17,7 @@ mod quick_open;
 mod regions;
 mod session_search;
 mod sidebar_events;
+mod skills;
 mod terminal;
 #[cfg(test)]
 mod tests;
@@ -116,6 +117,8 @@ pub struct Shell {
     _stage_events: Subscription,
     /// "Sessões passadas", while open.
     session_search: Option<session_search::OpenSearch>,
+    /// Skills, while open.
+    skills: Option<skills::OpenSkills>,
     /// "Feedback DCC", while open.
     feedback: Option<feedback::OpenFeedback>,
     /// "DCC Usage", while open.
@@ -266,6 +269,7 @@ impl Shell {
             palette: None,
             usage: None,
             feedback: None,
+            skills: None,
             terminal,
             _terminal_events: terminal_events,
             _terminal_counts: terminal_counts,
@@ -800,6 +804,7 @@ impl Render for Shell {
                     .as_ref()
                     .map(|(search, _)| search.clone()),
             )
+            .children(self.skills_overlay())
             .children(self.feedback_overlay())
             .children(self.usage_overlay())
             .children(self.palette_overlay())

@@ -19,6 +19,7 @@ pub mod session_search;
 pub mod shell;
 pub mod shortcuts;
 pub mod sidebar;
+pub mod skills;
 pub mod stage;
 pub mod terminal;
 pub mod usage;
