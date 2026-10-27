@@ -39,6 +39,7 @@ fn agent(id: &str, preset: &str, sessions: Vec<AgentSession>) -> AgentRecord {
         effort: None,
         kickoff_prompt: String::new(),
         role: "Revise o diff.".into(),
+        offer_prompt: "Posso revisar essas mudanças?".into(),
         extra_instructions: "Seja breve.".into(),
         sessions,
     }
@@ -141,4 +142,94 @@ fn dates_read_like_intl_medium() {
     let en = crate::data::time::medium_date_time(&value, true);
     assert!(en.ends_with("AM") || en.ends_with("PM"), "{en}");
     assert_eq!(crate::data::time::medium_date_time("nope", false), "nope");
+}
+
+#[gpui::test]
+fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let cleanup = dir.path().join("cleanup-alert.json");
+    let (port, desktop) = fake_desktop_routes(vec![
+        ("/api/v1/agents/a-1", 200, r#"{"agent":{}}"#.into()),
+        ("/api/v1/agents/a-3", 200, r#"{"agent":{}}"#.into()),
+    ]);
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("a-1".into(), sidebar, composer, cx)
+    });
+    cx.run_until_parked();
+    let reporter = AgentRecord {
+        name: "Repórter".into(),
+        ..agent("a-3", "chronicler", Vec::new())
+    };
+    let path = cleanup.clone();
+    page.update(cx, |page, cx| {
+        page.cleanup_path = path;
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![agent("a-1", "reviewer", Vec::new()), reporter],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    page.update_in(cx, |page, window, cx| page.open_editor(window, cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-editor").is_some());
+    assert!(cx.debug_bounds("agent-editor-offer").is_some());
+    assert!(cx.debug_bounds("agent-editor-cleanup").is_none());
+    let editor = page.read_with(cx, |page, _| page.editor.as_ref().unwrap().0.clone());
+    let bounds = cx.debug_bounds("agent-editor-color-pink").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    editor.update(cx, |editor, cx| {
+        editor.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
+        editor
+            .name
+            .update(cx, |input, cx| input.set_text(" Crítico ", cx));
+        editor.set_execution(Some("codex".into()), None, None, cx);
+        editor.offer = false;
+        editor.save(cx);
+    });
+    cx.run_until_parked();
+    assert!(
+        page.read_with(cx, |page, _| page.editor.is_none()),
+        "closed after saving"
+    );
+    // The Reporter's cleanup alert is kept beside it.
+    page.update(cx, |page, cx| page.show("a-3".into(), cx));
+    page.update_in(cx, |page, window, cx| page.open_editor(window, cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-editor-cleanup").is_some());
+    assert!(cx.debug_bounds("agent-editor-offer").is_none());
+    let editor = page.read_with(cx, |page, _| page.editor.as_ref().unwrap().0.clone());
+    editor.update(cx, |editor, cx| {
+        editor.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
+        editor
+            .threshold
+            .update(cx, |input, cx| input.set_text("12", cx));
+        editor.save(cx);
+    });
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();
+    assert_eq!(body["name"], "Crítico");
+    assert_eq!(body["avatar"]["color"], "pink");
+    assert_eq!(body["providerId"], "codex");
+    assert_eq!(body["offerPrompt"], "");
+    assert_eq!(body["role"], "Revise o diff.");
+    assert_eq!(body["extraInstructions"], "Seja breve.");
+    let alert = crate::data::cleanup_alert::CleanupAlert::load(&cleanup);
+    assert_eq!(alert.threshold_gb, 12);
+    assert!(alert.enabled);
 }

@@ -2,8 +2,8 @@
 //! what it runs on; how it is called; its conversations in every project
 //! (opening one goes to that task); the person's extra instructions; and
 //! its role, folded. It reads the sidebar, which reads the agents every few
-//! seconds. The editor, the Reporter's recap and the Researcher's new idea
-//! come with the next parts.
+//! seconds; "Editar" changes what the person owns. The Reporter's recap and
+//! the Researcher's new idea come with the next parts.
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, Render, SharedString,
@@ -21,6 +21,8 @@ use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
 use crate::ui::{Icon, Tracked};
 
+mod editor;
+mod picker;
 #[cfg(test)]
 mod tests;
 
@@ -36,6 +38,10 @@ pub struct AgentPage {
     sidebar: Entity<Sidebar>,
     composer: Entity<Composer>,
     pub(crate) role_open: bool,
+    /// "Editar …", while open.
+    pub(crate) editor: Option<(Entity<editor::AgentEditor>, Subscription)>,
+    /// Where the Reporter's cleanup alert is kept (tests use their own).
+    pub(crate) cleanup_path: std::path::PathBuf,
     _sidebar: Subscription,
 }
 
@@ -88,6 +94,8 @@ impl AgentPage {
             sidebar,
             composer,
             role_open: false,
+            editor: None,
+            cleanup_path: crate::prefs::native_file("cleanup-alert.json"),
             _sidebar: observe,
         }
     }
@@ -96,7 +104,34 @@ impl AgentPage {
         if self.agent_id != agent_id {
             self.agent_id = agent_id;
             self.role_open = false;
+            self.editor = None;
         }
+        cx.notify();
+    }
+
+    /// "Editar": the stored values, read when it opens.
+    pub(crate) fn open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(data) = self.sidebar.read(cx).agent_page(&self.agent_id) else {
+            return;
+        };
+        let catalog = self
+            .composer
+            .read(cx)
+            .catalog
+            .as_deref()
+            .cloned()
+            .unwrap_or_default();
+        let path = self.cleanup_path.clone();
+        let editor = cx.new(|cx| editor::AgentEditor::new(data.agent, catalog, path, window, cx));
+        let events = cx.subscribe(&editor, |page, _, event, cx| match event {
+            editor::EditorEvent::Closed => {
+                page.editor = None;
+                cx.notify();
+            }
+            // The sidebar reads the agents again within its next pass.
+            editor::EditorEvent::Saved => cx.notify(),
+        });
+        self.editor = Some((editor, events));
         cx.notify();
     }
 
@@ -321,6 +356,21 @@ impl Render for AgentPage {
                             .text_color(colors.muted_foreground)
                             .child(format!("{} · {runs_on}", cx.t(data.state.i18n_key()))),
                     ),
+            )
+            .child(
+                crate::ui::Button::new("agent-page-edit")
+                    .variant(crate::ui::ButtonVariant::Outline)
+                    .size(crate::ui::ButtonSize::Default)
+                    .text_size(14.0)
+                    .on_click(cx.listener(|page, _, window, cx| page.open_editor(window, cx)))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(Icon::new("pencil").size(16.0))
+                            .child(cx.t("agents.page.edit")),
+                    ),
             );
         // The Reporter's page is its recap and the Researcher's opens with a
         // new idea (both next); the Reviewer is called from a task.
@@ -431,6 +481,11 @@ impl Render for AgentPage {
                     .children(sessions)
                     .children(extra)
                     .child(role),
+            )
+            .children(
+                self.editor
+                    .as_ref()
+                    .map(|(editor, _)| editor.clone().into_any_element()),
             )
             .into_any_element()
     }

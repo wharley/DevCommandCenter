@@ -62,6 +62,8 @@ pub struct AgentRecord {
     pub kickoff_prompt: String,
     /// DCC's role text, shown on request.
     pub role: String,
+    /// What it asks after a turn leaves changes; empty: it never offers.
+    pub offer_prompt: String,
     /// The person's own instructions on top of the role.
     pub extra_instructions: String,
     pub sessions: Vec<AgentSession>,
@@ -228,6 +230,7 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                 effort: agent.effort,
                 kickoff_prompt: agent.kickoff_prompt,
                 role: agent.role,
+                offer_prompt: agent.offer_prompt,
                 extra_instructions: agent.extra_instructions,
                 sessions,
             }
