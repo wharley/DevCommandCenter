@@ -26,6 +26,7 @@ impl Render for Settings {
             SectionId::DecisionProvider => self.decision_section(cx),
             SectionId::AiMemory => self.memory_section(cx),
             SectionId::Account => self.account_section(cx),
+            SectionId::Git => self.git_section(cx),
             SectionId::Shortcuts => self.shortcuts_section(cx),
             SectionId::Experimental => self.experimental(cx),
             _ => div().into_any_element(),
@@ -34,7 +35,8 @@ impl Render for Settings {
             .confirm_dialog(cx)
             .or_else(|| self.remove_account_dialog(cx))
             .or_else(|| self.reset_dialog(cx))
-            .or_else(|| self.forge_connect_dialog(cx));
+            .or_else(|| self.forge_connect_dialog(cx))
+            .or_else(|| self.automation_dialog());
         let close = cx.entity().downgrade();
         let focus = gpui::Focusable::focus_handle(self.search.read(cx), cx);
         Dialog::new("settings-dialog", move |_: &mut Window, cx| {

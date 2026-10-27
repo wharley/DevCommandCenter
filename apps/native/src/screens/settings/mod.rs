@@ -8,6 +8,7 @@ mod appearance;
 mod decision;
 mod experimental;
 mod general;
+mod git;
 mod memory;
 mod nav;
 mod preview;
@@ -123,13 +124,14 @@ impl SectionId {
 }
 
 /// The sections the native app has, in the desktop's array order.
-pub const AVAILABLE: [SectionId; 8] = [
+pub const AVAILABLE: [SectionId; 9] = [
     SectionId::General,
     SectionId::Appearance,
     SectionId::Model,
     SectionId::DecisionProvider,
     SectionId::AiMemory,
     SectionId::Shortcuts,
+    SectionId::Git,
     SectionId::Experimental,
     SectionId::Account,
 ];
@@ -151,6 +153,11 @@ pub struct Settings {
     decision: decision::Decision,
     memory: memory::Memory,
     account: account::Account,
+    /// "Automação do projeto" over Settings.
+    automation: Option<(
+        Entity<crate::screens::automation::ProjectAutomation>,
+        Subscription,
+    )>,
     _search_events: Subscription,
 }
 
@@ -213,6 +220,7 @@ impl Settings {
             decision: decision::Decision::new(window, cx),
             memory: memory::Memory::new(window, cx),
             account: account::Account::new(window, cx),
+            automation: None,
             _search_events: events,
         };
         settings.load_general(cx);

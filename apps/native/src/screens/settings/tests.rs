@@ -443,3 +443,17 @@ fn ai_memory_saves_restarts_and_retries_the_queue(cx: &mut TestAppContext) {
     );
     cx.update(|_, cx| assert_eq!(settings.read(cx).memory.outbox.as_deref(), Some(&[][..])));
 }
+
+#[gpui::test]
+fn git_opens_the_project_automation_over_settings(cx: &mut TestAppContext) {
+    let (settings, cx, events) = open(Some(SectionId::Git), cx);
+    // The task's name, and "Configurar automação" (its checkout is known).
+    assert!(cx.debug_bounds("settings-git-workspace").is_some());
+    click(cx, "settings-git-automation");
+    assert!(cx.debug_bounds("project-automation").is_some());
+    cx.update(|_, cx| assert!(settings.read(cx).automation.is_some()));
+    click(cx, "automation-close");
+    assert!(cx.debug_bounds("project-automation").is_none());
+    // Settings stays open.
+    assert!(events.borrow().is_empty(), "{:?}", events.borrow());
+}

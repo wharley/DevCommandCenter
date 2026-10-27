@@ -6,6 +6,7 @@ pub mod activity;
 pub mod agents;
 pub mod ai_memory;
 pub mod ai_memory_settings;
+pub mod automation;
 pub mod avatar;
 pub mod browser_bridge;
 pub mod browser_opens;
