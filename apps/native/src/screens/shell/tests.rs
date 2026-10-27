@@ -709,3 +709,15 @@ fn the_sidebars_chart_button_opens_the_usage(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("usage-dialog").is_none());
 }
+
+#[gpui::test]
+fn the_sidebars_speech_bubble_opens_the_feedback(cx: &mut TestAppContext) {
+    use crate::screens::sidebar::SidebarEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::OpenFeedback));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("feedback-dialog").is_some());
+    // No GitHub account here: it asks to connect.
+    assert!(cx.debug_bounds("feedback-connect-hint").is_some());
+}

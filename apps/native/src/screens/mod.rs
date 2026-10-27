@@ -8,6 +8,7 @@ pub mod composer;
 pub mod computer_use;
 pub mod conversation;
 pub mod diff_view;
+pub mod feedback;
 pub mod file_view;
 pub mod help;
 pub mod merge;

@@ -43,6 +43,7 @@ impl Shell {
             SidebarEvent::NewTask => self.show(Surface::NewTask, cx),
             SidebarEvent::OpenHelp => self.open_help(None, window, cx),
             SidebarEvent::OpenUsage => self.open_usage(cx),
+            SidebarEvent::OpenFeedback => self.open_feedback(window, cx),
             // `toggleCodeColumn`
             SidebarEvent::ToggleCodeColumn => {
                 let open = !self.prefs.code_column_open;

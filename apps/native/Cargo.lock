@@ -1493,6 +1493,7 @@ dependencies = [
  "two-face",
  "unicode-segmentation",
  "url",
+ "uuid",
  "wry",
 ]
 

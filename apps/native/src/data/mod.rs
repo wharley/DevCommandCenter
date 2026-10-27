@@ -21,6 +21,7 @@ pub mod deletion;
 pub mod desktop_api;
 pub mod diff;
 pub mod disk;
+pub mod feedback;
 pub mod forge;
 pub mod git_watch;
 pub mod goal;

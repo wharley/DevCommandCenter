@@ -377,6 +377,18 @@ pub fn local_date_time(value: &str) -> String {
         .unwrap_or_else(|_| value.to_string())
 }
 
+/// `new Date(value).toLocaleDateString(language)`: `26/10/2026` or
+/// `10/26/2026`, in the local day; the value as it came when not a date.
+pub fn local_date(value: &str, english: bool) -> String {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|at| {
+            at.with_timezone(&chrono::Local)
+                .format(if english { "%-m/%-d/%Y" } else { "%d/%m/%Y" })
+                .to_string()
+        })
+        .unwrap_or_else(|_| value.to_string())
+}
+
 /// `toLocaleTimeString()` of a millisecond time (`14:03:22`, `2:03:22 PM`);
 /// `None` when it is not one (`browserAuditTime`).
 pub fn local_clock(at_ms: i64, english: bool) -> Option<String> {

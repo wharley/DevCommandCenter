@@ -8,6 +8,7 @@ mod browser_opens;
 mod computer;
 mod delivery;
 mod editor;
+mod feedback;
 mod help;
 pub mod layout;
 mod merge;
@@ -115,6 +116,8 @@ pub struct Shell {
     _stage_events: Subscription,
     /// "Sessões passadas", while open.
     session_search: Option<session_search::OpenSearch>,
+    /// "Feedback DCC", while open.
+    feedback: Option<feedback::OpenFeedback>,
     /// "DCC Usage", while open.
     usage: Option<usage::OpenUsage>,
     /// The command palette (⌘K), while open.
@@ -262,6 +265,7 @@ impl Shell {
             file_finder: None,
             palette: None,
             usage: None,
+            feedback: None,
             terminal,
             _terminal_events: terminal_events,
             _terminal_counts: terminal_counts,
@@ -796,6 +800,7 @@ impl Render for Shell {
                     .as_ref()
                     .map(|(search, _)| search.clone()),
             )
+            .children(self.feedback_overlay())
             .children(self.usage_overlay())
             .children(self.palette_overlay())
             .children(self.file_finder_overlay())

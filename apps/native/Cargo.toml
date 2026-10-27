@@ -19,6 +19,8 @@ path = "src/main.rs"
 gpui = { package = "gpui-pre", version = "=0.3.9", default-features = false }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", default-features = false, features = ["font-kit", "runtime_shaders", "x11", "wayland"] }
 serde = { version = "1", features = ["derive"] }
+# A request id per feedback report (the desktop's `crypto.randomUUID`).
+uuid = { version = "1", features = ["v4"] }
 serde_json = "1"
 dirs = "6"
 anyhow = "1"
