@@ -43,7 +43,11 @@ pub struct Target {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ComputerStatus {
+    /// `macos`, `windows`, `linux`…
+    pub platform: String,
     pub supported: bool,
+    /// The macOS version computer use needs, when this one is older.
+    pub minimum_macos_version: Option<u32>,
     pub runtime_attached: bool,
     pub accessibility: Permission,
     pub screen_recording: Permission,
@@ -59,6 +63,18 @@ impl ComputerStatus {
             .iter()
             .filter(|target| seen.insert(target.bundle_id.clone()))
             .cloned()
+            .collect()
+    }
+
+    /// The names of the apps the grant allows (`activeAppNames`).
+    pub fn granted_app_names(&self) -> Vec<String> {
+        if !self.grant.armed {
+            return Vec::new();
+        }
+        self.targets
+            .iter()
+            .filter(|target| self.grant.allowed_bundle_ids.contains(&target.bundle_id))
+            .map(|target| target.name.clone())
             .collect()
     }
 
@@ -141,11 +157,13 @@ impl PreviewFrame {
 }
 
 /// The agent's grant, as `status` reports it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Grant {
     pub armed: bool,
     pub remaining_ms: u64,
+    /// The apps the agent may control while armed.
+    pub allowed_bundle_ids: Vec<String>,
 }
 
 pub struct ComputerStream {
@@ -204,6 +222,23 @@ impl DesktopApi {
         Self::decoded(self.post(
             "/api/v1/computer/bridge/status",
             &json!({ "sessionId": session_id, "includeTargets": true }),
+        )?)
+    }
+
+    /// What Settings shows (`getComputerUseStatus`): with or without a
+    /// conversation, with the apps.
+    pub fn computer_settings(&self, session_id: Option<&str>) -> Result<ComputerStatus, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/computer/bridge/status",
+            &json!({ "sessionId": session_id, "includeTargets": true }),
+        )?)
+    }
+
+    /// `disarmComputerUse`: the conversation's grant ends now.
+    pub fn computer_disarm(&self, session_id: &str) -> Result<Grant, ApiError> {
+        Self::decoded(self.post(
+            "/api/v1/computer/bridge/disarm",
+            &json!({ "sessionId": session_id }),
         )?)
     }
 

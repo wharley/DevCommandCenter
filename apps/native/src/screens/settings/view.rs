@@ -28,6 +28,7 @@ impl Render for Settings {
             SectionId::Account => self.account_section(cx),
             SectionId::Git => self.git_section(cx),
             SectionId::Integrations => self.connectors_section(cx),
+            SectionId::ComputerUse => self.computer_section(cx),
             SectionId::Shortcuts => self.shortcuts_section(cx),
             SectionId::Experimental => self.experimental(cx),
             _ => div().into_any_element(),
