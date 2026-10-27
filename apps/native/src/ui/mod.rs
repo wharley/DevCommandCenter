@@ -4,6 +4,7 @@
 pub mod attention;
 mod badge;
 mod button;
+pub mod command;
 pub mod dialog;
 mod feedback;
 mod icon;

@@ -32,6 +32,7 @@ pub mod project_logo;
 pub mod prompt;
 pub mod provider_catalog;
 pub mod provider_selection;
+pub mod quick_open;
 pub mod rail;
 pub mod recap;
 pub mod seen;

@@ -9,7 +9,10 @@ use super::{SessionSearch, SessionSearchEvent};
 use crate::data::session_search::{updated_at_label, workspace_label};
 use crate::i18n::{Locale, Translate};
 use crate::theme::ActiveTheme;
-use crate::ui::{Badge, BadgeVariant, Dialog, Icon};
+use crate::ui::command::{
+    command_dialog, command_field, command_group, command_heading, command_list_height,
+};
+use crate::ui::{Badge, BadgeVariant, Icon};
 
 impl SessionSearch {
     fn item(&self, index: usize, english: bool, cx: &mut Context<Self>) -> AnyElement {
@@ -113,20 +116,10 @@ impl SessionSearch {
         if range.is_empty() {
             return None;
         }
-        let muted = cx.theme().colors.muted_foreground;
         let items: Vec<AnyElement> = range.map(|index| self.item(index, english, cx)).collect();
         Some(
-            div()
-                .p(px(4.0))
-                .child(
-                    div()
-                        .px(px(8.0))
-                        .py(px(6.0))
-                        .text_size(px(12.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(muted)
-                        .child(heading),
-                )
+            command_group()
+                .child(command_heading(heading, cx))
                 .children(items)
                 .into_any_element(),
         )
@@ -137,7 +130,6 @@ impl Render for SessionSearch {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
         let english = cx.global::<crate::i18n::I18n>().locale() == Locale::En;
-        let viewport = window.viewport_size();
         let has_query = !self.input.read(cx).text().trim().is_empty();
         let current = self.current_count();
         let total = self.results.len();
@@ -174,24 +166,18 @@ impl Render for SessionSearch {
                 .text_size(px(14.0))
                 .child(cx.t("workbench.sessionSearch.empty"))
         });
-        let list_height = (f32::from(viewport.height) * 0.58).min(512.0);
+        let list_height = command_list_height(window);
         let close = cx.entity().downgrade();
         let input_focus = gpui::Focusable::focus_handle(self.input.read(cx), cx);
-        Dialog::new("session-search-dialog", move |_: &mut Window, cx| {
-            let _ = close.update(cx, |_, cx| cx.emit(SessionSearchEvent::Closed));
-        })
-        .top(0.18)
-        // `CommandDialog`: `rounded-2xl border border-border/60 bg-background shadow-2xl`.
-        .radius(f32::from(cx.theme().radius.xxl))
-        .surface(colors.background)
-        .border(colors.border.opacity(0.6))
-        .shadow_2xl()
-        .max_width(760.0)
-        .max_height((f32::from(viewport.height) * 0.84).min(620.0))
-        .padding(0.0)
-        .gap(0.0)
-        .close_button(false)
-        .initial_focus(input_focus)
+        command_dialog(
+            "session-search-dialog",
+            input_focus,
+            move |_: &mut Window, cx| {
+                let _ = close.update(cx, |_, cx| cx.emit(SessionSearchEvent::Closed));
+            },
+            window,
+            cx,
+        )
         .child(
             div()
                 .border_b_1()
@@ -220,31 +206,16 @@ impl Render for SessionSearch {
                 ),
         )
         .child(
-            div().p(px(4.0)).child(
-                div()
-                    .id("session-search-field")
-                    .debug_selector(|| "session-search-field".into())
-                    .flex()
-                    .h(px(32.0))
-                    .items_center()
-                    .gap(px(4.0))
-                    .rounded(px(10.0))
-                    .border_1()
-                    .border_color(colors.input.opacity(0.3))
-                    .bg(colors.input.opacity(0.3))
-                    .px(px(10.0))
-                    .text_size(px(14.0))
-                    .on_key_down(cx.listener(|search, event: &KeyDownEvent, _, cx| {
-                        match event.keystroke.key.as_str() {
-                            "down" => search.move_highlight(true, cx),
-                            "up" => search.move_highlight(false, cx),
-                            _ => return,
-                        }
-                        cx.stop_propagation();
-                    }))
-                    .child(div().opacity(0.5).child(Icon::new("search").size(16.0)))
-                    .child(div().flex_1().min_w_0().child(self.input.clone())),
-            ),
+            command_field("session-search-field", self.input.clone(), cx).on_key_down(cx.listener(
+                |search, event: &KeyDownEvent, _, cx| {
+                    match event.keystroke.key.as_str() {
+                        "down" => search.move_highlight(true, cx),
+                        "up" => search.move_highlight(false, cx),
+                        _ => return,
+                    }
+                    cx.stop_propagation();
+                },
+            )),
         )
         .child(
             div()

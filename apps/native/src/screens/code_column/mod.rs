@@ -69,6 +69,8 @@ pub enum CodeColumnEvent {
         delivered: gpui::SharedString,
     },
     Close,
+    /// The header's search: "Abrir arquivo" (⌘P).
+    OpenQuickOpen,
     TabChanged(CodeColumnTab),
     /// Back to the parent's conversation after reviewing from the child's.
     OpenSession(String),

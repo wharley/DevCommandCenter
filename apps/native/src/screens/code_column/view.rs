@@ -65,6 +65,7 @@ impl Render for CodeColumn {
         let colors = cx.theme().colors.clone();
         let changes = self.change_count();
         let close_label = cx.t("codeColumn.close");
+        let quick_open_label = cx.t("inspector.codeSection.quickOpen");
         let header = div()
             .flex()
             .h(px(40.0))
@@ -98,6 +99,29 @@ impl Render for CodeColumn {
                         changes,
                         cx,
                     )),
+            )
+            .child(
+                Tooltip::new(
+                    "code-column-quick-open-tip",
+                    Button::new("code-column-quick-open")
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::IconSm)
+                        .muted()
+                        .on_click(
+                            cx.listener(|_, _, _, cx| cx.emit(CodeColumnEvent::OpenQuickOpen)),
+                        )
+                        .child(Icon::new("search").size(14.0).stroke(1.8)),
+                    move |_, cx| {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(quick_open_label.clone())
+                            .child(shortcut_keys(&[crate::ui::command_key(), "P"], cx))
+                            .into_any_element()
+                    },
+                )
+                .side(crate::ui::tooltip::Side::Bottom),
             )
             .child(
                 Tooltip::new(

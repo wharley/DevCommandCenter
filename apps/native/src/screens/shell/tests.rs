@@ -592,3 +592,59 @@ fn the_sidebars_help_opens_and_its_footer_swaps_it_for_the_shortcuts(cx: &mut Te
     cx.run_until_parked();
     assert!(cx.debug_bounds("shortcuts-dialog").is_none());
 }
+
+#[gpui::test]
+fn cmd_p_and_cmd_shift_f_open_a_checkout_file_on_the_stage(cx: &mut TestAppContext) {
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    cx.update(|_, cx| {
+        super::bind_keys(cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    // No task open: nothing to look in.
+    cx.simulate_keystrokes("cmd-p");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("quick-open-field").is_none());
+    let repo = crate::test_support::git_checkout(&[
+        ("src/a.rs", "fn a() {}\nlet needle = 1;\n"),
+        ("b.rs", "b\n"),
+    ]);
+    let root = repo.path().to_string_lossy().into_owned();
+    let conversation = shell.read_with(cx, |shell, _| shell.conversation.clone());
+    conversation.update(cx, |view, cx| {
+        let data = crate::data::conversation::Conversation {
+            task_id: "t".into(),
+            workspace_path: Some(root),
+            last_sequence: 1,
+            ..Default::default()
+        };
+        view.show_loaded(data, cx);
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("cmd-p");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("quick-open-field").is_some());
+    cx.simulate_input("b.rs");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("quick-open-field").is_none());
+    let stage = shell.read_with(cx, |shell, _| shell.stage.clone());
+    stage.read_with(cx, |stage, _| {
+        assert_eq!(stage.files.as_ref().unwrap().active().unwrap().path, "b.rs")
+    });
+    cx.simulate_keystrokes("cmd-shift-f");
+    cx.run_until_parked();
+    cx.simulate_input("needle");
+    cx.run_until_parked();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(200));
+    cx.run_until_parked();
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("workspace-search-field").is_none());
+    stage.read_with(cx, |stage, _| {
+        assert_eq!(
+            stage.files.as_ref().unwrap().active().unwrap().path,
+            "src/a.rs"
+        )
+    });
+}

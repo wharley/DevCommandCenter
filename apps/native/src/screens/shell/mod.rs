@@ -11,6 +11,7 @@ mod editor;
 mod help;
 pub mod layout;
 mod merge;
+mod quick_open;
 mod regions;
 mod session_search;
 mod terminal;
@@ -64,6 +65,7 @@ pub fn bind_keys(cx: &mut gpui::App) {
         gpui::KeyBinding::new("cmd-j", ToggleTerminal, None),
     ]);
     editor::bind_keys(cx);
+    quick_open::bind_keys(cx);
 }
 
 /// Drag payload of the sidebar separator.
@@ -109,6 +111,8 @@ pub struct Shell {
     _stage_events: Subscription,
     /// "Sessões passadas", while open.
     session_search: Option<session_search::OpenSearch>,
+    /// "Abrir arquivo" (⌘P) or "Buscar no workspace" (⌘⇧F), while open.
+    file_finder: Option<quick_open::FileFinder>,
     /// "Ajuda" and "Atalhos de teclado", while open.
     help: Option<help::OpenHelp>,
     shortcuts_open: bool,
@@ -205,6 +209,8 @@ impl Shell {
                 this.stage_root = root.clone();
                 this.stage.update(cx, |stage, cx| stage.clear(cx));
                 this.merge = None;
+                // Another checkout: Quick Open and the search close.
+                this.file_finder = None;
                 this.code_column
                     .update(cx, |column, cx| column.set_open_diff(None, cx));
             }
@@ -244,6 +250,7 @@ impl Shell {
             session_search: None,
             help: None,
             shortcuts_open: false,
+            file_finder: None,
             terminal,
             _terminal_events: terminal_events,
             _terminal_counts: terminal_counts,
@@ -410,6 +417,7 @@ impl Shell {
                     });
                 }
             }
+            CodeColumnEvent::OpenQuickOpen => self.open_quick_open(window, cx),
             CodeColumnEvent::Annotate(request) => {
                 self.open_annotation(request.clone(), false, window, cx)
             }
@@ -811,6 +819,16 @@ impl Render for Shell {
                         .update(cx, |conversation, cx| conversation.open_find(window, cx))
                 },
             ))
+            .on_action(
+                cx.listener(|this, _: &quick_open::OpenQuickOpen, window, cx| {
+                    this.open_quick_open(window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &quick_open::OpenWorkspaceSearch, window, cx| {
+                    this.open_workspace_search(window, cx)
+                }),
+            )
             // ⌘O: the task's folder in the preferred editor.
             .on_action(
                 cx.listener(|this, _: &editor::OpenInPreferredEditor, _, cx| {
@@ -873,6 +891,7 @@ impl Render for Shell {
                     .as_ref()
                     .map(|(search, _)| search.clone()),
             )
+            .children(self.file_finder_overlay())
             .children(self.help_overlays(cx))
             .child(self.browser_approvals.clone())
             .child(self.computer_approvals.clone())
