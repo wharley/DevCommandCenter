@@ -27,7 +27,9 @@ impl Render for Settings {
             SectionId::Experimental => self.experimental(cx),
             _ => div().into_any_element(),
         };
-        let confirm = self.confirm_dialog(cx);
+        let confirm = self
+            .confirm_dialog(cx)
+            .or_else(|| self.remove_account_dialog(cx));
         let close = cx.entity().downgrade();
         let focus = gpui::Focusable::focus_handle(self.search.read(cx), cx);
         Dialog::new("settings-dialog", move |_: &mut Window, cx| {

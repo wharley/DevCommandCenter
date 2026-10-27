@@ -84,7 +84,12 @@ impl Settings {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
-        let status = provider_text::rail_status(provider, 0);
+        let named = crate::data::provider_accounts::of_provider(
+            &self.providers.accounts.list,
+            &provider.id.0,
+        )
+        .len();
+        let status = provider_text::rail_status(provider, named);
         let line = match status.count {
             Some(count) => cx.t_with(status.key, &Args::count(count)),
             None => cx.t(status.key),
@@ -324,6 +329,14 @@ impl Settings {
             .flex_1()
             .min_w_0()
             .child(header)
+            .children(provider.capabilities.supports_accounts.then(|| {
+                detail_section(
+                    cx.t("settings.model.accountsTitle"),
+                    Some(cx.t("settings.model.accountsHint")),
+                    self.accounts_list(provider, cx),
+                    cx,
+                )
+            }))
             .child(detail_section(
                 cx.t("settings.model.modelsTitle"),
                 Some(cx.t("settings.model.modelsHint")),

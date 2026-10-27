@@ -34,6 +34,7 @@ pub mod open_project;
 pub mod plan_checklist;
 pub mod project_logo;
 pub mod prompt;
+pub mod provider_accounts;
 pub mod provider_catalog;
 pub mod provider_runtime;
 pub mod provider_selection;

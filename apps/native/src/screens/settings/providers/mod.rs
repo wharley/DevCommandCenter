@@ -3,8 +3,13 @@
 //! model new tasks start with, and how DCC launches it. Accounts and plan
 //! usage come with the next part.
 
+mod account_rows;
+mod accounts;
 mod runtime;
 mod view;
+
+#[cfg(test)]
+pub(super) use accounts::Status as AccountStatusView;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -43,6 +48,7 @@ pub(super) struct Providers {
     pub(super) binary: Entity<TextInput>,
     pub(super) home: Entity<TextInput>,
     pub(super) shadow_home: Entity<TextInput>,
+    pub(super) accounts: accounts::Accounts,
     _inputs: Vec<Subscription>,
 }
 
@@ -90,6 +96,7 @@ impl Providers {
             binary,
             home,
             shadow_home,
+            accounts: accounts::Accounts::new(window, cx),
             _inputs: inputs,
         }
     }
@@ -119,20 +126,32 @@ impl Settings {
         let api = self.general.api();
         let db_path = crate::data::loader::database_path();
         cx.spawn(async move |this, cx| {
-            let providers = cx
+            let (providers, accounts) = cx
                 .background_executor()
                 .spawn(async move {
+                    let accounts = api.as_ref().and_then(|api| api.provider_accounts().ok());
                     if let Some(Ok(providers)) = api.map(|api| api.providers()) {
-                        return providers;
+                        return (providers, accounts);
                     }
                     if cfg!(test) {
-                        return dcc_providers::offline_catalog().providers;
+                        return (dcc_providers::offline_catalog().providers, accounts);
                     }
-                    crate::data::provider_catalog::checked(&db_path)
-                        .unwrap_or_else(|| crate::data::provider_catalog::offline(&db_path))
+                    let providers = crate::data::provider_catalog::checked(&db_path)
+                        .unwrap_or_else(|| crate::data::provider_catalog::offline(&db_path));
+                    (providers, accounts)
                 })
                 .await;
             let _ = this.update(cx, |settings, cx| {
+                if let Some(accounts) = accounts {
+                    // The desktop answers: what it could not say is asked again.
+                    settings
+                        .providers
+                        .accounts
+                        .statuses
+                        .retain(|_, status| !matches!(status, accounts::Status::Failed(_)));
+                    settings.providers.accounts.list = accounts;
+                }
+                settings.load_account_statuses(cx);
                 let mut providers = providers;
                 settings
                     .providers
@@ -150,6 +169,7 @@ impl Settings {
     pub(super) fn choose_provider(&mut self, provider_id: String, cx: &mut Context<Self>) {
         self.providers.chosen = Some(provider_id);
         self.fill_runtime_fields(cx);
+        self.load_account_statuses(cx);
         cx.notify();
     }
 

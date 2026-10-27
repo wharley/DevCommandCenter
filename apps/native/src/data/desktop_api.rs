@@ -242,10 +242,22 @@ impl DesktopApi {
     }
 
     fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, ApiError> {
+        self.request_waiting(method, path, body, IO_TIMEOUT)
+    }
+
+    /// A request whose answer may take `wait` (a sign-in waiting on the
+    /// browser).
+    pub(crate) fn request_waiting(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        wait: Duration,
+    ) -> Result<Value, ApiError> {
         let address = SocketAddr::from(([127, 0, 0, 1], self.port));
         let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
             .map_err(|_| ApiError::DesktopClosed)?;
-        stream.set_read_timeout(Some(IO_TIMEOUT)).ok();
+        stream.set_read_timeout(Some(wait)).ok();
         stream.set_write_timeout(Some(IO_TIMEOUT)).ok();
         let payload = body.map(Value::to_string).unwrap_or_default();
         let request = format!(
