@@ -69,6 +69,7 @@ mod forge;
 mod git_changes;
 mod git_conflicts;
 mod mobile;
+mod skills;
 mod terminals;
 mod turn_review;
 
@@ -725,6 +726,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(create_workspace_bundle_handler),
         )
         .route("/api/v1/files/write", post(files::write))
+        .route("/api/v1/skills/save", post(skills::save))
+        .route("/api/v1/skills/delete", post(skills::delete))
+        .route("/api/v1/skills/import", post(skills::import))
+        .route("/api/v1/skills/compile", post(skills::compile))
         .route("/api/v1/git/stage-file", post(git_changes::stage_file))
         .route("/api/v1/git/unstage-file", post(git_changes::unstage_file))
         .route("/api/v1/git/discard-file", post(git_changes::discard_file))
@@ -1609,6 +1614,10 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/ai-memory/source-actions",
             "POST /api/v1/ai-memory/source-actions",
             "GET /api/v1/ai-memory/sidecar",
+            "POST /api/v1/skills/save",
+            "POST /api/v1/skills/delete",
+            "POST /api/v1/skills/import",
+            "POST /api/v1/skills/compile",
             "POST /api/v1/sessions/:session_id/agent",
             "GET /api/v1/workspaces/:workspace_id/delivery",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
@@ -5266,6 +5275,77 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         let (status, _) = post_json(&fixture.app, "/api/v1/git/discard-file", file("../x")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn skills_are_saved_compiled_and_deleted_in_the_tasks_checkout() {
+        use dcc_core::domain::workspace::{Workspace, WorkspaceState};
+        let fixture = embedded_fixture().await;
+        let base = tempfile::tempdir().expect("checkout");
+        let repo = std::fs::canonicalize(base.path()).unwrap().to_path_buf();
+        git(&repo, &["init", "-b", "main"]);
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        dcc_core::ports::WorkspaceRepo::save_workspace(
+            &workspaces,
+            &Workspace {
+                id: WorkspaceId("w-skills".to_string()),
+                project_id: ProjectId("project".to_string()),
+                name: None,
+                root_path: repo.to_string_lossy().to_string(),
+                base_branch: "main".to_string(),
+                worktree_path: None,
+                source: None,
+                state: WorkspaceState::Ready,
+                setup_report: None,
+                pinned_at: None,
+                snoozed_until: None,
+                created_at: "2026-10-27T00:00:00Z".to_string(),
+                updated_at: "2026-10-27T00:00:00Z".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let root = repo.to_string_lossy().to_string();
+        let skill = json!({
+            "name": "review-pr", "description": "Reviews a PR", "body": "Read the diff.",
+            "targetAgents": ["claude"], "disableModelInvocation": false, "scope": "project",
+        });
+        let (status, saved) = post_json(
+            &fixture.app,
+            "/api/v1/skills/save",
+            json!({ "projectRoot": root, "workspaceId": "w-skills", "skill": skill }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert!(repo
+            .join(".devcommandcenter/skills/review-pr/SKILL.md")
+            .exists());
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/skills/compile",
+            json!({ "checkoutRoot": root, "workspaceId": "w-skills" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(repo.join(".claude/skills/review-pr/SKILL.md").exists());
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/skills/delete",
+            json!({ "projectRoot": root, "workspaceId": "w-skills", "name": "review-pr" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!repo.join(".devcommandcenter/skills/review-pr").exists());
+        // An invalid name is refused.
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/skills/save",
+            json!({ "projectRoot": root, "workspaceId": "w-skills",
+                "skill": { "name": "Bad Name", "description": "x" } }),
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 

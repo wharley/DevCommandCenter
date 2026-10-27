@@ -758,6 +758,7 @@
     "helpTopic": "Help: {{topic}}",
     "keyboardShortcuts": "Keyboard shortcuts",
     "openUsage": "Open DCC Usage",
+    "manageSkills": "Manage skills",
 	"keywords": {
 		"openProject": "open project workspace",
 		"clone": "clone repository url",
