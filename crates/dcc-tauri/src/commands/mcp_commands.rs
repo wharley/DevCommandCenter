@@ -347,6 +347,14 @@ pub async fn disable_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
     input: DisableMcpIntegrationInput,
 ) -> Result<DisableMcpIntegrationOutput, String> {
+    disable_mcp_integration_with(&state, input).await
+}
+
+/// `disable_mcp_integration` for the HTTP API (no Tauri `State`).
+pub async fn disable_mcp_integration_with(
+    state: &WorkspaceCommandState,
+    input: DisableMcpIntegrationInput,
+) -> Result<DisableMcpIntegrationOutput, String> {
     let repo = SqliteMcpRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     disable_integration(&repo, input)
         .await

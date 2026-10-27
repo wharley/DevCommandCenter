@@ -6,11 +6,11 @@
 use super::*;
 use dcc_core::application::ActivateMcpDefinitionInput;
 use dcc_tauri::commands::mcp_commands::{
-    self as commands, CreateMcpIntegrationInput, DisconnectMcpConnectorInput,
-    FetchMcpConnectorLogoInput, ImportNativeMcpServersInput, McpConnectLoginInput,
-    RemoveMcpIntegrationInput, SetMcpConnectorLogoInput, SetMcpConnectorScopesInput,
-    SetMcpProjectEnabledInput, SetMcpToolPolicyInput, StartMcpConnectInput,
-    TestMcpIntegrationInput,
+    self as commands, CreateMcpIntegrationInput, DisableMcpIntegrationInput,
+    DisconnectMcpConnectorInput, FetchMcpConnectorLogoInput, ImportNativeMcpServersInput,
+    McpConnectLoginInput, RemoveMcpIntegrationInput, SetMcpConnectorLogoInput,
+    SetMcpConnectorScopesInput, SetMcpProjectEnabledInput, SetMcpToolPolicyInput,
+    StartMcpConnectInput, TestMcpIntegrationInput,
 };
 use dcc_tauri::connector_gateway::ConnectorGateway;
 use dcc_tauri::mcp_connect::McpConnectCoordinator;
@@ -162,4 +162,25 @@ pub(super) async fn import_native(
     Json(input): Json<ImportNativeMcpServersInput>,
 ) -> Result<Json<Value>, HttpApiError> {
     reply(commands::import_native_mcp_servers_with(&backend.workspace, input).await)
+}
+
+pub(super) async fn disable(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<DisableMcpIntegrationInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(commands::disable_mcp_integration_with(&backend.workspace, input).await)
+}
+
+/// What each connector reported in the session (the advanced panel).
+pub(super) async fn runtime(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::session_commands::ListMcpRuntimeStatusesInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(
+        dcc_tauri::commands::session_commands::list_mcp_runtime_statuses_with(
+            &backend.sessions,
+            input,
+        )
+        .await,
+    )
 }

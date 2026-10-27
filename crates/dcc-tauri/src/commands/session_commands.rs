@@ -3010,6 +3010,14 @@ pub async fn list_mcp_runtime_statuses(
     state: State<'_, SessionCommandState>,
     input: ListMcpRuntimeStatusesInput,
 ) -> Result<ListMcpRuntimeStatusesOutput, String> {
+    list_mcp_runtime_statuses_with(&state, input).await
+}
+
+/// `list_mcp_runtime_statuses` for the HTTP API (no Tauri `State`).
+pub async fn list_mcp_runtime_statuses_with(
+    state: &SessionCommandState,
+    input: ListMcpRuntimeStatusesInput,
+) -> Result<ListMcpRuntimeStatusesOutput, String> {
     let session_id = SessionId(input.session_id.trim().to_string());
     if session_id.0.is_empty() {
         return Err("sessionId is required".to_string());

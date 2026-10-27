@@ -855,6 +855,8 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/mcp/integrations", get(mcp::list).post(mcp::create))
         .route("/api/v1/mcp/integrations/activate", post(mcp::activate))
         .route("/api/v1/mcp/integrations/remove", post(mcp::remove))
+        .route("/api/v1/mcp/integrations/disable", post(mcp::disable))
+        .route("/api/v1/mcp/runtime", post(mcp::runtime))
         .route("/api/v1/mcp/scopes", post(mcp::set_scopes))
         .route("/api/v1/mcp/connect/start", post(mcp::start_connect))
         .route("/api/v1/mcp/connect/wait", post(mcp::wait_connect))
@@ -1745,6 +1747,8 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/mcp/integrations",
             "POST /api/v1/mcp/integrations/activate",
             "POST /api/v1/mcp/integrations/remove",
+            "POST /api/v1/mcp/integrations/disable",
+            "POST /api/v1/mcp/runtime",
             "POST /api/v1/mcp/scopes",
             "POST /api/v1/mcp/connect/start",
             "POST /api/v1/mcp/connect/wait",
@@ -5857,6 +5861,23 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{scoped}");
+        let (status, disabled) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/integrations/disable",
+            json!({ "definitionId": id }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{disabled}");
+        assert_eq!(disabled["integration"]["definition"]["enabled"], false);
+        // The session's runtime: none reported yet.
+        let (status, runtime) = post_json(
+            &fixture.app,
+            "/api/v1/mcp/runtime",
+            json!({ "sessionId": fixture.session_id.0 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{runtime}");
+        assert_eq!(runtime["statuses"], json!([]));
         // No desktop app around this backend: no sign-in to start.
         let (status, _) = post_json(
             &fixture.app,
