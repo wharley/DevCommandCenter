@@ -910,6 +910,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(delegation_review::cancel),
         )
         .route(
+            "/api/v1/delegations/:delegation_id/approve",
+            post(delegation_review::approve),
+        )
+        .route(
             "/api/v1/sessions/:session_id/ai-memory/export-status",
             get(ai_memory::export_status),
         )
@@ -1787,6 +1791,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/delegations/:delegation_id/apply",
             "POST /api/v1/delegations/:delegation_id/discard",
             "POST /api/v1/delegations/:delegation_id/cancel",
+            "POST /api/v1/delegations/:delegation_id/approve",
             "GET /api/v1/sessions/:session_id/ai-memory/export-status",
             "GET /api/v1/sessions/:session_id/ai-memory/sources",
             "GET /api/v1/ai-memory/source-actions",
@@ -6335,6 +6340,13 @@ mod tests {
         let (status, body) = post_json(
             &fixture.app,
             "/api/v1/delegations/missing/cancel",
+            json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/delegations/missing/approve",
             json!({}),
         )
         .await;

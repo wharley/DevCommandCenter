@@ -2,7 +2,8 @@
 //! (`handleApplyDelegation` / `handleDiscardDelegation`): apply the child's
 //! worktree onto the task's checkout and approve the delegation, or throw
 //! the worktree away and cancel it, in the desktop's order. The header's
-//! lineage menu stops a running one (`cancelRunningDelegation`).
+//! lineage menu stops a running one (`cancelRunningDelegation`), and the
+//! Session tab marks one reviewed (`approveDelegation`).
 use super::*;
 use dcc_core::domain::delegation::DelegationId;
 use dcc_core::ports::DelegationRepo;
@@ -81,6 +82,29 @@ pub(super) async fn discard(
     .await
     .map_err(HttpApiError::bad_request)?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// "Marcar revisada" (`approveDelegation`): a delegation waiting for review
+/// is accepted with its own report as the summary.
+pub(super) async fn approve(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(delegation_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let id = DelegationId(delegation_id);
+    let delegation = DelegationRepo::get_delegation(&backend.sessions, &id)
+        .await
+        .map_err(|error| HttpApiError::internal(error.to_string()))?
+        .ok_or_else(|| HttpApiError::not_found("delegation not found"))?;
+    let approved = delegation_commands::approve_delegation_with_state(
+        &backend.sessions,
+        ApproveDelegationInput {
+            delegation_id: id,
+            summary: delegation.result_summary,
+        },
+    )
+    .await
+    .map_err(HttpApiError::bad_request)?;
+    Ok(Json(json!({ "status": approved.delegation.status })))
 }
 
 /// `cancel_running_delegation`: marks it cancelled, aborts the child's turn
