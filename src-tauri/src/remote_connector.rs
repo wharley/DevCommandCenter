@@ -1277,6 +1277,7 @@ pub fn remote_path_allowed(path: &str) -> bool {
         && !route.starts_with("/api/v1/appshots/")
         && !route.starts_with("/api/v1/providers/")
         && !route.starts_with("/api/v1/provider-accounts")
+        && !route.starts_with("/api/v1/antigravity/")
 }
 
 fn is_channel_route(path: &str) -> bool {
@@ -1758,6 +1759,7 @@ mod tests {
         assert!(!remote_path_allowed("/api/v1/providers/codex/availability"));
         assert!(!remote_path_allowed("/api/v1/provider-accounts"));
         assert!(!remote_path_allowed("/api/v1/provider-accounts/sign-in"));
+        assert!(!remote_path_allowed("/api/v1/antigravity/install"));
         assert!(!remote_path_allowed("/api/v1/remote/pairing/offers"));
         assert!(!remote_path_allowed("/api/v1/terminals/spawn"));
         assert!(!remote_path_allowed("/api/v1/terminals/by-owner/terminal%3Ax"));

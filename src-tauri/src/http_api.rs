@@ -71,6 +71,7 @@ mod git_conflicts;
 mod keep_awake;
 mod mobile;
 mod provider_accounts;
+mod provider_usage;
 mod providers;
 mod shortcuts;
 mod skills;
@@ -776,6 +777,26 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/provider-accounts/sign-in/cancel",
             post(provider_accounts::cancel_sign_in),
+        )
+        .route(
+            "/api/v1/provider-accounts/usage",
+            post(provider_usage::usage),
+        )
+        .route(
+            "/api/v1/provider-accounts/reset",
+            post(provider_usage::reset),
+        )
+        .route(
+            "/api/v1/antigravity/status",
+            post(provider_usage::antigravity_status),
+        )
+        .route(
+            "/api/v1/antigravity/install",
+            post(provider_usage::install_antigravity),
+        )
+        .route(
+            "/api/v1/antigravity/connect",
+            post(provider_usage::connect_antigravity),
         )
         .route(
             "/api/v1/provider-accounts/:account_id",
@@ -1693,6 +1714,11 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/provider-accounts/sign-in/cancel",
             "PUT /api/v1/provider-accounts/:account_id",
             "DELETE /api/v1/provider-accounts/:account_id",
+            "POST /api/v1/provider-accounts/usage",
+            "POST /api/v1/provider-accounts/reset",
+            "POST /api/v1/antigravity/status",
+            "POST /api/v1/antigravity/install",
+            "POST /api/v1/antigravity/connect",
             "GET /api/v1/quick-composer/status",
             "PUT /api/v1/quick-composer/shortcut",
             "POST /api/v1/quick-composer/toggle",
@@ -5525,6 +5551,45 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn plan_usage_and_antigravity_go_through_the_desktop() {
+        let fixture = embedded_fixture().await;
+        // A provider without usage is refused before any CLI runs.
+        let (status, refused) = send_json(
+            &fixture.app,
+            "POST",
+            "/api/v1/provider-accounts/usage",
+            json!({ "providerId": "droid" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            refused
+                .to_string()
+                .contains("does not support account usage"),
+            "{refused}"
+        );
+        let (status, _) = send_json(
+            &fixture.app,
+            "POST",
+            "/api/v1/provider-accounts/reset",
+            json!({ "providerId": "droid" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // Nothing installed or signed in yet.
+        let (status, antigravity) = send_json(
+            &fixture.app,
+            "POST",
+            "/api/v1/antigravity/status",
+            json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{antigravity}");
+        assert_eq!(antigravity["managedRuntimeInstalled"], false);
+        assert_eq!(antigravity["signedIn"], false);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

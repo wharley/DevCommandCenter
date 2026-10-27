@@ -586,6 +586,13 @@ pub async fn provider_account_usage(
 pub async fn install_antigravity(
     state: State<'_, SessionCommandState>,
 ) -> Result<InstallAntigravityOutput, String> {
+    install_antigravity_for_state(&state).await
+}
+
+/// Downloads the verified official runtime and checks it runs.
+pub async fn install_antigravity_for_state(
+    state: &SessionCommandState,
+) -> Result<InstallAntigravityOutput, String> {
     let app_data_dir = state.app_data_dir().to_path_buf();
     let install_root = app_data_dir.clone();
     let binary_path = tokio::task::spawn_blocking(move || {
@@ -615,6 +622,14 @@ pub async fn install_antigravity(
 #[tauri::command]
 pub async fn get_antigravity_status(
     state: State<'_, SessionCommandState>,
+    input: AntigravityStatusInput,
+) -> Result<AntigravityStatusOutput, String> {
+    antigravity_status_for_state(&state, input)
+}
+
+/// Whether the managed runtime is installed and the Google login saved.
+pub fn antigravity_status_for_state(
+    state: &SessionCommandState,
     input: AntigravityStatusInput,
 ) -> Result<AntigravityStatusOutput, String> {
     let runtime = state
@@ -652,6 +667,14 @@ pub async fn get_antigravity_status(
 #[tauri::command]
 pub async fn connect_antigravity(
     state: State<'_, SessionCommandState>,
+    input: ConnectAntigravityInput,
+) -> Result<ConnectAntigravityOutput, String> {
+    connect_antigravity_for_state(&state, input).await
+}
+
+/// Signs in with Google in the browser and keeps the account's models.
+pub async fn connect_antigravity_for_state(
+    state: &SessionCommandState,
     input: ConnectAntigravityInput,
 ) -> Result<ConnectAntigravityOutput, String> {
     let runtime = state
