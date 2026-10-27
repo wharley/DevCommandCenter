@@ -16,9 +16,6 @@ use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip};
 
-/// `--dcc-terminal-toolbar-height`
-const TOOLBAR: f32 = 40.0;
-
 /// The dock's own drag, so only its parent's `on_drag_move` sees it.
 #[derive(Clone)]
 pub struct DockResize;
@@ -263,7 +260,7 @@ impl TerminalDock {
             .child(Icon::new("panel-bottom-close").size(16.0));
         div()
             .flex()
-            .h(px(TOOLBAR))
+            .h(px(crate::theme::Density::current(cx).terminal_toolbar()))
             .flex_shrink_0()
             .items_center()
             .gap(px(8.0))

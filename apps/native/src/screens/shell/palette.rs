@@ -138,6 +138,7 @@ impl Shell {
             }
             PaletteCommand::Help(topic) => self.open_help(topic, window, cx),
             PaletteCommand::Usage => self.open_usage(cx),
+            PaletteCommand::Settings => self.open_settings(None, window, cx),
             PaletteCommand::Skills => self.open_skills(window, cx),
             PaletteCommand::OpenTask(task) => {
                 self.sidebar
@@ -160,6 +161,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        crate::data::ux_metrics::record("command_palette_action");
         let composer = self.conversation.read(cx).composer.clone();
         match command {
             WorkbenchCommand::FocusComposer => self.focus_composer(cx),
@@ -181,6 +183,7 @@ impl Shell {
                 .terminal
                 .update(cx, |dock, cx| dock.show(ScopeKind::Project, window, cx)),
             WorkbenchCommand::Changes => {
+                crate::data::ux_metrics::record("diff_discovered");
                 self.set_code_column(true, Some(CodeColumnTab::Changes), cx)
             }
             WorkbenchCommand::Files => self.set_code_column(true, Some(CodeColumnTab::Files), cx),

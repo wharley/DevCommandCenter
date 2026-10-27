@@ -209,6 +209,7 @@ impl Composer {
     }
 
     pub(crate) fn toggle_plan(&mut self, cx: &mut Context<Self>) {
+        crate::data::ux_metrics::record("advanced_composer_control_used");
         let on = !self.plan_mode();
         let task = self.task().to_string();
         let session = self.session.session_id.clone();

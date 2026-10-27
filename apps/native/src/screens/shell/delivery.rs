@@ -74,6 +74,7 @@ impl Shell {
 
     /// "Revisar mudanças da tarefa", and the menu's fix or conflicts.
     pub(super) fn review_changes(&mut self, cx: &mut Context<Self>) {
+        crate::data::ux_metrics::record("diff_discovered");
         self.set_code_column(true, Some(CodeColumnTab::Changes), cx);
     }
 

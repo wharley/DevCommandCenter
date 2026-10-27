@@ -68,9 +68,16 @@ impl I18n {
     }
 
     pub fn t_with(&self, key: &str, args: &Args) -> SharedString {
+        // i18next reads `_zero` for a count of 0 when the catalog has one.
         let template = args
             .count
-            .and_then(|count| self.lookup(&format!("{key}{}", self.locale.plural_suffix(count))))
+            .filter(|count| *count == 0)
+            .and_then(|_| self.lookup(&format!("{key}_zero")))
+            .or_else(|| {
+                args.count.and_then(|count| {
+                    self.lookup(&format!("{key}{}", self.locale.plural_suffix(count)))
+                })
+            })
             .or_else(|| self.lookup(key));
         match template {
             Some(template) => interpolate(template, args).into(),
@@ -194,6 +201,15 @@ mod tests {
             I18n::new(Locale::En).t("sidebar.tasksTitle").as_ref(),
             "Tasks"
         );
+    }
+
+    #[test]
+    fn zero_has_its_own_form_when_the_catalog_has_one() {
+        let pt = I18n::new(Locale::PtBr);
+        let none = pt.t_with("settings.navigation.results", &Args::count(0));
+        let two = pt.t_with("settings.navigation.results", &Args::count(2));
+        assert_ne!(none, two);
+        assert!(two.contains('2'), "{two}");
     }
 
     #[test]

@@ -20,6 +20,8 @@ use crate::ui::text_input::{TextInput, TextInputEvent};
 
 pub enum FeedbackEvent {
     Closed,
+    /// "Abrir Configurações": this closes and Settings opens.
+    OpenSettings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

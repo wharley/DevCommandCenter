@@ -2,6 +2,7 @@
 //! Views read it with `cx.theme()`; nothing paints a color that is not here.
 
 pub mod color;
+pub mod density;
 pub mod fonts;
 pub mod metrics;
 pub mod palette;
@@ -10,6 +11,7 @@ pub mod tailwind;
 use gpui::{App, Global, Window, WindowAppearance};
 use serde::{Deserialize, Serialize};
 
+pub use density::Density;
 pub use fonts::Fonts;
 pub use metrics::Radius;
 pub use palette::Palette;

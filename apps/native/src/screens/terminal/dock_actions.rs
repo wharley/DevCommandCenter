@@ -66,6 +66,9 @@ impl TerminalDock {
 
     /// `onScopeChange`: the other scope's tab shows, focused.
     pub fn set_kind(&mut self, kind: ScopeKind, window: &mut Window, cx: &mut Context<Self>) {
+        if kind != self.kind {
+            crate::data::ux_metrics::record("terminal_scope_switched");
+        }
         self.show(kind, window, cx);
     }
 

@@ -734,3 +734,38 @@ fn the_sidebars_sparkles_open_the_skills(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("skills-dialog").is_none());
 }
+
+#[gpui::test]
+fn settings_apply_the_theme_language_and_density_at_once(cx: &mut TestAppContext) {
+    use crate::screens::sidebar::SidebarEvent;
+    let (shell, cx, dir) = open_shell(cx, Prefs::default());
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| cx.emit(SidebarEvent::OpenSettings));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("settings-dialog").is_some());
+    for selector in [
+        "settings-theme-dark",
+        "settings-locale-1",
+        "settings-density-1",
+    ] {
+        let bounds = cx.debug_bounds(selector).unwrap();
+        cx.simulate_click(bounds.center(), Modifiers::none());
+        cx.run_until_parked();
+    }
+    cx.update(|_, cx| {
+        use crate::theme::ActiveTheme;
+        assert_eq!(cx.theme().preference, crate::theme::ThemePreference::Dark);
+        assert_eq!(
+            cx.global::<crate::i18n::I18n>().locale(),
+            crate::i18n::Locale::En
+        );
+        assert_eq!(
+            crate::theme::Density::current(cx),
+            crate::theme::Density::Compact
+        );
+    });
+    let saved = Prefs::load(&dir.path().join("native-ui.json"));
+    assert_eq!(saved.theme, crate::theme::ThemePreference::Dark);
+    assert_eq!(saved.locale, crate::i18n::Locale::En);
+    assert_eq!(saved.density, crate::theme::Density::Compact);
+}

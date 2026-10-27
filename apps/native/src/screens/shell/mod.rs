@@ -16,6 +16,7 @@ mod palette;
 mod quick_open;
 mod regions;
 mod session_search;
+mod settings;
 mod sidebar_events;
 mod skills;
 mod terminal;
@@ -117,6 +118,8 @@ pub struct Shell {
     _stage_events: Subscription,
     /// "Sessões passadas", while open.
     session_search: Option<session_search::OpenSearch>,
+    /// Settings, while open.
+    settings: Option<settings::OpenSettings>,
     /// Skills, while open.
     skills: Option<skills::OpenSkills>,
     /// "Feedback DCC", while open.
@@ -270,6 +273,7 @@ impl Shell {
             usage: None,
             feedback: None,
             skills: None,
+            settings: None,
             terminal,
             _terminal_events: terminal_events,
             _terminal_counts: terminal_counts,
@@ -496,6 +500,9 @@ impl Shell {
 
     /// `toggleCodeColumnTab`: shows one list, or closes when it already shows.
     fn toggle_code_column(&mut self, tab: CodeColumnTab, cx: &mut Context<Self>) {
+        if tab == CodeColumnTab::Changes {
+            crate::data::ux_metrics::record("diff_discovered");
+        }
         if self.prefs.code_column_open && self.prefs.code_column_tab == tab {
             self.set_code_column(false, None, cx);
         } else {
@@ -804,6 +811,7 @@ impl Render for Shell {
                     .as_ref()
                     .map(|(search, _)| search.clone()),
             )
+            .children(self.settings_overlay())
             .children(self.skills_overlay())
             .children(self.feedback_overlay())
             .children(self.usage_overlay())

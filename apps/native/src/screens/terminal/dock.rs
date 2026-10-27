@@ -252,6 +252,7 @@ impl TerminalDock {
         if scope.cwd.is_none() {
             return;
         }
+        crate::data::ux_metrics::record("terminal_discovered");
         self.kind = scope.kind;
         self.open = true;
         self.show_active(cx);

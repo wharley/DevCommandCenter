@@ -65,6 +65,7 @@ impl Composer {
                 this.busy = None;
                 match result {
                     Ok(_) => {
+                        crate::data::ux_metrics::record("first_prompt");
                         if from_field {
                             this.clear_field(cx);
                         }

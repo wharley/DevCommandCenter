@@ -33,6 +33,8 @@ pub struct Prefs {
     pub terminal_height: f32,
     /// "Abrir no editor"'s pick (`dcc-preferred-editor`).
     pub preferred_editor: String,
+    /// "Densidade da interface" (`dcc-density`).
+    pub density: crate::theme::Density,
 }
 
 impl Default for Prefs {
@@ -48,6 +50,7 @@ impl Default for Prefs {
             code_column_tab: crate::screens::code_column::CodeColumnTab::Files,
             terminal_height: crate::screens::terminal::dock::DEFAULT_HEIGHT,
             preferred_editor: dcc_infra::editor_launch::EDITORS[0].id.to_string(),
+            density: crate::theme::Density::Comfortable,
         }
     }
 }

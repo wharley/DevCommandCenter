@@ -43,6 +43,7 @@ impl Shell {
             SidebarEvent::NewTask => self.show(Surface::NewTask, cx),
             SidebarEvent::OpenHelp => self.open_help(None, window, cx),
             SidebarEvent::OpenUsage => self.open_usage(cx),
+            SidebarEvent::OpenSettings => self.open_settings(None, window, cx),
             SidebarEvent::OpenSkills => self.open_skills(window, cx),
             SidebarEvent::OpenFeedback => self.open_feedback(window, cx),
             // `toggleCodeColumn`

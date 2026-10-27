@@ -31,6 +31,8 @@ pub fn run() {
         }
         Theme::init(prefs.theme, cx);
         I18n::init(prefs.locale, cx);
+        cx.set_global(prefs.density);
+        crate::data::ux_metrics::start();
         menus::install(cx);
         crate::ui::text_input::bind_keys(cx);
         crate::ui::text_area::bind_keys(cx);

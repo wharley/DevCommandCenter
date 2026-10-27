@@ -105,6 +105,9 @@ impl Composer {
         if open == self.picker.open {
             return;
         }
+        if open {
+            crate::data::ux_metrics::record("advanced_composer_control_used");
+        }
         self.picker.open = open;
         if open {
             self.refresh_catalog(cx);

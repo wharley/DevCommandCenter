@@ -31,11 +31,12 @@ impl Shell {
             Store::new(std::env::temp_dir().join("dcc-native-test-feedback.json")),
         );
         let feedback = cx.new(|cx| Feedback::new(backend, store, window, cx));
-        let events = cx.subscribe(&feedback, |shell, _, event, cx| match event {
-            FeedbackEvent::Closed => {
-                shell.feedback = None;
-                cx.notify();
+        let events = cx.subscribe_in(&feedback, window, |shell, _, event, window, cx| {
+            shell.feedback = None;
+            if matches!(event, FeedbackEvent::OpenSettings) {
+                shell.open_settings(None, window, cx);
             }
+            cx.notify();
         });
         self.feedback = Some((feedback, events));
         cx.notify();

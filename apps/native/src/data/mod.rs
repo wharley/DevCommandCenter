@@ -49,3 +49,4 @@ pub mod terminal_api;
 pub mod text_match;
 pub mod time;
 pub mod usage;
+pub mod ux_metrics;

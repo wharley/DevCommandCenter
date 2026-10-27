@@ -84,12 +84,20 @@ impl Feedback {
                     .into_any_element(),
             );
         }
-        // "Abrir Configurações" comes with Settings (9g).
         if self.account.failed {
             notices.push(
                 notice(None, cx)
                     .debug_selector(|| "feedback-connect-hint".into())
                     .child(div().child(cx.t("feedback.connectHint")))
+                    .child(
+                        Button::new("feedback-settings")
+                            .variant(ButtonVariant::Outline)
+                            .size(ButtonSize::Sm)
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(FeedbackEvent::OpenSettings)),
+                            )
+                            .child(cx.t("feedback.settings")),
+                    )
                     .child(
                         Button::new("feedback-retry")
                             .variant(ButtonVariant::Ghost)

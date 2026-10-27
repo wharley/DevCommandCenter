@@ -14,9 +14,6 @@ use crate::theme::ActiveTheme;
 use crate::theme::color::mix_oklab;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip, spinner};
 
-/// `--dcc-composer-input-min-height` (4rem).
-const INPUT_MIN_HEIGHT: f32 = 64.0;
-
 fn model_chip(composer: &Composer, cx: &mut Context<Composer>) -> Option<AnyElement> {
     let model_id = composer.selected_model_id()?;
     let provider = composer.selected_provider_id();
@@ -224,6 +221,8 @@ pub(super) fn render(
     }
     let disabled = !composer.session.usable();
     let input = composer.input.clone();
+    let density = crate::theme::Density::current(cx);
+    let (padding_x, padding_y) = density.composer_padding();
     let drop_border = mix_oklab(colors.accent_calm, 0.7, colors.border);
     div()
         .flex_shrink_0()
@@ -264,8 +263,8 @@ pub(super) fn render(
                         .border_color(border)
                         .bg(colors.sidebar)
                         .shadow(shadows)
-                        .px(px(16.0))
-                        .py(px(12.0))
+                        .px(px(padding_x))
+                        .py(px(padding_y))
                         .when(disabled, |surface| surface.opacity(0.6))
                         .children(strips::usage_limit_strip(composer, cx))
                         .children(strips::goal_strip(composer, cx))
@@ -273,7 +272,7 @@ pub(super) fn render(
                         .child(
                             div()
                                 .id("composer-input")
-                                .min_h(px(INPUT_MIN_HEIGHT))
+                                .min_h(px(density.composer_input_min_height()))
                                 .text_size(px(14.0))
                                 .line_height(px(20.0))
                                 .text_color(colors.foreground)

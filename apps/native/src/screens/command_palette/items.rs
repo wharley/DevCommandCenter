@@ -36,6 +36,7 @@ pub enum PaletteCommand {
     /// "Clonar a partir de URL": `openWorkspaceDialog("clone")`.
     Clone,
     Shortcuts,
+    Settings,
     /// "DCC Usage".
     Usage,
     /// Skills.
@@ -172,6 +173,13 @@ fn actions(selected: bool, cx: &App) -> Vec<Action> {
             "commandPalette.keywords.clone",
             None,
             PaletteCommand::Clone,
+        ),
+        // The desktop shows ⌘, here, though nothing listens for it.
+        action(
+            "commandPalette.openSettings",
+            "commandPalette.keywords.settings",
+            Some(format!("{command}+,").into()),
+            PaletteCommand::Settings,
         ),
         action(
             "commandPalette.manageSkills",

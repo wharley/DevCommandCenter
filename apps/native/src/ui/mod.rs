@@ -22,6 +22,7 @@ mod text;
 pub mod text_area;
 pub mod text_input;
 mod toast;
+mod toggle_group;
 pub mod tooltip;
 
 pub use badge::{Badge, BadgeVariant};
@@ -40,4 +41,5 @@ pub use text::{Tracked, tabular_nums};
 pub use text_area::{TextArea, TextAreaEvent};
 pub use text_input::{TextInput, TextInputEvent};
 pub use toast::{ToastKind, Toaster};
+pub use toggle_group::ToggleGroup;
 pub use tooltip::Tooltip;
