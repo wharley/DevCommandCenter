@@ -86,6 +86,8 @@ pub struct ConversationView {
         Option<Entity<crate::screens::computer_use::preview::ComputerPreview>>,
     /// A task just created: the composer takes the focus at the next frame.
     focus_composer: bool,
+    /// Text for the composer once the conversation can take it (a note's task).
+    prefill: Option<String>,
     _composer_events: gpui::Subscription,
     task_id: Option<String>,
     wanted_session: Option<String>,
@@ -150,6 +152,7 @@ impl ConversationView {
             composer,
             computer_preview: None,
             focus_composer: false,
+            prefill: None,
             _composer_events: composer_events,
             task_id: None,
             wanted_session: None,
@@ -257,6 +260,12 @@ impl ConversationView {
     /// The next frame focuses the composer (a task just created).
     pub fn focus_composer_soon(&mut self, cx: &mut Context<Self>) {
         self.focus_composer = true;
+        cx.notify();
+    }
+
+    /// `workspaceComposerPrefill`: the text lands once the composer has the task.
+    pub fn prefill_composer_soon(&mut self, text: String, cx: &mut Context<Self>) {
+        self.prefill = Some(text);
         cx.notify();
     }
 
@@ -677,6 +686,11 @@ fn launch_state(
 impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport_width = f32::from(self.list.viewport_bounds().size.width);
+        if self.prefill.is_some() && self.composer.read(cx).session.usable() {
+            let text = self.prefill.take().unwrap_or_default();
+            let composer = self.composer.clone();
+            composer.update(cx, |composer, cx| composer.append_text(&text, window, cx));
+        }
         if std::mem::take(&mut self.focus_composer) {
             let handle = gpui::Focusable::focus_handle(self.composer.read(cx).input.read(cx), cx);
             window.focus(&handle, cx);

@@ -184,6 +184,10 @@ fn balloons_come_back_edit_move_and_close(cx: &mut TestAppContext) {
     balloon.update(cx, |balloon, cx| balloon.use_here(cx));
     cx.run_until_parked();
     assert_eq!(events.borrow().as_slice(), ["Fixada e editada"]);
+    assert!(
+        notes.read_with(cx, |notes, _| notes.floating.is_empty()),
+        "used, it closes"
+    );
     // Closed: gone for this visit, back on the next.
     balloon.update(cx, |balloon, cx| balloon.close(cx));
     cx.run_until_parked();

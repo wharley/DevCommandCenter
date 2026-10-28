@@ -770,3 +770,15 @@ fn settings_apply_the_theme_language_and_density_at_once(cx: &mut TestAppContext
     assert_eq!(saved.locale, crate::i18n::Locale::En);
     assert_eq!(saved.density, crate::theme::Density::Compact);
 }
+
+#[gpui::test]
+fn cmd_shift_n_takes_a_note_and_asks_for_a_project(cx: &mut TestAppContext) {
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    cx.update(|_, cx| super::bind_keys(cx));
+    cx.run_until_parked();
+    // No task on screen and no project: the library opens to pick one.
+    cx.simulate_keystrokes("cmd-shift-n");
+    cx.run_until_parked();
+    assert!(shell.read_with(cx, |shell, cx| shell.notes.read(cx).open));
+    assert!(cx.debug_bounds("notes-library").is_some());
+}

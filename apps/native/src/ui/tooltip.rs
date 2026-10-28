@@ -25,6 +25,8 @@ pub enum Side {
 pub enum Align {
     Start,
     Center,
+    /// Over or under: the bubble's right edge at the trigger's.
+    End,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,6 +184,16 @@ impl RenderOnce for Tooltip {
             };
             let offset = self.offset;
             let (spot, anchor, shift) = match (self.side, self.align) {
+                (Side::Top, Align::End) => (
+                    div().top_0().right_0(),
+                    Anchor::BottomRight,
+                    point(px(0.0), px(-offset)),
+                ),
+                (Side::Bottom, Align::End) => (
+                    div().bottom_0().right_0(),
+                    Anchor::TopRight,
+                    point(px(0.0), px(offset)),
+                ),
                 (Side::Top, _) => (
                     div().top_0().left(relative(0.5)),
                     Anchor::BottomCenter,
@@ -192,7 +204,7 @@ impl RenderOnce for Tooltip {
                     Anchor::TopCenter,
                     point(px(0.0), px(offset)),
                 ),
-                (Side::Right, Align::Center) => (
+                (Side::Right, Align::Center | Align::End) => (
                     div().right_0().top(relative(0.5)),
                     Anchor::LeftCenter,
                     point(px(offset), px(0.0)),
@@ -202,7 +214,7 @@ impl RenderOnce for Tooltip {
                     Anchor::TopLeft,
                     point(px(offset), px(0.0)),
                 ),
-                (Side::Left, Align::Center) => (
+                (Side::Left, Align::Center | Align::End) => (
                     div().left_0().top(relative(0.5)),
                     Anchor::RightCenter,
                     point(px(-offset), px(0.0)),

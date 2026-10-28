@@ -65,7 +65,9 @@ gpui::actions!(
         /// ⌘⇧G: the same for "Mudanças".
         ToggleCodeChanges,
         /// ⌘J: the terminal dock (`isToggleTerminalShortcut`).
-        ToggleTerminal
+        ToggleTerminal,
+        /// ⌘⇧N, and the composer's bulb: a note from the task on screen.
+        CaptureNote
     ]
 );
 
@@ -75,6 +77,7 @@ pub fn bind_keys(cx: &mut gpui::App) {
         gpui::KeyBinding::new("cmd-shift-e", ToggleCodeFiles, None),
         gpui::KeyBinding::new("cmd-shift-g", ToggleCodeChanges, None),
         gpui::KeyBinding::new("cmd-j", ToggleTerminal, None),
+        gpui::KeyBinding::new("cmd-shift-n", CaptureNote, None),
     ]);
     editor::bind_keys(cx);
     quick_open::bind_keys(cx);
@@ -764,6 +767,7 @@ impl Render for Shell {
                     this.resize_sidebar(event.event.position.x, cx)
                 }),
             )
+            .on_action(cx.listener(|this, _: &CaptureNote, _, cx| this.capture_note(cx)))
             .on_action(cx.listener(|this, _: &ToggleCodeFiles, _, cx| {
                 this.toggle_code_column(CodeColumnTab::Files, cx)
             }))

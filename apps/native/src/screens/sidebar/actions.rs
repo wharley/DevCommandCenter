@@ -114,11 +114,24 @@ impl Sidebar {
             PendingAction::Archive => TaskAction::Archive,
         };
         let id = task_id.to_string();
+        // `handleCompleteWorkspace`: a bundle completes its members.
+        let completed: Vec<String> = self
+            .state
+            .data
+            .tasks
+            .iter()
+            .find(|task| task.id == task_id)
+            .map(|task| task.member_workspace_ids.clone())
+            .filter(|members| !members.is_empty())
+            .unwrap_or_else(|| vec![task_id.to_string()]);
         self.perform(
             task_id,
             action,
             Box::new(move |sidebar, result, _, cx| {
                 sidebar.pending.remove(&id);
+                if pending == PendingAction::Complete && result.is_ok() {
+                    cx.emit(super::SidebarEvent::TasksCompleted(completed.clone()));
+                }
                 // A restored task opens, like the desktop's `restoreWorkspace`.
                 if pending == PendingAction::Restore && result.is_ok() {
                     sidebar.open_task(&id, cx);

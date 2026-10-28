@@ -10,6 +10,9 @@ mod balloon_tests;
 mod balloon_view;
 mod balloons;
 mod card;
+mod completion;
+#[cfg(test)]
+mod completion_tests;
 mod library;
 mod palette;
 #[cfg(test)]
@@ -70,8 +73,8 @@ pub enum NotesEvent {
     Count(usize),
     /// "Adicionar à conversa atual": the note's text for the composer.
     Use(String),
-    /// "Criar tarefa" from this note.
-    CreateTask(String),
+    /// "Criar tarefa" from this note (not linked yet).
+    CreateTask(Box<ProjectNote>),
 }
 
 pub struct NotesWorkspace {
@@ -107,6 +110,8 @@ pub struct NotesWorkspace {
     pub delete_ids: Vec<String>,
     pub busy: bool,
     pub creating: bool,
+    /// Tasks just completed: their linked notes ask to be completed.
+    pub completion_task_ids: Vec<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -192,6 +197,7 @@ impl NotesWorkspace {
             delete_ids: Vec::new(),
             busy: false,
             creating: false,
+            completion_task_ids: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -407,5 +413,6 @@ impl Render for NotesWorkspace {
             .children(balloons)
             .children(self.open.then(|| self.library(window, cx)))
             .children(self.delete_dialog(cx))
+            .children(self.completion_dialog(cx))
     }
 }

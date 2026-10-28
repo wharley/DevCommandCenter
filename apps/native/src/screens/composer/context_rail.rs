@@ -283,7 +283,48 @@ pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> O
     .side(PopoverSide::Top)
     .width(320.0)
     .padding(8.0);
-    // Notes from the composer arrive with the notes page (screen 10).
+    // `NoteCaptureButton`: a note from this task (⌘⇧N does the same).
+    let capture = {
+        let colors = cx.theme().colors.clone();
+        let (fg, popover) = (colors.foreground, colors.popover);
+        let shadow = |alpha: u8, y: f32, blur: f32| gpui::BoxShadow {
+            color: gpui::black().opacity(alpha as f32 / 255.0),
+            offset: gpui::point(px(0.0), px(y)),
+            blur_radius: px(blur),
+            spread_radius: px(0.0),
+            inset: false,
+        };
+        crate::ui::Tooltip::text(
+            "notes-capture-tip",
+            div()
+                .id("notes-capture")
+                .debug_selector(|| "notes-capture".into())
+                .flex()
+                .flex_none()
+                .size(px(32.0))
+                .items_center()
+                .justify_center()
+                .border_1()
+                .border_color(colors.border)
+                .rounded_tl(px(20.0))
+                .rounded_tr(px(20.0))
+                .rounded_br(px(6.0))
+                .rounded_bl(px(20.0))
+                .text_color(colors.muted_foreground)
+                .bg(popover)
+                .shadow(vec![shadow(0x11, 5.0, 20.0)])
+                .cursor_pointer()
+                .hover(move |button| button.text_color(fg).shadow(vec![shadow(0x22, 8.0, 26.0)]))
+                .on_click(|_, window, cx| {
+                    window.dispatch_action(Box::new(crate::screens::shell::CaptureNote), cx)
+                })
+                .child(Icon::new("lightbulb").size(16.0)),
+            cx.t("notes.captureShortcut"),
+        )
+        .side(crate::ui::tooltip::Side::Top)
+        .align(crate::ui::tooltip::Align::End)
+        .offset(10.0)
+    };
     Some(
         div()
             .mt(px(8.0))
@@ -310,7 +351,8 @@ pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> O
                             .flex_shrink_0()
                             .items_center()
                             .gap(px(12.0))
-                            .child(mode),
+                            .child(mode)
+                            .child(capture),
                     )
                     .child(
                         div()

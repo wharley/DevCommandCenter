@@ -197,12 +197,37 @@ impl NotesWorkspace {
             }
             BalloonEvent::Close => self.close_balloon(id, cx),
             BalloonEvent::Delete => self.ask_delete(vec![id.to_string()], cx),
+            // `onUse`: the text goes to the composer and the balloon closes.
             BalloonEvent::Use => {
-                if let Some(note) = self.store.read(cx).notes.iter().find(|note| note.id == id) {
-                    cx.emit(NotesEvent::Use(note_prompt(note)));
+                let text = self
+                    .store
+                    .read(cx)
+                    .notes
+                    .iter()
+                    .find(|note| note.id == id)
+                    .map(note_prompt);
+                if let Some(text) = text {
+                    cx.emit(NotesEvent::Use(text));
+                    self.close_balloon(id, cx);
                 }
             }
-            BalloonEvent::CreateTask => cx.emit(NotesEvent::CreateTask(id.to_string())),
+            // `newTask`: once per note.
+            BalloonEvent::CreateTask => {
+                let note = self
+                    .store
+                    .read(cx)
+                    .notes
+                    .iter()
+                    .find(|note| note.id == id)
+                    .cloned();
+                match note {
+                    Some(note) if note.implementation_task_id.is_some() => {
+                        crate::ui::Toaster::info(cx.t("notes.alreadyLinked"), cx)
+                    }
+                    Some(note) => cx.emit(NotesEvent::CreateTask(Box::new(note))),
+                    None => {}
+                }
+            }
         }
     }
 

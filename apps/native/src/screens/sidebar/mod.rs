@@ -78,6 +78,8 @@ pub enum SidebarEvent {
     },
     OpenPullRequests,
     OpenNotes,
+    /// Tasks just completed (a bundle's members, or the task): their notes may be done.
+    TasksCompleted(Vec<String>),
     /// A resident agent's page.
     OpenAgent(String),
     /// One conversation of a task (a child task's, or its parent's proposal).
@@ -469,6 +471,14 @@ impl Sidebar {
     pub fn set_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
         self.collapsed = collapsed;
         cx.notify();
+    }
+
+    /// The open notes' count, as soon as the notes change.
+    pub fn set_open_notes(&mut self, count: usize, cx: &mut Context<Self>) {
+        if self.state.data.open_notes != count {
+            self.state.data.open_notes = count;
+            cx.notify();
+        }
     }
 
     pub fn set_current_page(&mut self, page: Option<NavPage>, cx: &mut Context<Self>) {
