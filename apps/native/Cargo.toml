@@ -41,6 +41,10 @@ dcc-core = { path = "../../crates/dcc-core" }
 dcc-infra = { path = "../../crates/dcc-infra" }
 # The provider descriptors, for the model picker before the desktop answers.
 dcc-providers = { path = "../../crates/dcc-providers" }
+# The whole backend, hosted here when no desktop serves the port
+# (`dcc_server::host`): sessions, terminals, the agents' MCP, the API.
+dcc-server = { path = "../../crates/dcc-server" }
+dcc-tauri = { path = "../../crates/dcc-tauri", default-features = false }
 # Diffs (`@pierre/diffs` on the desktop): line and word changes, and
 # TextMate-grammar highlighting like its Shiki, with the Pierre themes.
 similar = { version = "2", features = ["inline"] }
@@ -60,7 +64,7 @@ wry = "0.57"
 # desktop posts them through tauri-plugin-notification, also notify-rust).
 notify-rust = "4.16"
 # Runs the providers' health checks (their CLIs) when the desktop is closed.
-tokio = { version = "1", default-features = false, features = ["rt"] }
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # WebKitGTK's toolkit, for the Browser (the same version wry uses).

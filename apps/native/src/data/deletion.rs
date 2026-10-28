@@ -1,8 +1,9 @@
 //! Deleting tasks and projects from the native app, through the same
-//! `dcc_infra::workspace_deletion` the desktop runs. The desktop owns the
-//! agents, terminals and git coordinator while it is open, so every write
-//! here first takes the runtime owner lock: with the desktop open it is
-//! refused. Blocking: run off the UI thread.
+//! `dcc_infra::workspace_deletion` the desktop runs. Whoever hosts the
+//! backend owns the agents, terminals and git coordinator: hosting it here,
+//! the host's runtime deletes; otherwise every write first takes the runtime
+//! owner lock, and with the desktop open it is refused. Blocking: run off the
+//! UI thread.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -189,42 +190,80 @@ pub struct DeleteTask {
 }
 
 pub fn delete_task(db_path: &Path, task: &DeleteTask) -> Result<(), DeleteError> {
-    exclusive(db_path, |runtime| match &task.bundle_id {
-        Some(bundle_id) => block_on(deletion::delete_workspace_bundle(
-            runtime,
-            DeleteBundleRequest {
-                bundle_id: bundle_id.clone(),
-                delete_remote_branches: task.delete_remote_branches,
-                expected_remote_targets: task.remote_targets.clone(),
-            },
-        )),
-        None => block_on(deletion::delete_workspace(
-            runtime,
-            DeleteTaskRequest {
-                workspace_id: task.task_id.clone(),
-                delete_remote_branch: task.delete_remote_branches,
-                expected_remote_target: task.remote_targets.first().cloned(),
-                discard_delegation_changes: task.discard_child_edits,
-            },
-        )),
-    })
+    // Hosting the backend, this process owns the checkouts: the host's own
+    // runtime deletes, as the desktop's commands do.
+    if let Some(host) = crate::data::host::current() {
+        return crate::data::host::block_on(delete_task_with(&host.workspace, task))
+            .unwrap_or_else(|| Err("the backend is not running".into()))
+            .map_err(classify);
+    }
+    exclusive(db_path, |runtime| block_on(delete_task_with(runtime, task)))
+}
+
+async fn delete_task_with<R: DeletionRuntime>(
+    runtime: &R,
+    task: &DeleteTask,
+) -> Result<(), String> {
+    match &task.bundle_id {
+        Some(bundle_id) => {
+            deletion::delete_workspace_bundle(
+                runtime,
+                DeleteBundleRequest {
+                    bundle_id: bundle_id.clone(),
+                    delete_remote_branches: task.delete_remote_branches,
+                    expected_remote_targets: task.remote_targets.clone(),
+                },
+            )
+            .await
+        }
+        None => {
+            deletion::delete_workspace(
+                runtime,
+                DeleteTaskRequest {
+                    workspace_id: task.task_id.clone(),
+                    delete_remote_branch: task.delete_remote_branches,
+                    expected_remote_target: task.remote_targets.first().cloned(),
+                    discard_delegation_changes: task.discard_child_edits,
+                },
+            )
+            .await
+        }
+    }
 }
 
 /// Removes a project from DCC with its tasks (`delete_repository`); the
 /// folder on disk stays.
 pub fn remove_project(db_path: &Path, repository_id: &str) -> Result<(), DeleteError> {
-    exclusive(db_path, |runtime| {
-        let repo = SqliteWorkspaceRepo::open(db_path).map_err(|error| error.to_string())?;
-        let session_repo = SqliteSessionRepo::open(db_path).map_err(|error| error.to_string())?;
-        block_on(deletion::delete_repository_with_workspaces(
-            runtime,
-            &repo,
-            &session_repo,
-            &RepositoryId(repository_id.to_string()),
+    if let Some(host) = crate::data::host::current() {
+        return crate::data::host::block_on(remove_project_with(
+            &host.workspace,
             db_path,
+            repository_id,
         ))
-        .map(drop)
+        .unwrap_or_else(|| Err("the backend is not running".into()))
+        .map_err(classify);
+    }
+    exclusive(db_path, |runtime| {
+        block_on(remove_project_with(runtime, db_path, repository_id))
     })
+}
+
+async fn remove_project_with<R: DeletionRuntime>(
+    runtime: &R,
+    db_path: &Path,
+    repository_id: &str,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(db_path).map_err(|error| error.to_string())?;
+    let session_repo = SqliteSessionRepo::open(db_path).map_err(|error| error.to_string())?;
+    deletion::delete_repository_with_workspaces(
+        runtime,
+        &repo,
+        &session_repo,
+        &RepositoryId(repository_id.to_string()),
+        db_path,
+    )
+    .await
+    .map(drop)
 }
 
 /// The remote branches the deletion dialog offers to remove with the task:

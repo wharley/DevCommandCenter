@@ -40,7 +40,14 @@ pub fn open_main(prefs: Prefs, prefs_path: PathBuf, cx: &mut App) -> anyhow::Res
                     true
                 }
             });
-            cx.new(|cx| Shell::new(prefs, prefs_path, window, cx))
+            cx.new(|cx| {
+                // The relay skips phone pushes while the person looks here.
+                cx.observe_window_activation(window, |_, window, _| {
+                    crate::data::host::set_focused(window.is_window_active());
+                })
+                .detach();
+                Shell::new(prefs, prefs_path, window, cx)
+            })
         },
     )?;
     cx.set_global(super::menu_bar::MainWindow(handle));

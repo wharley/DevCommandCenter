@@ -8,6 +8,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    // Computer use (dcc-server) loads ScreenCaptureKit weakly: it is guarded
+    // at runtime on macOS 14+, like the desktop's.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-arg=-Wl,-weak_framework,ScreenCaptureKit");
+    }
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let mascots = manifest.join("../../packages/mascots/src/index.ts");

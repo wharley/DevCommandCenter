@@ -1,4 +1,5 @@
-//! Boot: fonts, theme, menus and the main window.
+//! Boot: the login shell's environment, the backend (when no desktop serves
+//! it), fonts, theme, menus and the main window.
 
 mod color_space;
 pub mod menu_bar;
@@ -25,6 +26,13 @@ fn platform() -> gpui::Application {
 }
 
 pub fn run() {
+    // Before any other thread: the login shell's PATH for the CLIs, the
+    // shells and the agents.
+    #[cfg(not(windows))]
+    if !cfg!(test) {
+        dcc_server::shell_env::bootstrap();
+    }
+    crate::data::host::start();
     crate::data::provider_catalog::locate_claude_helper();
     let prefs_path = prefs::default_path();
     let prefs = Prefs::load(&prefs_path);
@@ -47,6 +55,11 @@ pub fn run() {
         crate::screens::file_view::bind_keys(cx);
         crate::screens::annotation::bind_keys(cx);
         crate::ui::Toaster::init(cx);
+        cx.on_app_quit(|_| {
+            crate::data::host::shutdown();
+            async {}
+        })
+        .detach();
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();
