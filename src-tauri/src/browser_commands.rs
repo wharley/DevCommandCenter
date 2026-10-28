@@ -1,46 +1,26 @@
-//! Native, human-facing browser surface.
-//!
-//! This intentionally owns the child WebView in Rust. The renderer receives no
-//! permission to create WebViews and remote pages never get access to DCC IPC.
-//! The MVP keeps context in memory; durable browser metadata and automation are
-//! separate follow-up features.
+//! The Browser's bookkeeping: the scope and lifecycle, the agent's control
+//! grant, semantic maps, evidence and the audit. The page itself is the native
+//! app's (wry + WKWebView there); every page operation goes to it through the
+//! bridge (`http_api::browser_bridge`).
 
 // The URL policy lives in dcc-core, shared with the native app's Browser.
 pub use dcc_core::domain::browser::validate_browser_url;
-use dcc_core::domain::browser::{
-    sanitize_location_url as sanitize_browser_location_url,
-    select_open_url as select_browser_open_url, LOCATION_TTL_MS as BROWSER_LOCATION_TTL_MS,
-};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, WebviewBuilder};
-use tauri::{AppHandle, Emitter, Manager, State, Webview, WebviewUrl, Wry};
-use tokio::sync::{oneshot, Mutex as AsyncMutex};
+use tauri::State;
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::time::{timeout, Duration};
 use url::Url;
 
-#[cfg(not(target_os = "macos"))]
-use crate::browser_popups::browser_profile_data_dir;
-#[cfg(target_os = "macos")]
-use crate::browser_popups::named_browser_store_is_available;
-#[cfg(target_os = "macos")]
-use crate::browser_popups::BROWSER_DATA_STORE_IDENTIFIER;
-use crate::browser_popups::{
-    browser_popup_registry, choose_download_destination, open_browser_popup,
-};
 pub use dcc_core::domain::browser_context::*;
 use dcc_core::domain::session::SessionId;
 use dcc_tauri::state::SessionCommandState;
 use dev_command_center_tauri::http_api as dcc_http;
 
-const BROWSER_LABEL: &str = "dcc-browser";
-static BROWSER_VIEW_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-const MAX_BROWSER_LOCATION_CACHE_ENTRIES: usize = 256;
-const MAX_BROWSER_DIMENSION: f64 = 16_384.0;
 const BROWSER_CONTEXT_TIMEOUT: Duration = Duration::from_secs(2);
 /// A deliberate, short-lived consent window. It is in-memory only and must be
 /// armed again after expiry, a new Browser lifecycle, or any close; a future UI
@@ -301,152 +281,6 @@ pub(crate) struct BrowserControlContext {
     pub anchor: BrowserActionAnchor,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserBounds {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-}
-
-/// Validates and normalizes the logical bounds supplied by the renderer.
-///
-/// Coordinates are clamped to the window's non-negative coordinate space and
-/// dimensions are capped so a malformed renderer payload cannot request an
-/// unbounded native view. NaN and infinities are rejected explicitly because
-/// `f64::clamp` cannot safely normalize them.
-pub fn normalize_browser_bounds(bounds: BrowserBounds) -> Result<BrowserBounds, String> {
-    if !bounds.x.is_finite()
-        || !bounds.y.is_finite()
-        || !bounds.width.is_finite()
-        || !bounds.height.is_finite()
-    {
-        return Err("browser bounds must be finite".to_string());
-    }
-    if bounds.width <= 0.0 || bounds.height <= 0.0 {
-        return Err("browser bounds must have positive dimensions".to_string());
-    }
-    Ok(BrowserBounds {
-        x: bounds.x.clamp(0.0, MAX_BROWSER_DIMENSION),
-        y: bounds.y.clamp(0.0, MAX_BROWSER_DIMENSION),
-        width: bounds.width.clamp(1.0, MAX_BROWSER_DIMENSION),
-        height: bounds.height.clamp(1.0, MAX_BROWSER_DIMENSION),
-    })
-}
-
-/// Last measured distance, in logical pixels, from the top of the native view
-/// that hosts child WebViews to the top of the main WebView's document.
-///
-/// The renderer measures bounds in document coordinates, while wry positions
-/// child WebViews inside the window's content view. Those two origins differ
-/// when the content view extends under the title bar and WebKit insets the
-/// document below it (macOS 26 does this for a plain titled window), so a
-/// child placed at the renderer's `y` lands one title bar too high and leaves
-/// the same strip blank at the bottom.
-static HOST_DOCUMENT_TOP_INSET: Mutex<Option<f64>> = Mutex::new(None);
-
-/// Refresh [`HOST_DOCUMENT_TOP_INSET`] from the main window and return the
-/// value to use for the current layout call.
-///
-/// The measurement has to run on the main thread. Only the first call waits
-/// for it; later calls return the cached value immediately and let the fresh
-/// measurement land for the next call, so a busy main thread never stalls
-/// resize traffic. The inset only changes with the window chrome (for example
-/// entering full screen), and those transitions produce several bounds updates
-/// in a row, so the cache converges within the same gesture.
-#[cfg(target_os = "macos")]
-fn host_document_top_inset(app: &AppHandle<Wry>) -> f64 {
-    use std::sync::mpsc;
-    let cached = HOST_DOCUMENT_TOP_INSET.lock().ok().and_then(|inset| *inset);
-    // `get_webview_window` stops resolving once the browser child is attached
-    // (the window then hosts more than one WebView), so look the host up as a
-    // plain WebView.
-    let Some(host) = app.get_webview("main") else {
-        return cached.unwrap_or(0.0);
-    };
-    let (tx, rx) = mpsc::channel();
-    let dispatched = host.with_webview(move |platform| {
-        // SAFETY: `inner` is the live WKWebView of the main window, and this
-        // closure runs on the main thread, where AppKit views may be read.
-        let inset = unsafe { measure_document_top_inset(platform.inner()) };
-        if let Ok(mut slot) = HOST_DOCUMENT_TOP_INSET.lock() {
-            *slot = Some(inset);
-        }
-        let _ = tx.send(inset);
-    });
-    if dispatched.is_err() {
-        return cached.unwrap_or(0.0);
-    }
-    match cached {
-        Some(inset) => inset,
-        None => rx.recv_timeout(Duration::from_secs(1)).unwrap_or(0.0),
-    }
-}
-
-#[cfg(target_os = "macos")]
-unsafe fn measure_document_top_inset(webview: *mut std::ffi::c_void) -> f64 {
-    use objc2::runtime::NSObjectProtocol;
-    use objc2_app_kit::NSView;
-    use objc2_foundation::NSEdgeInsets;
-
-    if webview.is_null() {
-        return 0.0;
-    }
-    let view = &*webview.cast::<NSView>();
-    let mut inset = 0.0;
-    if let Some(parent) = view.superview() {
-        // AppKit's y axis grows upward: this is the gap between both top edges.
-        let parent_frame = parent.frame();
-        let frame = view.frame();
-        inset += parent_frame.size.height - (frame.origin.y + frame.size.height);
-    }
-    // WebKit reports the document region hidden under the title bar as an
-    // inset (macOS 26+); older systems do not respond to the selector.
-    if view.respondsToSelector(objc2::sel!(obscuredContentInsets)) {
-        let insets: NSEdgeInsets = objc2::msg_send![view, obscuredContentInsets];
-        inset += insets.top;
-    }
-    if inset.is_finite() {
-        inset.max(0.0)
-    } else {
-        0.0
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn host_document_top_inset(_app: &AppHandle<Wry>) -> f64 {
-    0.0
-}
-
-/// Translate renderer bounds (document coordinates) into the coordinate space
-/// wry uses for child WebViews. Call this before taking the WebView lock: the
-/// first measurement waits briefly on the main thread.
-fn host_adjusted_bounds(app: &AppHandle<Wry>, bounds: BrowserBounds) -> BrowserBounds {
-    let inset = host_document_top_inset(app);
-    BrowserBounds {
-        y: bounds.y + inset,
-        ..bounds
-    }
-}
-
-/// Apply position and size as one native frame update.
-///
-/// On macOS, child WebView coordinates are converted from a top-left logical
-/// origin to AppKit's native coordinate system. Sending position and size as
-/// separate messages can briefly combine a new origin with the previous
-/// height while the browser toolbar changes size. A single `set_bounds` keeps
-/// both values consistent. Bounds must already be in host coordinates; see
-/// [`host_adjusted_bounds`].
-fn set_browser_bounds(webview: &Webview<Wry>, bounds: BrowserBounds) -> Result<(), String> {
-    webview
-        .set_bounds(tauri::Rect {
-            position: tauri::LogicalPosition::new(bounds.x.max(0.0), bounds.y.max(0.0)).into(),
-            size: tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)).into(),
-        })
-        .map_err(|error| error.to_string())
-}
-
 #[derive(Debug, Clone, Default)]
 struct BrowserContext {
     url: Option<String>,
@@ -506,20 +340,6 @@ struct BrowserEvidenceCaptureRecord {
     expires_at: Instant,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct BrowserLocationCacheEntry {
-    safe_url: String,
-    expires_at_ms: i64,
-}
-
-/// A bounded, process-local write-dedup cache. It is never a restore source:
-/// SQLite remains authoritative across process restarts.
-#[derive(Default)]
-struct BrowserLocationCache {
-    entries: HashMap<String, BrowserLocationCacheEntry>,
-    oldest_first: VecDeque<String>,
-}
-
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserControlStatus {
@@ -531,9 +351,8 @@ pub struct BrowserControlStatus {
 /// active workspace and optional session, while the native view is reused.
 #[derive(Clone)]
 pub struct BrowserState {
-    pub(crate) webview: Arc<Mutex<Option<Webview<Wry>>>>,
     /// The native app's Browser is the surface: page operations go to it
-    /// through the bridge instead of `webview`.
+    /// through the bridge.
     remote: Arc<Mutex<bool>>,
     contexts: Arc<Mutex<HashMap<String, BrowserContext>>>,
     active_scope: Arc<Mutex<Option<String>>>,
@@ -555,10 +374,6 @@ pub struct BrowserState {
     /// Content-free runtime audit records. This is intentionally not persisted
     /// or emitted; restart and the bounded ring naturally clear this telemetry.
     browser_audit: Arc<Mutex<VecDeque<BrowserAuditRecord>>>,
-    /// Last successful durable URL per Browser scope. This is deliberately
-    /// separate from page context: it only suppresses identical SQLite writes
-    /// and is never treated as page, consent, map, or evidence state.
-    persisted_locations: Arc<Mutex<BrowserLocationCache>>,
     /// Serializes native child-WebView operations in IPC arrival order, also
     /// across async scope validation. Context extraction keeps it through its
     /// short, bounded native callback wait so a new command cannot change its
@@ -569,7 +384,6 @@ pub struct BrowserState {
 impl Default for BrowserState {
     fn default() -> Self {
         Self {
-            webview: Arc::new(Mutex::new(None)),
             remote: Arc::new(Mutex::new(false)),
             contexts: Arc::new(Mutex::new(HashMap::new())),
             active_scope: Arc::new(Mutex::new(None)),
@@ -584,7 +398,6 @@ impl Default for BrowserState {
             browser_audit: Arc::new(Mutex::new(VecDeque::with_capacity(
                 MAX_BROWSER_AUDIT_ENTRIES,
             ))),
-            persisted_locations: Arc::new(Mutex::new(BrowserLocationCache::default())),
             operation_lock: Arc::new(AsyncMutex::new(())),
         }
     }
@@ -825,114 +638,6 @@ fn browser_audit_tool_for_action(action: &BrowserControlAction) -> BrowserAuditT
         BrowserControlAction::Select { .. } => BrowserAuditTool::Select,
         BrowserControlAction::Press { .. } => BrowserAuditTool::Press,
     }
-}
-
-/// Browser allowlist used both by commands and by the native navigation hook.
-/// HTTPS is allowed for normal human browsing; HTTP is restricted to local
-/// development servers. Credentials and unsupported schemes are rejected.
-fn browser_location_now_ms() -> Option<i64> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-}
-
-/// Best-effort durable persistence runs only after the page-load callback has
-/// proved active scope, expected URL, native URL and payload URL agree. It
-/// intentionally performs synchronous, short local SQLite I/O after all
-/// Browser-state locks are dropped; failure never affects navigation.
-fn persist_browser_location(
-    sessions: &SessionCommandState,
-    persisted_locations: &Arc<Mutex<BrowserLocationCache>>,
-    workspace_id: &str,
-    session_id: Option<&str>,
-    raw_url: &str,
-) {
-    let Some(safe_url) = sanitize_browser_location_url(raw_url) else {
-        return;
-    };
-    let Some(saved_at_ms) = browser_location_now_ms() else {
-        return;
-    };
-    let Some(expires_at_ms) = saved_at_ms.checked_add(BROWSER_LOCATION_TTL_MS) else {
-        return;
-    };
-    let key = scope_key(workspace_id, session_id);
-    let already_current = persisted_locations.lock().is_ok_and(|mut cache| {
-        browser_location_cache_purge_expired(&mut cache, saved_at_ms);
-        browser_location_cache_matches_current(&cache, &key, &safe_url, saved_at_ms)
-    });
-    if already_current {
-        return;
-    }
-    // Do not hold a Browser/cache mutex over SQLite I/O. A concurrent page
-    // callback may write the same URL once, but the database's monotonic
-    // saved_at upsert remains authoritative and the bounded cache converges.
-    if sessions
-        .save_browser_location(
-            workspace_id,
-            session_id,
-            &safe_url,
-            saved_at_ms,
-            expires_at_ms,
-        )
-        .is_ok()
-    {
-        if let Ok(mut cache) = persisted_locations.lock() {
-            browser_location_cache_purge_expired(&mut cache, saved_at_ms);
-            browser_location_cache_insert(&mut cache, key, safe_url, expires_at_ms);
-        }
-    }
-}
-
-fn browser_location_cache_purge_expired(cache: &mut BrowserLocationCache, now_ms: i64) {
-    cache
-        .entries
-        .retain(|_, entry| entry.expires_at_ms > now_ms);
-    cache
-        .oldest_first
-        .retain(|scope| cache.entries.contains_key(scope));
-}
-
-fn browser_location_cache_matches_current(
-    cache: &BrowserLocationCache,
-    scope: &str,
-    safe_url: &str,
-    now_ms: i64,
-) -> bool {
-    cache
-        .entries
-        .get(scope)
-        .is_some_and(|entry| entry.safe_url == safe_url && entry.expires_at_ms > now_ms)
-}
-
-fn browser_location_cache_remove(cache: &mut BrowserLocationCache, scope: &str) {
-    cache.entries.remove(scope);
-    cache.oldest_first.retain(|candidate| candidate != scope);
-}
-
-fn browser_location_cache_insert(
-    cache: &mut BrowserLocationCache,
-    scope: String,
-    safe_url: String,
-    expires_at_ms: i64,
-) {
-    browser_location_cache_remove(cache, &scope);
-    while cache.entries.len() >= MAX_BROWSER_LOCATION_CACHE_ENTRIES {
-        let Some(oldest_scope) = cache.oldest_first.pop_front() else {
-            cache.entries.clear();
-            break;
-        };
-        cache.entries.remove(&oldest_scope);
-    }
-    cache.entries.insert(
-        scope.clone(),
-        BrowserLocationCacheEntry {
-            safe_url,
-            expires_at_ms,
-        },
-    );
-    cache.oldest_first.push_back(scope);
 }
 
 fn issue_semantic_map(
@@ -1244,7 +949,6 @@ pub(crate) async fn capture_browser_viewport_for_lease(
         return Err("browser page is still loading".to_string());
     }
     let bytes = match page_driver(state)? {
-        PageDriver::Local(webview) => crate::browser_capture::capture(*webview).await?,
         PageDriver::Remote => remote_capture().await?,
     };
     authorize()?;
@@ -2552,10 +2256,6 @@ fn parse_browser_evidence_cleanup_callback(raw: &str) -> Result<(), String> {
     }
 }
 
-fn emit_snapshot(app: &AppHandle<Wry>, snapshot: BrowserSnapshot) {
-    let _ = app.emit("browser://state-changed", snapshot);
-}
-
 fn tracked_browser_url(context: &BrowserContext) -> Option<String> {
     context.expected_url.clone().or_else(|| context.url.clone())
 }
@@ -2784,18 +2484,6 @@ fn require_active_scope(
     }
 }
 
-fn context_url(
-    state: &BrowserState,
-    workspace_id: &str,
-    session_id: Option<&str>,
-) -> Option<String> {
-    state.contexts.lock().ok().and_then(|contexts| {
-        contexts
-            .get(&scope_key(workspace_id, session_id))
-            .and_then(|context| context.url.clone())
-    })
-}
-
 fn mark_context_loading(context: &mut BrowserContext, expected_url: String) {
     let previous_url = context.url.clone();
     context.expected_url = Some(expected_url);
@@ -2817,166 +2505,6 @@ fn mark_context_open_request(
         context.pending_previous_main_url = previous_main_url;
     }
     context.approved_open_url = Some(url);
-}
-
-fn apply_main_frame_navigation(context: &mut BrowserContext, url: &str, loading: bool) -> bool {
-    if !context.main_load_started
-        && context.ready_url.is_none()
-        && context.pending_previous_main_url.as_deref() == Some(url)
-        && (!loading || context.expected_url.as_deref() != Some(url))
-    {
-        return false;
-    }
-    if loading {
-        // Re-arming a reused WKWebView can synchronously report its old,
-        // already committed URL. The explicit navigation intent has already
-        // made the context loading; do not replace it before WebKit reports
-        // the new main document.
-        if context.ready_url.is_none()
-            && context.url.as_deref() == Some(url)
-            && context.expected_url.as_deref() != Some(url)
-        {
-            return false;
-        }
-        mark_context_loading(context, url.to_string());
-        context.main_load_started = true;
-        return true;
-    }
-    // A replayed initial KVO value from a reused view must not mark the old
-    // document ready between `navigate` and its real start. A changed URL
-    // with a ready prior document is a History API transition and is accepted.
-    if !context.main_load_started
-        && context.ready_url.is_none()
-        && context.expected_url.as_deref() != Some(url)
-    {
-        return false;
-    }
-    if !context.main_load_started && context.url.as_deref() == Some(url) {
-        return false;
-    }
-    if !context_is_ready_for_url(context, url) {
-        mark_context_loading(context, url.to_string());
-    }
-    context.url = Some(url.to_string());
-    context.ready_url = Some(url.to_string());
-    true
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Clone)]
-struct MainFrameNavigationObserver {
-    app: AppHandle<Wry>,
-    state: BrowserState,
-}
-
-#[cfg(target_os = "macos")]
-static MAIN_FRAME_NAVIGATION_OBSERVERS: OnceLock<Mutex<HashMap<u64, MainFrameNavigationObserver>>> =
-    OnceLock::new();
-
-#[cfg(target_os = "macos")]
-fn main_frame_navigation_observers() -> &'static Mutex<HashMap<u64, MainFrameNavigationObserver>> {
-    MAIN_FRAME_NAVIGATION_OBSERVERS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Receives KVO only from WKWebView's `URL` and `loading` properties. Unlike
-/// Wry's navigation-policy hook, those are properties of the top-level frame;
-/// an iframe may therefore never replace the Browser's document identity.
-#[cfg(target_os = "macos")]
-extern "C" fn main_frame_navigation_changed(
-    token: u64,
-    url: *const std::ffi::c_char,
-    loading: bool,
-) {
-    if url.is_null() {
-        return;
-    }
-    let Ok(url) = unsafe { std::ffi::CStr::from_ptr(url) }.to_str() else {
-        return;
-    };
-    let Ok(url) = validate_browser_url(url) else {
-        return;
-    };
-    let observer = main_frame_navigation_observers()
-        .lock()
-        .ok()
-        .and_then(|observers| observers.get(&token).cloned());
-    let Some(observer) = observer else {
-        return;
-    };
-    if observer
-        .state
-        .lifecycle_token
-        .lock()
-        .map(|current| *current != token)
-        .unwrap_or(true)
-        || observer
-            .state
-            .lifecycle_open
-            .lock()
-            .map(|open| !*open)
-            .unwrap_or(true)
-    {
-        return;
-    }
-    let Some(scope) = observer
-        .state
-        .active_scope
-        .lock()
-        .ok()
-        .and_then(|scope| scope.clone())
-    else {
-        return;
-    };
-    let changed = if let Ok(mut contexts) = observer.state.contexts.lock() {
-        apply_main_frame_navigation(
-            contexts.entry(scope.clone()).or_default(),
-            url.as_str(),
-            loading,
-        )
-    } else {
-        false
-    };
-    if !changed {
-        return;
-    }
-    invalidate_browser_evidence_for_scope_key(&observer.state, &scope);
-    if let Ok(snapshot) = current_snapshot(&observer.state) {
-        emit_snapshot(&observer.app, snapshot);
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn track_main_frame_navigation(
-    webview: &Webview<Wry>,
-    app: AppHandle<Wry>,
-    state: BrowserState,
-) -> Result<(), String> {
-    let token = *state
-        .lifecycle_token
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?;
-    let mut observers = main_frame_navigation_observers()
-        .lock()
-        .map_err(|_| "browser navigation observer lock poisoned".to_string())?;
-    observers.clear();
-    observers.insert(token, MainFrameNavigationObserver { app, state });
-    drop(observers);
-    unsafe extern "C" {
-        fn dcc_browser_track_main_frame_navigation(
-            webview: *mut std::ffi::c_void,
-            token: u64,
-            callback: extern "C" fn(u64, *const std::ffi::c_char, bool),
-        );
-    }
-    webview
-        .with_webview(move |webview| unsafe {
-            dcc_browser_track_main_frame_navigation(
-                webview.inner(),
-                token,
-                main_frame_navigation_changed,
-            )
-        })
-        .map_err(|_| "Browser viewport is unavailable".to_string())
 }
 
 fn invalidate_semantic_map(context: &mut BrowserContext) {
@@ -3026,35 +2554,6 @@ fn page_load_revision_is_current(current: u64, expected: u64) -> bool {
     current == expected
 }
 
-fn page_load_matches_expected(
-    active_scope: Option<&str>,
-    scope: &str,
-    expected_url: Option<&str>,
-    payload_url: &str,
-) -> bool {
-    active_scope == Some(scope) && expected_url == Some(payload_url)
-}
-
-fn callback_matches_scope(
-    active_scope: &Arc<Mutex<Option<String>>>,
-    contexts: &Arc<Mutex<HashMap<String, BrowserContext>>>,
-    workspace_id: &str,
-    session_id: Option<&str>,
-) -> bool {
-    // Title callbacks do not carry our workspace/session token. Keep them
-    // scoped to the currently active context. Page-load callbacks additionally
-    // validate their payload URL before committing state.
-    let expected_scope = scope_key(workspace_id, session_id);
-    let active_scope = active_scope.lock().ok().and_then(|scope| scope.clone());
-    if active_scope.as_deref() != Some(expected_scope.as_str()) {
-        return false;
-    }
-    contexts
-        .lock()
-        .ok()
-        .is_some_and(|contexts| contexts.contains_key(&expected_scope))
-}
-
 fn occlusion_request_is_current(
     lifecycle_open: bool,
     current_token: u64,
@@ -3102,580 +2601,6 @@ fn context_ready_for_scope(
     Ok(contexts
         .get(&scope_key(workspace_id, session_id))
         .is_some_and(|context| context_is_ready_for_url(context, url)))
-}
-
-fn build_browser(
-    app: &AppHandle<Wry>,
-    state: &BrowserState,
-    sessions: SessionCommandState,
-    url: Url,
-    bounds: BrowserBounds,
-    initial_occluded: bool,
-) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "main window is unavailable".to_string())?;
-    let state_contexts = state.contexts.clone();
-    let state_workspace = state.active_workspace.clone();
-    let state_session = state.active_session.clone();
-    let state_active_scope = state.active_scope.clone();
-    let state_visible = state.visible.clone();
-    let page_load_app = app.clone();
-    let page_load_contexts = state.contexts.clone();
-    let page_load_active_scope = state.active_scope.clone();
-    let page_load_workspace = state.active_workspace.clone();
-    let page_load_session = state.active_session.clone();
-    let page_load_visible = state.visible.clone();
-    let page_load_token = state.lifecycle_token.clone();
-    let page_load_state = state.clone();
-    let page_load_persisted_locations = state.persisted_locations.clone();
-    let popup_app = app.clone();
-    let popup_parent = window.clone();
-    let popup_active_scope = state.active_scope.clone();
-    let popup_lifecycle_token = state.lifecycle_token.clone();
-    let popup_registry = browser_popup_registry();
-    #[cfg(not(target_os = "macos"))]
-    let navigation_state = state.clone();
-    // A fresh label per native view: closing the previous one is asynchronous,
-    // so reusing the label could collide with a view that is still tearing down.
-    let label = format!(
-        "{BROWSER_LABEL}-{}",
-        BROWSER_VIEW_SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    );
-    let builder = WebviewBuilder::new(label, WebviewUrl::External(url))
-        // Approved Browser work continues while its parent DCC window is hidden.
-        .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
-        .on_navigation(move |url| {
-            // Wry invokes this policy callback for every WKNavigationAction,
-            // including iframe requests. It remains an allowlist gate only;
-            // top-level lifecycle state comes from the WKWebView observer.
-            if validate_browser_url(url.as_str()).is_err() {
-                return false;
-            }
-            // Other engines retain their existing lifecycle tracking until
-            // they have a platform-specific main-document observer.
-            #[cfg(not(target_os = "macos"))]
-            {
-                let Some(scope) = navigation_state
-                    .active_scope
-                    .lock()
-                    .ok()
-                    .and_then(|scope| scope.clone())
-                else {
-                    return false;
-                };
-                if let Ok(mut contexts) = navigation_state.contexts.lock() {
-                    mark_context_loading(
-                        contexts.entry(scope.clone()).or_default(),
-                        url.to_string(),
-                    );
-                }
-                invalidate_browser_evidence_for_scope_key(&navigation_state, &scope);
-            }
-            true
-        })
-        .on_new_window(move |url, features| {
-            let Some(scope) = popup_active_scope
-                .lock()
-                .ok()
-                .and_then(|scope| scope.clone())
-            else {
-                return NewWindowResponse::Deny;
-            };
-            let lifecycle_token = match popup_lifecycle_token.lock() {
-                Ok(token) => *token,
-                Err(_) => return NewWindowResponse::Deny,
-            };
-            open_browser_popup(
-                &popup_app,
-                &popup_parent,
-                popup_registry.clone(),
-                scope,
-                lifecycle_token,
-                url,
-                features,
-                |expected_scope, expected_token| {
-                    popup_active_scope
-                        .lock()
-                        .ok()
-                        .and_then(|scope| scope.clone())
-                        .as_deref()
-                        == Some(expected_scope)
-                        && popup_lifecycle_token
-                            .lock()
-                            .map(|token| *token == expected_token)
-                            .unwrap_or(false)
-                },
-            )
-        })
-        .on_download(|_, event| match event {
-            DownloadEvent::Requested { destination, .. } => {
-                let Some(path) = choose_download_destination(destination) else {
-                    return false;
-                };
-                *destination = path;
-                true
-            }
-            DownloadEvent::Finished { .. } => true,
-            _ => false,
-        })
-        .on_document_title_changed(move |_webview, title| {
-            let (Some(workspace), Ok(session)) = (
-                state_workspace.lock().ok().and_then(|w| w.clone()),
-                state_session.lock(),
-            ) else {
-                return;
-            };
-            if !callback_matches_scope(
-                &state_active_scope,
-                &state_contexts,
-                &workspace,
-                session.as_deref(),
-            ) {
-                return;
-            }
-            if let Ok(mut contexts) = state_contexts.lock() {
-                contexts
-                    .entry(scope_key(&workspace, session.as_deref()))
-                    .or_default()
-                    .title = Some(title);
-            }
-        })
-        .on_page_load(move |_webview, payload| {
-            let Some(workspace_id) = page_load_workspace
-                .lock()
-                .ok()
-                .and_then(|workspace| workspace.clone())
-            else {
-                return;
-            };
-            let session_id = page_load_session
-                .lock()
-                .ok()
-                .and_then(|session| session.clone());
-            let key = scope_key(&workspace_id, session_id.as_deref());
-            let payload_url = payload.url().to_string();
-            if matches!(payload.event(), PageLoadEvent::Started) {
-                let active_scope = page_load_active_scope
-                    .lock()
-                    .ok()
-                    .and_then(|scope| scope.clone());
-                if active_scope.as_deref() != Some(key.as_str()) {
-                    return;
-                }
-                let marked_loading = if let Ok(mut contexts) = page_load_contexts.lock() {
-                    if let Some(context) = contexts.get_mut(&key) {
-                        if context.expected_url.as_deref() == Some(payload_url.as_str()) {
-                            context.ready_url = None;
-                            context.title = None;
-                            context.page_load_revision =
-                                context.page_load_revision.wrapping_add(1).max(1);
-                            invalidate_semantic_map(context);
-                            true
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                invalidate_browser_evidence_for_scope_key(&page_load_state, &key);
-                if marked_loading {
-                    emit_snapshot(
-                        &page_load_app,
-                        BrowserSnapshot {
-                            workspace_id,
-                            session_id,
-                            lifecycle_token: page_load_token
-                                .lock()
-                                .map(|token| *token)
-                                .unwrap_or(0),
-                            visible: page_load_visible
-                                .lock()
-                                .map(|visible| *visible)
-                                .unwrap_or(true),
-                            loading: true,
-                            url: Some(payload_url),
-                            title: None,
-                        },
-                    );
-                }
-                return;
-            }
-            if !matches!(payload.event(), PageLoadEvent::Finished) {
-                return;
-            }
-            // Main-frame tracking updates expected_url through redirects. A
-            // late Finished event from a prior workspace/session cannot
-            // satisfy the scope and URL checks.
-            let active_scope = page_load_active_scope
-                .lock()
-                .ok()
-                .and_then(|scope| scope.clone());
-            let title = page_load_contexts.lock().ok().and_then(|mut contexts| {
-                let context = contexts.get_mut(&key)?;
-                if !page_load_matches_expected(
-                    active_scope.as_deref(),
-                    &key,
-                    context.expected_url.as_deref(),
-                    &payload_url,
-                ) {
-                    return None;
-                }
-                context.url = Some(payload_url.clone());
-                context.ready_url = Some(payload_url.clone());
-                Some(context.title.clone())
-            });
-            let Some(title) = title else {
-                return;
-            };
-            persist_browser_location(
-                &sessions,
-                &page_load_persisted_locations,
-                &workspace_id,
-                session_id.as_deref(),
-                &payload_url,
-            );
-            emit_snapshot(
-                &page_load_app,
-                BrowserSnapshot {
-                    workspace_id,
-                    session_id,
-                    lifecycle_token: page_load_token.lock().map(|token| *token).unwrap_or(0),
-                    visible: page_load_visible
-                        .lock()
-                        .map(|visible| *visible)
-                        .unwrap_or(true),
-                    loading: false,
-                    url: Some(payload_url),
-                    title,
-                },
-            );
-        });
-    // macOS 14+ has a persistent named WKWebsiteDataStore. On earlier macOS,
-    // force an isolated transient store rather than let Wry select the app's
-    // default profile. Other desktop engines receive their own on-disk profile.
-    #[cfg(target_os = "macos")]
-    let builder = if named_browser_store_is_available() {
-        builder.data_store_identifier(BROWSER_DATA_STORE_IDENTIFIER)
-    } else {
-        builder.incognito(true)
-    };
-    #[cfg(not(target_os = "macos"))]
-    let builder = {
-        let profile = browser_profile_data_dir(app)
-            .ok_or_else(|| "Browser profile directory is unavailable".to_string())?;
-        std::fs::create_dir_all(&profile)
-            .map_err(|error| format!("failed to create Browser profile directory: {error}"))?;
-        builder.data_directory(profile)
-    };
-    let parent_window = window.as_ref().window();
-    let webview = parent_window
-        .add_child(
-            builder,
-            tauri::LogicalPosition::new(bounds.x.max(0.0), bounds.y.max(0.0)),
-            tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
-        )
-        .map_err(|error| format!("failed to create browser WebView: {error}"))?;
-    if initial_occluded {
-        webview
-            .hide()
-            .map_err(|error| format!("failed to hide browser during initial occlusion: {error}"))?;
-    }
-    *state
-        .webview
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = Some(webview);
-    #[cfg(target_os = "macos")]
-    {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?
-            .clone()
-            .ok_or_else(|| "browser WebView is unavailable".to_string())?;
-        track_main_frame_navigation(&webview, app.clone(), state.clone())?;
-    }
-    *state_visible
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = !initial_occluded;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn browser_open(
-    app: AppHandle<Wry>,
-    state: State<'_, BrowserState>,
-    sessions: State<'_, SessionCommandState>,
-    workspace_id: String,
-    session_id: Option<String>,
-    initial_url: Option<String>,
-    restore_last_url: Option<bool>,
-    bounds: BrowserBounds,
-    initial_occluded: Option<bool>,
-) -> Result<BrowserSnapshot, String> {
-    let _operation = state.operation_lock.lock().await;
-    validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
-    let bounds = host_adjusted_bounds(&app, normalize_browser_bounds(bounds)?);
-    let key = scope_key(&workspace_id, session_id.as_deref());
-    let requested_url = initial_url.is_some();
-    let initial_occluded = initial_occluded.unwrap_or(false);
-    let existing = state
-        .webview
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?
-        .is_some();
-    let previous_scope = state
-        .active_scope
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?
-        .clone();
-    let previous_main_url = previous_scope.as_deref().and_then(|scope| {
-        state
-            .contexts
-            .lock()
-            .ok()
-            .and_then(|contexts| contexts.get(scope).and_then(tracked_browser_url))
-    });
-    let runtime_url = context_url(&state, &workspace_id, session_id.as_deref());
-    let restore_last_url = restore_last_url.unwrap_or(false);
-    let stored_url = if initial_url.is_none() && runtime_url.is_none() && restore_last_url {
-        let now_ms = browser_location_now_ms();
-        match now_ms.and_then(|now_ms| {
-            sessions
-                .load_browser_location(&workspace_id, session_id.as_deref(), now_ms)
-                .ok()
-                .flatten()
-        }) {
-            Some(stored_url) => match sanitize_browser_location_url(&stored_url) {
-                // A DB read is deliberately not a cache insertion: the first
-                // validated PageLoad Finished after restore renews the TTL.
-                Some(safe_url) => Some(safe_url),
-                None => {
-                    let _ = sessions.delete_browser_location(&workspace_id, session_id.as_deref());
-                    if let Ok(mut cache) = state.persisted_locations.lock() {
-                        browser_location_cache_remove(&mut cache, &key);
-                    }
-                    None
-                }
-            },
-            // A missing row can mean a prior best-effort deletion (including
-            // expiry). It must not leave an in-memory dedup entry behind,
-            // otherwise a later PageLoad Finished could skip its TTL renewal.
-            None => {
-                if let Ok(mut cache) = state.persisted_locations.lock() {
-                    browser_location_cache_remove(&mut cache, &key);
-                }
-                None
-            }
-        }
-    } else {
-        None
-    };
-    let desired = select_browser_open_url(
-        initial_url.as_deref(),
-        runtime_url,
-        stored_url,
-        restore_last_url,
-    )?;
-    if let Some(previous_scope) = previous_scope.as_deref() {
-        let previous_token = *state
-            .lifecycle_token
-            .lock()
-            .map_err(|_| "browser state lock poisoned")?;
-        crate::browser_popups::close_browser_popups_for_lifecycle(
-            &app,
-            previous_scope,
-            previous_token,
-        );
-    }
-    set_active_scope(&state, &workspace_id, session_id.as_deref())?;
-    let scope_changed = previous_scope.as_deref() != Some(key.as_str());
-    let should_navigate = requested_url || scope_changed;
-    // One native view serves every task, so a view left by another task still
-    // shows that task's page (and keeps its back/forward history) until the
-    // new navigation commits, and forever if it fails. Another task never
-    // reuses the view: it gets a fresh one on the same shared website store.
-    let existing = existing && !(scope_changed && previous_scope.is_some());
-    if !existing {
-        discard_browser_view(&state)?;
-    }
-    let previous_main_url = if existing { previous_main_url } else { None };
-    {
-        let mut token = state
-            .lifecycle_token
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        advance_lifecycle_token(&mut token);
-    }
-    // Even a reopen to the same URL is a distinct surface lifecycle.
-    invalidate_semantic_map_for_scope(&state, &workspace_id, session_id.as_deref());
-    clear_browser_evidence_captures(&state);
-    clear_browser_control_grant(&state);
-    *state
-        .lifecycle_open
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = true;
-    *state
-        .occluded
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = initial_occluded;
-    if should_navigate || !existing {
-        if let Ok(mut contexts) = state.contexts.lock() {
-            mark_context_open_request(
-                contexts.entry(key.clone()).or_default(),
-                desired.to_string(),
-                previous_main_url,
-            );
-        }
-    }
-    if !existing {
-        build_browser(
-            &app,
-            &state,
-            sessions.inner().clone(),
-            desired,
-            bounds,
-            initial_occluded,
-        )?;
-    } else {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        if let Some(webview) = webview.as_ref() {
-            if should_navigate {
-                webview
-                    .navigate(desired)
-                    .map_err(|error| format!("failed to navigate browser: {error}"))?;
-            }
-            set_browser_bounds(webview, bounds)?;
-            if initial_occluded {
-                webview.hide().map_err(|error| error.to_string())?;
-            } else {
-                webview.show().map_err(|error| error.to_string())?;
-            }
-        }
-    }
-    #[cfg(target_os = "macos")]
-    if existing {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?
-            .clone()
-            .ok_or_else(|| "browser is not open".to_string())?;
-        // This runs after a reused view has received its explicit navigation,
-        // so its synchronous initial KVO value cannot replace that intent.
-        track_main_frame_navigation(&webview, app.clone(), state.inner().clone())?;
-    }
-    *state
-        .visible
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = !initial_occluded;
-    let snapshot = current_snapshot(&state)?;
-    emit_snapshot(&app, snapshot.clone());
-    Ok(snapshot)
-}
-
-#[tauri::command]
-pub async fn browser_navigate(
-    app: AppHandle<Wry>,
-    state: State<'_, BrowserState>,
-    sessions: State<'_, SessionCommandState>,
-    workspace_id: String,
-    session_id: Option<String>,
-    lifecycle_token: u64,
-    url: String,
-) -> Result<BrowserSnapshot, String> {
-    let _operation = state.operation_lock.lock().await;
-    validate_scope(&sessions, &workspace_id, session_id.as_deref()).await?;
-    let url = validate_browser_url(&url)?;
-    require_current_lifecycle(
-        &state,
-        &workspace_id,
-        session_id.as_deref(),
-        lifecycle_token,
-        "browser navigation lifecycle is stale",
-    )?;
-    if let Ok(mut contexts) = state.contexts.lock() {
-        mark_context_loading(
-            contexts
-                .entry(scope_key(&workspace_id, session_id.as_deref()))
-                .or_default(),
-            url.to_string(),
-        );
-    }
-    invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
-    {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        let webview = webview
-            .as_ref()
-            .ok_or_else(|| "browser is not open".to_string())?;
-        webview
-            .navigate(url)
-            .map_err(|error| format!("failed to navigate browser: {error}"))?;
-    }
-    let snapshot = current_snapshot(&state)?;
-    emit_snapshot(&app, snapshot.clone());
-    Ok(snapshot)
-}
-
-#[tauri::command]
-pub async fn browser_reload(
-    app: AppHandle<Wry>,
-    state: State<'_, BrowserState>,
-    workspace_id: String,
-    session_id: Option<String>,
-    lifecycle_token: u64,
-) -> Result<BrowserSnapshot, String> {
-    let _operation = state.operation_lock.lock().await;
-    require_current_lifecycle(
-        &state,
-        &workspace_id,
-        session_id.as_deref(),
-        lifecycle_token,
-        "browser reload lifecycle is stale",
-    )?;
-    let current_url = state
-        .contexts
-        .lock()
-        .ok()
-        .and_then(|contexts| {
-            contexts
-                .get(&scope_key(&workspace_id, session_id.as_deref()))
-                .and_then(tracked_browser_url)
-        })
-        .ok_or_else(|| "browser page URL is unavailable".to_string())?;
-    {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        let webview = webview
-            .as_ref()
-            .ok_or_else(|| "browser is not open".to_string())?;
-        if let Ok(mut contexts) = state.contexts.lock() {
-            mark_context_loading(
-                contexts
-                    .entry(scope_key(&workspace_id, session_id.as_deref()))
-                    .or_default(),
-                current_url.clone(),
-            );
-        }
-        invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
-        webview
-            .reload()
-            .map_err(|error| format!("failed to reload browser: {error}"))?;
-    }
-    let snapshot = current_snapshot(&state)?;
-    emit_snapshot(&app, snapshot.clone());
-    Ok(snapshot)
 }
 
 /// Arms the in-memory Browser-control capability after a future explicit UI
@@ -3854,80 +2779,6 @@ pub async fn browser_disarm_control(
         browser_audit_outcome(result.as_ref().err().map(String::as_str)),
     );
     result
-}
-
-/// The user can import a session while its native view is occluded by DCC's
-/// consent dialog. Scope, complete URL and load revision still have to match.
-pub(crate) async fn browser_session_import_target(
-    state: &BrowserState,
-    workspace_id: &str,
-    session_id: Option<&str>,
-    lifecycle_token: u64,
-    url: &str,
-) -> Result<(Webview<Wry>, u64), String> {
-    let _operation = state.operation_lock.lock().await;
-    browser_session_import_target_locked(state, workspace_id, session_id, lifecycle_token, url)
-        .await
-}
-
-async fn browser_session_import_target_locked(
-    state: &BrowserState,
-    workspace_id: &str,
-    session_id: Option<&str>,
-    lifecycle_token: u64,
-    url: &str,
-) -> Result<(Webview<Wry>, u64), String> {
-    validate_browser_url(url)?;
-    require_current_lifecycle(
-        state,
-        workspace_id,
-        session_id,
-        lifecycle_token,
-        "browser session import is stale",
-    )?;
-    let revision = {
-        let contexts = state
-            .contexts
-            .lock()
-            .map_err(|_| "browser state lock poisoned")?;
-        let context = contexts
-            .get(&scope_key(workspace_id, session_id))
-            .ok_or("browser page unavailable")?;
-        if !context_is_ready_for_url(context, url) {
-            return Err("browser changed page; reopen Sessions and try again".into());
-        }
-        context.page_load_revision
-    };
-    eval_browser_action_with_callback(state, browser_action_url_check_script(url)?).await?;
-    let view = state
-        .webview
-        .lock()
-        .map_err(|_| "browser state lock poisoned")?
-        .clone()
-        .ok_or("browser is not open")?;
-    Ok((view, revision))
-}
-
-pub(crate) async fn apply_browser_session_cookies(
-    state: &BrowserState,
-    workspace_id: &str,
-    session_id: Option<&str>,
-    lifecycle_token: u64,
-    url: &str,
-    expected_revision: u64,
-    cookies: Vec<crate::browser_sessions::PreparedSessionCookie>,
-) -> Result<(usize, usize), String> {
-    let _operation = state.operation_lock.lock().await;
-    let (view, revision) =
-        browser_session_import_target_locked(state, workspace_id, session_id, lifecycle_token, url)
-            .await?;
-    if revision != expected_revision {
-        return Err("browser changed page; reopen Sessions and try again".into());
-    }
-    let counts = crate::browser_sessions::apply_prepared_cookies(view, cookies).await?;
-    invalidate_semantic_map_for_scope(state, workspace_id, session_id);
-    invalidate_browser_evidence_for_scope(state, workspace_id, session_id);
-    Ok(counts)
 }
 
 /// Executes only a small allowlist of page-level actions. This is an internal
@@ -4812,230 +3663,15 @@ async fn extract_browser_context_locked(
     })
 }
 
-#[tauri::command]
-pub async fn browser_set_bounds(
-    app: AppHandle<Wry>,
-    state: State<'_, BrowserState>,
-    workspace_id: String,
-    session_id: Option<String>,
-    lifecycle_token: u64,
-    bounds: BrowserBounds,
-) -> Result<(), String> {
-    let _operation = state.operation_lock.lock().await;
-    require_current_lifecycle(
-        &state,
-        &workspace_id,
-        session_id.as_deref(),
-        lifecycle_token,
-        "browser layout lifecycle is stale",
-    )?;
-    let bounds = host_adjusted_bounds(&app, normalize_browser_bounds(bounds)?);
-    let webview = state
-        .webview
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?;
-    let webview = webview
-        .as_ref()
-        .ok_or_else(|| "browser is not open".to_string())?;
-    set_browser_bounds(webview, bounds)
-}
-
-/// Hide/show the child WebView for a short-lived DCC surface. This lifecycle
-/// is intentionally separate from `browser_hide`, which closes the Browser
-/// surface. The token makes a delayed restore from an old mount harmless.
-#[tauri::command]
-pub async fn browser_set_occluded(
-    app: AppHandle<Wry>,
-    state: State<'_, BrowserState>,
-    workspace_id: String,
-    session_id: Option<String>,
-    lifecycle_token: u64,
-    occluded: bool,
-    bounds: Option<BrowserBounds>,
-) -> Result<BrowserSnapshot, String> {
-    let _operation = state.operation_lock.lock().await;
-    require_current_lifecycle(
-        &state,
-        &workspace_id,
-        session_id.as_deref(),
-        lifecycle_token,
-        "browser visibility lifecycle is stale",
-    )?;
-    let currently_occluded = *state
-        .occluded
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?;
-    let bounds = bounds
-        .map(normalize_browser_bounds)
-        .transpose()?
-        .map(|bounds| host_adjusted_bounds(&app, bounds));
-    {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        let webview = webview
-            .as_ref()
-            .ok_or_else(|| "browser is not open".to_string())?;
-        if let Some(bounds) = bounds {
-            set_browser_bounds(webview, bounds)?;
-        }
-        if currently_occluded != occluded {
-            if occluded {
-                webview.hide().map_err(|error| error.to_string())?;
-            } else {
-                webview.show().map_err(|error| error.to_string())?;
-            }
-        }
-    }
-    if currently_occluded == occluded {
-        return current_snapshot(&state);
-    }
-    *state
-        .occluded
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = occluded;
-    *state
-        .visible
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = !occluded;
-    let snapshot = current_snapshot(&state)?;
-    emit_snapshot(&app, snapshot.clone());
-    Ok(snapshot)
-}
-
-#[tauri::command]
-pub async fn browser_hide(
-    app: AppHandle<Wry>,
-    state: State<'_, BrowserState>,
-    workspace_id: String,
-    session_id: Option<String>,
-    lifecycle_token: u64,
-) -> Result<BrowserSnapshot, String> {
-    let _operation = state.operation_lock.lock().await;
-    require_current_lifecycle(
-        &state,
-        &workspace_id,
-        session_id.as_deref(),
-        lifecycle_token,
-        "browser close lifecycle is stale",
-    )?;
-    crate::browser_popups::close_browser_popups_for_lifecycle(
-        &app,
-        &scope_key(&workspace_id, session_id.as_deref()),
-        lifecycle_token,
-    );
-    clear_browser_control_grant(&state);
-    invalidate_browser_evidence_for_scope(&state, &workspace_id, session_id.as_deref());
-    {
-        let webview = state
-            .webview
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        webview
-            .as_ref()
-            .ok_or_else(|| "browser is not open".to_string())?
-            .hide()
-            .map_err(|error| error.to_string())?;
-    }
-    *state
-        .visible
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = false;
-    *state
-        .lifecycle_open
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = false;
-    #[cfg(target_os = "macos")]
-    if let Ok(mut observers) = main_frame_navigation_observers().lock() {
-        observers.clear();
-    }
-    *state
-        .occluded
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())? = false;
-    invalidate_semantic_map_for_scope(&state, &workspace_id, session_id.as_deref());
-    let closed_token = {
-        let mut token = state
-            .lifecycle_token
-            .lock()
-            .map_err(|_| "browser state lock poisoned".to_string())?;
-        advance_lifecycle_token(&mut token);
-        *token
-    };
-    persist_current_context(&state);
-    let snapshot = current_snapshot(&state)?;
-    emit_snapshot(&app, snapshot.clone());
-    schedule_closed_browser_teardown(&state, closed_token);
-    Ok(snapshot)
-}
-
-/// A closed Browser keeps its page running (background throttling is off so
-/// approved agent work survives a hidden DCC window). After a while closed it
-/// is released; reopening builds a fresh view at the scope's last URL.
-const CLOSED_BROWSER_TEARDOWN_DELAY: Duration = Duration::from_secs(5 * 60);
-
-/// Only the close that scheduled the teardown may release the view: any open
-/// since then (by the person or an agent) advances the token and keeps it.
-fn closed_browser_view_is_idle(
-    lifecycle_open: bool,
-    current_token: u64,
-    closed_token: u64,
-) -> bool {
-    !lifecycle_open && current_token == closed_token
-}
-
-fn schedule_closed_browser_teardown(state: &BrowserState, closed_token: u64) {
-    let state = state.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(CLOSED_BROWSER_TEARDOWN_DELAY).await;
-        let _operation = state.operation_lock.lock().await;
-        let (Ok(open), Ok(token)) = (state.lifecycle_open.lock(), state.lifecycle_token.lock())
-        else {
-            return;
-        };
-        let idle = closed_browser_view_is_idle(*open, *token, closed_token);
-        drop((open, token));
-        if idle {
-            let _ = discard_browser_view(&state);
-        }
-    });
-}
-
-fn discard_browser_view(state: &BrowserState) -> Result<(), String> {
-    let previous = state
-        .webview
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?
-        .take();
-    if let Some(webview) = previous {
-        #[cfg(target_os = "macos")]
-        if let Ok(mut observers) = main_frame_navigation_observers().lock() {
-            observers.clear();
-        }
-        webview
-            .close()
-            .map_err(|error| format!("failed to close previous browser WebView: {error}"))?;
-    }
-    Ok(())
-}
-
 pub fn shutdown(state: &BrowserState) {
     clear_browser_evidence_captures(state);
-    if let Ok(mut webview) = state.webview.lock() {
-        if let Some(webview) = webview.take() {
-            let _ = webview.close();
-        }
-    }
 }
 
 // ---- The native app's Browser (`http_api::browser_bridge`) ----------------
 
-/// Where page operations go: the desktop's own view, or the native app's
-/// Browser through the bridge. Everything around them — scope, lifecycle,
-/// grant, maps, evidence, audit — is the same either way.
+/// Page operations go to the native app's Browser through the bridge; the
+/// scope, lifecycle, grant, maps, evidence and audit around them stay here.
 pub(crate) enum PageDriver {
-    Local(Box<Webview<Wry>>),
     Remote,
 }
 
@@ -5055,21 +3691,12 @@ pub(crate) fn page_driver(state: &BrowserState) -> Result<PageDriver, String> {
     if remote_attached(state) {
         return Ok(PageDriver::Remote);
     }
-    state
-        .webview
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?
-        .clone()
-        .map(|webview| PageDriver::Local(Box::new(webview)))
-        .ok_or_else(|| "browser is not open".to_string())
+    Err("browser is not open".to_string())
 }
 
 impl PageDriver {
     fn navigate(&self, url: &Url) -> Result<(), String> {
         match self {
-            Self::Local(webview) => webview
-                .navigate(url.clone())
-                .map_err(|error| error.to_string()),
             Self::Remote => {
                 dcc_http::native_browser_bridge().fire(dcc_http::BridgeOpKind::Navigate {
                     url: url.to_string(),
@@ -5080,14 +3707,12 @@ impl PageDriver {
 
     fn reload(&self) -> Result<(), String> {
         match self {
-            Self::Local(webview) => webview.reload().map_err(|error| error.to_string()),
             Self::Remote => dcc_http::native_browser_bridge().fire(dcc_http::BridgeOpKind::Reload),
         }
     }
 
     fn eval_detached(&self, script: String) -> Result<(), String> {
         match self {
-            Self::Local(webview) => webview.eval(script).map_err(|error| error.to_string()),
             Self::Remote => dcc_http::native_browser_bridge()
                 .fire(dcc_http::BridgeOpKind::EvalDetached { script }),
         }
@@ -5114,10 +3739,6 @@ async fn deliver_click(state: &BrowserState, x: f64, y: f64) -> Result<(), Strin
         return Err("browser click point is invalid".into());
     }
     match page_driver(state)? {
-        #[cfg(target_os = "macos")]
-        PageDriver::Local(view) => crate::browser_input::click(*view, x, y).await,
-        #[cfg(not(target_os = "macos"))]
-        PageDriver::Local(_) => Err("browser click is unavailable on this platform".into()),
         PageDriver::Remote => remote_input(
             dcc_http::BridgeOpKind::Click { x, y },
             Duration::from_secs(3),
@@ -5131,7 +3752,6 @@ async fn deliver_click(state: &BrowserState, x: f64, y: f64) -> Result<(), Strin
 /// `browser_input::press`: one allowed key to the focused page.
 async fn deliver_press(state: &BrowserState, key: &str) -> Result<(), String> {
     match page_driver(state)? {
-        PageDriver::Local(view) => crate::browser_input::press(*view, key).await,
         PageDriver::Remote => {
             if !crate::browser_input::valid_key(key) {
                 return Err("browser key is invalid".into());
@@ -5175,23 +3795,6 @@ async fn eval_page(
     wait: Duration,
 ) -> Result<String, PageEvalError> {
     match page_driver(state).map_err(PageEvalError::NotOpen)? {
-        PageDriver::Local(webview) => {
-            let (sender, receiver) = oneshot::channel();
-            let sender = Arc::new(Mutex::new(Some(sender)));
-            webview
-                .eval_with_callback(script, move |raw| {
-                    if let Ok(mut sender) = sender.lock() {
-                        if let Some(sender) = sender.take() {
-                            let _ = sender.send(raw);
-                        }
-                    }
-                })
-                .map_err(|error| PageEvalError::Start(error.to_string()))?;
-            timeout(wait, receiver)
-                .await
-                .map_err(|_| PageEvalError::Timeout)?
-                .map_err(|_| PageEvalError::Cancelled)
-        }
         PageDriver::Remote => {
             let receiver = dcc_http::native_browser_bridge()
                 .request(dcc_http::BridgeOpKind::Eval { script })
@@ -5236,7 +3839,6 @@ fn remote_token_is_current(state: &BrowserState, lifecycle_token: u64) -> Result
 /// own view, if any, goes), a new lifecycle starts — no grant, map or
 /// evidence carried over — and the URL is the one asked for.
 pub(crate) async fn remote_browser_open(
-    app: &AppHandle<Wry>,
     state: &BrowserState,
     sessions: &SessionCommandState,
     workspace_id: &str,
@@ -5246,23 +3848,6 @@ pub(crate) async fn remote_browser_open(
     let _operation = state.operation_lock.lock().await;
     validate_scope(sessions, workspace_id, session_id).await?;
     let url = validate_browser_url(url)?.to_string();
-    let previous_scope = state
-        .active_scope
-        .lock()
-        .map_err(|_| "browser state lock poisoned".to_string())?
-        .clone();
-    if let Some(previous_scope) = previous_scope.as_deref() {
-        let previous_token = *state
-            .lifecycle_token
-            .lock()
-            .map_err(|_| "browser state lock poisoned")?;
-        crate::browser_popups::close_browser_popups_for_lifecycle(
-            app,
-            previous_scope,
-            previous_token,
-        );
-    }
-    discard_browser_view(state)?;
     set_active_scope(state, workspace_id, session_id)?;
     let token = {
         let mut token = state
@@ -5538,41 +4123,34 @@ mod tests {
     use std::time::{Duration as StdDuration, Instant};
 
     use super::{
-        advance_lifecycle_token, append_browser_audit, apply_main_frame_navigation,
-        arm_browser_control_grant, browser_action_anchor_matches_context,
-        browser_action_url_check_script, browser_audit_outcome, browser_context_is_loading,
-        browser_evidence_cleanup_script, browser_evidence_read_script,
-        browser_evidence_start_script, browser_location_cache_insert,
-        browser_location_cache_matches_current, browser_location_cache_purge_expired,
-        browser_location_cache_remove, browser_scroll_script, browser_semantic_action_script,
+        advance_lifecycle_token, append_browser_audit, arm_browser_control_grant,
+        browser_action_anchor_matches_context, browser_action_url_check_script,
+        browser_audit_outcome, browser_evidence_cleanup_script, browser_evidence_read_script,
+        browser_evidence_start_script, browser_scroll_script, browser_semantic_action_script,
         browser_surface_matches_visibility_policy, clear_browser_control_grant,
-        click_target_is_compatible, closed_browser_view_is_idle, consume_browser_evidence_anchor,
-        consume_semantic_map_for_anchor, context_is_ready_for_url, control_grant_is_current,
-        control_grant_status, fill_target_is_compatible, mark_context_loading,
-        normalize_browser_bounds, normalize_browser_context_text,
+        click_target_is_compatible, consume_browser_evidence_anchor,
+        consume_semantic_map_for_anchor, control_grant_is_current, control_grant_status,
+        fill_target_is_compatible, mark_context_loading, normalize_browser_context_text,
         normalize_browser_evidence_events, normalize_browser_evidence_resource_initiator_type,
         normalize_browser_evidence_resource_status, normalize_browser_fill_text,
         normalize_browser_scroll_delta, normalize_browser_semantic_map,
-        occlusion_request_is_current, page_load_matches_expected, page_load_revision_is_current,
-        parse_browser_action_callback, parse_browser_evidence_callback,
-        parse_browser_evidence_cleanup_callback, prepare_browser_control_action,
-        read_browser_audit, require_browser_control_grant, require_current_lifecycle,
-        sanitize_browser_evidence_url, sanitize_browser_link_destination,
-        sanitize_browser_location_url, select_browser_open_url, semantic_item_serialized_chars,
+        occlusion_request_is_current, page_load_revision_is_current, parse_browser_action_callback,
+        parse_browser_evidence_callback, parse_browser_evidence_cleanup_callback,
+        prepare_browser_control_action, read_browser_audit, require_browser_control_grant,
+        require_current_lifecycle, sanitize_browser_evidence_url,
+        sanitize_browser_link_destination, semantic_item_serialized_chars,
         semantic_map_record_is_current, should_persist_context_url, tracked_browser_url,
         validate_browser_document_identity, validate_browser_evidence_capture_id,
         validate_browser_reference, validate_browser_url, BrowserActionAnchor, BrowserActionResult,
         BrowserAuditGrantState, BrowserAuditOrigin, BrowserAuditOutcome, BrowserAuditRecord,
-        BrowserAuditTool, BrowserAuditViewRecord, BrowserBounds, BrowserContext,
-        BrowserControlAction, BrowserControlGrant, BrowserControlStatus,
-        BrowserEvidenceCaptureRecord, BrowserEvidenceEventRaw, BrowserLocationCache,
-        BrowserSemanticItemExtraction, BrowserSemanticMap, BrowserSemanticMapExtraction,
-        BrowserSemanticMapRecord, BrowserSemanticTargetRecord, BrowserState,
-        BrowserVisibilityPolicy, MAX_BROWSER_AUDIT_ENTRIES,
+        BrowserAuditTool, BrowserAuditViewRecord, BrowserContext, BrowserControlAction,
+        BrowserControlGrant, BrowserControlStatus, BrowserEvidenceCaptureRecord,
+        BrowserEvidenceEventRaw, BrowserSemanticItemExtraction, BrowserSemanticMap,
+        BrowserSemanticMapExtraction, BrowserSemanticMapRecord, BrowserSemanticTargetRecord,
+        BrowserState, BrowserVisibilityPolicy, MAX_BROWSER_AUDIT_ENTRIES,
         MAX_BROWSER_AUDIT_LEASE_FINGERPRINT_CHARS, MAX_BROWSER_AUDIT_PROVIDER_CHARS,
         MAX_BROWSER_AUDIT_SCOPE_CHARS, MAX_BROWSER_EVIDENCE_CHARS, MAX_BROWSER_EVIDENCE_EVENTS,
-        MAX_BROWSER_EVIDENCE_RESOURCE_DURATION_MS, MAX_BROWSER_LOCATION_CACHE_ENTRIES,
-        MAX_BROWSER_SEMANTIC_ITEMS,
+        MAX_BROWSER_EVIDENCE_RESOURCE_DURATION_MS, MAX_BROWSER_SEMANTIC_ITEMS,
     };
 
     #[test]
@@ -5594,206 +4172,6 @@ mod tests {
         assert!(validate_browser_url("https://user:pass@example.com").is_err());
         assert!(validate_browser_url("https://user@example.com").is_err());
         assert!(validate_browser_url("https://example.com:443@evil.test").is_err());
-    }
-
-    #[test]
-    fn durable_browser_location_sanitization_removes_secret_components() {
-        assert_eq!(
-            sanitize_browser_location_url(
-                "https://user:secret@example.test:8443/path?q=private#fragment",
-            ),
-            Some("https://example.test:8443/path".to_string())
-        );
-        assert_eq!(
-            sanitize_browser_location_url("http://localhost:3000/path?token=private#section"),
-            Some("http://localhost:3000/path".to_string())
-        );
-        assert!(sanitize_browser_location_url("https://example.test/path\n").is_none());
-        assert!(sanitize_browser_location_url("http://example.test/private").is_none());
-        assert!(sanitize_browser_location_url("javascript:alert(1)").is_none());
-    }
-
-    #[test]
-    fn browser_open_url_precedence_keeps_restore_explicit() {
-        let initial = select_browser_open_url(
-            Some("https://initial.test/explicit"),
-            Some("https://runtime.test/current".to_string()),
-            Some("https://stored.test/last?private=yes#fragment".to_string()),
-            true,
-        )
-        .unwrap();
-        assert_eq!(initial.as_str(), "https://initial.test/explicit");
-
-        let runtime = select_browser_open_url(
-            None,
-            Some("https://runtime.test/current".to_string()),
-            Some("https://stored.test/last".to_string()),
-            true,
-        )
-        .unwrap();
-        assert_eq!(runtime.as_str(), "https://runtime.test/current");
-
-        let opt_in = select_browser_open_url(
-            None,
-            None,
-            Some("https://stored.test/last?private=yes#fragment".to_string()),
-            true,
-        )
-        .unwrap();
-        assert_eq!(opt_in.as_str(), "https://stored.test/last");
-
-        let defaulted = select_browser_open_url(
-            None,
-            None,
-            Some("https://stored.test/last".to_string()),
-            false,
-        )
-        .unwrap();
-        assert_eq!(defaulted.as_str(), dcc_core::domain::browser::DEFAULT_URL);
-    }
-
-    #[test]
-    fn browser_location_cache_is_bounded_and_evicts_the_oldest_scope() {
-        let mut cache = BrowserLocationCache::default();
-        for index in 0..MAX_BROWSER_LOCATION_CACHE_ENTRIES {
-            browser_location_cache_insert(
-                &mut cache,
-                format!("scope-{index}"),
-                format!("https://example.test/{index}"),
-                10_000,
-            );
-        }
-        assert_eq!(cache.entries.len(), MAX_BROWSER_LOCATION_CACHE_ENTRIES);
-        browser_location_cache_insert(
-            &mut cache,
-            "newest".to_string(),
-            "https://example.test/newest".to_string(),
-            10_000,
-        );
-        assert_eq!(cache.entries.len(), MAX_BROWSER_LOCATION_CACHE_ENTRIES);
-        assert!(!cache.entries.contains_key("scope-0"));
-        assert!(cache.entries.contains_key("newest"));
-    }
-
-    #[test]
-    fn browser_location_cache_deduplicates_only_a_current_matching_url() {
-        let mut cache = BrowserLocationCache::default();
-        browser_location_cache_insert(
-            &mut cache,
-            "scope".to_string(),
-            "https://example.test/ready".to_string(),
-            200,
-        );
-        assert!(browser_location_cache_matches_current(
-            &cache,
-            "scope",
-            "https://example.test/ready",
-            199,
-        ));
-        browser_location_cache_purge_expired(&mut cache, 200);
-        assert!(!browser_location_cache_matches_current(
-            &cache,
-            "scope",
-            "https://example.test/ready",
-            200,
-        ));
-        assert!(cache.entries.is_empty());
-        browser_location_cache_insert(
-            &mut cache,
-            "scope".to_string(),
-            "https://example.test/ready".to_string(),
-            300,
-        );
-        assert!(browser_location_cache_matches_current(
-            &cache,
-            "scope",
-            "https://example.test/ready",
-            200,
-        ));
-        browser_location_cache_remove(&mut cache, "scope");
-        assert!(cache.entries.is_empty());
-    }
-
-    #[test]
-    fn loading_a_durable_url_does_not_prewarm_the_write_dedup_cache() {
-        let cache = BrowserLocationCache::default();
-        let restored = select_browser_open_url(
-            None,
-            None,
-            Some("https://stored.test/last".to_string()),
-            true,
-        )
-        .unwrap();
-        assert_eq!(restored.as_str(), "https://stored.test/last");
-        // Only a successful PageLoad Finished write can enter this cache, so
-        // restored URLs renew their durable TTL on that first confirmed load.
-        assert!(cache.entries.is_empty());
-    }
-
-    #[test]
-    fn only_a_current_finished_page_load_is_persistable() {
-        assert!(page_load_matches_expected(
-            Some("workspace\u{1f}|session"),
-            "workspace\u{1f}|session",
-            Some("https://example.test/ready"),
-            "https://example.test/ready",
-        ));
-        assert!(!page_load_matches_expected(
-            Some("other\u{1f}|session"),
-            "workspace\u{1f}|session",
-            Some("https://example.test/ready"),
-            "https://example.test/ready",
-        ));
-        assert!(!page_load_matches_expected(
-            Some("workspace\u{1f}|session"),
-            "workspace\u{1f}|session",
-            Some("https://example.test/old"),
-            "https://example.test/ready",
-        ));
-    }
-
-    #[test]
-    fn normalizes_and_rejects_browser_bounds() {
-        let normalized = normalize_browser_bounds(BrowserBounds {
-            x: -20.0,
-            y: 20_000.0,
-            width: 20_000.0,
-            height: 0.5,
-        })
-        .expect("valid bounds should normalize");
-        assert_eq!(normalized.x, 0.0);
-        assert_eq!(normalized.y, 16_384.0);
-        assert_eq!(normalized.width, 16_384.0);
-        assert_eq!(normalized.height, 1.0);
-
-        for invalid in [
-            BrowserBounds {
-                x: f64::NAN,
-                y: 0.0,
-                width: 1.0,
-                height: 1.0,
-            },
-            BrowserBounds {
-                x: 0.0,
-                y: f64::INFINITY,
-                width: 1.0,
-                height: 1.0,
-            },
-            BrowserBounds {
-                x: 0.0,
-                y: 0.0,
-                width: 0.0,
-                height: 1.0,
-            },
-            BrowserBounds {
-                x: 0.0,
-                y: 0.0,
-                width: 1.0,
-                height: -1.0,
-            },
-        ] {
-            assert!(normalize_browser_bounds(invalid).is_err());
-        }
     }
 
     #[test]
@@ -6327,138 +4705,6 @@ mod tests {
         .unwrap();
         assert!(!result.contains("e1"));
         assert!(!result.contains("secret fill value"));
-    }
-
-    #[test]
-    fn only_accepts_finished_loads_for_the_active_expected_url() {
-        let scope = "workspace\u{1f}|session-b";
-        let mut context = BrowserContext::default();
-        assert!(browser_context_is_loading(&context));
-        mark_context_loading(&mut context, "https://example.test/b".to_string());
-        assert!(browser_context_is_loading(&context));
-        assert!(!context_is_ready_for_url(
-            &context,
-            "https://example.test/b"
-        ));
-        assert!(page_load_matches_expected(
-            Some(scope),
-            scope,
-            context.expected_url.as_deref(),
-            "https://example.test/b",
-        ));
-        assert!(!page_load_matches_expected(
-            Some(scope),
-            scope,
-            context.expected_url.as_deref(),
-            "https://example.test/a",
-        ));
-        assert!(!page_load_matches_expected(
-            Some("workspace\u{1f}|session-a"),
-            scope,
-            context.expected_url.as_deref(),
-            "https://example.test/b",
-        ));
-
-        context.ready_url = Some("https://example.test/b".to_string());
-        assert!(context_is_ready_for_url(&context, "https://example.test/b"));
-        assert!(!browser_context_is_loading(&context));
-    }
-
-    #[test]
-    fn main_frame_navigation_ignores_a_reused_views_old_ready_url() {
-        let mut context = BrowserContext {
-            url: Some("https://example.test/old".to_string()),
-            ready_url: Some("https://example.test/old".to_string()),
-            expected_url: Some("https://example.test/old".to_string()),
-            ..BrowserContext::default()
-        };
-        mark_context_loading(&mut context, "https://example.test/new".to_string());
-        assert!(!apply_main_frame_navigation(
-            &mut context,
-            "https://example.test/old",
-            false
-        ));
-        assert_eq!(
-            context.expected_url.as_deref(),
-            Some("https://example.test/new")
-        );
-        assert!(browser_context_is_loading(&context));
-    }
-
-    #[test]
-    fn main_frame_navigation_does_not_adopt_previous_scope_after_cancelled_navigation() {
-        let mut context = BrowserContext::default();
-        mark_context_loading(&mut context, "https://example.test/new".to_string());
-        context.pending_previous_main_url = Some("https://example.test/old".to_string());
-        assert!(!apply_main_frame_navigation(
-            &mut context,
-            "https://example.test/old",
-            true
-        ));
-        assert!(!apply_main_frame_navigation(
-            &mut context,
-            "https://example.test/old",
-            false
-        ));
-        assert!(browser_context_is_loading(&context));
-        assert_eq!(
-            context.expected_url.as_deref(),
-            Some("https://example.test/new")
-        );
-    }
-
-    #[test]
-    fn main_frame_navigation_accepts_redirects_and_history_urls() {
-        let mut context = BrowserContext::default();
-        mark_context_loading(&mut context, "https://example.test/start".to_string());
-        assert!(apply_main_frame_navigation(
-            &mut context,
-            "https://example.test/redirected",
-            true
-        ));
-        assert!(apply_main_frame_navigation(
-            &mut context,
-            "https://example.test/redirected",
-            false
-        ));
-        assert!(context_is_ready_for_url(
-            &context,
-            "https://example.test/redirected"
-        ));
-        assert!(apply_main_frame_navigation(
-            &mut context,
-            "https://example.test/profile",
-            false
-        ));
-        assert!(context_is_ready_for_url(
-            &context,
-            "https://example.test/profile"
-        ));
-    }
-
-    #[test]
-    fn main_frame_navigation_accepts_a_reload_of_the_same_url() {
-        let mut context = BrowserContext {
-            url: Some("https://example.test/current".to_string()),
-            ready_url: Some("https://example.test/current".to_string()),
-            expected_url: Some("https://example.test/current".to_string()),
-            ..BrowserContext::default()
-        };
-        mark_context_loading(&mut context, "https://example.test/current".to_string());
-        assert!(apply_main_frame_navigation(
-            &mut context,
-            "https://example.test/current",
-            true
-        ));
-        assert!(apply_main_frame_navigation(
-            &mut context,
-            "https://example.test/current",
-            false
-        ));
-        assert!(context_is_ready_for_url(
-            &context,
-            "https://example.test/current"
-        ));
     }
 
     #[test]
@@ -7552,15 +5798,6 @@ mod tests {
             BrowserAuditOutcome::Failed,
         );
         assert!(read_browser_audit(&state, "workspace", None, 1).is_err());
-    }
-
-    #[test]
-    fn closed_browser_view_is_released_only_by_its_own_close() {
-        assert!(closed_browser_view_is_idle(false, 7, 7));
-        // Reopened (by the person or an agent) since the close.
-        assert!(!closed_browser_view_is_idle(true, 8, 7));
-        // Reopened and closed again: the newer close owns the teardown.
-        assert!(!closed_browser_view_is_idle(false, 9, 7));
     }
 }
 

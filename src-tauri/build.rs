@@ -16,14 +16,6 @@ fn build_macos_computer_bridge() {
     let source = PathBuf::from("native/computer_use_macos.m");
     let object = out_dir.join("computer_use_macos.o");
     let archive = out_dir.join("libdcc_computer_use_macos.a");
-    let capture_object = out_dir.join("browser_capture_macos.o");
-    let input_object = out_dir.join("browser_input_macos.o");
-    let cookies_object = out_dir.join("browser_session_cookies_macos.o");
-    let navigation_object = out_dir.join("browser_navigation_macos.o");
-    println!("cargo:rerun-if-changed=native/browser_session_cookies_macos.m");
-    println!("cargo:rerun-if-changed=native/browser_input_macos.m");
-    println!("cargo:rerun-if-changed=native/browser_capture_macos.m");
-    println!("cargo:rerun-if-changed=native/browser_navigation_macos.m");
     println!("cargo:rerun-if-changed={}", source.display());
     println!("cargo:rerun-if-changed=native/computer_use_macos.h");
     println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
@@ -54,63 +46,6 @@ fn build_macos_computer_bridge() {
         .expect("xcrun clang must be available to build macOS computer use")
         .success();
     assert!(compiled, "failed to compile the macOS computer-use bridge");
-    let capture_compiled = Command::new("xcrun")
-        .args([
-            "clang",
-            "-fobjc-arc",
-            "-fblocks",
-            "-c",
-            "native/browser_capture_macos.m",
-        ])
-        .args(["-arch", architecture])
-        .arg(format!("-mmacosx-version-min={deployment_target}"))
-        .arg("-o")
-        .arg(&capture_object)
-        .status()
-        .expect("xcrun clang must be available to build Browser capture")
-        .success();
-    assert!(capture_compiled, "failed to compile Browser capture");
-    let input_compiled = Command::new("xcrun")
-        .args(["clang", "-fobjc-arc", "-c", "native/browser_input_macos.m"])
-        .args(["-arch", architecture])
-        .arg(format!("-mmacosx-version-min={deployment_target}"))
-        .arg("-o")
-        .arg(&input_object)
-        .status()
-        .expect("native Browser input compiler")
-        .success();
-    assert!(input_compiled, "failed to compile Browser input");
-    let cookies_compiled = Command::new("xcrun")
-        .args([
-            "clang",
-            "-fobjc-arc",
-            "-fblocks",
-            "-c",
-            "native/browser_session_cookies_macos.m",
-        ])
-        .args(["-arch", architecture])
-        .arg(format!("-mmacosx-version-min={deployment_target}"))
-        .arg("-o")
-        .arg(&cookies_object)
-        .status()
-        .expect("native Browser cookies compiler")
-        .success();
-    assert!(cookies_compiled, "failed to compile Browser cookies");
-    let navigation_compiled = Command::new("xcrun")
-        .args([
-            "clang",
-            "-fobjc-arc",
-            "-c",
-            "native/browser_navigation_macos.m",
-        ])
-        .args(["-arch", architecture])
-        .arg(format!("-mmacosx-version-min={deployment_target}"))
-        .arg("-o")
-        .arg(&navigation_object)
-        .status()
-        .expect("native Browser navigation compiler")
-        .success();
-    assert!(navigation_compiled, "failed to compile Browser navigation");
     let quick_object = out_dir.join("quick_composer_macos.o");
     println!("cargo:rerun-if-changed=native/quick_composer_macos.m");
     assert!(Command::new("xcrun")
@@ -132,25 +67,12 @@ fn build_macos_computer_bridge() {
         .arg(format!("-mmacosx-version-min={deployment_target}"))
         .arg("-o").arg(&menu_bar_object).status()
         .expect("native menu bar compiler").success());
-    let approval_object = out_dir.join("browser_approval_macos.o");
-    println!("cargo:rerun-if-changed=native/browser_approval_macos.m");
-    assert!(Command::new("xcrun")
-        .args(["clang", "-fobjc-arc", "-c", "native/browser_approval_macos.m"])
-        .args(["-arch", architecture])
-        .arg(format!("-mmacosx-version-min={deployment_target}"))
-        .arg("-o").arg(&approval_object).status()
-        .expect("native Browser approval compiler").success());
     let archived = Command::new("ar")
         .args(["crus"])
         .arg(&archive)
         .arg(&object)
-        .arg(&capture_object)
-        .arg(&input_object)
-        .arg(&cookies_object)
-        .arg(&navigation_object)
         .arg(&quick_object)
         .arg(&menu_bar_object)
-        .arg(&approval_object)
         .status()
         .expect("ar must be available to build macOS computer use")
         .success();

@@ -5,13 +5,9 @@ mod research_commands;
 mod appshot_commands;
 mod attachment_commands;
 mod browser_agent_requests;
-mod browser_approval_panel;
-mod browser_capture;
 mod browser_commands;
 mod browser_input;
 mod browser_mcp_bridge;
-mod browser_popups;
-mod browser_sessions;
 mod coderabbit_commands;
 mod computer_use_commands;
 mod delegation_commands;
@@ -31,7 +27,6 @@ mod session_commands;
 mod skills_commands;
 mod workspace_commands;
 mod delta_compaction_worker;
-mod browser_data;
 mod storage_commands;
 #[cfg(target_os = "macos")]
 mod webview_storage;
@@ -3527,7 +3522,6 @@ impl dev_command_center_tauri::http_api::DesktopBrowser for HttpBrowser {
             let state = app.state::<browser_commands::BrowserState>();
             let sessions = app.state::<SessionCommandState>();
             browser_commands::remote_browser_open(
-                &app,
                 &state,
                 &sessions,
                 &workspace_id,
@@ -6261,18 +6255,11 @@ pub fn run() {
             terminal_list_activity,
             terminal_clear_persisted_scrollback,
             terminal_get_project_activity,
-            browser_commands::browser_open,
-            browser_sessions::browser_session_profiles,
-            browser_sessions::browser_session_import,
             browser_agent_requests::browser_agent_pending,
             browser_agent_requests::browser_agent_pending_all,
             browser_agent_requests::browser_agent_resolve,
             desktop_agent_requests::browser_agent_claim,
             browser_agent_requests::browser_agent_cancel,
-            browser_approval_panel::browser_approval_panel_configure,
-            browser_approval_panel::browser_approval_panel_dismiss,
-            browser_commands::browser_navigate,
-            browser_commands::browser_reload,
             browser_commands::browser_arm_control,
             browser_commands::browser_control_status,
             browser_commands::browser_read_audit,
@@ -6289,9 +6276,6 @@ pub fn run() {
             computer_use_commands::computer_use_respond_control_request,
             computer_use_commands::computer_use_preview_frame,
             computer_use_commands::computer_use_refresh_preview_frame,
-            browser_commands::browser_set_bounds,
-            browser_commands::browser_set_occluded,
-            browser_commands::browser_hide,
             pair_list_devices,
             pair_revoke_device,
             pair_audit_log,
@@ -6310,8 +6294,6 @@ pub fn run() {
             menu_bar::menu_bar_compose,
             menu_bar::menu_bar_open_main,
             menu_bar::menu_bar_quit,
-            browser_data::browser_storage_usage,
-            browser_data::browser_clear_data,
             storage_commands::dcc_storage_usage,
             storage_commands::dcc_storage_compact,
             keep_awake_commands::keep_awake_status,
@@ -6607,7 +6589,6 @@ pub fn run() {
             dev_command_center_tauri::database::compact_once(&conn);
             eprintln!("[DCC] Database ready at {:?}", db_path);
             delta_compaction_worker::spawn(db_path.clone());
-            browser_data::spawn_cache_limit(app.handle().clone());
             let session_command_state =
                 SessionCommandState::new(app.handle().clone(), db_path.clone());
             let computer_use_state = ComputerUseState::default();
@@ -6792,7 +6773,6 @@ pub fn run() {
             app.manage(state);
             app.manage(browser_state);
             app.manage(browser_agent_requests);
-            browser_approval_panel::setup(app.handle());
             app.manage(computer_use_state);
             if let Some(browser_mcp_bridge) = browser_mcp_bridge {
                 app.manage(browser_mcp_bridge);
@@ -6848,13 +6828,11 @@ pub fn run() {
                 ..
             } = &event {
                 if label == "main" {
-                    browser_approval_panel::shutdown(app_handle);
                     quick_composer::shutdown(app_handle);
                     menu_bar::shutdown(app_handle);
                 }
             }
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                browser_approval_panel::shutdown(app_handle);
                 menu_bar::shutdown(app_handle);
                 quick_composer::shutdown(app_handle);
                 if let Some(state) = app_handle.try_state::<AppState>() {
@@ -6864,7 +6842,6 @@ pub fn run() {
                     bridge.shutdown();
                 }
                 if let Some(browser) = app_handle.try_state::<BrowserState>() {
-                    browser_popups::close_all_browser_popups(app_handle);
                     browser_commands::shutdown(&browser);
                 }
                 if let Some(ai_memory) = app_handle.try_state::<AiMemorySidecar>() {
