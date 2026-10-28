@@ -194,7 +194,14 @@ impl ComputerApprovals {
         match first {
             Some(id) => {
                 if self.announced.insert(id) {
-                    crate::ui::attention::request_attention();
+                    let reason = self
+                        .current()
+                        .map(|waiting| waiting.request.reason.clone())
+                        .unwrap_or_default();
+                    crate::ui::attention::request_attention(
+                        &cx.t("settings.computerUse.approval.title"),
+                        &reason,
+                    );
                 }
                 self.follow(cx);
             }

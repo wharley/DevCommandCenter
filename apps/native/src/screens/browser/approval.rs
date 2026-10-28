@@ -7,7 +7,7 @@
 //! on screen opens without a card. Allowed here, by a phone or the
 //! desktop's panel, the shell opens the task's Browser on it, and this
 //! confirms it with the Browser's lifecycle token. Away from the app, the
-//! Dock icon bounces for a new card.
+//! Dock icon bounces and a system notification names a new card.
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -176,7 +176,7 @@ impl BrowserApprovals {
             return;
         }
         if self.announced.insert(request.request_id.clone()) {
-            crate::ui::attention::request_attention();
+            crate::ui::attention::request_attention(&cx.t("browser.approval.title"), &request.url);
         }
         if self._tick.is_none() {
             self._tick = Some(cx.spawn(async move |this, cx| {
