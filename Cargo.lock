@@ -1039,7 +1039,6 @@ dependencies = [
  "sha2",
  "specta",
  "tauri",
- "tauri-specta",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
+#[cfg(feature = "tauri")]
 use tauri::State;
 
 pub use dcc_infra::workspace_cleanup::{
@@ -19,6 +20,7 @@ pub struct WorkspaceCleanupScanInput {
 
 /// Size and safety of each task's worktree and its child tasks' worktrees.
 /// Unknown ids are skipped.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_cleanup_scan(
     state: State<'_, WorkspaceCommandState>,
@@ -26,7 +28,7 @@ pub async fn workspace_cleanup_scan(
 ) -> Result<WorkspaceCleanupScanOutput, String> {
     let targets =
         dcc_infra::workspace_cleanup::cleanup_targets(&state.db_path, input.workspace_ids).await?;
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         dcc_infra::workspace_cleanup::measure_cleanup(targets)
     })
     .await

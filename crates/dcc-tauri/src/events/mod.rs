@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+#[cfg(feature = "tauri")]
 use tauri::{AppHandle, Emitter};
 
 use dcc_core::{
@@ -146,17 +147,21 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
     }
 }
 
+#[cfg(feature = "tauri")]
 #[derive(Clone)]
 pub struct TauriEventBus {
     app: AppHandle,
 }
 
+#[cfg(feature = "tauri")]
 impl TauriEventBus {
+    #[cfg(feature = "tauri")]
     pub fn new(app: AppHandle) -> Self {
         Self { app }
     }
 }
 
+#[cfg(feature = "tauri")]
 #[async_trait]
 impl dcc_core::ports::EventBus for TauriEventBus {
     async fn publish(&self, event: CoreEvent) -> Result<()> {

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{collections::HashSet, path::Path, time::Duration};
+#[cfg(feature = "tauri")]
 use tauri::State;
 
 use dcc_core::{
@@ -164,6 +165,7 @@ pub struct ProviderAccountStatusOutput {
     pub login_command: Option<String>,
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn list_provider_accounts(
     state: State<'_, SessionCommandState>,
@@ -175,6 +177,7 @@ pub async fn list_provider_accounts(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn create_provider_account(
     state: State<'_, SessionCommandState>,
@@ -191,6 +194,7 @@ pub async fn create_provider_account(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn rename_provider_account(
     state: State<'_, SessionCommandState>,
@@ -203,6 +207,7 @@ pub async fn rename_provider_account(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn remove_provider_account(
     state: State<'_, SessionCommandState>,
@@ -213,6 +218,7 @@ pub async fn remove_provider_account(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn provider_account_status(
     state: State<'_, SessionCommandState>,
@@ -280,6 +286,7 @@ fn account_sign_ins(
     ACCOUNT_SIGN_INS.get_or_init(Default::default)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn sign_in_provider_account(
     state: State<'_, SessionCommandState>,
@@ -347,6 +354,7 @@ pub async fn sign_in_provider_account_for_state(
     }
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn cancel_provider_account_sign_in(
     input: ProviderAccountStatusInput,
@@ -367,6 +375,7 @@ pub fn cancel_account_sign_in(input: &ProviderAccountStatusInput) -> Result<(), 
     Ok(())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn list_providers(
     state: State<'_, SessionCommandState>,
@@ -549,6 +558,7 @@ fn is_usable_executable(path: &Path) -> bool {
     }
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn get_provider_availability(
     state: State<'_, SessionCommandState>,
@@ -561,6 +571,7 @@ pub async fn get_provider_availability(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn set_provider_availability(
     state: State<'_, SessionCommandState>,
@@ -574,6 +585,7 @@ pub async fn set_provider_availability(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn provider_account_usage(
     state: State<'_, SessionCommandState>,
@@ -582,6 +594,7 @@ pub async fn provider_account_usage(
     provider_account_usage_for_state(&state, input).await
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn install_antigravity(
     state: State<'_, SessionCommandState>,
@@ -619,6 +632,7 @@ pub async fn install_antigravity_for_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn get_antigravity_status(
     state: State<'_, SessionCommandState>,
@@ -664,6 +678,7 @@ pub fn antigravity_status_for_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn connect_antigravity(
     state: State<'_, SessionCommandState>,
@@ -768,6 +783,7 @@ pub async fn provider_account_reset_for_state(
     Ok(ProviderAccountResetOutput { outcome })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn provider_account_reset(
     state: State<'_, SessionCommandState>,

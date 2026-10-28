@@ -56,7 +56,7 @@ pub async fn run_workspace_setup_with_options(
     suggestions: Vec<WorkspaceSetupSuggestion>,
     failure_policy: WorkspaceSetupFailurePolicy,
 ) -> Result<WorkspaceSetupExecutionOutcome, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         run_workspace_setup_with_options_blocking(&workspace_root, &suggestions, failure_policy)
     })
     .await

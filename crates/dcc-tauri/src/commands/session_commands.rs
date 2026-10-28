@@ -8,6 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
+#[cfg(feature = "tauri")]
 use tauri::{AppHandle, State};
 use tokio::time::sleep;
 
@@ -291,6 +292,7 @@ fn ai_memory_config(
     Ok(config)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn sync_session_to_ai_memory(
     state: State<'_, SessionCommandState>,
@@ -335,6 +337,7 @@ pub async fn sync_session_to_ai_memory(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn query_ai_memory(
     state: State<'_, SessionCommandState>,
@@ -364,6 +367,7 @@ pub async fn query_ai_memory(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn ai_memory_recovered_sources(
     state: State<'_, SessionCommandState>,
@@ -396,6 +400,7 @@ pub fn ai_memory_recovered_sources_with_state(
         .collect())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn ai_memory_source_actions(
     state: State<'_, SessionCommandState>,
@@ -425,6 +430,7 @@ pub fn ai_memory_source_actions_with_state(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn ai_memory_source_action_save(
     state: State<'_, SessionCommandState>,
@@ -474,6 +480,7 @@ pub fn ai_memory_source_action_save_with_state(
 
 /// Returns the durable export status for a session. `None` means there is no
 /// pending export, which is also the steady state after a successful sync.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn ai_memory_export_status(
     state: State<'_, SessionCommandState>,
@@ -509,6 +516,7 @@ pub fn ai_memory_export_status_with_state(
 /// The export is deliberately best effort: the durable outbox keeps the
 /// session pending when ai-memory is unavailable, so changing sessions never
 /// depends on the sidecar being reachable at that exact moment.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn ai_memory_checkpoint(
     state: State<'_, SessionCommandState>,
@@ -554,6 +562,7 @@ pub async fn ai_memory_checkpoint(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub fn ai_memory_export_history(
     state: State<'_, SessionCommandState>,
@@ -762,6 +771,7 @@ fn session_live_snapshot_from_records(
     }
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn run_pull_request_review_agent(
     state: State<'_, SessionCommandState>,
@@ -907,6 +917,7 @@ pub struct ExecuteGuardedUndoInput {
     pub confirmed: bool,
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn prepare_guarded_undo(
     state: State<'_, SessionCommandState>,
@@ -971,6 +982,7 @@ pub async fn prepare_guarded_undo_with_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn execute_guarded_undo(
     state: State<'_, SessionCommandState>,
@@ -1205,6 +1217,7 @@ async fn load_rewind_scope(
 /// Read-only: what "edit from here" on `anchor_turn_id` would remove, how
 /// the provider follows, and whether the removed turns' files can be
 /// restored. Nothing on disk or in the provider changes.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn prepare_conversation_rewind(
     state: State<'_, SessionCommandState>,
@@ -1231,6 +1244,7 @@ pub async fn prepare_conversation_rewind(
 
 /// Carries out a prepared "edit from here". Files are restored first, only
 /// when the person chose it; the conversation is cut only after they are.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn execute_conversation_rewind(
     state: State<'_, SessionCommandState>,
@@ -1314,6 +1328,7 @@ pub struct TurnReviewFileDiffInput {
     pub path: String,
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn last_turn_review(
     state: State<'_, SessionCommandState>,
@@ -1384,6 +1399,7 @@ pub async fn last_turn_review_with_state(
     }))
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn turn_review_file_diff(
     state: State<'_, SessionCommandState>,
@@ -2421,6 +2437,7 @@ async fn apply_decision_provider_memory_filter(
     }
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn start_thread(
     state: State<'_, SessionCommandState>,
@@ -2452,6 +2469,7 @@ pub async fn start_thread_with_state(
     Ok(output)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn send_turn(
     state: State<'_, SessionCommandState>,
@@ -2630,6 +2648,7 @@ async fn record_provider_start_failure(
     Ok(output)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn steer_turn(
     state: State<'_, SessionCommandState>,
@@ -2656,6 +2675,7 @@ pub async fn steer_turn_with_state(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn steer_native_subagent(
     state: State<'_, SessionCommandState>,
@@ -2679,6 +2699,7 @@ pub async fn steer_native_subagent(
     Ok(NativeSubagentControlOutput { ok: true })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn interrupt_native_subagent(
     state: State<'_, SessionCommandState>,
@@ -2696,6 +2717,7 @@ pub async fn interrupt_native_subagent(
     Ok(NativeSubagentControlOutput { ok: true })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn queue_turn(
     state: State<'_, SessionCommandState>,
@@ -2751,6 +2773,7 @@ pub struct SessionObjectiveOutput {
     pub objective: Option<SessionObjective>,
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn get_session_objective(
     state: State<'_, SessionCommandState>,
@@ -2763,6 +2786,7 @@ pub async fn get_session_objective(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn set_session_objective(
     state: State<'_, SessionCommandState>,
@@ -2777,6 +2801,7 @@ pub async fn set_session_objective(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn transition_session_objective(
     state: State<'_, SessionCommandState>,
@@ -2794,6 +2819,7 @@ pub async fn transition_session_objective(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn clear_session_objective(
     state: State<'_, SessionCommandState>,
@@ -2815,6 +2841,7 @@ pub struct InheritSessionObjectiveInput {
 /// Used by fork-by-message: the new thread keeps working toward the source
 /// thread's objective with its own counters. Idempotent, done objectives are
 /// not propagated, and the response is the child's current record.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn inherit_session_objective(
     state: State<'_, SessionCommandState>,
@@ -2827,6 +2854,7 @@ pub async fn inherit_session_objective(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn list_turn_queue(
     state: State<'_, SessionCommandState>,
@@ -2837,6 +2865,7 @@ pub async fn list_turn_queue(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn remove_queued_turn(
     state: State<'_, SessionCommandState>,
@@ -2847,6 +2876,7 @@ pub async fn remove_queued_turn(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn reorder_turn_queue(
     state: State<'_, SessionCommandState>,
@@ -2857,6 +2887,7 @@ pub async fn reorder_turn_queue(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn dispatch_next_queued_turn(
     state: State<'_, SessionCommandState>,
@@ -2868,6 +2899,7 @@ pub async fn dispatch_next_queued_turn(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn abort_run(
     state: State<'_, SessionCommandState>,
@@ -2901,6 +2933,7 @@ pub async fn abort_run_with_state(
     Ok(output)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn resume_session(
     state: State<'_, SessionCommandState>,
@@ -2931,6 +2964,7 @@ pub async fn resume_session(
     Ok(output)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn close_session(
     state: State<'_, SessionCommandState>,
@@ -2970,6 +3004,7 @@ pub async fn close_session(
     Ok(output)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn restore_session(
     state: State<'_, SessionCommandState>,
@@ -2981,6 +3016,7 @@ pub async fn restore_session(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn list_thread_events(
     state: State<'_, SessionCommandState>,
@@ -2993,6 +3029,7 @@ pub async fn list_thread_events(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn session_live_snapshot(
     state: State<'_, SessionCommandState>,
@@ -3013,6 +3050,7 @@ pub async fn session_live_snapshot(
     session_live_snapshot_from_bounded_records(&session_id, events, state.runtime_generation())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn list_mcp_runtime_statuses(
     state: State<'_, SessionCommandState>,
@@ -3093,6 +3131,7 @@ async fn record_mcp_needs_auth(state: &SessionCommandState, definition_id: &McpD
         .await;
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn approve_plan(
     state: State<'_, SessionCommandState>,
@@ -3104,6 +3143,7 @@ pub async fn approve_plan(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn record_plan_handoff(
     state: State<'_, SessionCommandState>,
@@ -3115,6 +3155,7 @@ pub async fn record_plan_handoff(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn list_workspace_sessions(
     state: State<'_, SessionCommandState>,
@@ -3126,6 +3167,7 @@ pub async fn list_workspace_sessions(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn usage_dashboard(
     state: State<'_, SessionCommandState>,
@@ -3137,6 +3179,7 @@ pub async fn usage_dashboard(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn session_turn_usage(
     state: State<'_, SessionCommandState>,
@@ -3172,6 +3215,7 @@ fn workspace_accepts_automatic_title(workspace: &Workspace) -> bool {
     is_automatic_task_name(workspace.name.as_deref())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn apply_task_title(
     state: State<'_, SessionCommandState>,
@@ -3259,6 +3303,7 @@ pub async fn apply_task_title_to_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn search_sessions(
     state: State<'_, SessionCommandState>,
@@ -3351,6 +3396,7 @@ async fn forward_claimed_answer(
     Ok(())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn respond_to_user_input(
     state: State<'_, SessionCommandState>,
@@ -3390,6 +3436,7 @@ pub async fn respond_to_user_input_with_state(
     Ok(RespondToUserInputOutput { ok: true })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn respond_to_permission_request(
     state: State<'_, SessionCommandState>,

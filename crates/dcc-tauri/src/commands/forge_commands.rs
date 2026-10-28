@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
+#[cfg(feature = "tauri")]
 use tauri::State;
 
 use dcc_core::domain::workspace::{WorkspaceSource, WorkspaceSourceKind};
@@ -732,6 +733,7 @@ pub(crate) fn resolve_forge_cli_snapshot(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_forge_cli_status(
     state: State<'_, WorkspaceCommandState>,
@@ -754,6 +756,7 @@ pub fn workspace_forge_cli_status_with_state(
     )
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_forge_cli_accounts(
     state: State<'_, WorkspaceCommandState>,
@@ -803,6 +806,7 @@ pub async fn workspace_forge_cli_accounts_with_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_forge_cli_hosts(
     _state: State<'_, WorkspaceCommandState>,
@@ -822,6 +826,7 @@ pub fn forge_cli_hosts(input: ForgeCliHostsInput) -> Result<ForgeCliHostsOutput,
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_forge_cli_select_login(
     state: State<'_, WorkspaceCommandState>,
@@ -845,6 +850,7 @@ pub fn workspace_forge_cli_select_login_with_state(
     .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_backfill_forge_repo_bindings(
     state: State<'_, WorkspaceCommandState>,
@@ -861,6 +867,7 @@ pub fn workspace_backfill_forge_repo_bindings_with_state(
     Ok(summary.bound)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_retry_repository_forge_binding(
     state: State<'_, WorkspaceCommandState>,
@@ -883,6 +890,7 @@ pub async fn workspace_retry_repository_forge_binding_with_state(
     Ok(login)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_github_cli_status(
     state: State<'_, WorkspaceCommandState>,
@@ -900,6 +908,7 @@ pub async fn workspace_github_cli_status(
     Ok(legacy_github_cli_status(output))
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_forge_context(
     state: State<'_, WorkspaceCommandState>,
@@ -960,6 +969,7 @@ pub async fn workspace_forge_context_with_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_change_request_view_web(
     state: State<'_, WorkspaceCommandState>,
@@ -989,6 +999,7 @@ pub async fn workspace_change_request_view_web(
     forge_provider::view_workspace_change_request(root, login.as_deref())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_change_request_merge(
     state: State<'_, WorkspaceCommandState>,
@@ -1031,6 +1042,7 @@ pub async fn workspace_change_request_merge_with_state(
     forge_provider::merge_workspace_change_request(root, &branch, login.as_deref())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_change_request_create(
     state: State<'_, WorkspaceCommandState>,
@@ -1106,6 +1118,7 @@ pub async fn workspace_change_request_create_with_state(
     )
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_change_request_context(
     state: State<'_, WorkspaceCommandState>,
@@ -1177,6 +1190,7 @@ pub async fn workspace_change_request_context_with_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_gh_pr_view_web(
     state: State<'_, WorkspaceCommandState>,
@@ -1185,6 +1199,7 @@ pub async fn workspace_gh_pr_view_web(
     workspace_change_request_view_web(state, input).await
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_gh_pr_merge(
     state: State<'_, WorkspaceCommandState>,
@@ -1193,6 +1208,7 @@ pub async fn workspace_gh_pr_merge(
     workspace_change_request_merge(state, input).await
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_gh_pr_create_fill(
     state: State<'_, WorkspaceCommandState>,
@@ -1627,6 +1643,7 @@ fn gitlab_hub_item(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn pull_request_hub_list(
     state: State<'_, WorkspaceCommandState>,
@@ -2038,6 +2055,7 @@ fn gitlab_inline_comments(
         .collect()
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn pull_request_hub_detail(
     state: State<'_, WorkspaceCommandState>,
@@ -2235,6 +2253,7 @@ pub async fn pull_request_hub_detail_with_state(
     }
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn pull_request_hub_merge(
     state: State<'_, WorkspaceCommandState>,
@@ -2356,6 +2375,7 @@ pub async fn pull_request_hub_merge_with_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn pull_request_hub_reply_thread(
     state: State<'_, WorkspaceCommandState>,
@@ -2418,6 +2438,7 @@ pub async fn pull_request_hub_reply_thread_with_state(
     Ok(PullRequestHubThreadReplyOutput { submitted: true })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn pull_request_hub_resolve_thread(
     state: State<'_, WorkspaceCommandState>,
@@ -2470,6 +2491,7 @@ pub async fn pull_request_hub_resolve_thread_with_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn pull_request_hub_comment(
     state: State<'_, WorkspaceCommandState>,
@@ -2523,6 +2545,7 @@ pub async fn pull_request_hub_comment_with_state(
     Ok(PullRequestHubCommentOutput { comment })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn pull_request_hub_submit_review(
     state: State<'_, WorkspaceCommandState>,
@@ -2781,6 +2804,7 @@ pub async fn pull_request_hub_submit_review_with_state(
     }
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_pr_status(
     state: State<'_, WorkspaceCommandState>,
@@ -2803,6 +2827,7 @@ pub async fn workspace_pr_status_with_state(
     .await
 }
 
+#[cfg(feature = "tauri")]
 pub async fn workspace_review_state(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceReviewStateInput,
@@ -2930,6 +2955,7 @@ pub async fn workspace_review_state_with_state(
     }
 }
 
+#[cfg(feature = "tauri")]
 pub async fn workspace_reviewer_candidates(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceReviewerCandidatesInput,
@@ -3003,6 +3029,7 @@ pub async fn workspace_reviewer_candidates_with_state(
     }
 }
 
+#[cfg(feature = "tauri")]
 pub async fn workspace_request_reviewers(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspaceRequestReviewersInput,
@@ -3605,6 +3632,7 @@ fn map_gitlab_review_state(
     }
 }
 
+#[cfg(feature = "tauri")]
 pub async fn workspace_pr_review_comments(
     state: State<'_, WorkspaceCommandState>,
     input: WorkspacePrReviewCommentsInput,
@@ -3922,6 +3950,7 @@ fn lookup_github_failed_checks(
     Ok(Some(lookup))
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_pipeline_status(
     state: State<'_, WorkspaceCommandState>,
@@ -4129,6 +4158,7 @@ pub async fn workspace_pipeline_status_with_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_pipeline_job_log(
     state: State<'_, WorkspaceCommandState>,
@@ -4173,6 +4203,7 @@ pub async fn workspace_pipeline_job_log_with_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_pipeline_job_retry(
     state: State<'_, WorkspaceCommandState>,

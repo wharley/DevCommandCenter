@@ -18,6 +18,7 @@ pub mod workspace_commands;
 pub mod workspace_delivery;
 pub(crate) mod workspace_support;
 
+#[cfg(feature = "tauri")]
 pub use coderabbit::{
     workspace_coderabbit_cli_status, workspace_coderabbit_diff_fingerprint,
     workspace_coderabbit_doctor, workspace_coderabbit_logout, workspace_coderabbit_review,
@@ -26,10 +27,12 @@ pub use coderabbit::{
     workspace_coderabbit_review_load, workspace_coderabbit_review_save,
     workspace_coderabbit_review_start,
 };
+#[cfg(feature = "tauri")]
 pub use delegation_commands::{
     approve_delegation, cancel_delegation, complete_delegation, create_delegation, fail_delegation,
     get_delegation, list_delegations, start_delegation,
 };
+#[cfg(feature = "tauri")]
 pub use forge_commands::{
     pull_request_hub_comment, pull_request_hub_detail, pull_request_hub_list,
     pull_request_hub_merge, pull_request_hub_reply_thread, pull_request_hub_resolve_thread,
@@ -44,6 +47,7 @@ pub use forge_commands::{
     workspace_retry_repository_forge_binding, workspace_review_state,
     workspace_reviewer_candidates,
 };
+#[cfg(feature = "tauri")]
 pub use mcp_commands::{
     activate_mcp_integration, cancel_mcp_connect, create_mcp_integration,
     disable_mcp_integration, disconnect_mcp_connector,
@@ -52,12 +56,14 @@ pub use mcp_commands::{
     set_mcp_connector_logo, set_mcp_connector_scopes, set_mcp_project_enabled,
     set_mcp_tool_policy, start_mcp_connect, test_mcp_integration, wait_mcp_connect,
 };
+#[cfg(feature = "tauri")]
 pub use provider_commands::{
     cancel_provider_account_sign_in, create_provider_account, get_provider_availability,
     list_provider_accounts, list_providers, provider_account_reset, provider_account_status,
     provider_account_usage, remove_provider_account, rename_provider_account,
     set_provider_availability, sign_in_provider_account,
 };
+#[cfg(feature = "tauri")]
 pub use session_commands::{
     abort_run, apply_task_title, approve_plan, execute_conversation_rewind, execute_guarded_undo,
     interrupt_native_subagent, last_turn_review, list_mcp_runtime_statuses, list_thread_events,
@@ -66,6 +72,7 @@ pub use session_commands::{
     run_pull_request_review_agent, send_turn, session_live_snapshot, start_thread,
     steer_native_subagent, turn_review_file_diff,
 };
+#[cfg(feature = "tauri")]
 pub use workspace_commands::{
     archive_workspace, archive_workspace_bundle, compile_mission_spec_context, complete_workspace,
     complete_workspace_bundle, create_workspace_bundle_for_repos, create_workspace_for_repo,

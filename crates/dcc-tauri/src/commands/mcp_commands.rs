@@ -16,6 +16,7 @@ use dcc_core::{
 use dcc_infra::{credential_store::SystemCredentialStore, mcp_db::SqliteMcpRepo};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+#[cfg(feature = "tauri")]
 use tauri::State;
 use thiserror::Error;
 use uuid::Uuid;
@@ -287,6 +288,7 @@ enum McpCommandError {
 
 type McpCommandResult<T> = Result<T, McpCommandError>;
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn list_mcp_integrations(
     state: State<'_, WorkspaceCommandState>,
@@ -304,6 +306,7 @@ pub async fn list_mcp_integrations_with(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn create_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
@@ -323,6 +326,7 @@ pub async fn create_mcp_integration_with(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn activate_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
@@ -342,6 +346,7 @@ pub async fn activate_mcp_integration_with(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn disable_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
@@ -361,6 +366,7 @@ pub async fn disable_mcp_integration_with(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn remove_mcp_integration(
     state: State<'_, WorkspaceCommandState>,
@@ -380,6 +386,7 @@ pub async fn remove_mcp_integration_with(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn set_mcp_tool_policy(
     state: State<'_, WorkspaceCommandState>,
@@ -399,6 +406,7 @@ pub async fn set_mcp_tool_policy_with(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn start_mcp_connect(
     state: State<'_, WorkspaceCommandState>,
@@ -450,6 +458,7 @@ pub async fn start_mcp_connect_with(
     )
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn wait_mcp_connect(
     coordinator: State<'_, McpConnectCoordinator>,
@@ -477,6 +486,7 @@ pub async fn wait_mcp_connect_with(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn cancel_mcp_connect(
     coordinator: State<'_, McpConnectCoordinator>,
@@ -495,6 +505,7 @@ pub async fn cancel_mcp_connect_with(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn disconnect_mcp_connector(
     state: State<'_, WorkspaceCommandState>,
@@ -520,6 +531,7 @@ pub async fn disconnect_mcp_connector_with(
 
 /// Sets the scopes requested at the next sign-in. Blank means "use what the
 /// server suggests".
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn set_mcp_connector_scopes(
     state: State<'_, WorkspaceCommandState>,
@@ -545,6 +557,7 @@ pub async fn set_mcp_connector_scopes_with(
 }
 
 /// Sets or removes a connector's logo.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn set_mcp_connector_logo(
     state: State<'_, WorkspaceCommandState>,
@@ -567,6 +580,7 @@ pub async fn set_mcp_connector_logo_with(
 
 /// Looks for the icon of the connector's own site and keeps it as its logo.
 /// Leaves the current logo when the site has none.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn fetch_mcp_connector_logo(
     state: State<'_, WorkspaceCommandState>,
@@ -659,6 +673,7 @@ pub struct ImportNativeMcpServersOutput {
 const MAX_IMPORTED_SERVERS: usize = 64;
 
 /// Remote servers in Claude Code, Codex and Cursor (read-only).
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn list_native_mcp_servers() -> Result<ListNativeMcpServersOutput, String> {
     let found = tokio::task::spawn_blocking(crate::native_connectors::discover_importable)
@@ -679,6 +694,7 @@ pub async fn list_native_mcp_servers() -> Result<ListNativeMcpServersOutput, Str
 
 /// Copies the chosen servers into DCC as global connectors. The source files
 /// are only read; header values go straight to the credential store.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn import_native_mcp_servers(
     state: State<'_, WorkspaceCommandState>,
@@ -808,6 +824,7 @@ async fn update_connector_details(
 
 /// Switches an integration off (or back on) in one project. New sessions in
 /// that project leave it out; other projects keep it.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn set_mcp_project_enabled(
     state: State<'_, WorkspaceCommandState>,
@@ -842,6 +859,7 @@ pub async fn set_mcp_project_enabled_with(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn test_mcp_integration(
     state: State<'_, WorkspaceCommandState>,

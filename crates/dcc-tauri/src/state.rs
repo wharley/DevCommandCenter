@@ -13,6 +13,7 @@ use chrono::{Duration as ChronoDuration, SecondsFormat, Utc};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+#[cfg(feature = "tauri")]
 use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
@@ -91,6 +92,7 @@ use crate::delivery_failure::{
     sanitize_delivery_failure_output, WorkspaceDeliveryFailureOperation,
     WorkspaceDeliveryFailureSnapshot,
 };
+#[cfg(feature = "tauri")]
 use crate::events::TauriEventBus;
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use crate::guarded_undo_runtime::{
@@ -1464,6 +1466,7 @@ impl SessionCommandState {
         self.runtime.runtime_generation().to_string()
     }
 
+    #[cfg(feature = "tauri")]
     pub fn new(app: AppHandle, db_path: PathBuf) -> Self {
         let app_data_dir = app
             .path()

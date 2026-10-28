@@ -16,6 +16,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
+#[cfg(feature = "tauri")]
 use tauri::State;
 
 use dcc_core::{
@@ -326,6 +327,7 @@ pub async fn workspace_attention_with_state(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_attention_blockers(
     state: State<'_, WorkspaceCommandState>,

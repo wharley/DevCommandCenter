@@ -16,6 +16,7 @@ use dcc_core::{
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+#[cfg(feature = "tauri")]
 use tauri::State;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
@@ -230,6 +231,7 @@ async fn status(db: &Path, workspace: &Workspace) -> Result<LocalBranchesOutput,
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_local_branches(
     state: State<'_, WorkspaceCommandState>,
@@ -241,7 +243,7 @@ pub async fn workspace_local_branches(
     let refresh_error = if input.refresh {
         let root = workspace.root_path.clone();
         let db = db.clone();
-        tauri::async_runtime::spawn_blocking(move || {
+        crate::rt::spawn_blocking(move || {
             let mut errors = Vec::new();
             for remote in git(&root, &["remote"])?.lines() {
                 let result = run_git_network_output_with_workspace_auth(
@@ -265,7 +267,7 @@ pub async fn workspace_local_branches(
         None
     };
     let _guard = lock_root(&workspace.root_path).await?;
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         futures::executor::block_on(async {
             let workspace = local_workspace(&db, &input.workspace_id).await?;
             let mut result = status(&db, &workspace).await?;
@@ -350,6 +352,7 @@ async fn switch_branch(
     status(db, &workspace).await
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_switch_local_branch(
     state: State<'_, WorkspaceCommandState>,

@@ -7,6 +7,7 @@ use dcc_core::domain::agent::{
 use dcc_core::domain::session::SessionId;
 use dcc_infra::db::{ActivityRecap, AgentSessionBinding};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri")]
 use tauri::State;
 
 use crate::state::SessionCommandState;
@@ -35,6 +36,7 @@ pub struct BindSessionAgentInput {
 
 /// `reviewer`, `researcher` and `chronicler` carry the built-in agents' texts
 /// in the app language. An app that does not send one gets the English text.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn agents_overview(
     state: State<'_, SessionCommandState>,
@@ -75,6 +77,7 @@ fn stored_instant(value: &str) -> Result<String, String> {
 }
 
 /// What moved in the person's tasks during the chronicler's recap window.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn agents_activity_recap(
     state: State<'_, SessionCommandState>,
@@ -87,6 +90,7 @@ pub async fn agents_activity_recap(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn agents_save(
     state: State<'_, SessionCommandState>,
@@ -97,6 +101,7 @@ pub async fn agents_save(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn agents_bind_session(
     state: State<'_, SessionCommandState>,

@@ -9,6 +9,7 @@ use dcc_core::domain::idea::{idea_template, Idea, IDEAS_DIR_NAME, IDEA_FOLDER_PR
 use dcc_core::domain::repository::RepositoryId;
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "tauri")]
 use tauri::State;
 
 use crate::{
@@ -171,6 +172,7 @@ pub fn create_idea_folder(base: &Path) -> Result<PathBuf, String> {
 /// Starts an idea: its folder in `~/dcc-ideias`, its empty `IDEIA.md` and the
 /// mark that keeps it out of the project list. The app then opens its task,
 /// where the person describes the idea to the researcher.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn research_create_idea(state: State<'_, WorkspaceCommandState>) -> Result<Idea, String> {
     research_create_idea_with_state(&state).await
@@ -359,6 +361,7 @@ fn same_disk(_left: &Path, _right: &Path) -> bool {
 /// first commit with `docs/IDEIA.md`, `AGENTS.md` and `CLAUDE.md`, creates the
 /// GitHub repository and pushes, moves the folder to `destination/name`, and
 /// turns the idea into a normal project. The app then opens a task in it.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn research_publish_idea(
     state: State<'_, WorkspaceCommandState>,
@@ -476,6 +479,7 @@ pub async fn research_publish_idea(
 
 /// Discards an idea: its task, the researcher's conversation, the records
 /// and the folder in `~/dcc-ideias`. Nothing is kept.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn research_discard_idea(
     state: State<'_, WorkspaceCommandState>,
@@ -497,6 +501,7 @@ pub async fn research_discard_idea(
 }
 
 /// Ideas in progress, newest first.
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn research_list_ideas(
     state: State<'_, WorkspaceCommandState>,

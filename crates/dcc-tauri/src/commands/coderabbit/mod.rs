@@ -20,6 +20,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
+#[cfg(feature = "tauri")]
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{commands::workspace_support::preflight_workspace_root, state::WorkspaceCommandState};
@@ -382,6 +383,7 @@ pub struct WorkspaceCodeRabbitReviewHistoryOutput {
     pub entries: Vec<WorkspaceCodeRabbitReviewHistoryEntry>,
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_cli_status(
     state: State<'_, WorkspaceCommandState>,
@@ -405,7 +407,7 @@ pub async fn workspace_coderabbit_cli_status(
     let cli_path = input.cli_path.clone();
     let include_auth_status = input.include_auth_status.unwrap_or(false);
 
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         let current_dir = workspace_root.as_deref();
         let cli = match detect_coderabbit_cli(cli_path.as_deref(), current_dir) {
             Ok(cli) => cli,
@@ -454,11 +456,12 @@ pub async fn workspace_coderabbit_cli_status(
     .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_logout(
     input: WorkspaceCodeRabbitLogoutInput,
 ) -> Result<WorkspaceCodeRabbitLogoutOutput, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         let cli = detect_coderabbit_cli(input.cli_path.as_deref(), None)?;
         let output = run_command_with_timeout(
             &cli.path,
@@ -489,6 +492,7 @@ pub async fn workspace_coderabbit_logout(
     .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_review_start(
     app: AppHandle,
@@ -548,6 +552,7 @@ pub async fn workspace_coderabbit_review_start(
     })
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_review_job(
     jobs_state: State<'_, CodeRabbitReviewJobsState>,
@@ -556,6 +561,7 @@ pub async fn workspace_coderabbit_review_job(
     get_review_job_snapshot(jobs_state.inner(), &input.job_id)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_review_cancel(
     jobs_state: State<'_, CodeRabbitReviewJobsState>,
@@ -570,6 +576,7 @@ pub async fn workspace_coderabbit_review_cancel(
     get_review_job_snapshot(jobs_state.inner(), &input.job_id)
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_review_load(
     state: State<'_, WorkspaceCommandState>,
@@ -579,11 +586,12 @@ pub async fn workspace_coderabbit_review_load(
     let workspace_root = normalize_workspace_root(&input.workspace_root)?;
     let db_path = state.db_path.clone();
 
-    tauri::async_runtime::spawn_blocking(move || load_review(&db_path, workspace_root))
+    crate::rt::spawn_blocking(move || load_review(&db_path, workspace_root))
         .await
         .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_review_save(
     state: State<'_, WorkspaceCommandState>,
@@ -594,11 +602,12 @@ pub async fn workspace_coderabbit_review_save(
     let db_path = state.db_path.clone();
     let review = input.review;
 
-    tauri::async_runtime::spawn_blocking(move || save_review(&db_path, workspace_root, review))
+    crate::rt::spawn_blocking(move || save_review(&db_path, workspace_root, review))
         .await
         .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_review_history(
     state: State<'_, WorkspaceCommandState>,
@@ -609,11 +618,12 @@ pub async fn workspace_coderabbit_review_history(
     let db_path = state.db_path.clone();
     let limit = input.limit.unwrap_or(20).clamp(1, 100);
 
-    tauri::async_runtime::spawn_blocking(move || review_history(&db_path, workspace_root, limit))
+    crate::rt::spawn_blocking(move || review_history(&db_path, workspace_root, limit))
         .await
         .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_review_clear(
     state: State<'_, WorkspaceCommandState>,
@@ -623,11 +633,12 @@ pub async fn workspace_coderabbit_review_clear(
     let workspace_root = normalize_workspace_root(&input.workspace_root)?;
     let db_path = state.db_path.clone();
 
-    tauri::async_runtime::spawn_blocking(move || clear_review(&db_path, workspace_root))
+    crate::rt::spawn_blocking(move || clear_review(&db_path, workspace_root))
         .await
         .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_doctor(
     state: State<'_, WorkspaceCommandState>,
@@ -638,7 +649,7 @@ pub async fn workspace_coderabbit_doctor(
     let cli_path = input.cli_path.clone();
     let timeout = timeout_from_seconds(input.timeout_seconds, CODERABBIT_DOCTOR_TIMEOUT);
 
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         let current_dir = Path::new(&workspace_root);
         let cli = detect_coderabbit_cli(cli_path.as_deref(), Some(current_dir))?;
         let started_at = Utc::now().to_rfc3339();
@@ -665,6 +676,7 @@ pub async fn workspace_coderabbit_doctor(
     .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "tauri")]
 fn run_review_job(
     jobs_state: &CodeRabbitReviewJobsState,
     app: AppHandle,
@@ -1089,10 +1101,12 @@ fn stream_event_from_agent_event(
     }
 }
 
+#[cfg(feature = "tauri")]
 fn emit_review_event(app: &AppHandle, event: CodeRabbitReviewStreamEvent) {
     let _ = app.emit(CODERABBIT_REVIEW_EVENT_NAME, event);
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_diff_fingerprint(
     state: State<'_, WorkspaceCommandState>,
@@ -1104,7 +1118,7 @@ pub async fn workspace_coderabbit_diff_fingerprint(
     let base = input.base.clone();
     let base_commit = input.base_commit.clone();
 
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         build_diff_fingerprint(
             &workspace_root,
             review_type,
@@ -1116,6 +1130,7 @@ pub async fn workspace_coderabbit_diff_fingerprint(
     .map_err(|error| error.to_string())?
 }
 
+#[cfg(feature = "tauri")]
 #[tauri::command]
 pub async fn workspace_coderabbit_review(
     state: State<'_, WorkspaceCommandState>,
@@ -1131,7 +1146,7 @@ pub async fn workspace_coderabbit_review(
     let light = input.light.unwrap_or(false);
     let timeout = timeout_from_seconds(input.timeout_seconds, CODERABBIT_DEFAULT_TIMEOUT);
 
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::rt::spawn_blocking(move || {
         let current_dir = Path::new(&workspace_root);
         let cli = detect_coderabbit_cli(cli_path.as_deref(), Some(current_dir))?;
         let fingerprint = build_diff_fingerprint(

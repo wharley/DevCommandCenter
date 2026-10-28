@@ -3138,12 +3138,13 @@ async fn create_task_handler(
     })))
 }
 
-/// The desktop app the creation runs in.
-fn desktop_app(backend: &HttpBackend) -> Result<tauri::AppHandle, HttpApiError> {
+/// Where the creation's events go: the desktop app it runs in.
+fn desktop_app(backend: &HttpBackend) -> Result<dcc_tauri::app_events::AppEvents, HttpApiError> {
     backend
         .app
         .get()
         .cloned()
+        .map(dcc_tauri::app_events::AppEvents::tauri)
         .ok_or_else(|| HttpApiError::service_unavailable("creating a task needs the desktop app"))
 }
 

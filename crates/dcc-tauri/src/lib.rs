@@ -1,5 +1,10 @@
+// Without Tauri the desktop's commands are left out, and with them the
+// helpers only they use; those go for good with the React app.
+#![cfg_attr(not(feature = "tauri"), allow(dead_code, unused_imports))]
+
 pub(crate) mod antigravity_account_state;
 pub mod antigravity_installation;
+pub mod app_events;
 pub mod commands;
 pub mod connector_gateway;
 pub mod conversation_rewind;
@@ -13,6 +18,7 @@ pub mod mcp_connect;
 pub mod native_connectors;
 pub mod process_runtime_registry;
 pub mod provider_delta_coalescer;
+pub mod rt;
 pub mod run;
 pub mod state;
 pub mod terminal_arbiter;
