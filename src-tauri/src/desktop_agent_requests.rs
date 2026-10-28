@@ -318,11 +318,16 @@ pub fn browser_agent_claim(
 /// Gets the person's attention for an agent request waiting on them, only
 /// when DCC is not the window they are looking at: the Dock icon bounces and
 /// a system notification names it. The renderer passes the text, already in
-/// the person's language.
+/// the person's language. While the native app answers the requests it
+/// calls for the person itself (one notification, not two).
 #[tauri::command]
 pub fn agent_request_attention(app: AppHandle, title: String, body: String) {
+    use dev_command_center_tauri::http_api::{native_browser_opens, native_computer};
     use tauri::Manager;
     use tauri_plugin_notification::NotificationExt;
+    if native_browser_opens().connected() || native_computer().connected() {
+        return;
+    }
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
