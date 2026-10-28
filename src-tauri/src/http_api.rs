@@ -77,6 +77,7 @@ mod mobile;
 mod provider_accounts;
 mod provider_usage;
 mod providers;
+mod pull_request_hub;
 mod remote_devices;
 mod research;
 mod shortcuts;
@@ -1019,7 +1020,8 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/remote/pairing/approvals/:approval_id",
             post(remote_respond_approval_handler),
         )
-        .merge(remote_devices::routes());
+        .merge(remote_devices::routes())
+        .merge(pull_request_hub::routes());
     let protected_routes = if backend.terminals {
         protected_routes.merge(terminal_routes)
     } else {
@@ -1841,6 +1843,14 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/sessions/:session_id/agent",
             "POST /api/v1/agents/:agent_id",
             "POST /api/v1/research/ideas",
+            "POST /api/v1/pull-request-hub/list",
+            "POST /api/v1/pull-request-hub/detail",
+            "POST /api/v1/pull-request-hub/comment",
+            "POST /api/v1/pull-request-hub/merge",
+            "POST /api/v1/pull-request-hub/submit-review",
+            "POST /api/v1/pull-request-hub/reply-thread",
+            "POST /api/v1/pull-request-hub/resolve-thread",
+            "POST /api/v1/pull-request-hub/review-agent",
             "GET /api/v1/workspaces/:workspace_id/delivery",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
@@ -5231,6 +5241,52 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_pull_request_hub_answers_for_known_repositories_only() {
+        let fixture = embedded_fixture().await;
+        // No project registered: nothing to list.
+        let (status, listed) =
+            post_json(&fixture.app, "/api/v1/pull-request-hub/list", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{listed}");
+        assert_eq!(listed["items"], json!([]));
+        let other = tempfile::tempdir().unwrap();
+        let root = other.path().to_string_lossy().to_string();
+        for (uri, body) in [
+            (
+                "/api/v1/pull-request-hub/detail",
+                json!({ "repositoryRoot": root, "number": 1 }),
+            ),
+            (
+                "/api/v1/pull-request-hub/comment",
+                json!({ "repositoryRoot": root, "number": 1, "body": "ok" }),
+            ),
+            (
+                "/api/v1/pull-request-hub/merge",
+                json!({ "repositoryRoot": root, "number": 1, "method": "squash", "expectedHeadSha": "abc" }),
+            ),
+            (
+                "/api/v1/pull-request-hub/submit-review",
+                json!({ "repositoryRoot": root, "number": 1, "event": "comment", "body": "ok", "comments": [] }),
+            ),
+            (
+                "/api/v1/pull-request-hub/reply-thread",
+                json!({ "repositoryRoot": root, "number": 1, "commentId": "1", "threadId": "t", "body": "ok" }),
+            ),
+            (
+                "/api/v1/pull-request-hub/resolve-thread",
+                json!({ "repositoryRoot": root, "number": 1, "threadId": "t", "resolved": true }),
+            ),
+            (
+                "/api/v1/pull-request-hub/review-agent",
+                json!({ "workingDirectory": root, "providerId": "codex", "prompt": "x" }),
+            ),
+        ] {
+            let (status, error) = post_json(&fixture.app, uri, body).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri} {error}");
+            assert!(!crate::remote_connector::remote_path_allowed(uri), "{uri}");
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

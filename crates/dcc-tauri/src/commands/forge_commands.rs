@@ -1630,6 +1630,14 @@ fn gitlab_hub_item(
 #[tauri::command]
 pub async fn pull_request_hub_list(
     state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubListInput,
+) -> Result<PullRequestHubListOutput, String> {
+    pull_request_hub_list_with_state(&state, input).await
+}
+
+/// `pull_request_hub_list` for callers without a Tauri `State` (the HTTP API).
+pub async fn pull_request_hub_list_with_state(
+    state: &WorkspaceCommandState,
     _input: PullRequestHubListInput,
 ) -> Result<PullRequestHubListOutput, String> {
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
@@ -2035,6 +2043,14 @@ pub async fn pull_request_hub_detail(
     state: State<'_, WorkspaceCommandState>,
     input: PullRequestHubDetailInput,
 ) -> Result<PullRequestHubDetailOutput, String> {
+    pull_request_hub_detail_with_state(&state, input).await
+}
+
+/// `pull_request_hub_detail` for callers without a Tauri `State` (the HTTP API).
+pub async fn pull_request_hub_detail_with_state(
+    state: &WorkspaceCommandState,
+    input: PullRequestHubDetailInput,
+) -> Result<PullRequestHubDetailOutput, String> {
     let root = input.repository_root.trim();
     let include_code = input.include_code.unwrap_or(false);
     let context = forge_context::resolve_workspace_forge_context(
@@ -2222,6 +2238,14 @@ pub async fn pull_request_hub_detail(
 #[tauri::command]
 pub async fn pull_request_hub_merge(
     state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubMergeInput,
+) -> Result<PullRequestHubMergeOutput, String> {
+    pull_request_hub_merge_with_state(&state, input).await
+}
+
+/// `pull_request_hub_merge` for callers without a Tauri `State` (the HTTP API).
+pub async fn pull_request_hub_merge_with_state(
+    state: &WorkspaceCommandState,
     input: PullRequestHubMergeInput,
 ) -> Result<PullRequestHubMergeOutput, String> {
     let root = input.repository_root.trim();
@@ -2451,6 +2475,14 @@ pub async fn pull_request_hub_comment(
     state: State<'_, WorkspaceCommandState>,
     input: PullRequestHubCommentInput,
 ) -> Result<PullRequestHubCommentOutput, String> {
+    pull_request_hub_comment_with_state(&state, input).await
+}
+
+/// `pull_request_hub_comment` for callers without a Tauri `State` (the HTTP API).
+pub async fn pull_request_hub_comment_with_state(
+    state: &WorkspaceCommandState,
+    input: PullRequestHubCommentInput,
+) -> Result<PullRequestHubCommentOutput, String> {
     let body = input.body.trim();
     if body.is_empty() {
         return Err("Comment cannot be empty.".to_string());
@@ -2494,6 +2526,14 @@ pub async fn pull_request_hub_comment(
 #[tauri::command]
 pub async fn pull_request_hub_submit_review(
     state: State<'_, WorkspaceCommandState>,
+    input: PullRequestHubSubmitReviewInput,
+) -> Result<PullRequestHubSubmitReviewOutput, String> {
+    pull_request_hub_submit_review_with_state(&state, input).await
+}
+
+/// `pull_request_hub_submit_review` for callers without a Tauri `State` (the HTTP API).
+pub async fn pull_request_hub_submit_review_with_state(
+    state: &WorkspaceCommandState,
     input: PullRequestHubSubmitReviewInput,
 ) -> Result<PullRequestHubSubmitReviewOutput, String> {
     let body = input

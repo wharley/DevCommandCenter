@@ -1286,6 +1286,7 @@ pub fn remote_path_allowed(path: &str) -> bool {
         && !route.starts_with("/api/v1/mcp/")
         && !route.starts_with("/api/v1/agents/")
         && !route.starts_with("/api/v1/research/")
+        && !route.starts_with("/api/v1/pull-request-hub/")
         && !matches!(
             route,
             "/api/v1/forge/cli-status"

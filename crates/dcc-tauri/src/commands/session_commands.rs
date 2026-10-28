@@ -767,6 +767,14 @@ pub async fn run_pull_request_review_agent(
     state: State<'_, SessionCommandState>,
     input: RunPullRequestReviewAgentInput,
 ) -> Result<RunPullRequestReviewAgentOutput, String> {
+    run_pull_request_review_agent_with_state(&state, input).await
+}
+
+/// `run_pull_request_review_agent` for callers without a Tauri `State` (the HTTP API).
+pub async fn run_pull_request_review_agent_with_state(
+    state: &SessionCommandState,
+    input: RunPullRequestReviewAgentInput,
+) -> Result<RunPullRequestReviewAgentOutput, String> {
     let working_directory = input.working_directory.trim();
     let root = std::path::Path::new(working_directory);
     if working_directory.is_empty() || !root.is_absolute() || !root.is_dir() {
