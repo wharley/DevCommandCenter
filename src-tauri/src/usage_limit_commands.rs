@@ -1,32 +1,11 @@
 //! Wires the usage-limit resume scheduler (`dcc_tauri::usage_limit_resume`)
 //! into the app: the global preference, each task's choice, the manual
 //! "Continuar" of a task stopped by its limit, and the scheduler itself.
-use std::sync::Arc;
 
 use dcc_core::domain::session::SessionId;
-use dcc_core::ports::EventBus;
 use dcc_tauri::state::SessionCommandState;
-use dcc_tauri::usage_limit_resume::{UsageLimitScheduler, UsageLimitSettings};
+use dcc_tauri::usage_limit_resume::UsageLimitSettings;
 use tauri::State;
-
-pub struct UsageLimitState {
-    pub scheduler: Arc<UsageLimitScheduler>,
-    // The runtime keeps only a weak reference to its buses.
-    _bus: Arc<dyn EventBus>,
-}
-
-pub fn start(sessions: &SessionCommandState) -> UsageLimitState {
-    let scheduler = UsageLimitScheduler::new(sessions.clone());
-    let bus = scheduler.event_bus();
-    if let Err(error) = sessions.register_event_bus(&bus) {
-        eprintln!("[DCC][usage-limit] session events unavailable: {error}");
-    }
-    tauri::async_runtime::spawn(scheduler.clone().run());
-    UsageLimitState {
-        scheduler,
-        _bus: bus,
-    }
-}
 
 #[tauri::command]
 pub fn usage_limit_settings(state: State<'_, SessionCommandState>) -> UsageLimitSettings {

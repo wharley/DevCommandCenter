@@ -87,7 +87,7 @@ pub async fn dcc_storage_usage(app: AppHandle<Wry>) -> Result<DccStorageUsage, S
 pub async fn dcc_storage_compact(app: AppHandle<Wry>) -> Result<DccStorageUsage, String> {
     let db_path = database_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        crate::delta_compaction_worker::run_pass(&db_path)
+        dev_command_center_tauri::delta_compaction_worker::run_pass(&db_path)
     })
     .await
     .map_err(|error| error.to_string())??;

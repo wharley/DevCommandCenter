@@ -178,7 +178,10 @@ pub fn decision_provider_history(
 
 #[tauri::command]
 pub fn ai_memory_sidecar_status(
-    sidecar: State<'_, dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar>,
+    sidecar: State<
+        '_,
+        std::sync::Arc<dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar>,
+    >,
 ) -> Result<AiMemorySidecarStatus, String> {
     Ok(sidecar.status())
 }

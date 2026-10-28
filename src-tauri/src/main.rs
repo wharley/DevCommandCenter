@@ -24,27 +24,22 @@ mod menu_bar;
 mod session_commands;
 mod skills_commands;
 mod workspace_commands;
-mod delta_compaction_worker;
 mod storage_commands;
 #[cfg(target_os = "macos")]
 mod webview_storage;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike};
-use dcc_tauri::commands::workspace_commands::reconcile_delegation_worktree_operations;
 use dcc_tauri::{
     commands::coderabbit::CodeRabbitReviewJobsState,
-    state::{SessionCommandState, WorkspaceCommandState},
+    state::WorkspaceCommandState,
 };
 use dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar;
 use dev_command_center_tauri::browser_mcp_bridge;
 use dev_command_center_tauri::command_api::{db_error, iso_now, next_id, ApiError, ApiResult};
-use dev_command_center_tauri::daemon_client::{ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo};
-use dev_command_center_tauri::decision_provider_settings::DecisionProviderSettings;
-use dev_command_center_tauri::embedded_http::EmbeddedHttpServer;
+use dev_command_center_tauri::daemon_client::{rpc_with_info, DaemonRuntimeInfo};
 use dev_command_center_tauri::http_api::{
-    publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals, HttpBackend,
+    publish_desktop_terminal_event, DesktopTerminalEvent,
 };
-use dev_command_center_tauri::http_config::HttpConfig;
 use dev_command_center_tauri::remote_connector::RemoteHub;
 use dev_command_center_tauri::terminals::{
     self, finalize_managed_terminal_removal, load_pane_scrollback_deque,
@@ -65,7 +60,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::{Read, Write};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -73,12 +67,11 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use sysinfo::{Pid, System};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::git_support::build_review_diffs_for_path;
-use browser_agent_requests::BrowserAgentRequestBroker;
 use browser_commands::BrowserState;
 use browser_mcp_bridge::BrowserMcpBridge;
 use coderabbit_commands::{
@@ -89,8 +82,6 @@ use coderabbit_commands::{
     workspace_coderabbit_review_load, workspace_coderabbit_review_save,
     workspace_coderabbit_review_start,
 };
-use computer_use_commands::ComputerUseState;
-use dcc_infra::mcp_db::SqliteMcpRepo;
 use delegation_commands::{
     approve_delegation, cancel_delegation, cancel_running_delegation, complete_delegation,
     create_delegation, delegation_result_turn, fail_delegation, get_delegation, list_delegations, run_delegation,
@@ -3337,454 +3328,6 @@ fn open_pairing_conn(app: &AppHandle) -> Result<Connection, ApiError> {
     Ok(conn)
 }
 
-fn http_get_local(port: u16, path: &str) -> Option<(u16, String)> {
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(250))
-    else {
-        return None;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
-    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
-    if stream.write_all(request.as_bytes()).is_err() {
-        return None;
-    }
-    let mut buf = Vec::with_capacity(8192);
-    let mut chunk = [0_u8; 1024];
-    while buf.len() < 8192 {
-        match stream.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
-            Err(_) if !buf.is_empty() => break,
-            Err(_) => return None,
-        }
-    }
-    let response = String::from_utf8_lossy(&buf).to_string();
-    let status = response
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse::<u16>().ok())?;
-    Some((status, response))
-}
-
-/// True when a DCC HTTP API answers on the port (`/` needs no daemon, so it
-/// answers fast even when `/health` would wait on one).
-fn http_port_held_by_dcc(port: u16) -> bool {
-    http_get_local(port, "/")
-        .map(|(_status, response)| response.contains("DCC HTTP API"))
-        .unwrap_or(false)
-}
-
-fn terminate_existing_http_sidecars(force: bool) {
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let mut args = vec!["/IM", "dccd-http*.exe", "/T"];
-        if force {
-            args.push("/F");
-        }
-        let _ = Command::new("taskkill")
-            .args(args)
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
-    }
-
-    #[cfg(not(windows))]
-    {
-        let mut system = System::new_all();
-        system.refresh_processes();
-        let current_pid = std::process::id() as usize;
-        for (pid, process) in system.processes() {
-            if pid.as_u32() as usize == current_pid {
-                continue;
-            }
-            let name = process.name();
-            let exe_matches = process
-                .exe()
-                .and_then(|path| path.file_name())
-                .and_then(|name| name.to_str())
-                .map(|name| name.starts_with("dccd-http"))
-                .unwrap_or(false);
-            if name.starts_with("dccd-http") || exe_matches {
-                let _ = if force {
-                    process.kill()
-                } else {
-                    process
-                        .kill_with(sysinfo::Signal::Term)
-                        .unwrap_or_else(|| process.kill())
-                };
-            }
-        }
-    }
-}
-
-/// The desktop serves the HTTP API itself now. A `dccd-http` left running by
-/// an older version would keep the port (and answer for the same database),
-/// so ask it to exit first; whatever still holds the port afterwards (e.g. a
-/// second copy of the app) only costs a warning.
-fn stop_stale_http_sidecar(port: u16) {
-    if !http_port_held_by_dcc(port) {
-        return;
-    }
-    terminate_existing_http_sidecars(false);
-    let started = Instant::now();
-    while started.elapsed() < Duration::from_secs(3) && http_port_held_by_dcc(port) {
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    if http_port_held_by_dcc(port) {
-        terminate_existing_http_sidecars(true);
-    }
-}
-
-fn start_embedded_http_server(
-    app: &tauri::App,
-    session_state: SessionCommandState,
-    workspace_state: WorkspaceCommandState,
-    db_path: PathBuf,
-    agent_requests: desktop_agent_requests::DesktopAgentRequests,
-) {
-    let mut config = match HttpConfig::load() {
-        Ok(config) if config.enabled => config,
-        Ok(_) => {
-            eprintln!("[DCC HTTP] disabled in configuration");
-            return;
-        }
-        Err(error) => {
-            eprintln!("[DCC HTTP] not started: {error}");
-            return;
-        }
-    };
-    config.db_path = db_path.clone();
-    let backend = match HttpBackend::embedded(session_state) {
-        Ok(backend) => backend
-            .with_workspace_state(workspace_state)
-            .with_desktop_terminals(Arc::new(HttpTerminals(app.handle().clone())))
-            .with_desktop_browser(Arc::new(HttpBrowser(app.handle().clone())))
-            .with_desktop_computer(Arc::new(HttpComputer(app.handle().clone())))
-            .with_desktop_keep_awake(Arc::new(HttpKeepAwake(app.handle().clone())))
-            .with_desktop_menu_bar(Arc::new(HttpMenuBar(app.handle().clone())))
-            .with_desktop_shortcuts(Arc::new(HttpShortcuts(app.handle().clone())))
-            .with_app(Arc::new(HttpApp(app.handle().clone()))),
-        Err(error) => {
-            eprintln!("[DCC HTTP] not started: {error}");
-            return;
-        }
-    };
-    backend.attach_agent_requests(Arc::new(agent_requests));
-    let server = Arc::new(EmbeddedHttpServer::new(config, backend));
-    start_remote_connector(app, &server, db_path);
-    tauri::async_runtime::spawn(async move {
-        let port = server.port();
-        let _ = tauri::async_runtime::spawn_blocking(move || stop_stale_http_sidecar(port)).await;
-        match server.listen().await {
-            Ok(addr) => eprintln!("[DCC HTTP] listening on http://{addr}"),
-            Err(error) => eprintln!("[DCC HTTP] WARN: {error}; local HTTP API unavailable"),
-        }
-    });
-}
-
-/// The dock's PTYs for the native app, through the same commands the
-/// WebView calls.
-struct HttpTerminals(AppHandle);
-
-impl HttpTerminals {
-    fn state(&self) -> Result<State<'_, AppState>, String> {
-        self.0
-            .try_state::<AppState>()
-            .ok_or_else(|| "terminals not ready".to_string())
-    }
-}
-
-fn api_message(error: ApiError) -> String {
-    error.message
-}
-
-fn reply_ok(value: Value) -> bool {
-    value.get("ok").and_then(Value::as_bool).unwrap_or(false)
-}
-
-/// The desktop's Browser state for the native app's Browser
-/// (`http_api::browser_bridge`): its lifecycle reports and the agent's
-/// control run the same bookkeeping and commands as the WebView's.
-struct HttpBrowser(AppHandle);
-
-impl dev_command_center_tauri::http_api::DesktopBrowser for HttpBrowser {
-    fn open(
-        &self,
-        workspace_id: String,
-        session_id: Option<String>,
-        url: String,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<u64> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let state = app.state::<browser_commands::BrowserState>();
-            let sessions = app.state::<SessionCommandState>();
-            browser_commands::remote_browser_open(
-                &state,
-                &sessions,
-                &workspace_id,
-                session_id.as_deref(),
-                &url,
-            )
-            .await
-        })
-    }
-
-    fn report(
-        &self,
-        lifecycle_token: u64,
-        report: dev_command_center_tauri::http_api::PageReport,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<()> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let state = app.state::<browser_commands::BrowserState>();
-            browser_commands::remote_browser_report(&state, lifecycle_token, report).await
-        })
-    }
-
-    fn close(&self, lifecycle_token: u64) -> dev_command_center_tauri::http_api::BrowserFuture<()> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let state = app.state::<browser_commands::BrowserState>();
-            browser_commands::remote_browser_close(&state, Some(lifecycle_token)).await
-        })
-    }
-
-    fn disconnected(&self) -> dev_command_center_tauri::http_api::BrowserFuture<()> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let state = app.state::<browser_commands::BrowserState>();
-            browser_commands::remote_browser_close(&state, None).await
-        })
-    }
-
-    fn control(
-        &self,
-        workspace_id: String,
-        session_id: Option<String>,
-        lifecycle_token: u64,
-        armed: Option<bool>,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let status = match armed {
-                Some(true) => {
-                    browser_commands::browser_arm_control(
-                        app.state(),
-                        app.state(),
-                        workspace_id,
-                        session_id,
-                        lifecycle_token,
-                    )
-                    .await?
-                }
-                Some(false) => {
-                    browser_commands::browser_disarm_control(
-                        app.state(),
-                        app.state(),
-                        app.state(),
-                        workspace_id,
-                        session_id,
-                        lifecycle_token,
-                    )
-                    .await?
-                }
-                None => {
-                    browser_commands::browser_control_status(
-                        app.state(),
-                        app.state(),
-                        workspace_id,
-                        session_id,
-                        lifecycle_token,
-                    )
-                    .await?
-                }
-            };
-            serde_json::to_value(status).map_err(|error| error.to_string())
-        })
-    }
-
-    fn evidence_start(
-        &self,
-        workspace_id: String,
-        session_id: Option<String>,
-        lifecycle_token: u64,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            // What the WebView's menu does: read the page, anchor on it.
-            let context = browser_commands::browser_extract_context(
-                app.state(),
-                app.state(),
-                workspace_id,
-                session_id,
-                lifecycle_token,
-            )
-            .await?;
-            let handle = browser_commands::browser_start_evidence_capture(
-                app.state(),
-                app.state(),
-                browser_commands::BrowserActionAnchor {
-                    workspace_id: context.workspace_id.clone(),
-                    session_id: context.session_id.clone(),
-                    lifecycle_token,
-                    map_id: context.semantic_map.map_id.clone(),
-                    generation: context.semantic_map.generation,
-                    url: context.url.clone(),
-                    page_load_revision: context.semantic_map.page_load_revision,
-                },
-            )
-            .await?;
-            Ok(serde_json::json!({
-                "captureId": handle.capture_id,
-                "remainingMs": handle.remaining_ms,
-                "url": context.url,
-                "title": context.title,
-                "text": context.text,
-                "selectionOnly": context.selection_only,
-                "truncated": context.truncated,
-            }))
-        })
-    }
-
-    fn evidence_read(
-        &self,
-        workspace_id: String,
-        session_id: Option<String>,
-        capture_id: String,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let evidence = browser_commands::browser_read_evidence_capture(
-                app.state(),
-                app.state(),
-                workspace_id,
-                session_id,
-                capture_id,
-            )
-            .await?;
-            serde_json::to_value(evidence).map_err(|error| error.to_string())
-        })
-    }
-
-    fn audit(
-        &self,
-        workspace_id: String,
-        session_id: Option<String>,
-        lifecycle_token: u64,
-        limit: usize,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let records = browser_commands::browser_read_audit(
-                app.state(),
-                app.state(),
-                workspace_id,
-                session_id,
-                lifecycle_token,
-                limit,
-            )
-            .await?;
-            serde_json::to_value(records).map_err(|error| error.to_string())
-        })
-    }
-
-    fn open_requests(&self) -> Value {
-        let broker = self
-            .0
-            .state::<browser_agent_requests::BrowserAgentRequestBroker>();
-        serde_json::to_value(broker.pending_all()).unwrap_or_else(|_| Value::Array(Vec::new()))
-    }
-
-    fn open_allow(
-        &self,
-        request_id: String,
-        workspace_id: String,
-        session_id: String,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let view = desktop_agent_requests::browser_agent_claim(
-                app.state(),
-                desktop_agent_requests::BrowserAgentClaimInput {
-                    request_id,
-                    workspace_id,
-                    session_id,
-                },
-            )?;
-            serde_json::to_value(view).map_err(|error| error.to_string())
-        })
-    }
-
-    fn open_deny(
-        &self,
-        request_id: String,
-        workspace_id: String,
-        session_id: String,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<()> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let result = browser_agent_requests::browser_agent_resolve(
-                app.state(),
-                app.state(),
-                app.state(),
-                browser_agent_requests::BrowserAgentResolveInput {
-                    request_id,
-                    workspace_id,
-                    session_id,
-                    decision: browser_agent_requests::BrowserAgentRequestDecision::Deny,
-                    lifecycle_token: None,
-                },
-            );
-            match result.status {
-                browser_agent_requests::BrowserAgentOpenStatus::Denied => Ok(()),
-                _ => Err(result
-                    .message
-                    .unwrap_or_else(|| "browser open request is unavailable".into())),
-            }
-        })
-    }
-
-    fn open_ack(
-        &self,
-        request_id: String,
-        workspace_id: String,
-        session_id: String,
-        lifecycle_token: u64,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let result = browser_agent_requests::browser_agent_resolve(
-                app.state(),
-                app.state(),
-                app.state(),
-                browser_agent_requests::BrowserAgentResolveInput {
-                    request_id,
-                    workspace_id,
-                    session_id,
-                    decision: browser_agent_requests::BrowserAgentRequestDecision::Allow,
-                    lifecycle_token: Some(lifecycle_token),
-                },
-            );
-            // `acknowledgeBrowserOpen`
-            if result.status != browser_agent_requests::BrowserAgentOpenStatus::Approved
-                || result.lifecycle_token != Some(lifecycle_token)
-            {
-                return Err(result
-                    .message
-                    .unwrap_or_else(|| "Browser approval could not be confirmed".into()));
-            }
-            serde_json::to_value(result).map_err(|error| error.to_string())
-        })
-    }
-}
-
-/// The desktop's computer use for the native app
-/// (`http_api::computer_bridge`): the same state and answers as the
-/// WebView's dialog.
-struct HttpComputer(AppHandle);
-
 /// The quick composer's and Appshots' global shortcuts for the native app.
 struct HttpShortcuts(AppHandle);
 
@@ -3846,230 +3389,8 @@ impl dev_command_center_tauri::http_api::DesktopMenuBar for HttpMenuBar {
     }
 }
 
-/// The Tauri app the API runs in: a task's events reach its webview; the
-/// connectors, the ai-memory sidecar and restarting are its own.
-struct HttpApp(AppHandle);
-
-impl dev_command_center_tauri::http_api::DesktopApp for HttpApp {
-    fn events(&self) -> dcc_tauri::app_events::AppEvents {
-        dcc_tauri::app_events::AppEvents::tauri(self.0.clone())
-    }
-
-    fn connectors(
-        &self,
-    ) -> Option<(
-        dcc_tauri::mcp_connect::McpConnectCoordinator,
-        dcc_tauri::connector_gateway::ConnectorGateway,
-    )> {
-        let coordinator = self
-            .0
-            .try_state::<dcc_tauri::mcp_connect::McpConnectCoordinator>()?;
-        let gateway = self
-            .0
-            .try_state::<dcc_tauri::connector_gateway::ConnectorGateway>()?;
-        Some((coordinator.inner().clone(), gateway.inner().clone()))
-    }
-
-    fn ai_memory_status(
-        &self,
-    ) -> Option<dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecarStatus> {
-        let sidecar = self.0.try_state::<AiMemorySidecar>()?;
-        Some(sidecar.status())
-    }
-
-    fn restart(&self) {
-        self.0.restart();
-    }
-}
-
-/// `keep_awake_status` / `keep_awake_set_mode` for the native app.
-struct HttpKeepAwake(AppHandle);
-
-impl dev_command_center_tauri::http_api::DesktopKeepAwake for HttpKeepAwake {
-    fn status(&self) -> Option<dev_command_center_tauri::keep_awake::KeepAwakeStatus> {
-        let state = self.0.try_state::<keep_awake_commands::KeepAwakeState>()?;
-        Some(state.controller.status())
-    }
-
-    fn set_mode(
-        &self,
-        mode: dev_command_center_tauri::keep_awake::KeepAwakeMode,
-    ) -> Option<Result<dev_command_center_tauri::keep_awake::KeepAwakeStatus, String>> {
-        let state = self.0.try_state::<keep_awake_commands::KeepAwakeState>()?;
-        Some(state.controller.set_mode(mode))
-    }
-}
-
-impl dev_command_center_tauri::http_api::DesktopComputer for HttpComputer {
-    fn pending(&self) -> Value {
-        let state = self.0.state::<computer_use_commands::ComputerUseState>();
-        serde_json::to_value(state.pending_control_requests().requests)
-            .unwrap_or_else(|_| Value::Array(Vec::new()))
-    }
-
-    fn status(
-        &self,
-        session_id: Option<String>,
-        include_targets: bool,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let state = self
-            .0
-            .state::<computer_use_commands::ComputerUseState>()
-            .inner()
-            .clone();
-        Box::pin(async move {
-            // Lists the Mac's windows: off the async threads.
-            let status = tokio::task::spawn_blocking(move || {
-                state.status(session_id.as_deref(), include_targets)
-            })
-            .await
-            .map_err(|_| "desktop computer-use status failed".to_string())?;
-            serde_json::to_value(status).map_err(|error| error.to_string())
-        })
-    }
-
-    fn request_access(
-        &self,
-        kind: String,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let state = self
-            .0
-            .state::<computer_use_commands::ComputerUseState>()
-            .inner()
-            .clone();
-        Box::pin(async move {
-            let kind: computer_use_commands::ComputerAccessKind =
-                serde_json::from_value(Value::String(kind))
-                    .map_err(|_| "desktop computer-use access kind is invalid".to_string())?;
-            let status = tokio::task::spawn_blocking(move || state.request_access(kind))
-                .await
-                .map_err(|_| "desktop computer-use access failed".to_string())??;
-            serde_json::to_value(status).map_err(|error| error.to_string())
-        })
-    }
-
-    fn preview(
-        &self,
-        session_id: String,
-        refresh: bool,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let state = self
-            .0
-            .state::<computer_use_commands::ComputerUseState>()
-            .inner()
-            .clone();
-        Box::pin(async move {
-            let frame = if refresh {
-                tokio::task::spawn_blocking(move || state.refresh_preview_frame(&session_id))
-                    .await
-                    .map_err(|_| "desktop computer-use preview refresh failed".to_string())?
-            } else {
-                state.preview_frame(&session_id)
-            };
-            serde_json::to_value(frame).map_err(|error| error.to_string())
-        })
-    }
-
-    fn disarm(
-        &self,
-        session_id: String,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let state = app.state::<computer_use_commands::ComputerUseState>();
-            let grant = state.disarm(&session_id);
-            computer_use_commands::publish_preview_cleared(&session_id);
-            let _ = app.emit("computer-use-preview-cleared", session_id);
-            serde_json::to_value(grant).map_err(|error| error.to_string())
-        })
-    }
-
-    fn respond(
-        &self,
-        request_id: String,
-        allowed: bool,
-        allowed_bundle_ids: Vec<String>,
-    ) -> dev_command_center_tauri::http_api::BrowserFuture<Value> {
-        let app = self.0.clone();
-        Box::pin(async move {
-            let output = computer_use_commands::computer_use_respond_control_request(
-                app.state(),
-                computer_use_commands::ComputerUseRespondControlRequestInput {
-                    request_id,
-                    allowed,
-                    allowed_bundle_ids,
-                },
-            )
-            .await?;
-            serde_json::to_value(output).map_err(|error| error.to_string())
-        })
-    }
-}
-
-impl DesktopTerminals for HttpTerminals {
-    fn get_or_create(&self, owner_key: &str, options: Value) -> Result<Value, String> {
-        terminal_get_or_create(
-            self.state()?,
-            self.0.clone(),
-            owner_key.to_string(),
-            options,
-        )
-        .map_err(api_message)
-    }
-
-    fn write(&self, pty_id: &str, data: String) -> Result<bool, String> {
-        terminal_write(self.state()?, pty_id.to_string(), data)
-            .map(reply_ok)
-            .map_err(api_message)
-    }
-
-    fn resize(&self, pty_id: &str, cols: u16, rows: u16) -> Result<bool, String> {
-        terminal_resize(self.state()?, pty_id.to_string(), cols, rows)
-            .map(reply_ok)
-            .map_err(api_message)
-    }
-
-    fn kill(&self, pty_id: &str) -> Result<bool, String> {
-        terminal_kill(self.state()?, self.0.clone(), pty_id.to_string())
-            .map(reply_ok)
-            .map_err(api_message)
-    }
-
-    fn activity(&self) -> Result<Vec<Value>, String> {
-        terminal_list_activity(self.state()?).map_err(api_message)
-    }
-}
-
 struct RemoteHubState(Arc<RemoteHub>);
 
-/// The relay connector lives as long as the app and serves the same router as
-/// the loopback API. It stays idle until a relay is configured and a phone is
-/// paired (or a pairing QR is open), so this costs nothing by default.
-fn start_remote_connector(app: &tauri::App, server: &Arc<EmbeddedHttpServer>, db_path: PathBuf) {
-    let hub = match RemoteHub::new(server.router(), db_path) {
-        Ok(hub) => hub,
-        Err(error) => {
-            eprintln!("[DCC Remote] not started: {error}");
-            return;
-        }
-    };
-    server.backend().attach_remote(&hub);
-    app.manage(RemoteHubState(hub.clone()));
-    let handle = app.handle().clone();
-    tauri::async_runtime::spawn(async move {
-        let mut events = hub.subscribe();
-        hub.start();
-        loop {
-            match events.recv().await {
-                Ok(event) => {
-                    let _ = handle.emit("remote-access-event", event);
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
-}
 
 fn remote_hub(app: &AppHandle) -> Result<Arc<RemoteHub>, ApiError> {
     app.try_state::<RemoteHubState>()
@@ -6547,214 +5868,89 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from("."));
             let _ = std::fs::create_dir_all(&app_data_dir);
-            // This process owns the agents, terminals and git coordinator of
-            // this data directory: the native app deletes tasks only while it
-            // holds this lock itself (`dcc_infra::runtime_owner`). A deletion
-            // it has in flight gets a few seconds to finish.
-            match dcc_infra::runtime_owner::RuntimeOwner::acquire_within(
-                &app_data_dir,
-                std::time::Duration::from_secs(10),
-            ) {
-                // Held until the process exits.
-                Ok(Some(owner)) => std::mem::forget(owner),
-                Ok(None) => eprintln!("[DCC] another process holds the runtime owner lock"),
-                Err(error) => eprintln!("[DCC] runtime owner lock unavailable: {error}"),
-            }
-            if let Err(error) = tauri::async_runtime::block_on(
-                AiMemorySidecar::load_persisted_settings(&app_data_dir),
-            ) {
-                eprintln!("[DCC][ai-memory] persisted settings unavailable: {error}");
-            }
-            if let Err(error) = tauri::async_runtime::block_on(
-                DecisionProviderSettings::load_persisted_settings(&app_data_dir),
-            ) {
-                eprintln!("[DCC][decision-provider] persisted settings unavailable: {error}");
-            }
-            let ai_memory_sidecar = match AiMemorySidecar::start(
-                app.path().resource_dir().ok().as_deref(),
-                &app_data_dir,
-            ) {
-                Ok(sidecar) => sidecar,
-                Err(error) => {
-                    eprintln!("[DCC][ai-memory] sidecar unavailable: {error}");
-                    AiMemorySidecar::unavailable(error)
-                }
-            };
             appshot_commands::setup(app.handle(), app_data_dir.clone())?;
-            let db_path = app_data_dir.join("database.sqlite");
-            let conn = dev_command_center_tauri::database::open_app_database(&db_path)?;
-            sync_existing_repo_configs(&conn)
-                .map_err(|e| format!("failed to sync repo configs: {e}"))?;
-            dev_command_center_tauri::database::compact_once(&conn);
-            eprintln!("[DCC] Database ready at {:?}", db_path);
-            delta_compaction_worker::spawn(db_path.clone());
-            let session_command_state =
-                SessionCommandState::new(app.handle().clone(), db_path.clone());
-            let computer_use_state = ComputerUseState::default();
-            // The optional listener is local-only. Failure leaves the human
-            // Browser and the rest of DCC available; no insecure fallback is
-            // ever installed and existing sessions are not reconfigured.
-            let browser_state = BrowserState::default();
-            let browser_agent_requests = BrowserAgentRequestBroker::default();
-            // One sign-in coordinator serves the Settings commands and the
-            // connector gateway, so a refresh is never run twice in parallel.
-            let mcp_connect_coordinator = match dcc_tauri::mcp_connect::McpConnectCoordinator::new() {
-                Ok(coordinator) => Some(coordinator),
-                Err(error) => {
-                    eprintln!("[DCC][mcp-connect] unavailable: {error}");
-                    None
-                }
+            let keep_awake_handle = app.handle().clone();
+            let restart_handle = app.handle().clone();
+            // The whole backend (`dcc_server::host`); this app adds its
+            // windows' events, the menu bar, the global shortcuts and Tauri's
+            // restart.
+            let config = dev_command_center_tauri::host::HostConfig {
+                app_data_dir: app_data_dir.clone(),
+                resource_dir: app.path().resource_dir().ok(),
+                dev: cfg!(dev),
+                events: named_events(app.handle()),
+                session_bus: Some(Arc::new(dcc_tauri::events::TauriEventBus::new(
+                    app.handle().clone(),
+                ))),
+                task_events: dcc_tauri::app_events::AppEvents::tauri(app.handle().clone()),
+                prepare_database: Some(Box::new(|conn: &Connection| {
+                    sync_existing_repo_configs(conn)
+                        .map_err(|e| format!("failed to sync repo configs: {e}"))
+                })),
+                keep_awake_listener: Box::new(move |reason| {
+                    menu_bar::set_keep_awake(
+                        &keep_awake_handle,
+                        reason.map(dev_command_center_tauri::keep_awake::HoldReason::label),
+                    );
+                    let _ = keep_awake_handle.emit(keep_awake_commands::CHANGED_EVENT, ());
+                }),
+                menu_bar: Some(Arc::new(HttpMenuBar(app.handle().clone()))),
+                shortcuts: Some(Arc::new(HttpShortcuts(app.handle().clone()))),
+                restart: Arc::new(move || restart_handle.restart()),
             };
-            let connector_gateway = mcp_connect_coordinator.as_ref().and_then(|coordinator| {
-                let db_path = WorkspaceCommandState::from_session(&session_command_state).db_path;
-                let repo = SqliteMcpRepo::open(&db_path).ok()?;
-                let app_handle = app.handle().clone();
-                dcc_tauri::connector_gateway::ConnectorGateway::new(
-                    coordinator.clone(),
-                    dcc_tauri::mcp_connect::ConnectStores {
-                        repo: Arc::new(repo),
-                        credentials: Arc::new(
-                            dcc_infra::credential_store::SystemCredentialStore::default(),
-                        ),
-                    },
-                    Arc::new(move |definition_id: &dcc_core::domain::mcp::McpDefinitionId| {
-                        let _ = app_handle.emit("mcp-connector-needs-auth", definition_id.0.clone());
-                    }),
-                )
-                .map_err(|error| eprintln!("[DCC][mcp-connect] gateway unavailable: {error}"))
-                .ok()
-            });
-            // Sign-ins the agents' own MCP login stored are no longer read;
-            // retire them so those connectors ask to reconnect.
-            if let Ok(repo) = SqliteMcpRepo::open(
-                &WorkspaceCommandState::from_session(&session_command_state).db_path,
-            ) {
-                tauri::async_runtime::spawn(async move {
-                    let stores = dcc_tauri::mcp_connect::ConnectStores {
-                        repo: Arc::new(repo),
-                        credentials: Arc::new(
-                            dcc_infra::credential_store::SystemCredentialStore::default(),
-                        ),
-                    };
-                    let retired = dcc_tauri::mcp_connect::retire_provider_grants(&stores).await;
-                    if retired > 0 {
-                        eprintln!("[DCC][mcp-connect] retired {retired} agent-held sign-ins");
-                    }
-                });
-            }
-            let browser_mcp_bridge = match tauri::async_runtime::block_on(BrowserMcpBridge::start(
-                Some(named_events(app.handle())),
-                browser_state.clone(),
-                browser_agent_requests.clone(),
-                session_command_state.clone(),
-                computer_use_state.clone(),
-                connector_gateway.clone(),
-            )) {
-                Ok(bridge) => match session_command_state
-                    .install_ephemeral_mcp_projection(bridge.clone())
-                {
-                    Ok(()) => Some(bridge),
-                    Err(_) => {
-                        bridge.shutdown();
-                        eprintln!("[DCC][browser-mcp] unavailable: projection installation failed");
-                        None
-                    }
-                },
-                Err(_) => {
-                    eprintln!("[DCC][browser-mcp] unavailable: loopback listener not started");
-                    None
-                }
-            };
-            let workspace_command_state =
-                WorkspaceCommandState::from_session(&session_command_state);
-            match tauri::async_runtime::block_on(reconcile_delegation_worktree_operations(
-                &workspace_command_state,
-            )) {
-                Ok(warnings) => {
-                    for warning in warnings {
-                        eprintln!("[DCC][delegation-recovery] {warning}");
-                    }
-                }
-                Err(error) => {
-                    eprintln!("[DCC][delegation-recovery] journal unavailable: {error}");
-                }
-            }
-            let http_workspace_state = workspace_command_state.clone();
+            let host = tauri::async_runtime::block_on(
+                dev_command_center_tauri::host::Host::start(config),
+            )?;
+            let dev_command_center_tauri::host::Host {
+                app_data_dir,
+                db_path,
+                sessions: session_command_state,
+                workspace: workspace_command_state,
+                terminals,
+                browser: browser_state,
+                broker: browser_agent_requests,
+                computer: computer_use_state,
+                agent_requests: desktop_agent_requests,
+                coordinator,
+                gateway,
+                mcp_bridge: browser_mcp_bridge,
+                ai_memory,
+                keep_awake,
+                usage_limit,
+                remote,
+                daemon,
+                ..
+            } = host;
             app.manage(workspace_command_state);
-            app.manage(ai_memory_sidecar);
+            app.manage(ai_memory);
             app.manage(CodeRabbitReviewJobsState::default());
-            if let Some(coordinator) = mcp_connect_coordinator {
+            if let Some(coordinator) = coordinator {
                 app.manage(coordinator);
             }
-            if let Some(gateway) = connector_gateway {
+            if let Some(gateway) = gateway {
                 app.manage(gateway);
             }
-            let desktop_agent_requests = desktop_agent_requests::DesktopAgentRequests::new(
-                named_events(app.handle()),
-                browser_agent_requests.clone(),
-                browser_state.clone(),
-                computer_use_state.clone(),
-            );
-            app.manage(desktop_agent_requests.clone());
-            start_embedded_http_server(
-                app,
-                session_command_state.clone(),
-                http_workspace_state,
-                db_path.clone(),
-                desktop_agent_requests,
-            );
-            let usage_limit_state = usage_limit_commands::start(&session_command_state);
-            app.manage(keep_awake_commands::start(
-                app.handle(),
-                &session_command_state,
-                usage_limit_state.scheduler.clone(),
-                &app_data_dir,
-            ));
-            app.manage(usage_limit_state);
+            app.manage(desktop_agent_requests);
+            if let Some(hub) = remote {
+                app.manage(RemoteHubState(hub));
+            }
+            app.manage(keep_awake);
+            app.manage(usage_limit);
             app.manage(session_command_state);
-            let ai_memory_retry_state = app
-                .try_state::<SessionCommandState>()
-                .expect("session command state managed")
-                .inner()
-                .clone();
-            tauri::async_runtime::spawn(async move {
-                loop {
-                    if let Err(error) = ai_memory_retry_state.drain_ai_memory_outbox(8).await {
-                        eprintln!("[DCC] ai-memory outbox drain failed: {error}");
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                }
-            });
-            // Settles delegations whose child finished while nobody was
-            // listening (reload, restart) and enforces their timeout budget.
-            let delegation_watchdog_state = app
-                .try_state::<SessionCommandState>()
-                .expect("session command state managed")
-                .inner()
-                .clone();
-            tauri::async_runtime::spawn(dcc_tauri::delegation_runtime::run_delegation_watchdog(
-                delegation_watchdog_state,
-            ));
             let state = AppState {
-                db_path: Arc::new(db_path.clone()),
+                db_path: Arc::new(db_path),
                 app_data_dir: Arc::new(app_data_dir.clone()),
-                conn: Arc::new(Mutex::new(conn)),
-                terminals: Arc::new(Mutex::new(HashMap::new())),
+                conn: terminals.conn,
+                terminals: terminals.terminals,
                 daemon: Arc::new(DaemonState {
                     started_at: local_now_string(),
                     last_tick_at: Arc::new(Mutex::new(None)),
                     running: Arc::new(AtomicBool::new(true)),
-                    system: Arc::new(Mutex::new(System::new_all())),
+                    system: terminals.system,
                 }),
                 daemon_endpoint: Arc::new(Mutex::new(None)),
             };
-            let app_handle = app.handle().clone();
-            match ensure_sidecar_running(
-                app_handle.path().resource_dir().ok().as_deref(),
-                cfg!(dev),
-                state.db_path.as_ref(),
-                state.app_data_dir.as_ref(),
-            ) {
+            match daemon {
                 Ok(runtime) => {
                     if let Ok(mut endpoint) = state.daemon_endpoint.lock() {
                         *endpoint = Some(runtime);
@@ -6765,8 +5961,7 @@ pub fn run() {
                     eprintln!(
                         "[DCC][daemon] sidecar unavailable, using in-process fallback: {err}"
                     );
-                    let state_for_daemon = state.clone();
-                    start_daemon_worker(app_handle, state_for_daemon);
+                    start_daemon_worker(app.handle().clone(), state.clone());
                 }
             }
             app.manage(state);
@@ -6843,7 +6038,7 @@ pub fn run() {
                 if let Some(browser) = app_handle.try_state::<BrowserState>() {
                     browser_commands::shutdown(&browser);
                 }
-                if let Some(ai_memory) = app_handle.try_state::<AiMemorySidecar>() {
+                if let Some(ai_memory) = app_handle.try_state::<Arc<AiMemorySidecar>>() {
                     ai_memory.shutdown();
                 }
             }

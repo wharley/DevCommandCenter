@@ -1484,6 +1484,16 @@ impl SessionCommandState {
         Self::from_parts(db_path, app_data_dir, Arc::new(NoopEventBus), true)
     }
 
+    /// The app's own state on `event_bus` (its windows' events), recovering
+    /// the turns a previous run left interrupted, like `new`.
+    pub fn new_recovering(
+        db_path: PathBuf,
+        app_data_dir: PathBuf,
+        event_bus: Arc<dyn EventBus>,
+    ) -> Self {
+        Self::from_parts(db_path, app_data_dir, event_bus, true)
+    }
+
     pub fn new_with_event_bus(
         db_path: PathBuf,
         app_data_dir: PathBuf,

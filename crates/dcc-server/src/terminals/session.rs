@@ -489,3 +489,15 @@ pub fn terminal_list_activity(state: &TerminalState) -> ApiResult<Vec<Value>> {
 
     Ok(result)
 }
+
+/// Every shell, when the app quits. Does not emit `terminal-exit`: the
+/// windows are already going away.
+pub fn kill_all(state: &TerminalState, events: &TerminalEvents) {
+    let drained: Vec<(String, ManagedTerminal)> = match state.terminals.lock() {
+        Ok(mut terminals) => terminals.drain().collect(),
+        Err(_) => return,
+    };
+    for (pty_id, terminal) in drained {
+        finalize_managed_terminal_removal(state, events, pty_id, terminal, false);
+    }
+}
