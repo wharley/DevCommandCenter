@@ -45,6 +45,8 @@ pub enum PaletteCommand {
     Usage,
     /// Skills.
     Skills,
+    /// "Abrir onboarding".
+    Onboarding,
     /// The help, on a topic when one was picked.
     Help(Option<&'static str>),
     OpenTask(String),
@@ -208,6 +210,12 @@ fn actions(selected: bool, cx: &App) -> Vec<Action> {
             "commandPalette.keywords.usage",
             None,
             PaletteCommand::Usage,
+        ),
+        action(
+            "commandPalette.openOnboarding",
+            "commandPalette.keywords.onboarding",
+            None,
+            PaletteCommand::Onboarding,
         ),
         action(
             "commandPalette.keyboardShortcuts",

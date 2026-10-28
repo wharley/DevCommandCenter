@@ -58,7 +58,7 @@ fn labels(palette: &Entity<CommandPalette>, cx: &mut VisualTestContext) -> Vec<S
 #[gpui::test]
 fn without_a_task_only_the_global_actions_and_typing_filters(cx: &mut TestAppContext) {
     let (palette, cx, ran) = open(empty_context(), cx);
-    assert_eq!(labels(&palette, cx).len(), 7);
+    assert_eq!(labels(&palette, cx).len(), 8);
     assert!(cx.debug_bounds("command-palette-field").is_some());
     cx.simulate_input("atalhos");
     cx.run_until_parked();
@@ -119,8 +119,8 @@ fn with_a_task_it_lists_commands_tasks_sessions_and_files(cx: &mut TestAppContex
     };
     let (palette, cx, ran) = open(context, cx);
     let found = labels(&palette, cx);
-    // 10 workbench commands + 7 global, 2 tasks, 1 conversation, 1 file.
-    assert_eq!(found.len(), 21, "{found:?}");
+    // 10 workbench commands + 8 global, 2 tasks, 1 conversation, 1 file.
+    assert_eq!(found.len(), 22, "{found:?}");
     assert!(found.contains(&"Abrir detalhes do workspace".to_string()));
     assert!(found.contains(&"Abrir atividade da sessão".to_string()));
     assert!(found.contains(&"Retry no checkout".to_string()));

@@ -16,6 +16,7 @@ pub mod help;
 pub mod merge;
 pub mod new_task;
 pub mod notes;
+pub mod onboarding;
 pub mod open_project;
 pub mod pr_hub;
 pub mod quick_open;

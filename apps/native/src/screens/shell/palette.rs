@@ -140,6 +140,7 @@ impl Shell {
             PaletteCommand::Usage => self.open_usage(cx),
             PaletteCommand::Settings => self.open_settings(None, window, cx),
             PaletteCommand::Skills => self.open_skills(window, cx),
+            PaletteCommand::Onboarding => self.open_onboarding(window, cx),
             PaletteCommand::OpenTask(task) => {
                 self.sidebar
                     .update(cx, |sidebar, cx| sidebar.reveal_task(&task, cx));

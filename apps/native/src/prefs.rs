@@ -35,6 +35,8 @@ pub struct Prefs {
     pub preferred_editor: String,
     /// "Densidade da interface" (`dcc-density`).
     pub density: crate::theme::Density,
+    /// The first-run guide was finished or skipped (`dcc.onboarding.complete`).
+    pub onboarding_complete: bool,
 }
 
 impl Default for Prefs {
@@ -51,6 +53,7 @@ impl Default for Prefs {
             terminal_height: crate::screens::terminal::dock::DEFAULT_HEIGHT,
             preferred_editor: dcc_infra::editor_launch::EDITORS[0].id.to_string(),
             density: crate::theme::Density::Comfortable,
+            onboarding_complete: false,
         }
     }
 }

@@ -22,37 +22,7 @@ pub struct Renaming {
 /// `shell_open_terminal_at_path`: the system's terminal in that folder.
 fn open_system_terminal(cwd: String) {
     std::thread::spawn(move || {
-        use std::process::Command;
-        let path = std::path::Path::new(&cwd);
-        if !path.is_dir() {
-            return;
-        }
-        #[cfg(target_os = "macos")]
-        let _ = Command::new("open")
-            .args(["-a", "Terminal"])
-            .arg(path)
-            .status();
-        #[cfg(target_os = "linux")]
-        for (bin, flag) in [
-            ("x-terminal-emulator", "--working-directory"),
-            ("gnome-terminal", "--working-directory"),
-            ("konsole", "--workdir"),
-            ("xfce4-terminal", "--working-directory"),
-        ] {
-            if Command::new(bin)
-                .arg(flag)
-                .arg(path)
-                .status()
-                .is_ok_and(|status| status.success())
-            {
-                break;
-            }
-        }
-        #[cfg(target_os = "windows")]
-        let _ = Command::new("cmd")
-            .args(["/C", "start", "cmd"])
-            .current_dir(path)
-            .status();
+        let _ = crate::data::system_terminal::open(std::path::Path::new(&cwd));
     });
 }
 

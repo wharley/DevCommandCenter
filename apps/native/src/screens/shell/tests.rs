@@ -782,3 +782,21 @@ fn cmd_shift_n_takes_a_note_and_asks_for_a_project(cx: &mut TestAppContext) {
     assert!(shell.read_with(cx, |shell, cx| shell.notes.read(cx).open));
     assert!(cx.debug_bounds("notes-library").is_some());
 }
+
+#[gpui::test]
+fn finishing_the_onboarding_keeps_it_closed(cx: &mut TestAppContext) {
+    let (shell, cx, dir) = open_shell(cx, Prefs::default());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("onboarding").is_none(),
+        "never on its own under test"
+    );
+    shell.update_in(cx, |shell, window, cx| shell.open_onboarding(window, cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("onboarding").is_some());
+    let bounds = cx.debug_bounds("onboarding-skip").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("onboarding").is_none());
+    assert!(Prefs::load(&dir.path().join("native-ui.json")).onboarding_complete);
+}

@@ -14,6 +14,7 @@ mod help;
 pub mod layout;
 mod merge;
 mod notes;
+mod onboarding;
 mod palette;
 mod quick_open;
 mod regions;
@@ -137,6 +138,8 @@ pub struct Shell {
     skills: Option<skills::OpenSkills>,
     /// "Feedback DCC", while open.
     feedback: Option<feedback::OpenFeedback>,
+    /// The first-run guide, while open.
+    onboarding: Option<onboarding::OpenOnboarding>,
     /// The project notes and their balloons.
     notes: Entity<crate::screens::notes::NotesWorkspace>,
     _notes: Vec<Subscription>,
@@ -276,7 +279,13 @@ impl Shell {
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
         let (notes, notes_follow) = Self::new_notes(&sidebar, &conversation, window, cx);
+        cx.defer_in(window, |shell: &mut Self, window, cx| {
+            if shell.onboarding_on_start() {
+                shell.open_onboarding(window, cx);
+            }
+        });
         Self {
+            onboarding: None,
             notes,
             _notes: notes_follow,
             delivery,
@@ -881,6 +890,7 @@ impl Render for Shell {
             .children(self.help_overlays(cx))
             .child(self.browser_approvals.clone())
             .child(self.computer_approvals.clone())
+            .children(self.onboarding_overlay())
             .children(Toaster::handle(cx))
     }
 }
