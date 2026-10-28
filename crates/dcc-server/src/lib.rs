@@ -7,6 +7,8 @@
 
 pub mod agent_requests;
 pub mod ai_memory_sidecar;
+pub mod command_api;
+pub mod database;
 pub mod daemon_client;
 pub mod daemon_runtime;
 pub mod decision_provider_settings;
@@ -20,3 +22,4 @@ pub mod pairing;
 pub mod prompt_attachments;
 pub mod remote_connector;
 pub mod remote_push;
+pub mod terminals;

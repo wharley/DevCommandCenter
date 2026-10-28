@@ -43,6 +43,7 @@ use dcc_tauri::{
     state::{SessionCommandState, WorkspaceCommandState},
 };
 use dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar;
+use dev_command_center_tauri::command_api::{db_error, iso_now, next_id, ApiError, ApiResult};
 use dev_command_center_tauri::daemon_client::{ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo};
 use dev_command_center_tauri::decision_provider_settings::DecisionProviderSettings;
 use dev_command_center_tauri::embedded_http::EmbeddedHttpServer;
@@ -51,20 +52,23 @@ use dev_command_center_tauri::http_api::{
 };
 use dev_command_center_tauri::http_config::HttpConfig;
 use dev_command_center_tauri::remote_connector::RemoteHub;
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
+use dev_command_center_tauri::terminals::{
+    self, finalize_managed_terminal_removal, load_pane_scrollback_deque,
+    new_terminal_output_buffer, spawn_terminal_reader_thread, terminal_session_json,
+    waiting_excerpt_from_buffer, ManagedTerminal, TerminalEvents, TerminalState,
+};
+#[cfg(windows)]
+use dev_command_center_tauri::terminals::{attach_windows_job_object, windows_job};
 use notify_rust::Notification as DesktopNotification;
 #[cfg(all(unix, not(target_os = "macos")))]
 use notify_rust::NotificationHandle as DesktopNotificationHandle;
-use portable_pty::{native_pty_system, Child as PtyChild, CommandBuilder, MasterPty, PtySize};
-use regex::Regex;
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use rusqlite::{params, params_from_iter, types::ValueRef, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
@@ -73,11 +77,9 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use sysinfo::{Pid, System};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -153,16 +155,7 @@ use workspace_commands::{
     workspace_skip_setup, write_workspace_file,
 };
 
-/// Schema SQLite embutido (`src-tauri/sql/schema.sql`, CREATE IF NOT EXISTS).
-const APP_SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
 const REPO_CONFIG_FILENAME: &str = ".dcc.toml";
-
-// Regex para detectar quando um terminal está esperando input do usuário
-lazy_static::lazy_static! {
-    static ref WAIT_PATTERN: Regex = Regex::new(
-        r"(?i)(trust|workspace\s+trust|permission|approve|confirm|\(y/n\)|\[y/n\]|\by/n\b|press\s+enter|waiting\s+for|allow\s+edit|must\s+be\s+trusted|denied|blocked|requires?\s+your|intervention|open\s+.*\s+to\s+continue|do\s+you\s+want|aguardando|permiss[aã]o|aprovar|confirmar|pressione\s+enter|pressione\s+retorno|deseja\s+continuar|requer\s+sua\s+interven[cç][aã]o)"
-    ).unwrap();
-}
 
 #[derive(Clone)]
 struct AppState {
@@ -380,205 +373,6 @@ struct DesktopNotificationActionEvent {
     body: Option<String>,
 }
 
-/// Últimas N linhas de stdout/stderr por sessão (reidratação do xterm ao remontar).
-const TERMINAL_OUTPUT_MAX_LINES: usize = 1000;
-
-#[cfg(windows)]
-mod windows_job {
-    use std::ffi::c_void;
-    use std::mem::size_of;
-    use std::ptr::null_mut;
-
-    type Handle = *mut c_void;
-
-    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
-    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: u32 = 9;
-
-    const PROCESS_TERMINATE: u32 = 0x0001;
-    const PROCESS_SET_QUOTA: u32 = 0x0100;
-    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
-
-    #[repr(C)]
-    struct IoCounters {
-        read_operation_count: u64,
-        write_operation_count: u64,
-        other_operation_count: u64,
-        read_transfer_count: u64,
-        write_transfer_count: u64,
-        other_transfer_count: u64,
-    }
-
-    #[repr(C)]
-    struct JobObjectBasicLimitInformation {
-        per_process_user_time_limit: i64,
-        per_job_user_time_limit: i64,
-        limit_flags: u32,
-        minimum_working_set_size: usize,
-        maximum_working_set_size: usize,
-        active_process_limit: u32,
-        affinity: usize,
-        priority_class: u32,
-        scheduling_class: u32,
-    }
-
-    #[repr(C)]
-    struct JobObjectExtendedLimitInformation {
-        basic_limit_information: JobObjectBasicLimitInformation,
-        io_counters: IoCounters,
-        process_memory_limit: usize,
-        job_memory_limit: usize,
-        peak_process_memory_used: usize,
-        peak_job_memory_used: usize,
-    }
-
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn CreateJobObjectW(lp_job_attributes: *mut c_void, lp_name: *const u16) -> Handle;
-        fn SetInformationJobObject(
-            h_job: Handle,
-            job_object_info_class: u32,
-            lp_job_object_info: *mut c_void,
-            cb_job_object_info_length: u32,
-        ) -> i32;
-        fn AssignProcessToJobObject(h_job: Handle, h_process: Handle) -> i32;
-        fn TerminateJobObject(h_job: Handle, u_exit_code: u32) -> i32;
-        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32)
-            -> Handle;
-        fn CloseHandle(h_object: Handle) -> i32;
-    }
-
-    pub struct WindowsJobObject {
-        handle: Handle,
-    }
-
-    impl WindowsJobObject {
-        pub fn attach_process(pid: u32) -> Result<Self, String> {
-            unsafe {
-                let handle = CreateJobObjectW(null_mut(), null_mut());
-                if handle.is_null() {
-                    return Err(format!(
-                        "CreateJobObjectW falhou: {}",
-                        std::io::Error::last_os_error()
-                    ));
-                }
-
-                let mut info = JobObjectExtendedLimitInformation {
-                    basic_limit_information: JobObjectBasicLimitInformation {
-                        per_process_user_time_limit: 0,
-                        per_job_user_time_limit: 0,
-                        limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-                        minimum_working_set_size: 0,
-                        maximum_working_set_size: 0,
-                        active_process_limit: 0,
-                        affinity: 0,
-                        priority_class: 0,
-                        scheduling_class: 0,
-                    },
-                    io_counters: IoCounters {
-                        read_operation_count: 0,
-                        write_operation_count: 0,
-                        other_operation_count: 0,
-                        read_transfer_count: 0,
-                        write_transfer_count: 0,
-                        other_transfer_count: 0,
-                    },
-                    process_memory_limit: 0,
-                    job_memory_limit: 0,
-                    peak_process_memory_used: 0,
-                    peak_job_memory_used: 0,
-                };
-
-                if SetInformationJobObject(
-                    handle,
-                    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
-                    &mut info as *mut _ as *mut c_void,
-                    size_of::<JobObjectExtendedLimitInformation>() as u32,
-                ) == 0
-                {
-                    let err = std::io::Error::last_os_error();
-                    let _ = CloseHandle(handle);
-                    return Err(format!("SetInformationJobObject falhou: {err}"));
-                }
-
-                let process = OpenProcess(
-                    PROCESS_TERMINATE | PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION,
-                    0,
-                    pid,
-                );
-                if process.is_null() {
-                    let err = std::io::Error::last_os_error();
-                    let _ = CloseHandle(handle);
-                    return Err(format!("OpenProcess falhou: {err}"));
-                }
-
-                if AssignProcessToJobObject(handle, process) == 0 {
-                    let err = std::io::Error::last_os_error();
-                    let _ = CloseHandle(process);
-                    let _ = CloseHandle(handle);
-                    return Err(format!("AssignProcessToJobObject falhou: {err}"));
-                }
-
-                let _ = CloseHandle(process);
-                Ok(Self { handle })
-            }
-        }
-
-        pub fn terminate(&self, exit_code: u32) -> Result<(), String> {
-            unsafe {
-                if TerminateJobObject(self.handle, exit_code) == 0 {
-                    Err(format!(
-                        "TerminateJobObject falhou: {}",
-                        std::io::Error::last_os_error()
-                    ))
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    impl Drop for WindowsJobObject {
-        fn drop(&mut self) {
-            unsafe {
-                if !self.handle.is_null() {
-                    let _ = CloseHandle(self.handle);
-                    self.handle = null_mut();
-                }
-            }
-        }
-    }
-}
-
-struct ManagedTerminal {
-    pty_master: Box<dyn MasterPty + Send>,
-    child: Box<dyn PtyChild + Send>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    #[cfg(windows)]
-    windows_job: Option<windows_job::WindowsJobObject>,
-    mission_id: Option<String>,
-    pane_id: Option<String>,
-    pty_owner_key: Option<String>,
-    title: Arc<Mutex<Option<String>>>,
-    cwd: String,
-    command: String,
-    args: Vec<String>,
-    started_at: String,
-    stop_flag: Arc<AtomicBool>,
-    exit_notified: Arc<AtomicBool>,
-    /// Buffer circular compartilhado entre as threads de leitura (lock curto só aqui).
-    output_buffer: Arc<Mutex<VecDeque<String>>>,
-    reader_thread: Option<JoinHandle<()>>,
-}
-
-#[cfg(windows)]
-fn attach_windows_job_object(
-    child: &Box<dyn PtyChild + Send>,
-) -> Option<windows_job::WindowsJobObject> {
-    child
-        .process_id()
-        .and_then(|pid| windows_job::WindowsJobObject::attach_process(pid).ok())
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DetectedTerminalAgent {
@@ -618,179 +412,6 @@ struct DaemonHealthSnapshot {
     cpu_percent: f64,
     memory_mb: f64,
     last_metrics_at: String,
-}
-
-fn new_terminal_output_buffer() -> Arc<Mutex<VecDeque<String>>> {
-    Arc::new(Mutex::new(VecDeque::with_capacity(
-        TERMINAL_OUTPUT_MAX_LINES.min(256),
-    )))
-}
-
-#[inline]
-fn append_terminal_line(buffer: &Arc<Mutex<VecDeque<String>>>, line: &str) {
-    if let Ok(mut guard) = buffer.lock() {
-        while guard.len() >= TERMINAL_OUTPUT_MAX_LINES {
-            guard.pop_front();
-        }
-        guard.push_back(line.to_string());
-    }
-}
-
-/// Intervalo mínimo entre escritas do scrollback comprimido no SQLite (evita pressão no WAL).
-const PANE_SCROLLBACK_PERSIST_INTERVAL: Duration = Duration::from_millis(1600);
-
-fn persist_pane_scrollback_compressed(
-    conn: &Connection,
-    pane_id: &str,
-    lines: &[String],
-) -> Result<(), String> {
-    if lines.is_empty() {
-        conn.execute(
-            "DELETE FROM pane_terminal_scrollback WHERE pane_id = ?1",
-            params![pane_id],
-        )
-        .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-    let json = serde_json::to_vec(lines).map_err(|e| e.to_string())?;
-    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
-    enc.write_all(&json).map_err(|e| e.to_string())?;
-    let compressed = enc.finish().map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT INTO pane_terminal_scrollback (pane_id, payload_z, updated_at) VALUES (?1, ?2, datetime('now')) \
-         ON CONFLICT(pane_id) DO UPDATE SET payload_z = excluded.payload_z, updated_at = excluded.updated_at",
-        params![pane_id, compressed],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn load_pane_scrollback_deque(conn: &Connection, pane_id: &str) -> Option<VecDeque<String>> {
-    let blob: Vec<u8> = conn
-        .query_row(
-            "SELECT payload_z FROM pane_terminal_scrollback WHERE pane_id = ?1",
-            params![pane_id],
-            |row| row.get(0),
-        )
-        .ok()?;
-    let mut decoder = GzDecoder::new(&blob[..]);
-    let mut json = Vec::new();
-    decoder.read_to_end(&mut json).ok()?;
-    let lines: Vec<String> = serde_json::from_slice(&json).ok()?;
-    let mut dq = VecDeque::with_capacity(lines.len().min(TERMINAL_OUTPUT_MAX_LINES));
-    for line in lines {
-        while dq.len() >= TERMINAL_OUTPUT_MAX_LINES {
-            dq.pop_front();
-        }
-        dq.push_back(line);
-    }
-    Some(dq)
-}
-
-fn persist_managed_terminal_buffer(state: &AppState, t: &ManagedTerminal) {
-    let Some(ref pane_id) = t.pane_id else {
-        return;
-    };
-    let lines: Vec<String> = t
-        .output_buffer
-        .lock()
-        .ok()
-        .map(|g| g.iter().cloned().collect())
-        .unwrap_or_default();
-    if let Ok(conn) = state.conn.lock() {
-        if let Err(e) = persist_pane_scrollback_compressed(&conn, pane_id, &lines) {
-            eprintln!("[DCC] pane scrollback persist failed: {e}");
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-struct ApiError {
-    code: &'static str,
-    message: String,
-}
-
-type ApiResult<T> = Result<T, ApiError>;
-
-fn db_error(message: impl Into<String>) -> ApiError {
-    ApiError {
-        code: "DB_ERROR",
-        message: message.into(),
-    }
-}
-
-fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
-    let pragma = format!("PRAGMA table_info({table})");
-    let mut stmt = conn.prepare(&pragma).map_err(|e| e.to_string())?;
-    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
-    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
-        let name: String = row.get(1).map_err(|e| e.to_string())?;
-        if name == column {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
-    let mut stmt = conn
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1")
-        .map_err(|e| e.to_string())?;
-    stmt.exists(params![table]).map_err(|e| e.to_string())
-}
-
-fn ensure_column(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    sql_type: &str,
-) -> Result<(), String> {
-    if !table_exists(conn, table)? {
-        return Ok(());
-    }
-    if table_has_column(conn, table, column)? {
-        return Ok(());
-    }
-    let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {sql_type}");
-    conn.execute(&sql, []).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn run_legacy_schema_migrations(conn: &Connection) -> Result<(), String> {
-    // Providers
-    ensure_column(conn, "providers", "api_key_encrypted", "BLOB")?;
-    ensure_column(conn, "providers", "cli_path", "TEXT")?;
-    ensure_column(conn, "providers", "config", "TEXT")?;
-
-    // Projects
-    ensure_column(conn, "projects", "git_remote_url", "TEXT")?;
-    ensure_column(conn, "projects", "repo_config", "TEXT")?;
-    ensure_column(conn, "projects", "last_opened_at", "TEXT")?;
-
-    // Combs
-    ensure_column(conn, "combs", "review_targets", "TEXT")?;
-    ensure_column(conn, "combs", "branch", "TEXT")?;
-    ensure_column(conn, "combs", "worktree_path", "TEXT")?;
-    ensure_column(conn, "combs", "status", "TEXT NOT NULL DEFAULT 'active'")?;
-    ensure_column(conn, "combs", "last_opened_at", "TEXT")?;
-    ensure_column(conn, "combs", "is_pinned", "INTEGER DEFAULT 0")?;
-    ensure_column(conn, "combs", "pinned_at", "TEXT")?;
-    ensure_column(conn, "combs", "last_git_activity_at", "TEXT")?;
-    ensure_column(conn, "combs", "forge_link", "TEXT")?;
-
-    // Panes
-    ensure_column(conn, "panes", "pty_owner_key", "TEXT")?;
-    ensure_column(conn, "panes", "last_activity_at", "TEXT")?;
-
-    Ok(())
-}
-
-fn next_id() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("dcc-{now:x}")
 }
 
 fn repo_config_file_path(project_path: &str) -> PathBuf {
@@ -1320,14 +941,6 @@ fn provider_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "createdAt": created_at,
         "updatedAt": updated_at,
     }))
-}
-
-fn iso_now() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    format!("{secs}")
 }
 
 fn local_now_string() -> String {
@@ -2772,7 +2385,7 @@ fn spawn_terminal_session_with_options(
     }
     let reader_thread = Some(spawn_terminal_reader_thread(
         reader,
-        app.clone(),
+        terminal_events(app),
         pty_id.clone(),
         pane_id_opt.clone(),
         title_state.clone(),
@@ -5805,190 +5418,6 @@ fn db_utils_backup(state: State<'_, AppState>, dest_path: String) -> ApiResult<b
         })
 }
 
-// ---------- Terminal ----------
-#[tauri::command]
-fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) -> ApiResult<Value> {
-    let cwd = options
-        .get("cwd")
-        .and_then(Value::as_str)
-        .ok_or_else(|| db_error("cwd is required"))?;
-    let command = options
-        .get("command")
-        .and_then(Value::as_str)
-        .unwrap_or("bash");
-    let args = options
-        .get("args")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|v| v.as_str().map(str::to_string))
-        .collect::<Vec<_>>();
-
-    let cols = options.get("cols").and_then(Value::as_u64).unwrap_or(80) as u16;
-    let rows = options.get("rows").and_then(Value::as_u64).unwrap_or(24) as u16;
-
-    let pty_system = native_pty_system();
-    let pty_pair = pty_system
-        .openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| db_error(e.to_string()))?;
-
-    let mut cmd = CommandBuilder::new(command);
-    cmd.args(&args);
-    cmd.cwd(cwd);
-    // Alinha o PTY com o que o xterm.js emula; sem TERM adequado, `clear` e escapes podem falhar
-    // quando o app é lançado pela GUI (env mínima).
-    #[cfg(unix)]
-    {
-        cmd.env("TERM", "xterm-256color");
-
-        // Detecta worktree e configura Git corretamente
-        // Worktrees têm um arquivo .git (não diretório) apontando para gitdir
-        let git_file_path = Path::new(cwd).join(".git");
-        if git_file_path.is_file() {
-            // Lê o arquivo .git para obter o gitdir
-            if let Ok(git_content) = std::fs::read_to_string(&git_file_path) {
-                // Formato: "gitdir: /path/to/.git/worktrees/name"
-                if let Some(gitdir_line) = git_content.lines().find(|l| l.starts_with("gitdir:")) {
-                    let gitdir = gitdir_line.trim_start_matches("gitdir:").trim();
-                    // Configura GIT_DIR para apontar para o gitdir do worktree
-                    cmd.env("GIT_DIR", gitdir);
-                    // GIT_WORK_TREE aponta para o diretório de trabalho atual (o worktree)
-                    cmd.env("GIT_WORK_TREE", cwd);
-                }
-            }
-        }
-    }
-
-    let child = pty_pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| db_error(e.to_string()))?;
-    #[cfg(windows)]
-    let windows_job = attach_windows_job_object(&child);
-
-    let reader = pty_pair
-        .master
-        .try_clone_reader()
-        .map_err(|e| db_error(e.to_string()))?;
-    let writer = pty_pair
-        .master
-        .take_writer()
-        .map_err(|e| db_error(e.to_string()))?;
-
-    let pty_id = format!("pty-{}", next_id());
-    let stop_flag = Arc::new(AtomicBool::new(false));
-
-    let pane_id_opt = options
-        .get("paneId")
-        .and_then(Value::as_str)
-        .map(|s| s.to_string());
-    let skip_scrollback_restore = options
-        .get("restart")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let pty_owner_key_opt = options
-        .get("ptyOwnerKey")
-        .and_then(Value::as_str)
-        .map(|s| s.to_string());
-
-    let output_buffer = new_terminal_output_buffer();
-    let title_state = Arc::new(Mutex::new(None));
-    if skip_scrollback_restore {
-        if let Some(ref pid) = pane_id_opt {
-            if let Ok(conn) = state.conn.lock() {
-                let _ = conn.execute(
-                    "DELETE FROM pane_terminal_scrollback WHERE pane_id = ?1",
-                    params![pid],
-                );
-            }
-        }
-    } else if let Some(ref pid) = pane_id_opt {
-        if let Ok(conn) = state.conn.lock() {
-            if let Some(loaded) = load_pane_scrollback_deque(&conn, pid) {
-                if let Ok(mut guard) = output_buffer.lock() {
-                    *guard = loaded;
-                }
-            }
-        }
-    }
-
-    let reader_thread = Some(spawn_terminal_reader_thread(
-        reader,
-        app.clone(),
-        pty_id.clone(),
-        pane_id_opt.clone(),
-        title_state.clone(),
-        stop_flag.clone(),
-        output_buffer.clone(),
-        state.conn.clone(),
-    ));
-
-    if let Some(pane_id) = pane_id_opt.as_ref() {
-        if let Ok(conn) = state.conn.lock() {
-            let _ = conn.execute(
-                "UPDATE panes SET status = 'running', last_activity_at = datetime('now') WHERE id = ?1",
-                params![pane_id],
-            );
-        }
-    }
-
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
-
-    terminals.insert(
-        pty_id.clone(),
-        ManagedTerminal {
-            pty_master: pty_pair.master,
-            child,
-            writer: Arc::new(Mutex::new(writer)),
-            #[cfg(windows)]
-            windows_job,
-            mission_id: None,
-            pane_id: pane_id_opt,
-            pty_owner_key: pty_owner_key_opt,
-            title: title_state,
-            cwd: cwd.to_string(),
-            command: command.to_string(),
-            args,
-            started_at: iso_now(),
-            stop_flag,
-            exit_notified: Arc::new(AtomicBool::new(false)),
-            output_buffer,
-            reader_thread,
-        },
-    );
-
-    Ok(serde_json::json!({ "ptyId": pty_id }))
-}
-
-fn terminal_session_json(pty_id: &str, t: &mut ManagedTerminal) -> Value {
-    let wait = t.child.try_wait().ok().flatten();
-    let (status, exited_at, exit_code) = if let Some(s) = wait {
-        ("exited", Some(iso_now()), Some(s.exit_code()))
-    } else {
-        ("running", None, None)
-    };
-    serde_json::json!({
-      "ptyId": pty_id,
-      "cwd": t.cwd,
-      "command": t.command,
-      "args": t.args,
-      "ptyOwnerKey": t.pty_owner_key,
-      "status": status,
-      "startedAt": t.started_at,
-      "exitedAt": exited_at,
-      "lastExitCode": exit_code
-    })
-}
-
 #[derive(Debug, Clone)]
 struct PaneActivityContext {
     project_id: String,
@@ -6140,213 +5569,6 @@ fn detect_terminal_agent_kind(
         return classify("agent", &label, "pane-type");
     }
 
-    None
-}
-
-fn normalize_terminal_title(raw: &str) -> Option<String> {
-    let stripped = strip_ansi_codes(raw);
-
-    // Remove OSC sequence residues (e.g., "11;rgb:1a1a/1a1a/1a1a")
-    // Pattern: digit(s) followed by semicolon and rgb/hex color data
-    let osc_cleaned = stripped
-        .split_whitespace()
-        .filter(|word| {
-            // Filter out OSC color code patterns like "11;rgb:..." or "10;#..."
-            !word.chars().next().map_or(false, |c| c.is_ascii_digit())
-                || !word.contains(';')
-                || (!word.contains("rgb:") && !word.contains('#'))
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let collapsed = osc_cleaned
-        .chars()
-        .map(|ch| if ch.is_control() { ' ' } else { ch })
-        .collect::<String>();
-    let normalized = collapsed.split_whitespace().collect::<Vec<_>>().join(" ");
-    let trimmed = normalized.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn update_terminal_title_from_bytes(
-    data: &[u8],
-    carry: &mut Vec<u8>,
-    title_state: &Arc<Mutex<Option<String>>>,
-) {
-    let mut bytes = Vec::with_capacity(carry.len() + data.len());
-    bytes.extend_from_slice(carry);
-    bytes.extend_from_slice(data);
-    carry.clear();
-
-    let mut i = 0usize;
-    let mut latest_title: Option<String> = None;
-    while i < bytes.len() {
-        if bytes[i] != 0x1b {
-            i += 1;
-            continue;
-        }
-        if i + 1 >= bytes.len() {
-            carry.extend_from_slice(&bytes[i..]);
-            break;
-        }
-        if bytes[i + 1] != b']' {
-            i += 1;
-            continue;
-        }
-
-        let seq_start = i;
-        i += 2;
-        let kind_start = i;
-        while i < bytes.len() && bytes[i].is_ascii_digit() {
-            i += 1;
-        }
-        if i >= bytes.len() {
-            carry.extend_from_slice(&bytes[seq_start..]);
-            break;
-        }
-        if bytes[i] != b';' {
-            i = seq_start + 1;
-            continue;
-        }
-
-        let kind = std::str::from_utf8(&bytes[kind_start..i]).ok();
-        i += 1;
-        let payload_start = i;
-        let mut terminated_at: Option<usize> = None;
-        while i < bytes.len() {
-            if bytes[i] == 0x07 {
-                terminated_at = Some(i);
-                break;
-            }
-            if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
-                terminated_at = Some(i);
-                break;
-            }
-            i += 1;
-        }
-        let Some(term_idx) = terminated_at else {
-            carry.extend_from_slice(&bytes[seq_start..]);
-            break;
-        };
-
-        if matches!(kind, Some("0") | Some("2")) {
-            if let Ok(raw_title) = std::str::from_utf8(&bytes[payload_start..term_idx]) {
-                if let Some(title) = normalize_terminal_title(raw_title) {
-                    latest_title = Some(title);
-                }
-            }
-        }
-
-        i = if bytes[term_idx] == 0x1b {
-            term_idx + 2
-        } else {
-            term_idx + 1
-        };
-    }
-
-    if let Some(title) = latest_title {
-        if let Ok(mut guard) = title_state.lock() {
-            *guard = Some(title);
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn normalize_terminal_title_collapses_whitespace_and_strips_controls() {
-        let title = normalize_terminal_title("  Claude\tCode  \u{1b}[31m- Dev \u{1b}[0m  ");
-        assert_eq!(title.as_deref(), Some("Claude Code - Dev"));
-    }
-
-    #[test]
-    fn normalize_terminal_title_removes_osc_color_codes() {
-        let title = normalize_terminal_title("service-dashboard git:(main) 11;rgb:1a1a/1a1a/1a1a");
-        assert_eq!(title.as_deref(), Some("service-dashboard git:(main)"));
-    }
-
-    #[test]
-    fn normalize_terminal_title_removes_multiple_osc_patterns() {
-        let title = normalize_terminal_title("myapp 10;#ffffff 11;rgb:0000/0000/0000 test");
-        assert_eq!(title.as_deref(), Some("myapp test"));
-    }
-
-    #[test]
-    fn parses_bel_terminated_osc_title_in_single_chunk() {
-        let title_state = Arc::new(Mutex::new(None));
-        let mut carry = Vec::new();
-        update_terminal_title_from_bytes(b"\x1b]2;Codex - project\x07", &mut carry, &title_state);
-
-        assert!(carry.is_empty());
-        assert_eq!(
-            title_state
-                .lock()
-                .ok()
-                .and_then(|guard| guard.clone())
-                .as_deref(),
-            Some("Codex - project")
-        );
-    }
-
-    #[test]
-    fn parses_st_terminated_osc_title_across_chunks() {
-        let title_state = Arc::new(Mutex::new(None));
-        let mut carry = Vec::new();
-
-        update_terminal_title_from_bytes(b"\x1b]0;Claude ", &mut carry, &title_state);
-        assert!(!carry.is_empty());
-        assert!(title_state
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone())
-            .is_none());
-
-        update_terminal_title_from_bytes(b"Code\x1b\\", &mut carry, &title_state);
-        assert!(carry.is_empty());
-        assert_eq!(
-            title_state
-                .lock()
-                .ok()
-                .and_then(|guard| guard.clone())
-                .as_deref(),
-            Some("Claude Code")
-        );
-    }
-}
-
-fn waiting_excerpt_from_buffer(output_buffer: &Arc<Mutex<VecDeque<String>>>) -> Option<String> {
-    let buffer = output_buffer.lock().ok()?;
-    let tail: String = buffer
-        .iter()
-        .rev()
-        .take(5)
-        .map(|s| s.as_str())
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n");
-    let stripped = strip_ansi_codes(&tail);
-    if WAIT_PATTERN.is_match(&stripped) {
-        return buffer.iter().rev().find(|s| !s.trim().is_empty()).map(|s| {
-            let trimmed = strip_ansi_codes(s).trim().to_string();
-            const MAX_EXCERPT_CHARS: usize = 220;
-            if trimmed.chars().count() > MAX_EXCERPT_CHARS {
-                format!(
-                    "{}…",
-                    trimmed.chars().take(MAX_EXCERPT_CHARS).collect::<String>()
-                )
-            } else {
-                trimmed
-            }
-        });
-    }
     None
 }
 
@@ -6534,250 +5756,23 @@ fn collect_project_agent_activity(state: &AppState, project_id: &str) -> Result<
     }))
 }
 
-/// Verifica se o terminal está aguardando input do usuário
-/// Retorna (needs_attention, excerpt_opcional)
-fn check_needs_attention(
-    data: &str,
-    output_buffer: &Arc<Mutex<VecDeque<String>>>,
-) -> (bool, Option<String>) {
-    // OSC 9;9; protocol (Ghostty)
-    if data.contains("\x1b]9;9;") {
-        return (true, Some("Notification request".to_string()));
+/// The terminals' share of the app state (`dcc-server` runs them).
+fn terminal_state(state: &AppState) -> TerminalState {
+    TerminalState {
+        conn: state.conn.clone(),
+        terminals: state.terminals.clone(),
+        system: state.daemon.system.clone(),
     }
-
-    // Verificar últimas linhas do buffer para padrões de espera
-    if let Ok(buffer) = output_buffer.lock() {
-        // Pegar últimas 5 linhas
-        let tail: String = buffer
-            .iter()
-            .rev()
-            .take(5)
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        // Strip ANSI para análise mais limpa
-        let stripped = strip_ansi_codes(&tail);
-
-        if WAIT_PATTERN.is_match(&stripped) {
-            // Extrair excerpt da última linha não vazia
-            let excerpt = buffer
-                .iter()
-                .rev()
-                .find(|s| !s.trim().is_empty())
-                .map(|s| {
-                    let trimmed = strip_ansi_codes(s).trim().to_string();
-                    const MAX_EXCERPT_CHARS: usize = 220;
-                    if trimmed.chars().count() > MAX_EXCERPT_CHARS {
-                        format!(
-                            "{}…",
-                            trimmed.chars().take(MAX_EXCERPT_CHARS).collect::<String>()
-                        )
-                    } else {
-                        trimmed
-                    }
-                })
-                .unwrap_or_default();
-
-            return (true, Some(excerpt));
-        }
-    }
-
-    (false, None)
 }
 
-/// Remove códigos ANSI básicos para análise de texto
-fn strip_ansi_codes(input: &str) -> String {
-    // This runs for every terminal output batch and activity poll. Compile once,
-    // preserving the exact matching/replacement behavior of the three passes.
-    use std::sync::LazyLock;
-    static RE_SGR: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\x1b\[[\d;?]*[A-Za-z]").unwrap());
-    static RE_OSC1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\][^\x07]*\x07").unwrap());
-    static RE_OSC2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\][^\x1b\\]*\\").unwrap());
-    // Remove SGR sequences: ESC [ ... m
-    let s = RE_SGR.replace_all(input, "");
-
-    // Remove OSC sequences: ESC ] ... BEL or ESC ]... ESC \
-    let s = RE_OSC1.replace_all(&s, "");
-
-    RE_OSC2.replace_all(&s, "").to_string()
+/// The terminals' events, to the webview.
+fn terminal_events(app: &AppHandle) -> TerminalEvents {
+    TerminalEvents(dcc_tauri::app_events::AppEvents::tauri_emitter(app.clone()))
 }
 
-fn spawn_terminal_reader_thread(
-    mut reader: Box<dyn Read + Send>,
-    app: AppHandle,
-    pty_id: String,
-    pane_id: Option<String>,
-    title_state: Arc<Mutex<Option<String>>>,
-    stop_flag: Arc<AtomicBool>,
-    output_buffer: Arc<Mutex<VecDeque<String>>>,
-    conn: Arc<Mutex<Connection>>,
-) -> JoinHandle<()> {
-    /// Batching alinhado a superset-sh (`apps/desktop/src/main/terminal-host/pty-subprocess.ts`):
-    /// ~60fps + limite por frame evita inundar o IPC com micro-chunks e mantém redesenhos de TUI (`\r`, escapes)
-    /// mais coerentes num único `terminal-output` antes do xterm.js — sem alterar o stream final concatenado.
-    const FLUSH_INTERVAL: Duration = Duration::from_millis(16);
-    const MAX_BATCH_BYTES: usize = 128 * 1024;
-
-    thread::spawn(move || {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
-        let last_persist = Arc::new(Mutex::new(
-            Instant::now() - PANE_SCROLLBACK_PERSIST_INTERVAL,
-        ));
-        let mut title_remainder: Vec<u8> = Vec::new();
-
-        let read_thread = thread::spawn(move || {
-            let mut buffer = [0u8; 8192];
-            loop {
-                if stop_flag.load(Ordering::Relaxed) {
-                    break;
-                }
-                match reader.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if tx.send(buffer[..n].to_vec()).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
-
-        let mut pending: Vec<u8> = Vec::new();
-
-        let mut flush_pending = |pending: &mut Vec<u8>| {
-            if pending.is_empty() {
-                return;
-            }
-            update_terminal_title_from_bytes(pending, &mut title_remainder, &title_state);
-            let data = String::from_utf8_lossy(pending).to_string();
-            pending.clear();
-
-            append_terminal_line(&output_buffer, &data);
-
-            if let Some(ref pid) = pane_id {
-                if let Ok(mut lp) = last_persist.lock() {
-                    if lp.elapsed() >= PANE_SCROLLBACK_PERSIST_INTERVAL {
-                        *lp = Instant::now();
-                        let lines: Vec<String> = output_buffer
-                            .lock()
-                            .ok()
-                            .map(|g| g.iter().cloned().collect())
-                            .unwrap_or_default();
-                        if let Ok(c) = conn.lock() {
-                            if let Err(e) = persist_pane_scrollback_compressed(&c, pid, &lines) {
-                                eprintln!("[DCC] pane scrollback persist (throttled): {e}");
-                            }
-                        }
-                    }
-                }
-            }
-
-            let (needs_attention, excerpt) = check_needs_attention(&data, &output_buffer);
-
-            if needs_attention {
-                let excerpt_key = excerpt
-                    .as_ref()
-                    .map(|s| s.chars().take(64).collect::<String>())
-                    .unwrap_or_default();
-                let activity_excerpt = excerpt.clone();
-                let notification_id = format!(
-                    "{}:{}:{}",
-                    pane_id.as_deref().unwrap_or_else(|| pty_id.as_str()),
-                    "needs_input",
-                    excerpt_key
-                );
-                let mut payload = serde_json::json!({
-                    "ptyId": pty_id,
-                    "status": "waiting",
-                    "phase": "needs_input",
-                    "notificationId": notification_id
-                });
-
-                if let Some(ref pid) = pane_id {
-                    payload["paneId"] = serde_json::json!(pid);
-                }
-
-                if let Some(ref exc) = excerpt {
-                    payload["excerpt"] = serde_json::json!(exc);
-                }
-
-                let _ = app.emit("terminal-attention", payload);
-                let mut activity_payload = serde_json::json!({
-                    "ptyId": pty_id,
-                    "status": "waiting"
-                });
-                if let Some(ref pid) = pane_id {
-                    activity_payload["paneId"] = serde_json::json!(pid);
-                }
-                if let Some(exc) = activity_excerpt {
-                    activity_payload["excerpt"] = serde_json::json!(exc);
-                }
-                let _ = app.emit("terminal-activity", activity_payload);
-            }
-
-            let _ = app.emit(
-                "terminal-output",
-                serde_json::json!({
-                  "ptyId": pty_id,
-                  "data": data,
-                  "stream": "stdout"
-                }),
-            );
-            publish_desktop_terminal_event(DesktopTerminalEvent::Output {
-                pty_id: pty_id.clone(),
-                data,
-            });
-        };
-
-        loop {
-            match rx.recv_timeout(FLUSH_INTERVAL) {
-                Ok(chunk) => {
-                    pending.extend_from_slice(&chunk);
-                    while let Ok(more) = rx.try_recv() {
-                        pending.extend_from_slice(&more);
-                        if pending.len() >= MAX_BATCH_BYTES {
-                            flush_pending(&mut pending);
-                        }
-                    }
-                    if pending.len() >= MAX_BATCH_BYTES {
-                        flush_pending(&mut pending);
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if !pending.is_empty() {
-                        flush_pending(&mut pending);
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    if !pending.is_empty() {
-                        flush_pending(&mut pending);
-                    }
-                    break;
-                }
-            }
-        }
-
-        let _ = read_thread.join();
-
-        if let Some(ref pid) = pane_id {
-            let lines: Vec<String> = output_buffer
-                .lock()
-                .ok()
-                .map(|g| g.iter().cloned().collect())
-                .unwrap_or_default();
-            if let Ok(c) = conn.lock() {
-                if let Err(e) = persist_pane_scrollback_compressed(&c, pid, &lines) {
-                    eprintln!("[DCC] pane scrollback persist (final): {e}");
-                }
-            }
-        }
-    })
+#[tauri::command]
+fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) -> ApiResult<Value> {
+    terminals::terminal_spawn(&terminal_state(&state), terminal_events(&app), options)
 }
 
 #[tauri::command]
@@ -6787,67 +5782,37 @@ fn terminal_get_or_create(
     mission_id: String,
     options: Value,
 ) -> ApiResult<Value> {
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
+    terminals::terminal_get_or_create(
+        &terminal_state(&state),
+        terminal_events(&app),
+        mission_id,
+        options,
+    )
+}
 
-    let existing_id = terminals
-        .iter_mut()
-        .find(|(_, t)| t.mission_id.as_deref() == Some(mission_id.as_str()))
-        .map(|(id, _)| id.clone());
+#[tauri::command]
+fn terminal_write(state: State<'_, AppState>, pty_id: String, data: String) -> ApiResult<Value> {
+    terminals::terminal_write(&terminal_state(&state), pty_id, data)
+}
 
-    if let Some(pty_id) = existing_id {
-        if let Some(t) = terminals.get_mut(&pty_id) {
-            let session = terminal_session_json(&pty_id, t);
-            let chunks = t
-                .output_buffer
-                .lock()
-                .map(|buffer| buffer.iter().cloned().collect::<Vec<_>>())
-                .unwrap_or_default();
-            return Ok(serde_json::json!({
-                "ptyId": pty_id,
-                "existing": true,
-                "session": session,
-                "chunks": chunks,
-                "truncated": false
-            }));
-        }
-    }
+#[tauri::command]
+fn terminal_resize(
+    state: State<'_, AppState>,
+    pty_id: String,
+    cols: u16,
+    rows: u16,
+) -> ApiResult<Value> {
+    terminals::terminal_resize(&terminal_state(&state), pty_id, cols, rows)
+}
 
-    // Drop lock before spawn to avoid deadlock or long stalls
-    drop(terminals);
+#[tauri::command]
+fn terminal_kill(state: State<'_, AppState>, app: AppHandle, pty_id: String) -> ApiResult<Value> {
+    terminals::terminal_kill(&terminal_state(&state), terminal_events(&app), pty_id)
+}
 
-    let spawn_result = terminal_spawn(state.clone(), app, options)?;
-    let pty_id = spawn_result
-        .get("ptyId")
-        .and_then(Value::as_str)
-        .unwrap()
-        .to_string();
-
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
-
-    if let Some(t) = terminals.get_mut(&pty_id) {
-        t.mission_id = Some(mission_id);
-        let session = terminal_session_json(&pty_id, t);
-        let chunks = t
-            .output_buffer
-            .lock()
-            .map(|buffer| buffer.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-        return Ok(serde_json::json!({
-            "ptyId": pty_id,
-            "existing": false,
-            "session": session,
-            "chunks": chunks,
-            "truncated": false
-        }));
-    }
-
-    Err(db_error("Failed to re-acquire spawned terminal"))
+#[tauri::command]
+fn terminal_list_activity(state: State<'_, AppState>) -> ApiResult<Vec<Value>> {
+    terminals::terminal_list_activity(&terminal_state(&state))
 }
 
 #[tauri::command]
@@ -6863,64 +5828,6 @@ fn terminal_get_session(state: State<'_, AppState>, mission_id: String) -> ApiRe
         return Ok(terminal_session_json(id, t));
     }
     Ok(Value::Null)
-}
-
-/// Escreve no PTY em pedaços para reduzir EIO/backpressure em colagens grandes (um único `write` enorme).
-const PTY_INPUT_CHUNK_BYTES: usize = 8192;
-
-fn pty_write_all_chunked(writer: &mut dyn Write, data: &[u8]) -> std::io::Result<()> {
-    if data.is_empty() {
-        return Ok(());
-    }
-    for chunk in data.chunks(PTY_INPUT_CHUNK_BYTES) {
-        writer.write_all(chunk)?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn terminal_write(state: State<'_, AppState>, pty_id: String, data: String) -> ApiResult<Value> {
-    let terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
-
-    if let Some(t) = terminals.get(&pty_id) {
-        let mut writer = t
-            .writer
-            .lock()
-            .map_err(|_| db_error("writer lock poisoned"))?;
-        pty_write_all_chunked(&mut *writer, data.as_bytes())
-            .map_err(|e| db_error(e.to_string()))?;
-        return Ok(serde_json::json!({ "ok": true }));
-    }
-    Ok(serde_json::json!({ "ok": false }))
-}
-
-#[tauri::command]
-fn terminal_resize(
-    state: State<'_, AppState>,
-    pty_id: String,
-    cols: u16,
-    rows: u16,
-) -> ApiResult<Value> {
-    let terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
-
-    if let Some(t) = terminals.get(&pty_id) {
-        t.pty_master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| db_error(e.to_string()))?;
-        return Ok(serde_json::json!({ "ok": true }));
-    }
-    Ok(serde_json::json!({ "ok": false }))
 }
 
 /// Envia sinal ao **grupo de processos** ligado ao PTY (Unix: `kill(-pgid, …)`; Windows: Ctrl+C no stream e Job Object para TERM/KILL).
@@ -6991,68 +5898,6 @@ fn send_signal_to_managed_terminal(t: &ManagedTerminal, signal: &str) -> Result<
     }
 }
 
-#[cfg(windows)]
-fn terminate_managed_terminal_tree(t: &ManagedTerminal, force: bool) -> Result<(), String> {
-    if let Some(job) = t.windows_job.as_ref() {
-        if job.terminate(if force { 1 } else { 0 }).is_ok() {
-            return Ok(());
-        }
-    }
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let pid_u = t
-        .child
-        .process_id()
-        .ok_or_else(|| "PID da sessão PTY indisponível".to_string())?;
-    let mut args = vec!["/PID".to_string(), pid_u.to_string(), "/T".to_string()];
-    if force {
-        args.push("/F".to_string());
-    }
-    let status = std::process::Command::new("taskkill")
-        .args(args)
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()
-        .map_err(|e| e.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("taskkill falhou: {status}"))
-    }
-}
-
-#[cfg(not(windows))]
-fn terminate_managed_terminal_tree(_t: &ManagedTerminal, _force: bool) -> Result<(), String> {
-    Ok(())
-}
-
-fn finalize_managed_terminal_removal(
-    state: &AppState,
-    app: &AppHandle,
-    pty_id: String,
-    mut terminal: ManagedTerminal,
-    emit_exit_event: bool,
-) {
-    persist_managed_terminal_buffer(state, &terminal);
-    terminal.stop_flag.store(true, Ordering::Relaxed);
-    let _ = terminate_managed_terminal_tree(&terminal, true);
-    let _ = terminal.child.kill();
-    drop(terminal.pty_master);
-    // Não aguardamos o reader thread aqui. Se ele demorar a encerrar,
-    // o delete ficaria preso e a UI pareceria travada.
-    let _ = terminal.reader_thread.take();
-
-    if emit_exit_event {
-        let _ = app.emit(
-            "terminal-exit",
-            serde_json::json!({ "ptyId": pty_id, "code": -1 }),
-        );
-        publish_desktop_terminal_event(DesktopTerminalEvent::Exit {
-            pty_id,
-            code: Some(-1),
-        });
-    }
-}
-
 /// Drains and terminates every managed PTY. Called on app exit so terminal child
 /// processes never outlive the app (belt-and-suspenders over OS process-tree teardown).
 /// Does not emit `terminal-exit`: the webview is already going away.
@@ -7062,7 +5907,13 @@ fn kill_all_terminals(state: &AppState, app: &AppHandle) {
         Err(_) => return,
     };
     for (pty_id, terminal) in drained {
-        finalize_managed_terminal_removal(state, app, pty_id, terminal, false);
+        finalize_managed_terminal_removal(
+            &terminal_state(state),
+            &terminal_events(app),
+            pty_id,
+            terminal,
+            false,
+        );
     }
 }
 
@@ -7083,23 +5934,6 @@ fn terminal_send_signal(
         Ok(()) => Ok(serde_json::json!({ "ok": true })),
         Err(e) => Ok(serde_json::json!({ "ok": false, "error": e })),
     }
-}
-
-#[tauri::command]
-fn terminal_kill(state: State<'_, AppState>, app: AppHandle, pty_id: String) -> ApiResult<Value> {
-    let terminal = {
-        let mut terminals = state
-            .terminals
-            .lock()
-            .map_err(|_| db_error("terminals lock poisoned"))?;
-        terminals.remove(&pty_id)
-    };
-
-    if let Some(t) = terminal {
-        finalize_managed_terminal_removal(&state, &app, pty_id, t, true);
-        return Ok(serde_json::json!({ "ok": true }));
-    }
-    Ok(serde_json::json!({ "ok": false }))
 }
 
 #[tauri::command]
@@ -7129,7 +5963,13 @@ fn terminal_kill_by_mission_id(
             terminals.remove(&id)
         };
         if let Some(t) = terminal {
-            finalize_managed_terminal_removal(&state, &app, id, t, true);
+            finalize_managed_terminal_removal(
+                &terminal_state(&state),
+                &terminal_events(&app),
+                id,
+                t,
+                true,
+            );
         }
     }
     Ok(serde_json::json!({ "ok": true }))
@@ -7237,7 +6077,13 @@ fn terminal_kill_by_pane_id(
             terminals.remove(&id)
         };
         if let Some(t) = terminal {
-            finalize_managed_terminal_removal(&state, &app, id, t, true);
+            finalize_managed_terminal_removal(
+                &terminal_state(&state),
+                &terminal_events(&app),
+                id,
+                t,
+                true,
+            );
         }
     }
     Ok(serde_json::json!({ "ok": true }))
@@ -7286,90 +6132,6 @@ fn terminal_get_backlog(state: State<'_, AppState>, pty_id: String) -> ApiResult
         return Ok(serde_json::json!({ "lines": lines }));
     }
     Ok(serde_json::json!({ "lines": [] }))
-}
-
-fn process_is_descendant_of(system: &System, pid: Pid, root_pid: Pid) -> bool {
-    let mut current = system.process(pid).and_then(|process| process.parent());
-    for _ in 0..64 {
-        let Some(parent) = current else {
-            return false;
-        };
-        if parent == root_pid {
-            return true;
-        }
-        current = system.process(parent).and_then(|process| process.parent());
-    }
-    false
-}
-
-/// Returns semantic activity for every managed terminal. A live login shell is
-/// `idle`; only a descendant process makes it `running`. This keeps the UI from
-/// presenting an idle shell as active work and lets hidden workspaces surface
-/// real background resource usage.
-#[tauri::command]
-fn terminal_list_activity(state: State<'_, AppState>) -> ApiResult<Vec<Value>> {
-    let mut system = state
-        .daemon
-        .system
-        .lock()
-        .map_err(|_| db_error("system lock poisoned"))?;
-    system.refresh_processes();
-
-    let mut terminals = state
-        .terminals
-        .lock()
-        .map_err(|_| db_error("terminals lock poisoned"))?;
-    let mut result = Vec::with_capacity(terminals.len());
-
-    for (pty_id, terminal) in terminals.iter_mut() {
-        let shell_running = terminal.child.try_wait().ok().flatten().is_none();
-        let shell_pid = terminal.child.process_id().map(Pid::from_u32);
-        let descendants = shell_pid
-            .map(|root_pid| {
-                system
-                    .processes()
-                    .iter()
-                    .filter(|(pid, _)| process_is_descendant_of(&system, **pid, root_pid))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let active_process = descendants
-            .iter()
-            .copied()
-            .find(|(_, process)| {
-                shell_pid.is_some_and(|pid| process.parent() == Some(pid))
-                    && !process.name().trim().is_empty()
-            })
-            .or_else(|| descendants.first().copied());
-        let waiting = shell_running
-            && active_process.is_some()
-            && waiting_excerpt_from_buffer(&terminal.output_buffer).is_some();
-        let status = if !shell_running {
-            "exited"
-        } else if waiting {
-            "waiting"
-        } else if active_process.is_some() {
-            "running"
-        } else {
-            "idle"
-        };
-        let (process_id, process_label) = active_process
-            .map(|(pid, process)| (Some(pid.as_u32()), Some(process.name().to_string())))
-            .unwrap_or((None, None));
-
-        result.push(serde_json::json!({
-            "ptyId": pty_id,
-            "ptyOwnerKey": terminal.pty_owner_key,
-            "cwd": terminal.cwd,
-            "status": status,
-            "processLabel": process_label,
-            "processId": process_id,
-            "startedAt": terminal.started_at
-        }));
-    }
-
-    Ok(result)
 }
 
 #[tauri::command]
@@ -7839,37 +6601,10 @@ pub fn run() {
             };
             appshot_commands::setup(app.handle(), app_data_dir.clone())?;
             let db_path = app_data_dir.join("database.sqlite");
-            let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-            // Before journal_mode: a new file only takes auto_vacuum while empty.
-            dcc_infra::db::limit_storage_growth(&conn).map_err(|e| e.to_string())?;
-            conn.execute_batch(
-                "
-                PRAGMA journal_mode = WAL;
-                PRAGMA synchronous = NORMAL;
-                PRAGMA foreign_keys = ON;
-                PRAGMA busy_timeout = 5000;
-                ",
-            )
-            .map_err(|e| e.to_string())?;
-            run_legacy_schema_migrations(&conn)
-                .map_err(|e| format!("failed to migrate legacy schema: {e}"))?;
-            conn.execute_batch(APP_SCHEMA_SQL)
-                .map_err(|e| format!("failed to apply schema: {e}"))?;
-            SqliteMcpRepo::apply_migrations(&conn)
-                .map_err(|e| format!("failed to apply MCP schema: {e}"))?;
+            let conn = dev_command_center_tauri::database::open_app_database(&db_path)?;
             sync_existing_repo_configs(&conn)
                 .map_err(|e| format!("failed to sync repo configs: {e}"))?;
-            // Once per database: nothing writes yet, so the rewrite cannot
-            // make an agent wait. Later frees go back in slices (worker).
-            match dcc_infra::db::vacuum_into_incremental_mode(&conn) {
-                Ok(Some(outcome)) => eprintln!(
-                    "[DCC] database compacted: {} MB -> {} MB",
-                    outcome.before_bytes / (1024 * 1024),
-                    outcome.after_bytes / (1024 * 1024)
-                ),
-                Ok(None) => {}
-                Err(error) => eprintln!("[DCC] database compaction skipped: {error}"),
-            }
+            dev_command_center_tauri::database::compact_once(&conn);
             eprintln!("[DCC] Database ready at {:?}", db_path);
             delta_compaction_worker::spawn(db_path.clone());
             browser_data::spawn_cache_limit(app.handle().clone());

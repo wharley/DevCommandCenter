@@ -35,6 +35,12 @@ impl AppEvents {
         )
     }
 
+    /// Events by name to the desktop's webview, alone.
+    #[cfg(feature = "tauri")]
+    pub fn tauri_emitter(app: tauri::AppHandle) -> Arc<dyn AppEmitter> {
+        Arc::new(TauriEmitter(app))
+    }
+
     pub fn emit<T: Serialize>(&self, event: &str, payload: T) -> Result<(), String> {
         let payload = serde_json::to_value(payload).map_err(|error| error.to_string())?;
         self.emitter.emit(event, payload)
