@@ -2,8 +2,8 @@
 //! what it runs on; how it is called; its conversations in every project
 //! (opening one goes to that task); the person's extra instructions; and
 //! its role, folded. It reads the sidebar, which reads the agents every few
-//! seconds; "Editar" changes what the person owns, and the Reporter's page
-//! is its recap. The Researcher's new idea comes with the next part.
+//! seconds; "Editar" changes what the person owns, the Reporter's page is
+//! its recap, and the Researcher's starts a new idea.
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, Render, SharedString,
@@ -22,6 +22,7 @@ use crate::theme::{ActiveTheme, Appearance};
 use crate::ui::{Icon, Tracked};
 
 mod editor;
+mod idea;
 mod picker;
 mod recap;
 #[cfg(test)]
@@ -34,6 +35,9 @@ pub enum AgentPageEvent {
     OpenSession { task_id: String, session_id: String },
     /// A task from the Reporter's recap.
     OpenTask(String),
+    /// A new idea's task, on its conversation with the Researcher: the
+    /// composer takes the focus.
+    IdeaStarted { task_id: String, session_id: String },
 }
 
 pub struct AgentPage {
@@ -49,6 +53,10 @@ pub struct AgentPage {
     pub(crate) recap: recap::RecapRead,
     /// The database the recap is read from (tests use their own).
     pub(crate) db_path: std::path::PathBuf,
+    /// "Nova ideia" while it runs.
+    pub(crate) starting_idea: bool,
+    /// The desktop the idea goes through (tests point it elsewhere).
+    pub(crate) api: Option<crate::data::desktop_api::DesktopApi>,
     _sidebar: Subscription,
 }
 
@@ -105,6 +113,12 @@ impl AgentPage {
             cleanup_path: crate::prefs::native_file("cleanup-alert.json"),
             recap: recap::RecapRead::default(),
             db_path: crate::data::loader::database_path(),
+            starting_idea: false,
+            api: if cfg!(test) {
+                None
+            } else {
+                crate::data::desktop_api::DesktopApi::load()
+            },
             _sidebar: observe,
         }
     }
@@ -381,8 +395,8 @@ impl Render for AgentPage {
                             .child(cx.t("agents.page.edit")),
                     ),
             );
-        // The Reporter's page is its recap and the Researcher's opens with a
-        // new idea (both next); the Reviewer is called from a task.
+        // The Reviewer needs a diff, so it is called from a task; the
+        // Researcher is the opposite: an idea starts here.
         let how_to_call = (!chronicler && !researcher).then(|| {
             Self::card(cx)
                 .p(px(20.0))
@@ -401,6 +415,7 @@ impl Render for AgentPage {
                         .child(cx.t("agents.page.howToCallReviewer")),
                 )
         });
+        let new_idea = researcher.then(|| self.new_idea_card(cx));
         let sessions = (!chronicler).then(|| self.sessions(&data, cx));
         // The Reporter has no conversations: its page is the recap.
         let recap = chronicler.then(|| self.recap_card(&data, cx));
@@ -489,6 +504,7 @@ impl Render for AgentPage {
                     .py(px(32.0))
                     .child(header)
                     .children(recap)
+                    .children(new_idea)
                     .children(how_to_call)
                     .children(sessions)
                     .children(extra)

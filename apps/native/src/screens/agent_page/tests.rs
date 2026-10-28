@@ -289,3 +289,111 @@ fn weekday_times_read_like_intl() {
     let en = crate::data::time::weekday_time(&value, true);
     assert!(en.ends_with("AM") || en.ends_with("PM"), "{en}");
 }
+
+#[gpui::test]
+fn the_researcher_starts_an_idea_with_its_conversation(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let (port, desktop) = fake_desktop_routes(vec![
+        (
+            "/api/v1/research/ideas",
+            200,
+            r#"{"rootPath":"/home/ana/dcc-ideias/ideia-1","createdAt":"x"}"#.into(),
+        ),
+        (
+            "/api/v1/workspaces",
+            200,
+            r#"{"workspaceId":"w-idea","setupReport":{"status":"pending","steps":[],"message":null},"setupHints":[]}"#
+                .into(),
+        ),
+        ("/api/v1/sessions/start", 200, r#"{"session":{"id":"s-idea"}}"#.into()),
+        ("/api/v1/sessions/s-idea/agent", 200, r#"{"ok":true}"#.into()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("a-2".into(), sidebar, composer, cx)
+    });
+    cx.run_until_parked();
+    let researcher = AgentRecord {
+        name: "Pesquisador".into(),
+        provider_id: Some("codex".into()),
+        ..agent("a-2", "researcher", Vec::new())
+    };
+    page.update(cx, |page, cx| {
+        page.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
+        let mut providers = dcc_providers::offline_catalog().providers;
+        for provider in &mut providers {
+            provider.enabled = true;
+        }
+        page.composer.update(cx, |composer, _| {
+            composer.catalog = Some(std::sync::Arc::new(providers))
+        });
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![researcher],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-new-idea").is_some());
+    assert!(cx.debug_bounds("agent-session-0").is_none());
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = events.clone();
+    page.update(cx, |_, cx| {
+        cx.subscribe_self(move |_, event: &AgentPageEvent, _| {
+            if let AgentPageEvent::IdeaStarted {
+                task_id,
+                session_id,
+            } = event
+            {
+                sink.borrow_mut().push(format!("{task_id} {session_id}"));
+            }
+        })
+        .detach();
+    });
+    let bounds = cx.debug_bounds("agent-new-idea-start").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    cx.run_until_parked();
+    assert_eq!(events.borrow().as_slice(), ["w-idea s-idea"]);
+    let body = |index: usize| serde_json::from_str::<serde_json::Value>(&seen[index].1).unwrap();
+    let workspace = body(1);
+    assert_eq!(workspace["workspaceRoot"], "/home/ana/dcc-ideias/ideia-1");
+    assert_eq!(workspace["isolationMode"], "localDirect");
+    assert_eq!(workspace["name"], serde_json::Value::Null);
+    assert!(
+        workspace["projectId"]
+            .as_str()
+            .unwrap()
+            .starts_with("ideia-1-")
+    );
+    assert_eq!(body(2)["providerId"], "codex");
+    assert_eq!(body(2)["title"], "Pesquisador");
+    assert_eq!(body(3)["agentId"], "a-2");
+    assert_eq!(seen.len(), 4, "no kickoff turn");
+}
+
+#[test]
+fn an_idea_keeps_its_folder_name_with_the_time() {
+    assert_eq!(
+        super::idea::idea_project_id("/home/ana/dcc-ideias/Ideia X", 35),
+        format!(
+            "{}-z",
+            dcc_core::application::linked_task::infer_project_id_from_workspace_root(
+                "/home/ana/dcc-ideias/Ideia X"
+            )
+        )
+    );
+}

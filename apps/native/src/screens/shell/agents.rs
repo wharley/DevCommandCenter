@@ -35,6 +35,17 @@ impl Shell {
                         });
                         shell.show(Surface::Conversation, cx);
                     }
+                    AgentPageEvent::IdeaStarted {
+                        task_id,
+                        session_id,
+                    } => {
+                        let (task_id, session_id) = (task_id.clone(), session_id.clone());
+                        shell.conversation.update(cx, |conversation, cx| {
+                            conversation.open(&task_id, Some(session_id), cx);
+                            conversation.focus_composer_soon(cx);
+                        });
+                        shell.show(Surface::Conversation, cx);
+                    }
                     AgentPageEvent::OpenTask(task_id) => {
                         let task_id = task_id.clone();
                         shell
