@@ -181,6 +181,26 @@ impl ConversationView {
         self.task_id.as_deref()
     }
 
+    /// Where a note comes from: the task's project, the task, the
+    /// conversation and its title (else the task's name).
+    pub fn note_source(&self) -> Option<(Option<String>, String, Option<String>, String)> {
+        let data = self.data.as_ref()?;
+        let title = data
+            .session_id
+            .as_ref()
+            .and_then(|id| data.sessions.iter().find(|row| &row.id == id))
+            .map(|row| row.title.clone())
+            .filter(|title| !title.is_empty())
+            .or_else(|| data.workspace_name.clone())
+            .unwrap_or_default();
+        Some((
+            data.project_id.clone(),
+            data.task_id.clone(),
+            data.session_id.clone(),
+            title,
+        ))
+    }
+
     /// Another conversation of the open task (a child's, from its card).
     pub(crate) fn open_session(&mut self, session_id: String, cx: &mut Context<Self>) {
         if let Some(task_id) = self.task_id.clone() {

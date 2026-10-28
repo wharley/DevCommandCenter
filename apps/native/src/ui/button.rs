@@ -51,6 +51,8 @@ pub struct Button {
     height: Option<f32>,
     text_size: Option<f32>,
     padding: Option<f32>,
+    /// `rounded-*` over the theme's.
+    radius: Option<f32>,
     /// `w-full justify-start`
     stretch: bool,
     children: SmallVec<[AnyElement; 2]>,
@@ -71,6 +73,7 @@ impl Button {
             height: None,
             text_size: None,
             padding: None,
+            radius: None,
             stretch: false,
             children: SmallVec::new(),
             on_click: None,
@@ -121,6 +124,12 @@ impl Button {
     /// `px-*` over the size's own.
     pub fn padding_x(mut self, padding: f32) -> Self {
         self.padding = Some(padding);
+        self
+    }
+
+    /// A radius of its own (`rounded-[12px]`).
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.radius = Some(radius);
         self
     }
 
@@ -246,7 +255,7 @@ impl RenderOnce for Button {
             .h(px(height))
             .when_some(width, |button, width| button.w(px(width)))
             .px(px(padding))
-            .rounded(theme.radius.lg)
+            .rounded(self.radius.map(px).unwrap_or(theme.radius.lg))
             .border_1()
             .border_color(border.unwrap_or(gpui::transparent_black()))
             .text_size(px(text_size))

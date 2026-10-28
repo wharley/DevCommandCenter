@@ -13,6 +13,7 @@ mod feedback;
 mod help;
 pub mod layout;
 mod merge;
+mod notes;
 mod palette;
 mod quick_open;
 mod regions;
@@ -133,6 +134,8 @@ pub struct Shell {
     skills: Option<skills::OpenSkills>,
     /// "Feedback DCC", while open.
     feedback: Option<feedback::OpenFeedback>,
+    /// The project notes, once "Anotações" opened.
+    notes: Option<Entity<crate::screens::notes::NotesWorkspace>>,
     /// "DCC Usage", while open.
     usage: Option<usage::OpenUsage>,
     /// The command palette (⌘K), while open.
@@ -282,6 +285,7 @@ impl Shell {
             palette: None,
             usage: None,
             feedback: None,
+            notes: None,
             skills: None,
             settings: None,
             terminal,
@@ -862,6 +866,7 @@ impl Render for Shell {
             .children(self.settings_overlay())
             .children(self.skills_overlay())
             .children(self.feedback_overlay())
+            .children(self.notes_overlay())
             .children(self.usage_overlay())
             .children(self.palette_overlay())
             .children(self.file_finder_overlay())
