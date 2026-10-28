@@ -14,7 +14,6 @@ use dcc_tauri::commands::mcp_commands::{
 };
 use dcc_tauri::connector_gateway::ConnectorGateway;
 use dcc_tauri::mcp_connect::McpConnectCoordinator;
-use tauri::Manager;
 
 fn reply<T: Serialize>(result: Result<T, String>) -> Result<Json<Value>, HttpApiError> {
     let value = result.map_err(HttpApiError::bad_request)?;
@@ -23,24 +22,15 @@ fn reply<T: Serialize>(result: Result<T, String>) -> Result<Json<Value>, HttpApi
         .map_err(|error| HttpApiError::internal(error.to_string()))
 }
 
-fn app(backend: &HttpBackend) -> Result<tauri::AppHandle, HttpApiError> {
-    backend
+fn connectors(
+    backend: &HttpBackend,
+) -> Result<(McpConnectCoordinator, ConnectorGateway), HttpApiError> {
+    let app = backend
         .app
         .get()
-        .cloned()
-        .ok_or_else(|| HttpApiError::not_found("connectors are not available"))
-}
-
-fn coordinator(
-    app: &tauri::AppHandle,
-) -> Result<tauri::State<'_, McpConnectCoordinator>, HttpApiError> {
-    app.try_state::<McpConnectCoordinator>()
+        .ok_or_else(|| HttpApiError::not_found("connectors are not available"))?;
+    app.connectors()
         .ok_or_else(|| HttpApiError::not_found("connector sign-in is not available"))
-}
-
-fn gateway(app: &tauri::AppHandle) -> Result<tauri::State<'_, ConnectorGateway>, HttpApiError> {
-    app.try_state::<ConnectorGateway>()
-        .ok_or_else(|| HttpApiError::not_found("the connector gateway is not available"))
 }
 
 pub(super) async fn list(
@@ -81,8 +71,7 @@ pub(super) async fn start_connect(
     State(backend): State<Arc<HttpBackend>>,
     Json(input): Json<StartMcpConnectInput>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let app = app(&backend)?;
-    let coordinator = coordinator(&app)?;
+    let (coordinator, _) = connectors(&backend)?;
     reply(commands::start_mcp_connect_with(&backend.workspace, &coordinator, input).await)
 }
 
@@ -91,8 +80,7 @@ pub(super) async fn wait_connect(
     State(backend): State<Arc<HttpBackend>>,
     Json(input): Json<McpConnectLoginInput>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let app = app(&backend)?;
-    let (coordinator, gateway) = (coordinator(&app)?, gateway(&app)?);
+    let (coordinator, gateway) = connectors(&backend)?;
     reply(commands::wait_mcp_connect_with(&coordinator, &gateway, input).await)
 }
 
@@ -100,8 +88,7 @@ pub(super) async fn cancel_connect(
     State(backend): State<Arc<HttpBackend>>,
     Json(input): Json<McpConnectLoginInput>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let app = app(&backend)?;
-    let coordinator = coordinator(&app)?;
+    let (coordinator, _) = connectors(&backend)?;
     reply(commands::cancel_mcp_connect_with(&coordinator, input).await)
 }
 
@@ -109,8 +96,7 @@ pub(super) async fn disconnect(
     State(backend): State<Arc<HttpBackend>>,
     Json(input): Json<DisconnectMcpConnectorInput>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let app = app(&backend)?;
-    let coordinator = coordinator(&app)?;
+    let (coordinator, _) = connectors(&backend)?;
     reply(commands::disconnect_mcp_connector_with(&backend.workspace, &coordinator, input).await)
 }
 
@@ -118,8 +104,7 @@ pub(super) async fn test(
     State(backend): State<Arc<HttpBackend>>,
     Json(input): Json<TestMcpIntegrationInput>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let app = app(&backend)?;
-    let gateway = gateway(&app)?;
+    let (_, gateway) = connectors(&backend)?;
     reply(commands::test_mcp_integration_with(&backend.workspace, &gateway, input).await)
 }
 

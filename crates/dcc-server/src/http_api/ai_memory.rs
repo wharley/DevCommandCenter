@@ -4,7 +4,6 @@
 //! sources (pin, correct, ignore, clear) and the sidecar's mode. They run
 //! the desktop's own commands.
 use super::*;
-use crate::ai_memory_sidecar::AiMemorySidecar;
 use dcc_tauri::commands::session_commands::{self as commands, AiMemorySourceActionInput};
 
 fn reply<T: Serialize>(result: Result<T, String>) -> Result<Json<Value>, HttpApiError> {
@@ -61,12 +60,7 @@ pub(super) async fn save_source_action(
 pub(super) async fn sidecar_status(
     State(backend): State<Arc<HttpBackend>>,
 ) -> Result<Json<Value>, HttpApiError> {
-    use tauri::Manager;
-    let status = backend
-        .app
-        .get()
-        .and_then(|app| app.try_state::<AiMemorySidecar>())
-        .map(|sidecar| sidecar.status());
+    let status = backend.app.get().and_then(|app| app.ai_memory_status());
     Ok(Json(match status {
         Some(status) => serde_json::to_value(status)
             .map_err(|error| HttpApiError::internal(error.to_string()))?,

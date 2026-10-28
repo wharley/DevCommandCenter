@@ -11528,8 +11528,7 @@ pub async fn workspace_git_branch_diff_with_state(
 
 
 /// Immediate child directories of `path` (absolute paths), sorted.
-#[cfg(feature = "tauri")]
-#[tauri::command]
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn list_child_directories(
     input: ListChildDirectoriesInput,
 ) -> Result<ListChildDirectoriesOutput, String> {

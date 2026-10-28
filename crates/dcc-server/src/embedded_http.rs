@@ -62,7 +62,7 @@ impl EmbeddedHttpServer {
             .await
             .map_err(|error| format!("could not listen on {addr}: {error}"))?;
         let app = self.router.clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             let served = axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<SocketAddr>(),

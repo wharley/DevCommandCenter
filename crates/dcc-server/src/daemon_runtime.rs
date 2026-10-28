@@ -22,7 +22,7 @@ pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// daemon writes apart from a stale one left by a previous daemon.
 pub const LAUNCH_ID_ENV: &str = "DCC_DAEMON_LAUNCH_ID";
 
-const APP_SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
+const APP_SCHEMA_SQL: &str = include_str!("../../../src-tauri/sql/schema.sql");
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

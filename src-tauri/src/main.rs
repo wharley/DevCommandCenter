@@ -3858,7 +3858,7 @@ fn start_embedded_http_server(
             .with_desktop_keep_awake(Arc::new(HttpKeepAwake(app.handle().clone())))
             .with_desktop_menu_bar(Arc::new(HttpMenuBar(app.handle().clone())))
             .with_desktop_shortcuts(Arc::new(HttpShortcuts(app.handle().clone())))
-            .with_app(app.handle().clone()),
+            .with_app(Arc::new(HttpApp(app.handle().clone()))),
         Err(error) => {
             eprintln!("[DCC HTTP] not started: {error}");
             return;
@@ -4237,6 +4237,42 @@ impl dev_command_center_tauri::http_api::DesktopMenuBar for HttpMenuBar {
     fn snapshot(&self) -> Result<Value, String> {
         let snapshot = menu_bar::read_snapshot(&self.0)?;
         serde_json::to_value(snapshot).map_err(|error| error.to_string())
+    }
+}
+
+/// The Tauri app the API runs in: a task's events reach its webview; the
+/// connectors, the ai-memory sidecar and restarting are its own.
+struct HttpApp(AppHandle);
+
+impl dev_command_center_tauri::http_api::DesktopApp for HttpApp {
+    fn events(&self) -> dcc_tauri::app_events::AppEvents {
+        dcc_tauri::app_events::AppEvents::tauri(self.0.clone())
+    }
+
+    fn connectors(
+        &self,
+    ) -> Option<(
+        dcc_tauri::mcp_connect::McpConnectCoordinator,
+        dcc_tauri::connector_gateway::ConnectorGateway,
+    )> {
+        let coordinator = self
+            .0
+            .try_state::<dcc_tauri::mcp_connect::McpConnectCoordinator>()?;
+        let gateway = self
+            .0
+            .try_state::<dcc_tauri::connector_gateway::ConnectorGateway>()?;
+        Some((coordinator.inner().clone(), gateway.inner().clone()))
+    }
+
+    fn ai_memory_status(
+        &self,
+    ) -> Option<dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecarStatus> {
+        let sidecar = self.0.try_state::<AiMemorySidecar>()?;
+        Some(sidecar.status())
+    }
+
+    fn restart(&self) {
+        self.0.restart();
     }
 }
 
@@ -7791,7 +7827,10 @@ pub fn run() {
             ) {
                 eprintln!("[DCC][decision-provider] persisted settings unavailable: {error}");
             }
-            let ai_memory_sidecar = match AiMemorySidecar::start(app.handle(), &app_data_dir) {
+            let ai_memory_sidecar = match AiMemorySidecar::start(
+                app.path().resource_dir().ok().as_deref(),
+                &app_data_dir,
+            ) {
                 Ok(sidecar) => sidecar,
                 Err(error) => {
                     eprintln!("[DCC][ai-memory] sidecar unavailable: {error}");
@@ -7996,7 +8035,8 @@ pub fn run() {
             };
             let app_handle = app.handle().clone();
             match ensure_sidecar_running(
-                &app_handle,
+                app_handle.path().resource_dir().ok().as_deref(),
+                cfg!(dev),
                 state.db_path.as_ref(),
                 state.app_data_dir.as_ref(),
             ) {

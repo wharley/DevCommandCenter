@@ -1021,6 +1021,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "dcc-server"
+version = "0.1.99"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "dcc-core",
+ "dcc-infra",
+ "dcc-providers",
+ "dcc-remote",
+ "dcc-tauri",
+ "futures-util",
+ "hex",
+ "libc",
+ "portable-pty",
+ "rand 0.8.6",
+ "reqwest 0.11.27",
+ "rusqlite",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "sysinfo",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "toml 0.8.2",
+ "tower 0.4.13",
+ "tower-http 0.5.2",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "dcc-tauri"
 version = "0.0.0"
 dependencies = [
@@ -1103,6 +1142,7 @@ dependencies = [
  "dcc-infra",
  "dcc-providers",
  "dcc-remote",
+ "dcc-server",
  "dcc-tauri",
  "flate2",
  "futures-util",

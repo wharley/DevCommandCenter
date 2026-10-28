@@ -67,6 +67,7 @@ mod computer_bridge;
 mod decision_provider;
 mod delegation_review;
 mod delivery;
+mod desktop_app;
 mod files;
 mod forge;
 mod git_changes;
@@ -91,6 +92,7 @@ pub use browser_bridge::{
 };
 pub use browser_opens::native_browser_opens;
 pub use computer_bridge::{native_computer, DesktopComputer};
+pub use desktop_app::DesktopApp;
 pub use keep_awake::DesktopKeepAwake;
 pub use menu_bar::DesktopMenuBar;
 pub use shortcuts::native_quick_composer;
@@ -264,9 +266,9 @@ pub struct HttpBackend {
     /// The relay connector serving this router, for the operator routes and
     /// to drop a revoked phone at once. Weak: the hub holds the router.
     remote: OnceLock<std::sync::Weak<RemoteHub>>,
-    /// The desktop app, inside it: creating a task runs the desktop's own
-    /// creation (its events reach the desktop's window).
-    app: OnceLock<tauri::AppHandle>,
+    /// The app the server runs in: a task's events, the connectors, the
+    /// ai-memory sidecar and restarting (`DesktopApp`).
+    app: OnceLock<Arc<dyn DesktopApp>>,
 }
 
 impl HttpBackend {
@@ -333,7 +335,7 @@ impl HttpBackend {
     }
 
     /// The desktop app the server runs in (task creation needs it).
-    pub fn with_app(self, app: tauri::AppHandle) -> Self {
+    pub fn with_app(self, app: Arc<dyn DesktopApp>) -> Self {
         let _ = self.app.set(app);
         self
     }
@@ -3143,8 +3145,7 @@ fn desktop_app(backend: &HttpBackend) -> Result<dcc_tauri::app_events::AppEvents
     backend
         .app
         .get()
-        .cloned()
-        .map(dcc_tauri::app_events::AppEvents::tauri)
+        .map(|app| app.events())
         .ok_or_else(|| HttpApiError::service_unavailable("creating a task needs the desktop app"))
 }
 
@@ -3701,7 +3702,7 @@ mod tests {
         let root_path = std::fs::canonicalize(root.path()).unwrap();
         let db_path = root_path.join("state.sqlite");
         let conn = rusqlite::Connection::open(&db_path).unwrap();
-        conn.execute_batch(include_str!("../sql/schema.sql"))
+        conn.execute_batch(include_str!("../../../src-tauri/sql/schema.sql"))
             .unwrap();
         crate::pairing::ensure_pairing_schema(&conn).unwrap();
         let config = Arc::new(RwLock::new(HttpConfig {

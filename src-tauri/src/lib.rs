@@ -1,18 +1,3 @@
-// The HTTP API's endpoint index is one `json!` literal past the default depth.
-#![recursion_limit = "256"]
-
-pub mod agent_requests;
-pub mod ai_memory_sidecar;
-pub mod daemon_client;
-pub mod daemon_runtime;
-pub mod decision_provider_settings;
-pub mod embedded_http;
-pub mod http_api;
-pub mod http_auth;
-pub mod http_config;
-pub mod http_rpc_handler;
-pub mod keep_awake;
-pub mod pairing;
-pub mod prompt_attachments;
-pub mod remote_connector;
-pub mod remote_push;
+//! The desktop's backend lives in `dcc-server` (no Tauri), so the native app
+//! can host the same one; the desktop and its binaries reach it here.
+pub use dcc_server::*;

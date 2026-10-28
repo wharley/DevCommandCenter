@@ -13,7 +13,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
 
 use dcc_core::{
     domain::mcp::McpSecretReferenceId,
@@ -222,7 +221,8 @@ impl AiMemorySidecar {
         })
     }
 
-    pub fn start(app: &AppHandle, app_data_dir: &Path) -> Result<Self, String> {
+    /// `resource_dir`: where the bundle keeps the `ai-memory` binary.
+    pub fn start(resource_dir: Option<&Path>, app_data_dir: &Path) -> Result<Self, String> {
         let release_default = !cfg!(debug_assertions) && !env_truthy("DCC_AI_MEMORY_DISABLE");
         if !env_truthy("DCC_AI_MEMORY_AUTO_START") && !release_default {
             return Ok(Self::disabled());
@@ -275,7 +275,7 @@ impl AiMemorySidecar {
                 }
             }
         }
-        let binary = locate_binary(app)?;
+        let binary = locate_binary(resource_dir)?;
         fs::create_dir_all(&data_dir).map_err(|error| {
             format!(
                 "could not create ai-memory data directory {}: {error}",
@@ -661,12 +661,12 @@ fn env_truthy(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn locate_binary(app: &AppHandle) -> Result<PathBuf, String> {
+fn locate_binary(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("DCC_AI_MEMORY_BIN") {
         candidates.push(PathBuf::from(path));
     }
-    if let Ok(resource_dir) = app.path().resource_dir() {
+    if let Some(resource_dir) = resource_dir {
         candidates.push(resource_dir.join("ai-memory"));
         candidates.push(resource_dir.join("ai-memory-aarch64-apple-darwin"));
         candidates.push(resource_dir.join("ai-memory-x86_64-apple-darwin"));

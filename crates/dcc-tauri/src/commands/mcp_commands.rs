@@ -673,8 +673,7 @@ pub struct ImportNativeMcpServersOutput {
 const MAX_IMPORTED_SERVERS: usize = 64;
 
 /// Remote servers in Claude Code, Codex and Cursor (read-only).
-#[cfg(feature = "tauri")]
-#[tauri::command]
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn list_native_mcp_servers() -> Result<ListNativeMcpServersOutput, String> {
     let found = tokio::task::spawn_blocking(crate::native_connectors::discover_importable)
         .await

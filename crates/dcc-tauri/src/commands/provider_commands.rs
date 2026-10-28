@@ -354,8 +354,7 @@ pub async fn sign_in_provider_account_for_state(
     }
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn cancel_provider_account_sign_in(
     input: ProviderAccountStatusInput,
 ) -> Result<(), String> {

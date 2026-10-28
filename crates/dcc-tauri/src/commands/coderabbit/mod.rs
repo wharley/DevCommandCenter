@@ -456,8 +456,7 @@ pub async fn workspace_coderabbit_cli_status(
     .map_err(|error| error.to_string())?
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workspace_coderabbit_logout(
     input: WorkspaceCodeRabbitLogoutInput,
 ) -> Result<WorkspaceCodeRabbitLogoutOutput, String> {

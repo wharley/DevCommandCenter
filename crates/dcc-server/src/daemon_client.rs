@@ -8,7 +8,6 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use sysinfo::System;
-use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +103,7 @@ fn open_connection(db_path: &Path) -> Result<Connection, String> {
 }
 
 fn ensure_schema(conn: &Connection) -> Result<(), String> {
-    let schema = include_str!("../sql/schema.sql");
+    let schema = include_str!("../../../src-tauri/sql/schema.sql");
     conn.execute_batch(schema).map_err(|e| e.to_string())
 }
 
@@ -163,15 +162,17 @@ pub fn write_runtime_info(app_data_dir: &Path, info: &DaemonRuntimeInfo) -> Resu
     fs::write(path, raw).map_err(|e| e.to_string())
 }
 
-fn locate_sidecar_binary(app: &AppHandle) -> Option<PathBuf> {
-    if cfg!(dev) {
+/// `dev`: a dev build runs dccd through `cargo run`; `resource_dir`: where
+/// the bundle keeps its sidecars.
+fn locate_sidecar_binary(resource_dir: Option<&Path>, dev: bool) -> Option<PathBuf> {
+    if dev {
         return None;
     }
 
     let mut candidates = Vec::new();
     let binary_names = sidecar_binary_candidates();
 
-    if let Ok(resource_dir) = app.path().resource_dir() {
+    if let Some(resource_dir) = resource_dir {
         for name in &binary_names {
             candidates.push(resource_dir.join(name));
         }
@@ -408,7 +409,7 @@ pub fn sidecar_command(binary: Option<PathBuf>) -> Command {
     }
     let mut cargo = Command::new("cargo");
     cargo
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../src-tauri"))
         .env(
             "CARGO_TARGET_DIR",
             std::env::temp_dir().join("dcc-sidecar-target"),
@@ -418,7 +419,8 @@ pub fn sidecar_command(binary: Option<PathBuf>) -> Command {
 }
 
 pub fn ensure_sidecar_running(
-    app: &AppHandle,
+    resource_dir: Option<&Path>,
+    dev: bool,
     db_path: &Path,
     app_data_dir: &Path,
 ) -> Result<DaemonRuntimeInfo, String> {
@@ -429,7 +431,7 @@ pub fn ensure_sidecar_running(
         Some(DAEMON_VERSION),
         db_path,
         app_data_dir,
-        sidecar_command(locate_sidecar_binary(app)),
+        sidecar_command(locate_sidecar_binary(resource_dir, dev)),
     )
 }
 
