@@ -45,6 +45,7 @@ pub mod model_picker;
 pub mod open_project;
 pub mod plan_checklist;
 pub mod pr_hub;
+pub mod pr_review;
 pub mod project_logo;
 pub mod prompt;
 pub mod provider_accounts;

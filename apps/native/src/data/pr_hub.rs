@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::desktop_api::{ApiError, DesktopApi};
+use super::pr_review::{File, InlineComment, ReviewCapabilities};
 
 /// `PullRequestHubActor`
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -102,10 +103,10 @@ pub struct Detail {
     pub checks: Vec<Check>,
     /// GitHub only.
     pub merge_capabilities: Option<MergeCapabilities>,
-    /// The rest (files, inline comments, capabilities) for the code tab and
-    /// the merge.
-    #[serde(flatten)]
-    pub rest: serde_json::Map<String, Value>,
+    /// With `includeCode`: the files and their patches.
+    pub files: Vec<File>,
+    pub inline_comments: Vec<InlineComment>,
+    pub review_capabilities: Option<ReviewCapabilities>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -3,9 +3,11 @@
 //! chosen one on the right — open its task or "Trabalhar nisto", open it on
 //! the forge — and its summary (branch, facts, description, checks,
 //! activity) with a comment box. Under 780px only one side shows, with
-//! "Voltar". A GitHub pull request merges from here, after a confirmation.
-//! The code tab and the Reviewer come next.
+//! "Voltar". A GitHub pull request merges from here, after a confirmation;
+//! its code tab reads the patches and sends a review. The Reviewer comes
+//! next.
 
+mod code;
 mod detail;
 mod list;
 mod merge;
@@ -58,6 +60,10 @@ pub struct PrHub {
     pub(crate) pending_merge: Option<&'static str>,
     pub(crate) merging: bool,
     pub(crate) merge_error: Option<String>,
+    pub(crate) tab: code::Tab,
+    /// The code tab's read, with the patches.
+    pub(crate) code_detail: Option<DetailRead>,
+    pub(crate) review: code::CodeReview,
     /// The hub's width, measured as it paints.
     pub(crate) width: Rc<Cell<f32>>,
     _inputs: Vec<Subscription>,
@@ -78,7 +84,8 @@ impl PrHub {
         let search = cx.new(|cx| TextInput::new(window, cx).with_placeholder(placeholder));
         let comment_placeholder = cx.t("pullRequests.commentPlaceholder");
         let comment = cx.new(|cx| TextArea::new(window, cx).with_placeholder(comment_placeholder));
-        let inputs = vec![
+        let (review, review_inputs) = code::CodeReview::new(window, cx);
+        let mut inputs = vec![
             cx.subscribe(&search, |hub, _, event, cx| {
                 if matches!(event, TextInputEvent::Changed) {
                     hub.follow_selection(cx);
@@ -92,6 +99,7 @@ impl PrHub {
                 _ => {}
             }),
         ];
+        inputs.extend(review_inputs);
         let mut hub = Self {
             api: if cfg!(test) { None } else { DesktopApi::load() },
             list: None,
@@ -108,6 +116,9 @@ impl PrHub {
             pending_merge: None,
             merging: false,
             merge_error: None,
+            tab: code::Tab::Summary,
+            code_detail: None,
+            review,
             width: Rc::new(Cell::new(1200.0)),
             _inputs: inputs,
         };
@@ -191,6 +202,8 @@ impl PrHub {
 
     /// The selected one's detail, read again after 20s.
     pub(crate) fn ensure_detail(&mut self, cx: &mut Context<Self>) {
+        self.sync_review(cx);
+        self.ensure_code_detail(cx);
         let Some(item) = self.selected_item(cx) else {
             return;
         };

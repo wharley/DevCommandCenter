@@ -9,7 +9,13 @@ use super::{PrHub, PrHubEvent};
 use crate::data::desktop_api::DesktopApi;
 use crate::theme::{Theme, ThemePreference};
 
-fn item(id: &str, number: u32, title: &str, reviewing: bool, mine: bool) -> serde_json::Value {
+pub(super) fn item(
+    id: &str,
+    number: u32,
+    title: &str,
+    reviewing: bool,
+    mine: bool,
+) -> serde_json::Value {
     json!({
         "id": id, "provider": "github", "host": "github.com", "repositoryId": "r", "projectId": "p-1",
         "repositoryName": "acme/app", "repositoryRoot": "/repo", "forgeLogin": "ana",

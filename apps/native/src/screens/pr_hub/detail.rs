@@ -1,5 +1,5 @@
 //! The chosen pull request (`dcc-pr-detail`): "Voltar" when narrow, the
-//! summary tab, "Abrir tarefa" or "Trabalhar nisto", open on the forge, the
+//! Resumo | Código tabs, "Abrir tarefa" or "Trabalhar nisto", open on the forge, the
 //! title and who opened it; then the summary — branch → base, reviewers,
 //! comments and checks, the description, the checks one by one, the
 //! activity in markdown — and the comment box at the foot.
@@ -7,6 +7,7 @@
 use gpui::{AnyElement, Context, FontWeight, SharedString, Window, div, prelude::*, px};
 
 use super::PrHub;
+use super::code::Tab;
 use super::list::{author_avatar, check_icon};
 use crate::data::pr_hub::relative_date;
 use crate::i18n::{I18n, Locale, Translate};
@@ -50,6 +51,41 @@ fn summary_card(title: SharedString, body: AnyElement, cx: &gpui::App) -> AnyEle
 }
 
 impl PrHub {
+    /// A segment of "Resumo | Código".
+    fn tab_button(&self, tab: Tab, label: &str, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors.clone();
+        let chosen = self.tab == tab;
+        let selector = format!(
+            "pr-tab-{}",
+            if tab == Tab::Code { "code" } else { "summary" }
+        );
+        div()
+            .id(SharedString::from(selector.clone()))
+            .debug_selector(move || selector)
+            .rounded(px(6.0))
+            .border_1()
+            .px(px(11.0))
+            .py(px(5.0))
+            .text_size(px(11.0))
+            .font_weight(FontWeight::MEDIUM)
+            .cursor_pointer()
+            .map(|button| {
+                if chosen {
+                    button
+                        .bg(colors.background)
+                        .shadow_sm()
+                        .border_color(colors.border.opacity(0.7))
+                } else {
+                    button
+                        .border_color(gpui::transparent_black())
+                        .text_color(colors.muted_foreground)
+                }
+            })
+            .on_click(cx.listener(move |hub, _, _, cx| hub.set_tab(tab, cx)))
+            .child(cx.t(label))
+            .into_any_element()
+    }
+
     pub(super) fn detail_column(
         &mut self,
         window: &mut Window,
@@ -129,19 +165,10 @@ impl PrHub {
                             .rounded(px(8.0))
                             .bg(colors.muted.opacity(0.5))
                             .p(px(4.0))
-                            .child(
-                                div()
-                                    .rounded(px(6.0))
-                                    .px(px(12.0))
-                                    .py(px(6.0))
-                                    .text_size(px(11.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .bg(colors.background)
-                                    .shadow_sm()
-                                    .border_1()
-                                    .border_color(colors.border.opacity(0.7))
-                                    .child(cx.t("pullRequests.tabs.summary")),
-                            ),
+                            .children([
+                                self.tab_button(Tab::Summary, "pullRequests.tabs.summary", cx),
+                                self.tab_button(Tab::Code, "pullRequests.tabs.code", cx),
+                            ]),
                     )
                     .child(
                         div()
@@ -500,8 +527,17 @@ impl PrHub {
             .min_w_0()
             .h_full()
             .child(header)
-            .child(summary)
-            .child(footer)
+            .map(|column| match self.tab {
+                Tab::Summary => column.child(summary).child(footer),
+                Tab::Code => column.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_h_0()
+                        .child(self.code_tab(&item, window, cx)),
+                ),
+            })
             .children(self.merge_dialog(cx))
             .into_any_element()
     }

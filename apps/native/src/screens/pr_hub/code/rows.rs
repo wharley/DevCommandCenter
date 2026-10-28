@@ -1,0 +1,552 @@
+//! A patch's rows (`DiffRow`): the hunk headers, the lines with their
+//! numbers and the + to comment on one, the conversations on the line
+//! (reply, resolve), the comment drafted there, and the card that writes
+//! it. The code moves sideways under the wheel; the conversations stay put,
+//! as the desktop keeps them `sticky` at the left.
+
+use gpui::{AnyElement, BoxShadow, Context, FontWeight, Hsla, div, point, prelude::*, px};
+
+use crate::data::pr_review::{DraftComment, File, InlineComment, PatchRow, RowKind, draft_key};
+use crate::i18n::{Args, Translate};
+use crate::screens::pr_hub::PrHub;
+use crate::theme::color::mix_lab;
+use crate::theme::tailwind as tw;
+use crate::theme::{ActiveTheme, Appearance, fonts};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tracked, surface_edge};
+
+/// `leading-6`
+pub(super) const LINE: f32 = 24.0;
+pub(super) const CODE_SIZE: f32 = 11.0;
+const LINE_GROUP: &str = "pr-code-line";
+
+fn dark(cx: &gpui::App) -> bool {
+    cx.theme().appearance == Appearance::Dark
+}
+
+/// `dcc-code-inline-thread`: 12px in, 14px padding, 520px at most.
+fn thread_card(width: f32, cx: &gpui::App) -> gpui::Div {
+    div()
+        .m(px(12.0))
+        .w(px(520.0_f32.min(width - 24.0).max(0.0)))
+        .p(px(14.0))
+        .border_1()
+        .border_color(surface_edge(cx.theme()))
+        .rounded(px(14.0))
+        .bg(cx.theme().colors.card)
+}
+
+/// `dcc-code-line-plus`
+fn line_plus(id: String, cx: &mut Context<PrHub>) -> gpui::Stateful<gpui::Div> {
+    let colors = &cx.theme().colors;
+    let calm = colors.accent_calm;
+    let background = colors.background;
+    let selector = id.clone();
+    div()
+        .id(gpui::SharedString::from(id))
+        .debug_selector(move || selector)
+        .flex()
+        .size(px(20.0))
+        .items_center()
+        .justify_center()
+        .rounded(px(7.0))
+        .border_1()
+        .border_color(mix_lab(calm, 0.35, colors.border))
+        .bg(colors.popover)
+        .text_color(calm)
+        .shadow(vec![BoxShadow {
+            color: gpui::black().opacity(0x18 as f32 / 255.0),
+            offset: point(px(0.0), px(2.0)),
+            blur_radius: px(6.0),
+            spread_radius: px(0.0),
+            inset: false,
+        }])
+        .cursor_pointer()
+        .opacity(0.0)
+        .group_hover(LINE_GROUP, |style| style.opacity(1.0))
+        .hover(move |style| style.bg(calm).text_color(background))
+        .child(Icon::new("plus").size(14.0).stroke(2.2))
+}
+
+impl PrHub {
+    /// Every row of `file`'s patch, with what hangs under each line.
+    pub(super) fn patch_rows(
+        &self,
+        file: &File,
+        rows: &[PatchRow],
+        comments: &[InlineComment],
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let colors = cx.theme().colors.clone();
+        let dark = dark(cx);
+        let mut out = Vec::with_capacity(rows.len());
+        for (index, row) in rows.iter().enumerate() {
+            match row.kind {
+                RowKind::Hunk => {
+                    let sky = tw::SKY_500.hsla();
+                    out.push(
+                        div()
+                            .border_y_1()
+                            .border_color(sky.opacity(0.15))
+                            .bg(sky.opacity(0.07))
+                            .px(px(12.0))
+                            .py(px(4.0))
+                            .font_family(fonts::MONO)
+                            .text_size(px(10.0))
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_color(if dark {
+                                tw::SKY_400.hsla()
+                            } else {
+                                tw::SKY_600.hsla()
+                            })
+                            .child(row.content.clone())
+                            .into_any_element(),
+                    );
+                    continue;
+                }
+                RowKind::Meta => {
+                    out.push(
+                        div()
+                            .px(px(12.0))
+                            .py(px(8.0))
+                            .font_family(fonts::MONO)
+                            .text_size(px(10.0))
+                            .italic()
+                            .text_color(colors.muted_foreground)
+                            .child(if row.content.is_empty() {
+                                " ".to_string()
+                            } else {
+                                row.content.clone()
+                            })
+                            .into_any_element(),
+                    );
+                    continue;
+                }
+                _ => {}
+            }
+            out.push(self.code_line(file, row, index, cx));
+            let Some((line, side)) = row.review else {
+                continue;
+            };
+            let key = draft_key(&file.path, line, side);
+            for comment in comments.iter().filter(|comment| {
+                comment.path == file.path
+                    && comment.line == Some(line)
+                    && comment.side.as_deref() == Some(side)
+            }) {
+                out.push(self.thread(comment, width, cx));
+            }
+            if let Some(draft) = self.review.drafts.iter().find(|draft| draft.key() == key) {
+                out.push(self.draft_card(draft, width, cx));
+            }
+            if self.review.editing.as_deref() == Some(key.as_str()) {
+                out.push(self.line_editor(&file.path, line, side, width, cx));
+            }
+        }
+        out
+    }
+
+    /// `grid-cols-[28px_42px_42px_1fr]`: the +, the old and new numbers, the code.
+    fn code_line(
+        &self,
+        file: &File,
+        row: &PatchRow,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = cx.theme().colors.clone();
+        let edge = colors.border.opacity(0.3);
+        let (green, red) = (tw::EMERALD_500.hsla(), tw::RED_500.hsla());
+        let number = |value: Option<u32>| {
+            div()
+                .w(px(42.0))
+                .flex_none()
+                .border_r_1()
+                .border_color(edge)
+                .px(px(8.0))
+                .flex()
+                .justify_end()
+                .text_color(colors.muted_foreground.opacity(0.6))
+                .child(value.map(|value| value.to_string()).unwrap_or_default())
+        };
+        let plus = row.review.map(|(line, side)| {
+            let path = file.path.clone();
+            line_plus(format!("pr-line-plus-{index}"), cx)
+                .on_click(cx.listener(move |hub, _, window, cx| {
+                    hub.start_line_comment(&path, line, side, window, cx)
+                }))
+                .into_any_element()
+        });
+        let (marker, marker_color): (&str, Option<Hsla>) = match row.kind {
+            RowKind::Addition => ("+", Some(green)),
+            RowKind::Deletion => ("−", Some(red)),
+            _ => (" ", None),
+        };
+        div()
+            .group(LINE_GROUP)
+            .flex()
+            .min_h(px(LINE))
+            .border_b_1()
+            .border_color(colors.border.opacity(0.25))
+            .font_family(fonts::MONO)
+            .text_size(px(CODE_SIZE))
+            .line_height(px(LINE))
+            .when(row.kind == RowKind::Addition, |line| {
+                line.bg(green.opacity(0.08))
+            })
+            .when(row.kind == RowKind::Deletion, |line| {
+                line.bg(red.opacity(0.08))
+            })
+            .child(
+                div()
+                    .w(px(28.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .border_r_1()
+                    .border_color(edge)
+                    .children(plus),
+            )
+            .child(number(row.old))
+            .child(number(row.new))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .px(px(8.0))
+                    .child(
+                        div()
+                            .flex()
+                            .ml(px(-self.review.scroll_x))
+                            .whitespace_nowrap()
+                            .text_color(colors.foreground.opacity(0.9))
+                            .child(
+                                div()
+                                    .mr(px(8.0))
+                                    .when_some(marker_color, |marker, color| {
+                                        marker.text_color(color)
+                                    })
+                                    .child(marker),
+                            )
+                            .child(row.content.clone()),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// A conversation's comment, with Responder and Resolver.
+    fn thread(&self, comment: &InlineComment, width: f32, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors.clone();
+        let green = tw::EMERALD_500.hsla();
+        let id = comment.id.clone();
+        let login = comment
+            .author
+            .as_ref()
+            .map(|actor| actor.login.clone())
+            .unwrap_or_else(|| cx.t("pullRequests.unknownAuthor").to_string());
+        let replying = self.review.replying_to.as_deref() == Some(id.as_str());
+        let actions = comment.thread_id.as_ref().map(|_| {
+            let reply_to = id.clone();
+            let toggled = comment.clone();
+            div()
+                .mt(px(8.0))
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(6.0))
+                .child(
+                    Button::new(gpui::SharedString::from(format!("pr-thread-reply-{id}")))
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::Xs)
+                        .text_size(12.0)
+                        .on_click(cx.listener(move |hub, _, window, cx| {
+                            hub.start_reply(reply_to.clone(), window, cx)
+                        }))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .child(Icon::new("reply").size(12.0))
+                                .child(cx.t("pullRequests.code.reply")),
+                        ),
+                )
+                .child(
+                    Button::new(gpui::SharedString::from(format!("pr-thread-resolve-{id}")))
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::Xs)
+                        .text_size(12.0)
+                        .on_click(cx.listener(move |hub, _, _, cx| {
+                            hub.toggle_resolved(toggled.clone(), cx)
+                        }))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .child(Icon::new("check").size(12.0))
+                                .child(cx.t(if comment.resolved == Some(true) {
+                                    "pullRequests.code.reopenThread"
+                                } else {
+                                    "pullRequests.code.resolveThread"
+                                })),
+                        ),
+                )
+        });
+        let reply_box = replying.then(|| {
+            let empty = self.review.reply.read(cx).text().trim().is_empty();
+            let sent = comment.clone();
+            div()
+                .mt(px(8.0))
+                .rounded(px(8.0))
+                .border_1()
+                .border_color(colors.border)
+                .bg(colors.background.opacity(0.7))
+                .p(px(8.0))
+                .child(
+                    div()
+                        .debug_selector(|| "pr-thread-reply-field".into())
+                        .min_h(px(64.0))
+                        .text_size(px(11.0))
+                        .child(self.review.reply.clone()),
+                )
+                .child(
+                    div()
+                        .mt(px(12.0))
+                        .flex()
+                        .flex_wrap()
+                        .justify_end()
+                        .gap(px(8.0))
+                        .child(
+                            Button::new("pr-thread-reply-cancel")
+                                .variant(ButtonVariant::Ghost)
+                                .size(ButtonSize::Xs)
+                                .text_size(12.0)
+                                .on_click(cx.listener(|hub, _, _, cx| hub.cancel_reply(cx)))
+                                .child(cx.t("pullRequests.code.cancel")),
+                        )
+                        .child(
+                            Button::new("pr-thread-reply-send")
+                                .size(ButtonSize::Xs)
+                                .text_size(12.0)
+                                .disabled(empty || self.review.replying)
+                                .on_click(cx.listener(move |hub, _, _, cx| {
+                                    hub.send_reply(sent.clone(), cx)
+                                }))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(4.0))
+                                        .child(Icon::new("send").size(12.0))
+                                        .child(cx.t("pullRequests.code.publishReply")),
+                                ),
+                        ),
+                )
+        });
+        let selector = format!("pr-thread-{id}");
+        thread_card(width, cx)
+            .debug_selector(move || selector)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_size(px(10.0))
+                    .text_color(colors.muted_foreground)
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(colors.foreground)
+                            .child(format!("@{login}")),
+                    )
+                    .when(comment.resolved == Some(true), |header| {
+                        header.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .text_color(green)
+                                .child(Icon::new("check").size(12.0))
+                                .child(cx.t("pullRequests.code.resolved")),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .mt(px(6.0))
+                    .text_size(px(11.0))
+                    .line_height(px(16.0))
+                    .child(comment.body.clone()),
+            )
+            .children(actions)
+            .children(reply_box)
+            .into_any_element()
+    }
+
+    /// "Comentário pendente", with its trash.
+    fn draft_card(&self, draft: &DraftComment, width: f32, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors.clone();
+        let idea = colors.accent_idea;
+        let amber = if dark(cx) {
+            tw::AMBER_400.hsla()
+        } else {
+            tw::AMBER_600.hsla()
+        };
+        let key = draft.key();
+        let selector = format!("pr-draft-{key}");
+        thread_card(width, cx)
+            .debug_selector(move || selector)
+            .border_color(mix_lab(idea, 0.30, colors.border))
+            .bg(mix_lab(idea, 0.04, colors.card))
+            .flex()
+            .items_start()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(amber)
+                            .child(Tracked::new(
+                                cx.t("pullRequests.code.pendingComment").to_uppercase(),
+                                9.0,
+                                0.12,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .mt(px(4.0))
+                            .text_size(px(11.0))
+                            .line_height(px(16.0))
+                            .child(draft.body.clone()),
+                    ),
+            )
+            .child(
+                Button::new(gpui::SharedString::from(format!("pr-draft-remove-{key}")))
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::IconXs)
+                    .on_click(cx.listener(move |hub, _, _, cx| hub.remove_draft(&key, cx)))
+                    .child(Icon::new("trash-2").size(14.0)),
+            )
+            .into_any_element()
+    }
+
+    /// `dcc-code-annotation dcc-code-inline-card`: the comment on a line.
+    fn line_editor(
+        &self,
+        path: &str,
+        line: u32,
+        side: &'static str,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = cx.theme().colors.clone();
+        let calm = colors.accent_calm;
+        let empty = self.review.draft.read(cx).text().trim().is_empty();
+        let shadow = |alpha: f32, y: f32, blur: f32| BoxShadow {
+            color: gpui::black().opacity(alpha),
+            offset: point(px(0.0), px(y)),
+            blur_radius: px(blur),
+            spread_radius: px(0.0),
+            inset: false,
+        };
+        let saved = path.to_string();
+        div()
+            .debug_selector(|| "pr-line-editor".into())
+            .m(px(12.0))
+            .w(px(396.0_f32.min(width - 24.0).max(0.0)))
+            .p(px(14.0))
+            .border_1()
+            .border_color(surface_edge(cx.theme()))
+            .rounded(px(18.0))
+            .bg(colors.popover)
+            .text_color(colors.popover_foreground)
+            .shadow(vec![shadow(0.16, 24.0, 80.0), shadow(0.06, 4.0, 14.0)])
+            .child(
+                div()
+                    .mb(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_none()
+                            .size(px(32.0))
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(11.0))
+                            .bg(calm.opacity(0.12))
+                            .text_color(calm)
+                            .child(Icon::new("message-square-plus").size(15.0)),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .child(div().font_weight(FontWeight::SEMIBOLD).child(Tracked::new(
+                                cx.t_with(
+                                    "pullRequests.code.addInlineComment",
+                                    &Args::default().with("line", line.to_string()),
+                                ),
+                                13.0,
+                                -0.015,
+                            )))
+                            .child(
+                                div()
+                                    .font_family(fonts::MONO)
+                                    .text_size(px(10.0))
+                                    .line_height(gpui::relative(1.5))
+                                    .text_color(colors.muted_foreground)
+                                    .child(path.to_string()),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "pr-line-editor-field".into())
+                    .min_h(px(88.0))
+                    .rounded(px(12.0))
+                    .border_1()
+                    .border_color(surface_edge(cx.theme()))
+                    .bg(colors.background)
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .text_size(px(12.0))
+                    .line_height(gpui::relative(1.6))
+                    .child(self.review.draft.clone()),
+            )
+            .child(
+                div()
+                    .mt(px(12.0))
+                    .flex()
+                    .flex_wrap()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .child(
+                        Button::new("pr-line-cancel")
+                            .variant(ButtonVariant::Ghost)
+                            .size(ButtonSize::Xs)
+                            .text_size(11.0)
+                            .on_click(cx.listener(|hub, _, _, cx| hub.cancel_line_comment(cx)))
+                            .child(cx.t("pullRequests.code.cancel")),
+                    )
+                    .child(
+                        Button::new("pr-line-save")
+                            .size(ButtonSize::Xs)
+                            .text_size(11.0)
+                            .disabled(empty)
+                            .on_click(cx.listener(move |hub, _, _, cx| {
+                                hub.save_line_comment(&saved, line, side, cx)
+                            }))
+                            .child(cx.t("pullRequests.code.addToReview")),
+                    ),
+            )
+            .into_any_element()
+    }
+}

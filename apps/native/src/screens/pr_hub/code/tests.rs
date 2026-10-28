@@ -1,0 +1,167 @@
+//! The code tab against a fake desktop: the files and the patch, a comment
+//! drafted on a line, a reply on a conversation's first comment, resolving
+//! it, and the review sent with the draft.
+
+use gpui::{Modifiers, TestAppContext, WindowAppearance, px, size};
+use serde_json::json;
+
+use crate::data::desktop_api::DesktopApi;
+use crate::data::pr_review::ReviewEvent;
+use crate::screens::pr_hub::PrHub;
+use crate::screens::pr_hub::code::Tab;
+use crate::screens::pr_hub::tests::item;
+use crate::theme::{Theme, ThemePreference};
+
+#[gpui::test]
+fn the_code_tab_drafts_replies_resolves_and_sends(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let detail = json!({
+        "body": null, "comments": [], "checks": [],
+        "files": [
+            { "path": "src/login.rs", "status": "modified", "additions": 2, "deletions": 1,
+              "patch": "@@ -1,2 +1,3 @@\n fn login() {\n-    old();\n+    new();\n+    more();" },
+            { "path": "README.md", "status": "added", "additions": 1, "deletions": 0, "patch": null },
+        ],
+        "inlineComments": [
+            { "id": "c-1", "threadId": "t-1", "path": "src/login.rs", "line": 2, "side": "right",
+              "body": "Por que new?", "author": { "login": "bob" }, "resolved": false },
+            { "id": "c-2", "threadId": "t-1", "path": "src/login.rs", "line": 2, "side": "right",
+              "body": "Explico.", "author": { "login": "ana" }, "resolved": false },
+        ],
+        "reviewCapabilities": { "inlineComments": true, "approve": true, "requestChanges": true,
+            "replyToThreads": true, "resolveThreads": true },
+        "mergeCapabilities": null,
+    })
+    .to_string();
+    let detail_route = || ("/api/v1/pull-request-hub/detail", 200, detail.clone());
+    let sent = json!({ "submitted": true, "url": null, "submittedCommentCount": 1,
+        "bodySubmitted": false, "decisionSubmitted": true, "warning": null })
+    .to_string();
+    let (port, desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list.clone()),
+        detail_route(),
+        detail_route(),
+        (
+            "/api/v1/pull-request-hub/reply-thread",
+            200,
+            r#"{"submitted":true}"#.into(),
+        ),
+        detail_route(),
+        (
+            "/api/v1/pull-request-hub/resolve-thread",
+            200,
+            r#"{"resolved":true}"#.into(),
+        ),
+        detail_route(),
+        ("/api/v1/pull-request-hub/submit-review", 200, sent),
+        detail_route(),
+        detail_route(),
+        ("/api/v1/pull-request-hub/list", 200, list),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1400.0), px(900.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    let bounds = cx.debug_bounds("pr-tab-code").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(hub.read_with(cx, |hub, _| hub.tab), Tab::Code);
+    assert!(cx.debug_bounds("pr-code-files").is_some());
+    assert!(cx.debug_bounds("pr-file-1").is_some(), "both files");
+    assert!(cx.debug_bounds("pr-review-footer").is_some());
+    assert!(
+        cx.debug_bounds("pr-thread-c-1").is_some(),
+        "the conversation on line 2"
+    );
+    // A comment on the deleted line (row 2: the hunk, then the context).
+    let bounds = cx.debug_bounds("pr-line-plus-2").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-line-editor").is_some());
+    hub.update(cx, |hub, cx| {
+        let draft = hub.review.draft.clone();
+        draft.update(cx, |area, cx| area.set_text("  Nit: nome  ", cx));
+    });
+    let bounds = cx.debug_bounds("pr-line-save").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-line-editor").is_none());
+    assert!(cx.debug_bounds("pr-draft-src/login.rs:left:2").is_some());
+    assert!(cx.debug_bounds("pr-review-pending").is_some());
+    // A reply on the second comment goes to the conversation's first.
+    let bounds = cx.debug_bounds("pr-thread-reply-c-2").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-thread-reply-field").is_some());
+    hub.update(cx, |hub, cx| {
+        let reply = hub.review.reply.clone();
+        reply.update(cx, |area, cx| area.set_text("Valeu", cx));
+    });
+    let bounds = cx.debug_bounds("pr-thread-reply-send").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-thread-reply-field").is_none());
+    let bounds = cx.debug_bounds("pr-thread-resolve-c-1").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    // Approve, with the draft.
+    let bounds = cx.debug_bounds("pr-review-event-approve").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(
+        hub.read_with(cx, |hub, _| hub.review.event),
+        ReviewEvent::Approve
+    );
+    let bounds = cx.debug_bounds("pr-review-send").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    cx.run_until_parked();
+    let (drafts, event, submitted) = hub.read_with(cx, |hub, _| {
+        (
+            hub.review.drafts.len(),
+            hub.review.event,
+            hub.review.submitted,
+        )
+    });
+    assert_eq!((drafts, event, submitted), (0, ReviewEvent::Comment, true));
+    assert!(cx.debug_bounds("pr-review-pending").is_none());
+    let body = |path: &str| {
+        let (_, body) = seen
+            .iter()
+            .find(|(request, _)| request.ends_with(path))
+            .unwrap();
+        serde_json::from_str::<serde_json::Value>(body).unwrap()
+    };
+    let reply = body("/reply-thread");
+    assert_eq!(reply["commentId"], "c-1");
+    assert_eq!(reply["threadId"], "t-1");
+    assert_eq!(reply["body"], "Valeu");
+    let resolve = body("/resolve-thread");
+    assert_eq!(
+        (resolve["threadId"].as_str(), resolve["resolved"].as_bool()),
+        (Some("t-1"), Some(true))
+    );
+    let review = body("/submit-review");
+    assert_eq!(review["event"], "approve");
+    assert_eq!(review["body"], serde_json::Value::Null);
+    assert_eq!(review["forgeLogin"], "ana");
+    assert_eq!(
+        review["comments"],
+        json!([{ "path": "src/login.rs", "body": "Nit: nome", "line": 2, "side": "left" }])
+    );
+    // The second file has no patch: no line to comment on.
+    hub.update(cx, |hub, cx| hub.choose_file("README.md".into(), cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-line-plus-1").is_none());
+}
