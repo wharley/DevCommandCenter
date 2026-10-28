@@ -141,6 +141,8 @@ impl ConversationView {
                     ComposerEvent::Refresh => view.refresh_now(cx),
                     ComposerEvent::OpenSession(session) => view.open_session(session.clone(), cx),
                     ComposerEvent::OpenTerminal => cx.emit(ConversationEvent::OpenTerminal),
+                    // Only the quick composer sends this way.
+                    ComposerEvent::QuickSubmit(_) => {}
                 },
             );
         let list = ListState::new(0, ListAlignment::Bottom, px(800.0));

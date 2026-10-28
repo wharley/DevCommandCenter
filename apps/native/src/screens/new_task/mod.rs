@@ -134,6 +134,7 @@ impl NewTaskView {
             worktree,
             include_linked_folders,
             bundle_name: cx.t("sidebar.newWorkspace").to_string(),
+            name: None,
         };
         let endpoint = self.endpoint.clone();
         cx.notify();

@@ -61,6 +61,7 @@ pub mod provider_runtime;
 pub mod provider_selection;
 pub mod provider_text;
 pub mod provider_usage;
+pub mod quick_composer;
 pub mod quick_open;
 pub mod rail;
 pub mod recap;

@@ -20,6 +20,7 @@ pub mod notes;
 pub mod onboarding;
 pub mod open_project;
 pub mod pr_hub;
+pub mod quick_composer;
 pub mod quick_open;
 pub mod session_panel;
 pub mod session_search;

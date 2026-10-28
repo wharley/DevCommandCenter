@@ -208,6 +208,16 @@ pub fn session_events(
     read_events(&sessions, &SessionId(session_id.to_string()), 0)
 }
 
+/// A task's `ThreadStart` read again (the quick composer's new task: its
+/// bundle's other projects come along).
+pub fn thread_start_for(db_path: &Path, workspace_id: &str) -> anyhow::Result<ThreadStart> {
+    let workspaces = SqliteWorkspaceRepo::open(db_path)?;
+    let id = dcc_core::domain::workspace::WorkspaceId(workspace_id.to_string());
+    let record = block_on(workspaces.get_workspace(&id))?
+        .ok_or_else(|| anyhow::anyhow!("the task {workspace_id} is gone"))?;
+    thread_start(&workspaces, &record)
+}
+
 /// What the first prompt of a task with no conversation starts it with.
 fn thread_start(
     workspaces: &SqliteWorkspaceRepo,

@@ -567,6 +567,7 @@ impl DesktopApi {
                 "isolationMode": if request.worktree { "protectedWorktree" } else { "localDirect" },
                 "includeLinkedFolders": request.include_linked_folders,
                 "bundleName": request.bundle_name,
+                "name": request.name,
             }),
         )?;
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
@@ -1283,6 +1284,8 @@ pub struct CreateTaskRequest {
     pub include_linked_folders: bool,
     /// The name of a task over several projects.
     pub bundle_name: String,
+    /// The task's own name (the quick composer's first line).
+    pub name: Option<String>,
 }
 
 /// What a branch or PR URL points at (`WorkspaceSourceUrlResolution`).

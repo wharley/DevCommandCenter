@@ -89,6 +89,18 @@ pub enum ComposerEvent {
     OpenSession(String),
     /// "Abrir terminal" on the setup warning.
     OpenTerminal,
+    /// The quick composer's send: the host creates the task, starts the
+    /// conversation and sends this.
+    QuickSubmit(Box<QuickTurn>),
+}
+
+/// What the quick composer's host launches.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuickTurn {
+    pub prompt: String,
+    pub options: crate::data::desktop_api::TurnOptions,
+    pub provider_id: String,
+    pub model_id: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,6 +114,8 @@ pub(crate) enum Busy {
 pub struct Composer {
     pub(crate) input: Entity<TextArea>,
     pub(crate) session: ComposerSession,
+    /// In the quick composer: the send goes to the host (`QuickSubmit`).
+    pub(crate) quick: bool,
     /// Drafts by conversation, also kept on disk.
     drafts: HashMap<String, String>,
     pub(crate) busy: Option<Busy>,
@@ -162,6 +176,7 @@ impl Composer {
         Self {
             input,
             session: ComposerSession::default(),
+            quick: false,
             drafts: drafts::load(),
             busy: None,
             endpoint: None,
@@ -404,6 +419,19 @@ impl Composer {
         from_field: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.quick {
+            if retry_of.is_none()
+                && let Some(pick) = self.new_task_pick()
+            {
+                cx.emit(ComposerEvent::QuickSubmit(Box::new(QuickTurn {
+                    prompt,
+                    options,
+                    provider_id: pick.provider_id,
+                    model_id: pick.model_id,
+                })));
+            }
+            return;
+        }
         let Some(session) = self.session.session_id.clone() else {
             if retry_of.is_none() {
                 self.first_send(prompt, options, from_field, cx);
@@ -470,6 +498,12 @@ impl Composer {
             });
         })
         .detach();
+    }
+
+    /// The quick composer's launch was accepted: the field and its draft go.
+    pub fn clear_quick(&mut self, cx: &mut Context<Self>) {
+        self.clear_field(cx);
+        cx.notify();
     }
 
     fn clear_field(&mut self, cx: &mut Context<Self>) {

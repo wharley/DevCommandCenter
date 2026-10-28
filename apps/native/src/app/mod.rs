@@ -5,6 +5,7 @@ pub mod menu_bar;
 #[cfg(target_os = "macos")]
 mod menu_bar_item;
 mod menus;
+pub mod quick_composer;
 mod window;
 
 use crate::assets::Assets;
@@ -59,6 +60,7 @@ pub fn run() {
             return;
         }
         menu_bar::install(cx);
+        quick_composer::listen(cx);
         cx.activate(true);
     });
 }

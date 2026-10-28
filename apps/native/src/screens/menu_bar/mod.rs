@@ -150,33 +150,13 @@ impl MenuBarPanel {
         }
     }
 
-    /// `menu_bar_compose`: the Quick Composer (the desktop's, for now).
+    /// `menu_bar_compose`: the panel goes and the quick composer comes.
     pub fn compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(api) = self.api.clone() else {
-            self.action_error = true;
-            cx.notify();
+        if self.busy {
             return;
-        };
-        self.busy = true;
-        self.action_error = false;
-        cx.notify();
-        cx.spawn_in(window, async move |this, cx| {
-            let done = cx
-                .background_executor()
-                .spawn(async move { api.toggle_quick_composer() })
-                .await;
-            let _ = this.update_in(cx, |panel, window, cx| {
-                panel.busy = false;
-                match done {
-                    Ok(()) => panel.leave(window, cx),
-                    Err(_) => {
-                        panel.action_error = true;
-                        cx.notify();
-                    }
-                }
-            });
-        })
-        .detach();
+        }
+        self.leave(window, cx);
+        crate::app::quick_composer::show(cx);
     }
 
     pub fn quit(&mut self, cx: &mut Context<Self>) {
