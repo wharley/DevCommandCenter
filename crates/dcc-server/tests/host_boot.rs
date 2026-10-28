@@ -19,12 +19,15 @@ impl AppEmitter for Quiet {
     }
 }
 
-fn get(port: u16, path: &str) -> Option<String> {
+fn get(port: u16, path: &str, key: Option<&str>) -> Option<String> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    let auth = key
+        .map(|key| format!("X-API-Key: {key}\r\n"))
+        .unwrap_or_default();
     write!(
         stream,
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{auth}Connection: close\r\n\r\n"
     )
     .ok()?;
     let mut response = String::new();
@@ -62,7 +65,6 @@ fn the_host_boots_and_serves_the_api() {
             task_events: AppEvents::silent(),
             prepare_database: None,
             keep_awake_listener: Box::new(|_| {}),
-            menu_bar: None,
             shortcuts: None,
             restart: Arc::new(|| {}),
         }))
@@ -71,7 +73,7 @@ fn the_host_boots_and_serves_the_api() {
     assert!(host.server.is_some(), "the API is served");
     let started = Instant::now();
     let index = loop {
-        if let Some(response) = get(port, "/") {
+        if let Some(response) = get(port, "/", None) {
             break response;
         }
         assert!(
@@ -81,6 +83,15 @@ fn the_host_boots_and_serves_the_api() {
         std::thread::sleep(Duration::from_millis(100));
     };
     assert!(index.contains("DCC HTTP API"), "{index}");
+    // The menu bar's snapshot is the host's own now.
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.path().join(".dcc/http-config.json")).unwrap(),
+    )
+    .unwrap();
+    let key = config["api_key"].as_str().unwrap();
+    let snapshot = get(port, "/api/v1/menu-bar", Some(key)).unwrap();
+    assert!(snapshot.starts_with("HTTP/1.1 200"), "{snapshot}");
+    assert!(snapshot.contains("\"tasks\":[]"), "{snapshot}");
     eprintln!("daemon: {:?}", host.daemon.as_ref().map(|info| info.pid));
     host.shutdown();
     if let Ok(info) = &host.daemon {

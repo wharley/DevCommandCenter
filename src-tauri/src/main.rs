@@ -3323,16 +3323,6 @@ impl dev_command_center_tauri::http_api::DesktopShortcuts for HttpShortcuts {
     }
 }
 
-/// `menu_bar_snapshot` for the native app's menu bar item.
-struct HttpMenuBar(AppHandle);
-
-impl dev_command_center_tauri::http_api::DesktopMenuBar for HttpMenuBar {
-    fn snapshot(&self) -> Result<Value, String> {
-        let snapshot = menu_bar::read_snapshot(&self.0)?;
-        serde_json::to_value(snapshot).map_err(|error| error.to_string())
-    }
-}
-
 struct RemoteHubState(Arc<RemoteHub>);
 
 
@@ -5552,12 +5542,6 @@ pub fn run() {
             read_image_preview,
             read_audio_preview,
             attachment_commands::preview_composer_attachment,
-            menu_bar::menu_bar_snapshot,
-            menu_bar::menu_bar_visible,
-            menu_bar::menu_bar_hide,
-            menu_bar::menu_bar_compose,
-            menu_bar::menu_bar_open_main,
-            menu_bar::menu_bar_quit,
             storage_commands::dcc_storage_usage,
             storage_commands::dcc_storage_compact,
             keep_awake_commands::keep_awake_status,
@@ -5838,7 +5822,6 @@ pub fn run() {
                     );
                     let _ = keep_awake_handle.emit(keep_awake_commands::CHANGED_EVENT, ());
                 }),
-                menu_bar: Some(Arc::new(HttpMenuBar(app.handle().clone()))),
                 shortcuts: Some(Arc::new(HttpShortcuts(app.handle().clone()))),
                 restart: Arc::new(move || restart_handle.restart()),
             };

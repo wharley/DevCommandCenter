@@ -1,5 +1,6 @@
 //! The app's database, ready to use: its storage settings, the legacy column
-//! migrations, the schema and the MCP tables, then a one-time compaction.
+//! migrations, the schema, the MCP, task and session tables, then a one-time
+//! compaction.
 //! Whoever hosts the backend opens it once at startup.
 
 use std::path::Path;
@@ -29,6 +30,12 @@ pub fn open_app_database(db_path: &Path) -> Result<Connection, String> {
         .map_err(|e| format!("failed to apply schema: {e}"))?;
     SqliteMcpRepo::apply_migrations(&conn)
         .map_err(|e| format!("failed to apply MCP schema: {e}"))?;
+    // The tasks' and sessions' tables, so a first run already has every table
+    // the readers expect (the menu bar's snapshot joins them).
+    dcc_infra::db::SqliteWorkspaceRepo::open(db_path)
+        .map_err(|e| format!("failed to apply the task schema: {e}"))?;
+    dcc_infra::db::SqliteSessionRepo::open(db_path)
+        .map_err(|e| format!("failed to apply the session schema: {e}"))?;
     Ok(conn)
 }
 

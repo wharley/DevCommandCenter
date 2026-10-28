@@ -40,7 +40,7 @@ use crate::daemon_client::DaemonRuntimeInfo;
 use crate::decision_provider_settings::DecisionProviderSettings;
 use crate::desktop_agent_requests::DesktopAgentRequests;
 use crate::embedded_http::EmbeddedHttpServer;
-use crate::http_api::{DesktopMenuBar, DesktopShortcuts, HttpBackend};
+use crate::http_api::{DesktopShortcuts, HttpBackend};
 use crate::named_events::NamedEvents;
 use crate::remote_connector::RemoteHub;
 use crate::terminals::TerminalState;
@@ -63,7 +63,6 @@ pub struct HostConfig {
     pub task_events: AppEvents,
     pub prepare_database: Option<PrepareDatabase>,
     pub keep_awake_listener: keep_awake::HoldListener,
-    pub menu_bar: Option<Arc<dyn DesktopMenuBar>>,
     pub shortcuts: Option<Arc<dyn DesktopShortcuts>>,
     pub restart: Arc<dyn Fn() + Send + Sync>,
 }
@@ -105,7 +104,6 @@ impl Host {
             task_events,
             prepare_database,
             keep_awake_listener,
-            menu_bar,
             shortcuts,
             restart,
         } = config;
@@ -210,6 +208,7 @@ impl Host {
             terminals: Arc::new(Mutex::new(HashMap::new())),
             system: Arc::new(Mutex::new(sysinfo::System::new_all())),
         };
+        let daemon_pid = Arc::new(Mutex::new(None));
         let (server, remote) = match HttpBackend::embedded(sessions.clone()) {
             Ok(backend) => {
                 let mut backend = backend
@@ -237,10 +236,13 @@ impl Host {
                         connectors: coordinator.clone().zip(gateway.clone()),
                         ai_memory: ai_memory.clone(),
                         restart,
+                    }))
+                    .with_desktop_menu_bar(Arc::new(crate::menu_bar_snapshot::HostMenuBar {
+                        db_path: db_path.clone(),
+                        daemon_pid: daemon_pid.clone(),
+                        sampler: Default::default(),
+                        keep_awake: keep_awake.controller.clone(),
                     }));
-                if let Some(menu_bar) = menu_bar {
-                    backend = backend.with_desktop_menu_bar(menu_bar);
-                }
                 if let Some(shortcuts) = shortcuts {
                     backend = backend.with_desktop_shortcuts(shortcuts);
                 }
@@ -275,6 +277,9 @@ impl Host {
             &db_path,
             &app_data_dir,
         );
+        if let (Ok(info), Ok(mut pid)) = (&daemon, daemon_pid.lock()) {
+            *pid = Some(info.pid);
+        }
         Ok(Host {
             app_data_dir,
             events,
