@@ -3856,6 +3856,7 @@ fn start_embedded_http_server(
             .with_desktop_browser(Arc::new(HttpBrowser(app.handle().clone())))
             .with_desktop_computer(Arc::new(HttpComputer(app.handle().clone())))
             .with_desktop_keep_awake(Arc::new(HttpKeepAwake(app.handle().clone())))
+            .with_desktop_menu_bar(Arc::new(HttpMenuBar(app.handle().clone())))
             .with_desktop_shortcuts(Arc::new(HttpShortcuts(app.handle().clone())))
             .with_app(app.handle().clone()),
         Err(error) => {
@@ -4206,6 +4207,16 @@ impl dev_command_center_tauri::http_api::DesktopShortcuts for HttpShortcuts {
 
     fn set_appshots(&self, shortcut: Option<String>) -> Result<(), String> {
         appshot_commands::set_shortcut(&self.0, shortcut)
+    }
+}
+
+/// `menu_bar_snapshot` for the native app's menu bar item.
+struct HttpMenuBar(AppHandle);
+
+impl dev_command_center_tauri::http_api::DesktopMenuBar for HttpMenuBar {
+    fn snapshot(&self) -> Result<Value, String> {
+        let snapshot = menu_bar::read_snapshot(&self.0)?;
+        serde_json::to_value(snapshot).map_err(|error| error.to_string())
     }
 }
 

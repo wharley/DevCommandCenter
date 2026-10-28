@@ -72,6 +72,7 @@ mod forge;
 mod git_changes;
 mod git_conflicts;
 mod keep_awake;
+mod menu_bar;
 mod mcp;
 mod mobile;
 mod provider_accounts;
@@ -91,6 +92,7 @@ pub use browser_bridge::{
 pub use browser_opens::native_browser_opens;
 pub use computer_bridge::{native_computer, DesktopComputer};
 pub use keep_awake::DesktopKeepAwake;
+pub use menu_bar::DesktopMenuBar;
 pub use shortcuts::DesktopShortcuts;
 pub use terminals::{publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals};
 
@@ -254,6 +256,8 @@ pub struct HttpBackend {
     desktop_computer: OnceLock<Arc<dyn DesktopComputer>>,
     /// The desktop's keep-awake hold, for the native app's Settings.
     desktop_keep_awake: OnceLock<Arc<dyn DesktopKeepAwake>>,
+    /// The desktop's menu bar snapshot, for the native app's menu bar item.
+    desktop_menu_bar: OnceLock<Arc<dyn DesktopMenuBar>>,
     /// The desktop's global shortcuts, for the native app's Settings.
     desktop_shortcuts: OnceLock<Arc<dyn DesktopShortcuts>>,
     /// The relay connector serving this router, for the operator routes and
@@ -289,6 +293,7 @@ impl HttpBackend {
             desktop_browser: OnceLock::new(),
             desktop_computer: OnceLock::new(),
             desktop_keep_awake: OnceLock::new(),
+            desktop_menu_bar: OnceLock::new(),
             desktop_shortcuts: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
@@ -317,6 +322,7 @@ impl HttpBackend {
             desktop_browser: OnceLock::new(),
             desktop_computer: OnceLock::new(),
             desktop_keep_awake: OnceLock::new(),
+            desktop_menu_bar: OnceLock::new(),
             desktop_shortcuts: OnceLock::new(),
             remote: OnceLock::new(),
             agent_requests: OnceLock::new(),
@@ -355,6 +361,12 @@ impl HttpBackend {
     /// `/api/v1/appshots/*`.
     pub fn with_desktop_shortcuts(self, shortcuts: Arc<dyn DesktopShortcuts>) -> Self {
         let _ = self.desktop_shortcuts.set(shortcuts);
+        self
+    }
+
+    /// The desktop's menu bar snapshot, for `/api/v1/menu-bar`.
+    pub fn with_desktop_menu_bar(self, menu_bar: Arc<dyn DesktopMenuBar>) -> Self {
+        let _ = self.desktop_menu_bar.set(menu_bar);
         self
     }
 
@@ -765,6 +777,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/keep-awake",
             get(keep_awake::status).put(keep_awake::set_mode),
         )
+        .route("/api/v1/menu-bar", get(menu_bar::snapshot))
         .route(
             "/api/v1/decision-provider/settings",
             get(decision_provider::settings).put(decision_provider::save),
@@ -1815,6 +1828,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/app/restart",
             "GET /api/v1/keep-awake",
             "PUT /api/v1/keep-awake",
+            "GET /api/v1/menu-bar",
             "PUT /api/v1/providers/:provider_id/availability",
             "GET /api/v1/decision-provider/settings",
             "PUT /api/v1/decision-provider/settings",
@@ -5710,6 +5724,24 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{set}");
         assert_eq!(set["mode"], "during_agents");
         assert_eq!(set["supported"], true);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_menu_bar_snapshot_comes_from_the_desktop() {
+        struct Fake;
+        impl DesktopMenuBar for Fake {
+            fn snapshot(&self) -> Result<Value, String> {
+                Ok(json!({ "tasks": [{ "workspaceId": "w", "status": "running" }], "metrics": null }))
+            }
+        }
+        let fixture = embedded_fixture().await;
+        let (status, _) = get_json(&fixture.app, "/api/v1/menu-bar").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let fake: Arc<dyn DesktopMenuBar> = Arc::new(Fake);
+        let _ = fixture.backend.desktop_menu_bar.set(fake);
+        let (status, read) = get_json(&fixture.app, "/api/v1/menu-bar").await;
+        assert_eq!(status, StatusCode::OK, "{read}");
+        assert_eq!(read["tasks"][0]["status"], "running");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

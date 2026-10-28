@@ -10,8 +10,6 @@ use sysinfo::{Pid, ProcessRefreshKind, System};
 use tauri::{AppHandle, Emitter, Manager, Webview};
 
 pub const LABEL: &str = "menu-bar";
-#[cfg(target_os = "macos")]
-static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
 pub struct MenuBarState {
     metrics: Mutex<MetricsSampler>,
@@ -247,40 +245,44 @@ impl MetricsSampler {
     }
 }
 
-#[tauri::command]
-pub async fn menu_bar_snapshot(window: Webview, app: AppHandle) -> Result<Snapshot, String> {
-    trusted(&window)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<crate::AppState>();
-        let mut conn =
-            Connection::open_with_flags(state.db_path.as_path(), OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(|e| e.to_string())?;
-        conn.busy_timeout(Duration::from_millis(300))
+/// The snapshot the panel reads; also the native app's (`/api/v1/menu-bar`).
+pub fn read_snapshot(app: &AppHandle) -> Result<Snapshot, String> {
+    let state = app.state::<crate::AppState>();
+    let mut conn =
+        Connection::open_with_flags(state.db_path.as_path(), OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| e.to_string())?;
-        let tasks = read_tasks(&mut conn).map_err(|e| e.to_string())?;
-        let mut roots = vec![std::process::id()];
-        if let Ok(endpoint) = state.daemon_endpoint.lock() {
-            if let Some(endpoint) = endpoint.as_ref() {
-                roots.push(endpoint.pid);
-            }
+    conn.busy_timeout(Duration::from_millis(300))
+        .map_err(|e| e.to_string())?;
+    let tasks = read_tasks(&mut conn).map_err(|e| e.to_string())?;
+    let mut roots = vec![std::process::id()];
+    if let Ok(endpoint) = state.daemon_endpoint.lock() {
+        if let Some(endpoint) = endpoint.as_ref() {
+            roots.push(endpoint.pid);
         }
-        let metrics = app
-            .state::<MenuBarState>()
+    }
+    let metrics = app.try_state::<MenuBarState>().and_then(|state| {
+        state
             .metrics
             .lock()
             .ok()
-            .map(|mut sampler| sampler.sample(&roots));
-        let keep_awake = app
-            .try_state::<crate::keep_awake_commands::KeepAwakeState>()
-            .and_then(|state| state.controller.status().active);
-        Ok(Snapshot {
-            tasks,
-            metrics,
-            keep_awake,
-        })
+            .map(|mut sampler| sampler.sample(&roots))
+    });
+    let keep_awake = app
+        .try_state::<crate::keep_awake_commands::KeepAwakeState>()
+        .and_then(|state| state.controller.status().active);
+    Ok(Snapshot {
+        tasks,
+        metrics,
+        keep_awake,
     })
-    .await
-    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn menu_bar_snapshot(window: Webview, app: AppHandle) -> Result<Snapshot, String> {
+    trusted(&window)?;
+    tauri::async_runtime::spawn_blocking(move || read_snapshot(&app))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -354,48 +356,19 @@ pub fn menu_bar_quit(window: Webview, app: AppHandle) -> Result<(), String> {
 }
 
 pub fn setup(app: &AppHandle) -> Result<(), String> {
+    // On this branch the native app owns the menu bar item and its panel;
+    // the desktop keeps only the sampler (for `/api/v1/menu-bar`) and, with
+    // it, hiding its window on close so the native app keeps its backend.
     #[cfg(target_os = "macos")]
-    {
-        let panel = tauri::WebviewWindowBuilder::new(
-            app,
-            LABEL,
-            tauri::WebviewUrl::App("index.html?menu-bar=1".into()),
-        )
-        .title("DCC")
-        .inner_size(368., 480.)
-        .visible(false)
-        .focused(false)
-        .resizable(false)
-        .skip_taskbar(true)
-        .on_navigation(crate::quick_composer::local_navigation)
-        .build()
-        .map_err(|e| e.to_string())?;
-        let _ = APP.set(app.clone());
-        if !unsafe {
-            native::dcc_menu_bar_create(
-                panel.ns_window().map_err(|e| e.to_string())?,
-                visibility_changed,
-            )
-        } {
-            let _ = panel.destroy();
-            return Err("Could not create menu bar item".into());
-        }
-        app.manage(MenuBarState {
-            metrics: Mutex::new(MetricsSampler {
-                system: System::new(),
-                last: None,
-                value: None,
-            }),
-        });
-    }
+    app.manage(MenuBarState {
+        metrics: Mutex::new(MetricsSampler {
+            system: System::new(),
+            last: None,
+            value: None,
+        }),
+    });
     let _ = app;
     Ok(())
-}
-#[cfg(target_os = "macos")]
-extern "C" fn visibility_changed(visible: bool) {
-    if let Some(app) = APP.get() {
-        let _ = app.emit_to(LABEL, "menu-bar-visibility", visible);
-    }
 }
 /// The ☕ next to the menu bar icon while DCC keeps the Mac awake; the
 /// tooltip says why. Safe before `setup`: the native side applies it when
@@ -427,10 +400,6 @@ pub fn shutdown(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 mod native {
     extern "C" {
-        pub fn dcc_menu_bar_create(
-            window: *mut std::ffi::c_void,
-            callback: extern "C" fn(bool),
-        ) -> bool;
         pub fn dcc_menu_bar_visible() -> bool;
         pub fn dcc_menu_bar_hide();
         pub fn dcc_menu_bar_destroy();
