@@ -146,6 +146,7 @@ impl OpenProjectDialog {
                     &context.workspace_root,
                     &url,
                     (!name.is_empty()).then_some(name.as_str()),
+                    None,
                 )
             },
             cx,

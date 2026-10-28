@@ -3,6 +3,7 @@
 
 pub mod attention;
 mod badge;
+mod branch_context;
 mod button;
 pub mod command;
 pub mod dialog;
@@ -26,6 +27,7 @@ mod toggle_group;
 pub mod tooltip;
 
 pub use badge::{Badge, BadgeVariant};
+pub use branch_context::branch_context;
 pub use button::{Button, Size as ButtonSize, Variant as ButtonVariant};
 pub use dialog::{Dialog, dialog_footer, dialog_footer_split, dialog_header};
 pub use feedback::{Checkbox, Spinner, ThinkingIndicator, spinner, thinking_indicator};

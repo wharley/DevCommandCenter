@@ -1088,6 +1088,7 @@ impl DesktopApi {
         workspace_root: &str,
         url: &str,
         name: Option<&str>,
+        forge_login: Option<&str>,
     ) -> Result<CreatedTask, ApiError> {
         let value = self.post(
             "/api/v1/workspaces/from-source-url",
@@ -1096,7 +1097,7 @@ impl DesktopApi {
                 "workspaceRoot": workspace_root,
                 "url": url,
                 "name": name,
-                "forgeLogin": null,
+                "forgeLogin": forge_login,
             }),
         )?;
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))

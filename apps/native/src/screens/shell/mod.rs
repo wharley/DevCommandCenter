@@ -52,6 +52,8 @@ pub enum Surface {
     NewTask,
     /// A DCC agent's page (`globalSurface: "agent"`).
     Agent,
+    /// "Pull Requests" (`globalSurface: "pullRequests"`).
+    PullRequests,
 }
 
 gpui::actions!(
@@ -106,6 +108,8 @@ pub struct Shell {
     open_project: Option<(Entity<OpenProjectDialog>, Subscription)>,
     /// The agent's page, once one was opened.
     agent_page: Option<agents::OpenAgentPage>,
+    /// The pull requests hub, once opened.
+    pr_hub: Option<agents::OpenPrHub>,
     /// The merge conflict resolver, while open.
     merge: Option<(Entity<crate::screens::merge::MergeResolver>, Subscription)>,
     /// "Enviar trecho ao agente", while open.
@@ -297,6 +301,7 @@ impl Shell {
             focus_on_open: None,
             open_project: None,
             agent_page: None,
+            pr_hub: None,
             merge: None,
             annotation: None,
             bootstrap_provider: None,
@@ -539,7 +544,11 @@ impl Shell {
 
     fn show(&mut self, surface: Surface, cx: &mut Context<Self>) {
         self.surface = surface;
-        let page = (surface == Surface::NewTask).then_some(NavPage::NewTask);
+        let page = match surface {
+            Surface::NewTask => Some(NavPage::NewTask),
+            Surface::PullRequests => Some(NavPage::PullRequests),
+            _ => None,
+        };
         self.sidebar.update(cx, |sidebar, cx| {
             sidebar.set_current_page(page, cx);
             if surface != Surface::Agent {
@@ -836,6 +845,10 @@ impl Render for Shell {
                 Surface::Agent => {
                     self.hide_browser_page(cx);
                     self.agent_page_element()
+                }
+                Surface::PullRequests => {
+                    self.hide_browser_page(cx);
+                    self.pr_hub_element()
                 }
             }))
             .child(self.delivery.overlay.clone())
