@@ -75,7 +75,7 @@ fn config() -> HostConfig {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     HostConfig {
-        app_data_dir,
+        app_data_dir: app_data_dir.clone(),
         resource_dir: resource_dir(),
         dev: cfg!(debug_assertions),
         events: NamedEvents(Arc::new(Quiet)),
@@ -84,11 +84,22 @@ fn config() -> HostConfig {
         prepare_database: None,
         // The menu bar's ☕ reads the hold through the API.
         keep_awake_listener: Box::new(|_| {}),
-        // The menu bar's snapshot and the global shortcuts come next (12e).
-        menu_bar: None,
-        shortcuts: None,
+        shortcuts: shortcuts(&app_data_dir),
         restart: Arc::new(relaunch),
     }
+}
+
+/// The quick composer's journal and key (macOS only, like the desktop's).
+fn shortcuts(
+    app_data_dir: &std::path::Path,
+) -> Option<Arc<dyn dcc_server::http_api::DesktopShortcuts>> {
+    #[cfg(target_os = "macos")]
+    match crate::data::host_shortcuts::HostShortcuts::open(app_data_dir) {
+        Ok(shortcuts) => return Some(Arc::new(shortcuts)),
+        Err(error) => eprintln!("[dcc-native] quick composer journal unavailable: {error}"),
+    }
+    let _ = app_data_dir;
+    None
 }
 
 /// The bundle's `Contents/Resources`, beside `Contents/MacOS/dcc-native`.

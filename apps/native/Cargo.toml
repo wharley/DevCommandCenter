@@ -71,6 +71,9 @@ tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-t
 gtk = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# The quick composer's global key while this app hosts the backend (the
+# same crate tauri-plugin-global-shortcut uses on the desktop).
+global-hotkey = "0.8"
 # Tags the Metal layer as sRGB (see src/app/color_space.rs).
 objc2 = "0.6"
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "objc2", "CGColorSpace"] }

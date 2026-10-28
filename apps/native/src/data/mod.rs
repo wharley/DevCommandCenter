@@ -39,6 +39,8 @@ pub mod git_watch;
 pub mod goal;
 pub mod highlight;
 pub mod host;
+#[cfg(target_os = "macos")]
+pub mod host_shortcuts;
 pub mod keep_awake;
 pub mod loader;
 pub mod mcp_advanced;

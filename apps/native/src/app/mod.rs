@@ -2,6 +2,8 @@
 //! it), fonts, theme, menus and the main window.
 
 mod color_space;
+#[cfg(target_os = "macos")]
+pub mod global_keys;
 pub mod menu_bar;
 #[cfg(target_os = "macos")]
 mod menu_bar_item;
@@ -73,6 +75,9 @@ pub fn run() {
             return;
         }
         menu_bar::install(cx);
+        // The quick composer's key while this app hosts the backend.
+        #[cfg(target_os = "macos")]
+        global_keys::serve(cx);
         quick_composer::listen(cx);
         cx.activate(true);
     });
