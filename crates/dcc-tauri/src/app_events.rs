@@ -35,6 +35,11 @@ impl AppEvents {
         )
     }
 
+    /// Nowhere: a host whose windows read the API instead of events.
+    pub fn silent() -> Self {
+        Self::new(Arc::new(Silent), Arc::new(Silent))
+    }
+
     /// Events by name to the desktop's webview, alone.
     #[cfg(feature = "tauri")]
     pub fn tauri_emitter(app: tauri::AppHandle) -> Arc<dyn AppEmitter> {
@@ -76,5 +81,20 @@ impl AppEmitter for TauriEmitter {
         self.0
             .emit(event, payload)
             .map_err(|error| error.to_string())
+    }
+}
+
+struct Silent;
+
+impl AppEmitter for Silent {
+    fn emit(&self, _event: &str, _payload: serde_json::Value) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl EventBus for Silent {
+    async fn publish(&self, _event: CoreEvent) -> dcc_core::Result<()> {
+        Ok(())
     }
 }

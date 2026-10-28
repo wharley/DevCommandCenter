@@ -32,4 +32,5 @@ pub mod prompt_attachments;
 pub mod remote_connector;
 pub mod remote_push;
 pub mod runtime;
+pub mod shell_env;
 pub mod terminals;
