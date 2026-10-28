@@ -173,6 +173,13 @@ pub fn create_idea_folder(base: &Path) -> Result<PathBuf, String> {
 /// where the person describes the idea to the researcher.
 #[tauri::command]
 pub async fn research_create_idea(state: State<'_, WorkspaceCommandState>) -> Result<Idea, String> {
+    research_create_idea_with_state(&state).await
+}
+
+/// `research_create_idea` without Tauri's state (the native app's route).
+pub async fn research_create_idea_with_state(
+    state: &WorkspaceCommandState,
+) -> Result<Idea, String> {
     let base = ideas_dir()?;
     let root = tokio::task::spawn_blocking(move || create_idea_folder(&base))
         .await

@@ -78,6 +78,7 @@ mod provider_accounts;
 mod provider_usage;
 mod providers;
 mod remote_devices;
+mod research;
 mod shortcuts;
 mod skills;
 mod terminals;
@@ -949,6 +950,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(agents::bind_session),
         )
         .route("/api/v1/agents/:agent_id", post(agents::save))
+        .route("/api/v1/research/ideas", post(research::create_idea))
         .route(
             "/api/v1/sessions/:session_id/last-turn-review",
             post(turn_review::last_turn),
@@ -1838,6 +1840,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/skills/compile",
             "POST /api/v1/sessions/:session_id/agent",
             "POST /api/v1/agents/:agent_id",
+            "POST /api/v1/research/ideas",
             "GET /api/v1/workspaces/:workspace_id/delivery",
             "POST /api/v1/workspaces/:workspace_id/delivery/:action",
             "POST /api/v1/sessions/:session_id/task-title",
@@ -6478,6 +6481,10 @@ mod tests {
             "/api/v1/agents/{}",
             reviewer.id
         )));
+        // A new idea makes a folder in the home: never from a phone.
+        assert!(!crate::remote_connector::remote_path_allowed(
+            "/api/v1/research/ideas"
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
