@@ -1,6 +1,6 @@
 //! The hub driven headlessly against a fake desktop: the list and its
 //! filters and search, the first one chosen, the summary of another, a
-//! comment, and "Trabalhar nisto".
+//! comment, "Trabalhar nisto", and a merge after its confirmation.
 
 use gpui::{Modifiers, TestAppContext, WindowAppearance, px, size};
 use serde_json::json;
@@ -168,4 +168,90 @@ fn narrow_shows_the_list_or_the_detail(cx: &mut TestAppContext) {
     cx.simulate_click(bounds.center(), Modifiers::none());
     cx.run_until_parked();
     assert!(cx.debug_bounds("pr-list").is_some());
+}
+
+#[gpui::test]
+fn a_github_pull_request_merges_after_its_confirmation(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let detail = |mergeable: &str| {
+        json!({
+            "body": null, "comments": [], "checks": [], "files": [], "inlineComments": [],
+            "reviewCapabilities": null,
+            "mergeCapabilities": { "allowedMethods": ["squash", "rebase"], "viewerCanMerge": true,
+                "mergeable": mergeable, "headSha": "0123456789abcdef0123" },
+        })
+        .to_string()
+    };
+    let (port, desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list.clone()),
+        ("/api/v1/pull-request-hub/detail", 200, detail("MERGEABLE")),
+        (
+            "/api/v1/pull-request-hub/merge",
+            200,
+            r#"{"status":"queued","url":null}"#.into(),
+        ),
+        (
+            "/api/v1/pull-request-hub/detail",
+            200,
+            detail("CONFLICTING"),
+        ),
+        ("/api/v1/pull-request-hub/list", 200, list),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1200.0), px(800.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("pr-merge").is_some(),
+        "Mesclar, GitHub only"
+    );
+    assert!(cx.debug_bounds("pr-merge-dialog").is_none());
+    hub.update(cx, |hub, cx| hub.ask_merge("squash", cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-merge-dialog").is_some());
+    hub.update(cx, |hub, cx| hub.cancel_merge(cx));
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("pr-merge-dialog").is_none(),
+        "Cancelar closes it"
+    );
+    hub.update(cx, |hub, cx| {
+        hub.ask_merge("squash", cx);
+        hub.confirm_merge(cx);
+    });
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("pr-merge-dialog").is_none(),
+        "closed once accepted"
+    );
+    let (pending, error) = hub.read_with(cx, |hub, _| (hub.pending_merge, hub.merge_error.clone()));
+    assert_eq!((pending, error), (None, None));
+    // Read again: now in conflict, so off with its reason.
+    let blocked = hub.read_with(cx, |hub, cx| {
+        let item = hub.selected_item(cx).unwrap();
+        crate::data::pr_hub::merge_blocked(&item, hub.merge_detail(&item))
+    });
+    assert_eq!(blocked, Some("pullRequests.merge.conflictsBlocked"));
+    let (_, body) = seen
+        .iter()
+        .find(|(path, _)| path.ends_with("/merge"))
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_str(body).unwrap();
+    assert_eq!(body["method"], "squash");
+    assert_eq!(body["expectedHeadSha"], "0123456789abcdef0123");
+    assert_eq!(body["repositoryRoot"], "/repo");
+    assert_eq!(body["number"], 1);
+    assert_eq!(body["forgeLogin"], "ana");
 }

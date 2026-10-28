@@ -178,6 +178,7 @@ impl PrHub {
                                     )
                                     .into_any_element(),
                             })
+                            .children(self.merge_button(&item, cx))
                             .child(
                                 Button::new("pr-open-forge")
                                     .variant(ButtonVariant::Ghost)
@@ -501,6 +502,7 @@ impl PrHub {
             .child(header)
             .child(summary)
             .child(footer)
+            .children(self.merge_dialog(cx))
             .into_any_element()
     }
 }

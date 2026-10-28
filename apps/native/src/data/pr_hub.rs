@@ -79,6 +79,20 @@ pub struct Comment {
     pub created_at: Option<String>,
 }
 
+/// `PullRequestHubMergeCapabilities`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MergeCapabilities {
+    /// `merge` | `squash` | `rebase`
+    pub allowed_methods: Vec<String>,
+    pub viewer_can_merge: bool,
+    pub mergeable: Option<String>,
+    pub head_sha: Option<String>,
+}
+
+/// `MERGE_METHODS`, in the menu's order.
+pub const MERGE_METHODS: [&str; 3] = ["merge", "squash", "rebase"];
+
 /// `PullRequestHubDetailOutput`, what the summary reads.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -86,6 +100,8 @@ pub struct Detail {
     pub body: Option<String>,
     pub comments: Vec<Comment>,
     pub checks: Vec<Check>,
+    /// GitHub only.
+    pub merge_capabilities: Option<MergeCapabilities>,
     /// The rest (files, inline comments, capabilities) for the code tab and
     /// the merge.
     #[serde(flatten)]
@@ -168,6 +184,44 @@ pub fn relative_date(value: Option<&str>, now_ms: i64, english: bool) -> String 
     }
 }
 
+/// `mergeUnavailableReason`: why "Mesclar" is off, as an i18n key; `None`
+/// when it can be used. `detail` is `None` while it is read.
+pub fn merge_blocked(item: &Item, detail: Option<&Result<Detail, String>>) -> Option<&'static str> {
+    let detail = match detail {
+        None => return Some("pullRequests.merge.loadingCapabilities"),
+        Some(Err(_)) => return Some("pullRequests.merge.capabilitiesUnavailable"),
+        Some(Ok(detail)) => detail,
+    };
+    let Some(merge) = &detail.merge_capabilities else {
+        return Some("pullRequests.merge.unsupportedProvider");
+    };
+    if !merge.viewer_can_merge {
+        return Some("pullRequests.merge.noPermission");
+    }
+    if item.is_draft {
+        return Some("pullRequests.merge.draftBlocked");
+    }
+    if merge.mergeable.as_deref() == Some("CONFLICTING") {
+        return Some("pullRequests.merge.conflictsBlocked");
+    }
+    if merge.head_sha.as_deref().is_none_or(str::is_empty) {
+        return Some("pullRequests.merge.commitUnavailable");
+    }
+    if merge.allowed_methods.is_empty() {
+        return Some("pullRequests.merge.noMethods");
+    }
+    None
+}
+
+/// What the forge did with a merge, as the toast's key.
+pub fn merge_toast(status: &str) -> &'static str {
+    match status {
+        "merged" => "pullRequests.merge.success",
+        "queued" => "pullRequests.merge.queued",
+        _ => "pullRequests.merge.submitted",
+    }
+}
+
 fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
     serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
 }
@@ -189,6 +243,30 @@ impl DesktopApi {
                 "includeCode": include_code,
             }),
         )?)
+    }
+
+    /// `pullRequestHubMerge` on the reviewed commit; the forge's status.
+    pub fn pr_hub_merge(
+        &self,
+        item: &Item,
+        method: &str,
+        head_sha: &str,
+    ) -> Result<String, ApiError> {
+        let value = self.post(
+            "/api/v1/pull-request-hub/merge",
+            &json!({
+                "repositoryRoot": item.repository_root,
+                "number": item.number,
+                "method": method,
+                "expectedHeadSha": head_sha,
+                "forgeLogin": item.forge_login,
+            }),
+        )?;
+        Ok(value
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("submitted")
+            .to_string())
     }
 
     /// `pullRequestHubComment`
@@ -242,6 +320,60 @@ mod tests {
             "the branch counts"
         );
         assert_eq!(filtered(&items, Filter::All, "docs")[0].id, "2");
+    }
+
+    #[test]
+    fn merge_reads_its_reason_like_the_desktop() {
+        let item = item("1", "Fix", false, false);
+        assert_eq!(
+            merge_blocked(&item, None),
+            Some("pullRequests.merge.loadingCapabilities")
+        );
+        let detail = |merge: Option<MergeCapabilities>| {
+            Ok(Detail {
+                merge_capabilities: merge,
+                ..Detail::default()
+            })
+        };
+        assert_eq!(
+            merge_blocked(&item, Some(&detail(None))),
+            Some("pullRequests.merge.unsupportedProvider")
+        );
+        let ready = MergeCapabilities {
+            allowed_methods: vec!["squash".into()],
+            viewer_can_merge: true,
+            mergeable: Some("MERGEABLE".into()),
+            head_sha: Some("abc".into()),
+        };
+        assert_eq!(
+            merge_blocked(&item, Some(&detail(Some(ready.clone())))),
+            None
+        );
+        let draft = Item {
+            is_draft: true,
+            ..item.clone()
+        };
+        assert_eq!(
+            merge_blocked(&draft, Some(&detail(Some(ready.clone())))),
+            Some("pullRequests.merge.draftBlocked")
+        );
+        let conflicting = MergeCapabilities {
+            mergeable: Some("CONFLICTING".into()),
+            ..ready.clone()
+        };
+        assert_eq!(
+            merge_blocked(&item, Some(&detail(Some(conflicting)))),
+            Some("pullRequests.merge.conflictsBlocked")
+        );
+        let no_sha = MergeCapabilities {
+            head_sha: None,
+            ..ready
+        };
+        assert_eq!(
+            merge_blocked(&item, Some(&detail(Some(no_sha)))),
+            Some("pullRequests.merge.commitUnavailable")
+        );
+        assert_eq!(merge_toast("queued"), "pullRequests.merge.queued");
     }
 
     #[test]

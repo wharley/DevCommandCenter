@@ -3,10 +3,12 @@
 //! chosen one on the right — open its task or "Trabalhar nisto", open it on
 //! the forge — and its summary (branch, facts, description, checks,
 //! activity) with a comment box. Under 780px only one side shows, with
-//! "Voltar". The merge, the code tab and the Reviewer come next.
+//! "Voltar". A GitHub pull request merges from here, after a confirmation.
+//! The code tab and the Reviewer come next.
 
 mod detail;
 mod list;
+mod merge;
 #[cfg(test)]
 mod tests;
 
@@ -52,6 +54,10 @@ pub struct PrHub {
     pub(crate) sending: bool,
     pub(crate) comment_error: Option<String>,
     pub(crate) working_on: Option<String>,
+    /// The merge method picked, waiting for its confirmation.
+    pub(crate) pending_merge: Option<&'static str>,
+    pub(crate) merging: bool,
+    pub(crate) merge_error: Option<String>,
     /// The hub's width, measured as it paints.
     pub(crate) width: Rc<Cell<f32>>,
     _inputs: Vec<Subscription>,
@@ -99,6 +105,9 @@ impl PrHub {
             sending: false,
             comment_error: None,
             working_on: None,
+            pending_merge: None,
+            merging: false,
+            merge_error: None,
             width: Rc::new(Cell::new(1200.0)),
             _inputs: inputs,
         };
