@@ -4,10 +4,15 @@
 //! comment, an approval or a request for changes, with the drafts. Its state
 //! starts over on each pull request, as the desktop keys it by id.
 
+mod agent;
+#[cfg(test)]
+mod agent_tests;
 mod footer;
+mod panel;
 mod rows;
 #[cfg(test)]
 mod tests;
+mod thread;
 mod view;
 
 use std::time::Instant;
@@ -51,6 +56,17 @@ pub(crate) struct CodeReview {
     pub body: Entity<TextArea>,
     /// The review's text as last seen, to tell typing from clearing.
     pub body_seen: String,
+    /// The reviewer's panel ("Revisar com o …").
+    pub agent_panel_open: bool,
+    /// The person's optional guidance for the reviewer.
+    pub instruction: Entity<TextArea>,
+    /// The line ("inline:key") or reply ("reply:id") being prepared.
+    pub agent_pending: Option<String>,
+    pub agent_error: Option<String>,
+    /// How many drafts the finished review left, until "Ok".
+    pub agent_result: Option<usize>,
+    /// The finished review already applied on this visit.
+    pub applied: Option<u64>,
 }
 
 impl CodeReview {
@@ -60,6 +76,9 @@ impl CodeReview {
         let draft = cx.new(|cx| TextArea::new(window, cx));
         let reply = cx.new(|cx| TextArea::new(window, cx).with_placeholder(reply_placeholder));
         let body = cx.new(|cx| TextArea::new(window, cx).with_placeholder(body_placeholder));
+        let instruction_placeholder = cx.t("pullRequests.code.agentInstructionPlaceholder");
+        let instruction =
+            cx.new(|cx| TextArea::new(window, cx).with_placeholder(instruction_placeholder));
         // Enter is a new line in each; Escape drops the line comment.
         let newline = |area: Entity<TextArea>, cx: &mut Context<PrHub>| {
             area.update(cx, |area, cx| area.insert("\n", cx))
@@ -68,6 +87,11 @@ impl CodeReview {
             cx.subscribe(&draft, move |hub, area, event, cx| match event {
                 TextAreaEvent::Submitted => newline(area, cx),
                 TextAreaEvent::Cancelled => hub.cancel_line_comment(cx),
+                TextAreaEvent::Changed => cx.notify(),
+                _ => {}
+            }),
+            cx.subscribe(&instruction, move |_, area, event, cx| match event {
+                TextAreaEvent::Submitted => newline(area, cx),
                 TextAreaEvent::Changed => cx.notify(),
                 _ => {}
             }),
@@ -109,6 +133,12 @@ impl CodeReview {
             reply,
             body,
             body_seen: String::new(),
+            agent_panel_open: false,
+            instruction,
+            agent_pending: None,
+            agent_error: None,
+            agent_result: None,
+            applied: None,
         };
         (review, subscriptions)
     }
@@ -166,6 +196,7 @@ impl PrHub {
     pub(crate) fn set_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
         self.tab = tab;
         self.ensure_code_detail(cx);
+        self.apply_review_job(cx);
         cx.notify();
     }
 
@@ -202,6 +233,8 @@ impl PrHub {
                     && *current == id
                 {
                     *result = Some(read.map_err(|error| message(error, cx)));
+                    hub.apply_review_job(cx);
+                    hub.start_auto_review(cx);
                     cx.notify();
                 }
             });
@@ -379,6 +412,7 @@ impl PrHub {
         let body = self.review.body.read(cx).text().trim().to_string();
         let event = self.review.event;
         let drafts = self.review.drafts.clone();
+        let item_id = item.id.clone();
         if !crate::data::pr_review::can_submit(event, drafts.len(), &body, self.review.submitting) {
             return;
         }
@@ -411,6 +445,9 @@ impl PrHub {
                         }
                         // After the body cleared, which marks it unsent.
                         hub.review.submitted = result.submitted;
+                        if result.submitted {
+                            crate::data::pr_review_jobs::PrReviewJobs::dismiss(cx, &item_id);
+                        }
                         hub.review.warning = result.warning;
                         hub.detail = None;
                         hub.ensure_detail(cx);

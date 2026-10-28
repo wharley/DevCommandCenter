@@ -24,7 +24,7 @@ fn dark(cx: &gpui::App) -> bool {
 }
 
 /// `dcc-code-inline-thread`: 12px in, 14px padding, 520px at most.
-fn thread_card(width: f32, cx: &gpui::App) -> gpui::Div {
+pub(super) fn thread_card(width: f32, cx: &gpui::App) -> gpui::Div {
     div()
         .m(px(12.0))
         .w(px(520.0_f32.min(width - 24.0).max(0.0)))
@@ -141,7 +141,7 @@ impl PrHub {
                 out.push(self.draft_card(draft, width, cx));
             }
             if self.review.editing.as_deref() == Some(key.as_str()) {
-                out.push(self.line_editor(&file.path, line, side, width, cx));
+                out.push(self.line_editor(&file.path, row, width, cx));
             }
         }
         out
@@ -237,156 +237,6 @@ impl PrHub {
             .into_any_element()
     }
 
-    /// A conversation's comment, with Responder and Resolver.
-    fn thread(&self, comment: &InlineComment, width: f32, cx: &mut Context<Self>) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        let green = tw::EMERALD_500.hsla();
-        let id = comment.id.clone();
-        let login = comment
-            .author
-            .as_ref()
-            .map(|actor| actor.login.clone())
-            .unwrap_or_else(|| cx.t("pullRequests.unknownAuthor").to_string());
-        let replying = self.review.replying_to.as_deref() == Some(id.as_str());
-        let actions = comment.thread_id.as_ref().map(|_| {
-            let reply_to = id.clone();
-            let toggled = comment.clone();
-            div()
-                .mt(px(8.0))
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(6.0))
-                .child(
-                    Button::new(gpui::SharedString::from(format!("pr-thread-reply-{id}")))
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::Xs)
-                        .text_size(12.0)
-                        .on_click(cx.listener(move |hub, _, window, cx| {
-                            hub.start_reply(reply_to.clone(), window, cx)
-                        }))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .child(Icon::new("reply").size(12.0))
-                                .child(cx.t("pullRequests.code.reply")),
-                        ),
-                )
-                .child(
-                    Button::new(gpui::SharedString::from(format!("pr-thread-resolve-{id}")))
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::Xs)
-                        .text_size(12.0)
-                        .on_click(cx.listener(move |hub, _, _, cx| {
-                            hub.toggle_resolved(toggled.clone(), cx)
-                        }))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .child(Icon::new("check").size(12.0))
-                                .child(cx.t(if comment.resolved == Some(true) {
-                                    "pullRequests.code.reopenThread"
-                                } else {
-                                    "pullRequests.code.resolveThread"
-                                })),
-                        ),
-                )
-        });
-        let reply_box = replying.then(|| {
-            let empty = self.review.reply.read(cx).text().trim().is_empty();
-            let sent = comment.clone();
-            div()
-                .mt(px(8.0))
-                .rounded(px(8.0))
-                .border_1()
-                .border_color(colors.border)
-                .bg(colors.background.opacity(0.7))
-                .p(px(8.0))
-                .child(
-                    div()
-                        .debug_selector(|| "pr-thread-reply-field".into())
-                        .min_h(px(64.0))
-                        .text_size(px(11.0))
-                        .child(self.review.reply.clone()),
-                )
-                .child(
-                    div()
-                        .mt(px(12.0))
-                        .flex()
-                        .flex_wrap()
-                        .justify_end()
-                        .gap(px(8.0))
-                        .child(
-                            Button::new("pr-thread-reply-cancel")
-                                .variant(ButtonVariant::Ghost)
-                                .size(ButtonSize::Xs)
-                                .text_size(12.0)
-                                .on_click(cx.listener(|hub, _, _, cx| hub.cancel_reply(cx)))
-                                .child(cx.t("pullRequests.code.cancel")),
-                        )
-                        .child(
-                            Button::new("pr-thread-reply-send")
-                                .size(ButtonSize::Xs)
-                                .text_size(12.0)
-                                .disabled(empty || self.review.replying)
-                                .on_click(cx.listener(move |hub, _, _, cx| {
-                                    hub.send_reply(sent.clone(), cx)
-                                }))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(4.0))
-                                        .child(Icon::new("send").size(12.0))
-                                        .child(cx.t("pullRequests.code.publishReply")),
-                                ),
-                        ),
-                )
-        });
-        let selector = format!("pr-thread-{id}");
-        thread_card(width, cx)
-            .debug_selector(move || selector)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .text_size(px(10.0))
-                    .text_color(colors.muted_foreground)
-                    .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(colors.foreground)
-                            .child(format!("@{login}")),
-                    )
-                    .when(comment.resolved == Some(true), |header| {
-                        header.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .text_color(green)
-                                .child(Icon::new("check").size(12.0))
-                                .child(cx.t("pullRequests.code.resolved")),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .mt(px(6.0))
-                    .text_size(px(11.0))
-                    .line_height(px(16.0))
-                    .child(comment.body.clone()),
-            )
-            .children(actions)
-            .children(reply_box)
-            .into_any_element()
-    }
-
     /// "Comentário pendente", with its trash.
     fn draft_card(&self, draft: &DraftComment, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
@@ -441,11 +291,37 @@ impl PrHub {
     fn line_editor(
         &self,
         path: &str,
-        line: u32,
-        side: &'static str,
+        row: &PatchRow,
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Some((line, side)) = row.review else {
+            return div().into_any_element();
+        };
+        let preparing = self
+            .agent_busy(cx)
+            .is_some_and(|busy| busy.starts_with("inline:"));
+        let (prepared_path, prepared_row) = (path.to_string(), row.clone());
+        let prepare_tip = cx.t("pullRequests.code.prepareWithAgent");
+        let prepare = crate::ui::Tooltip::new(
+            "pr-line-prepare-tip",
+            div().debug_selector(|| "pr-line-prepare".into()).child(
+                Button::new("pr-line-prepare")
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::IconXs)
+                    .disabled(preparing)
+                    .on_click(cx.listener(move |hub, _, _, cx| {
+                        hub.prepare_inline(prepared_path.clone(), prepared_row.clone(), cx)
+                    }))
+                    .child(if preparing {
+                        crate::ui::spinner("pr-line-preparing", 12.0).into_any_element()
+                    } else {
+                        Icon::new("sparkles").size(12.0).into_any_element()
+                    }),
+            ),
+            move |_, _| div().child(prepare_tip.clone()).into_any_element(),
+        )
+        .side(crate::ui::tooltip::Side::Top);
         let colors = cx.theme().colors.clone();
         let calm = colors.accent_calm;
         let empty = self.review.draft.read(cx).text().trim().is_empty();
@@ -528,6 +404,7 @@ impl PrHub {
                     .flex_wrap()
                     .justify_end()
                     .gap(px(8.0))
+                    .child(prepare)
                     .child(
                         Button::new("pr-line-cancel")
                             .variant(ButtonVariant::Ghost)

@@ -148,6 +148,7 @@ impl PrHub {
                                 &Args::default().with("login", login.clone()),
                             ))
                     }))
+                    .child(self.agent_button(cx))
                     .child(
                         div()
                             .ml_auto()
@@ -205,8 +206,9 @@ impl PrHub {
             }))
             .children(
                 review
-                    .thread_error
+                    .agent_error
                     .clone()
+                    .or_else(|| review.thread_error.clone())
                     .map(|error| line(red, "circle-alert", error)),
             )
             .children(

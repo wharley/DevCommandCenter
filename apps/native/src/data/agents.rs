@@ -10,6 +10,7 @@ use dcc_core::domain::workspace::WorkspaceId;
 use dcc_infra::db::SqliteSessionRepo;
 
 pub const CHRONICLER_PRESET: &str = "chronicler";
+pub const REVIEWER_PRESET: &str = "reviewer";
 
 /// What the agent is doing, shown on its mascot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

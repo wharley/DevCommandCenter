@@ -24,6 +24,7 @@ use crate::ui::{Icon, Tracked};
 mod editor;
 mod idea;
 mod picker;
+mod pr_reviews;
 mod recap;
 #[cfg(test)]
 mod tests;
@@ -38,6 +39,8 @@ pub enum AgentPageEvent {
     /// A new idea's task, on its conversation with the Researcher: the
     /// composer takes the focus.
     IdeaStarted { task_id: String, session_id: String },
+    /// One of the reviewer's pull request reviews: the hub on its code tab.
+    OpenPullRequest(String),
 }
 
 pub struct AgentPage {
@@ -417,6 +420,7 @@ impl Render for AgentPage {
         });
         let new_idea = researcher.then(|| self.new_idea_card(cx));
         let sessions = (!chronicler).then(|| self.sessions(&data, cx));
+        let pr_reviews = self.pr_reviews(&data, cx);
         // The Reporter has no conversations: its page is the recap.
         let recap = chronicler.then(|| self.recap_card(&data, cx));
         let extra = (!agent.extra_instructions.is_empty()).then(|| {
@@ -507,6 +511,7 @@ impl Render for AgentPage {
                     .children(new_idea)
                     .children(how_to_call)
                     .children(sessions)
+                    .children(pr_reviews)
                     .children(extra)
                     .child(role),
             )

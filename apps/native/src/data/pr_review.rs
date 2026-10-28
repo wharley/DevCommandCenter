@@ -222,6 +222,19 @@ pub struct SubmitResult {
     pub warning: Option<String>,
 }
 
+/// `RunPullRequestReviewAgentInput`
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AgentRun {
+    pub working_directory: String,
+    pub provider_id: String,
+    pub model: Option<String>,
+    pub provider_runtime: Option<dcc_core::ports::provider::ProviderRuntimeConfig>,
+    pub prompt: String,
+    /// The reviewer itself: its method and extra instructions lead the prompt.
+    pub agent_id: Option<String>,
+    pub effort: Option<String>,
+}
+
 impl DesktopApi {
     /// `pullRequestHubSubmitReview`
     pub fn pr_hub_submit_review(
@@ -265,6 +278,27 @@ impl DesktopApi {
             }),
         )
         .map(|_: Value| ())
+    }
+
+    /// `runPullRequestReviewAgent`: a read-only run in the repository; its answer.
+    pub fn pr_review_agent(&self, run: &AgentRun) -> Result<String, ApiError> {
+        let value = self.post(
+            "/api/v1/pull-request-hub/review-agent",
+            &json!({
+                "workingDirectory": run.working_directory,
+                "providerId": run.provider_id,
+                "model": run.model,
+                "providerRuntime": run.provider_runtime,
+                "prompt": run.prompt,
+                "agentId": run.agent_id,
+                "effort": run.effort,
+            }),
+        )?;
+        Ok(value
+            .get("response")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string())
     }
 
     /// `pullRequestHubResolveThread`

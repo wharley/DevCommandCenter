@@ -121,6 +121,9 @@ pub struct Sidebar {
     completed_scan: disk_usage::CompletedScan,
     dialog: Option<dialogs::SidebarDialog>,
     agent_markers: agents::AgentMarkers,
+    /// The reviewer's pull request reviews from the hub.
+    pr_reviews: Vec<crate::data::pr_review_jobs::PrReviewJob>,
+    _pr_reviews: gpui::Subscription,
     /// The agent whose page is on screen.
     active_agent_id: Option<String>,
     /// The conversation on screen, when the task has several.
@@ -185,6 +188,13 @@ impl Sidebar {
             dialog: None,
             agent_markers: agents::AgentMarkers::load(
                 seen_path.parent().unwrap_or(std::path::Path::new(".")),
+            ),
+            pr_reviews: Vec::new(),
+            _pr_reviews: cx.observe_global::<crate::data::pr_review_jobs::PrReviewJobs>(
+                |sidebar, cx| {
+                    sidebar.pr_reviews = crate::data::pr_review_jobs::PrReviewJobs::all(cx);
+                    cx.notify();
+                },
             ),
             active_agent_id: None,
             selected_session_id: None,

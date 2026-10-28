@@ -8,8 +8,11 @@ use gpui::{AnyElement, ClickEvent, Context, Hsla, SharedString, Window, div, pre
 
 use super::{Sidebar, SidebarEvent};
 use crate::agent::AgentAvatarView;
-use crate::data::agents::{AgentRecord, AgentState, CHRONICLER_PRESET, aggregate, lead};
+use crate::data::agents::{
+    AgentRecord, AgentState, CHRONICLER_PRESET, REVIEWER_PRESET, aggregate, lead,
+};
 use crate::data::daily_recap::DailyRecap;
+use crate::data::pr_review_jobs::{JobStatus, PrReviewJob};
 use crate::data::seen::SeenResults;
 use crate::i18n::Translate;
 use crate::theme::tailwind as tw;
@@ -45,9 +48,9 @@ pub struct AgentView<'a> {
 }
 
 impl Sidebar {
-    /// `useAgentsQuery`: each agent's state across its sessions. Pull request
-    /// reviews run from the desktop's hub, so none count here; the Reporter's
-    /// result is the recap.
+    /// `useAgentsQuery`: each agent's state across its sessions; the
+    /// reviewer's pull request reviews count too, and the Reporter's result
+    /// is the recap.
     pub(super) fn agent_views(&self) -> Vec<AgentView<'_>> {
         self.state
             .data
@@ -66,6 +69,16 @@ impl Sidebar {
                         (session.state, unread)
                     })
                     .collect();
+                if agent.preset.as_deref() == Some(REVIEWER_PRESET) {
+                    sessions.extend(self.pr_reviews.iter().map(|job| {
+                        let state = if job.status == JobStatus::Running {
+                            AgentState::Working
+                        } else {
+                            AgentState::Done
+                        };
+                        (state, job.unread())
+                    }));
+                }
                 if agent.preset.as_deref() == Some(CHRONICLER_PRESET)
                     && self.agent_markers.recap.is_unread()
                 {
@@ -93,6 +106,8 @@ pub struct AgentPageData {
     pub project_labels: std::collections::HashMap<String, String>,
     /// The tasks that are still ideas (`ideaWorkspaceIds`).
     pub idea_tasks: std::collections::HashSet<String>,
+    /// The reviewer's pull request reviews (`prReviews`).
+    pub pr_reviews: Vec<PrReviewJob>,
 }
 
 impl Sidebar {
@@ -131,7 +146,22 @@ impl Sidebar {
                 .map(|project| (project.project_id.clone(), project.display_name.clone()))
                 .collect(),
             idea_tasks: data.idea_tasks.keys().cloned().collect(),
+            pr_reviews: if view.agent.preset.as_deref() == Some(REVIEWER_PRESET) {
+                self.pr_reviews.clone()
+            } else {
+                Vec::new()
+            },
         })
+    }
+
+    /// The built-in reviewer, for the pull requests hub.
+    pub fn reviewer(&self) -> Option<AgentRecord> {
+        self.state
+            .data
+            .agents
+            .iter()
+            .find(|agent| agent.preset.as_deref() == Some(REVIEWER_PRESET))
+            .cloned()
     }
 
     /// The Reporter's current recap window.

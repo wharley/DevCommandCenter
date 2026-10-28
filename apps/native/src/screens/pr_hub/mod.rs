@@ -4,13 +4,14 @@
 //! the forge — and its summary (branch, facts, description, checks,
 //! activity) with a comment box. Under 780px only one side shows, with
 //! "Voltar". A GitHub pull request merges from here, after a confirmation;
-//! its code tab reads the patches and sends a review. The Reviewer comes
-//! next.
+//! its code tab reads the patches and sends a review, with the built-in
+//! reviewer's help when the person asks or accepts its offer.
 
 mod code;
 mod detail;
 mod list;
 mod merge;
+mod reviewer;
 #[cfg(test)]
 mod tests;
 
@@ -64,6 +65,15 @@ pub struct PrHub {
     /// The code tab's read, with the patches.
     pub(crate) code_detail: Option<DetailRead>,
     pub(crate) review: code::CodeReview,
+    /// The reviewer, the providers and the composer's pick, from the shell.
+    pub(crate) sources: reviewer::ReviewerSources,
+    /// The provider and model picked in the reviewer's panel.
+    pub(crate) review_pick: Option<(String, Option<String>)>,
+    pub(crate) offer: Option<reviewer::Offer>,
+    /// The pull request whose accepted offer starts the review.
+    pub(crate) auto_start_for: Option<String>,
+    /// A pull request asked to open, waiting for the list.
+    pub(crate) requested: Option<String>,
     /// The hub's width, measured as it paints.
     pub(crate) width: Rc<Cell<f32>>,
     _inputs: Vec<Subscription>,
@@ -100,6 +110,13 @@ impl PrHub {
             }),
         ];
         inputs.extend(review_inputs);
+        inputs.push(
+            cx.observe_global::<crate::data::pr_review_jobs::PrReviewJobs>(|hub, cx| {
+                hub.apply_review_job(cx);
+                hub.sync_offer(cx);
+                cx.notify();
+            }),
+        );
         let mut hub = Self {
             api: if cfg!(test) { None } else { DesktopApi::load() },
             list: None,
@@ -119,6 +136,11 @@ impl PrHub {
             tab: code::Tab::Summary,
             code_detail: None,
             review,
+            sources: reviewer::ReviewerSources::default(),
+            review_pick: None,
+            offer: None,
+            auto_start_for: None,
+            requested: None,
             width: Rc::new(Cell::new(1200.0)),
             _inputs: inputs,
         };
@@ -181,6 +203,7 @@ impl PrHub {
                 hub.fetching = false;
                 hub.list = Some(read.map_err(|error| message(error, cx)));
                 hub.follow_selection(cx);
+                hub.follow_request(cx);
                 cx.notify();
             });
         })
@@ -203,6 +226,7 @@ impl PrHub {
     /// The selected one's detail, read again after 20s.
     pub(crate) fn ensure_detail(&mut self, cx: &mut Context<Self>) {
         self.sync_review(cx);
+        self.sync_offer(cx);
         self.ensure_code_detail(cx);
         let Some(item) = self.selected_item(cx) else {
             return;

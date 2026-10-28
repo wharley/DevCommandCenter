@@ -397,3 +397,61 @@ fn an_idea_keeps_its_folder_name_with_the_time() {
         )
     );
 }
+
+#[gpui::test]
+fn the_reviewers_pull_request_reviews_show_and_open(cx: &mut TestAppContext) {
+    use crate::data::pr_review_jobs::PrReviewJobs;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("a-1".into(), sidebar, composer, cx)
+    });
+    cx.run_until_parked();
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![agent("a-1", "reviewer", Vec::new())],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        })
+    });
+    cx.update(|_, cx| {
+        PrReviewJobs::start(cx, "pr-7", "acme/app#7".into(), "Fix login".into());
+    });
+    cx.run_until_parked();
+    let state = page.read_with(cx, |page, cx| {
+        page.sidebar.read(cx).agent_page("a-1").unwrap().state
+    });
+    assert_eq!(state, AgentState::Working, "a review running counts");
+    assert!(cx.debug_bounds("agent-pr-review-0").is_some());
+    cx.update(|_, cx| PrReviewJobs::finish(cx, "pr-7", Ok("{}".into())));
+    cx.run_until_parked();
+    let state = page.read_with(cx, |page, cx| {
+        page.sidebar.read(cx).agent_page("a-1").unwrap().state
+    });
+    assert_eq!(state, AgentState::Done, "its answer is unread");
+    let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = opened.clone();
+    page.update(cx, |_, cx| {
+        cx.subscribe_self(move |_, event: &AgentPageEvent, _| {
+            if let AgentPageEvent::OpenPullRequest(id) = event {
+                sink.borrow_mut().push(id.clone());
+            }
+        })
+        .detach();
+    });
+    let bounds = cx.debug_bounds("agent-pr-review-0").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(opened.borrow().as_slice(), ["pr-7"]);
+}

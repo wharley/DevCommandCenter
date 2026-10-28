@@ -120,6 +120,7 @@ impl PrHub {
             .flex_col()
             .size_full()
             .min_h_0()
+            .children(self.agent_section(cx))
             .child(body)
             .child(self.review_footer(item, &detail, narrow, cx))
             .into_any_element()
