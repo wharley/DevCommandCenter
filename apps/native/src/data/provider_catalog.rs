@@ -14,6 +14,14 @@ use dcc_infra::db::SqliteSessionRepo;
 /// Where an installed DCC keeps the Claude helper the Claude provider runs
 /// (`dcc-claude-sidecar`, beside the desktop's executable).
 fn installed_claude_helper() -> Option<std::path::PathBuf> {
+    // This app's own bundle first (`yarn native:local` ships the helper).
+    let own = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("dcc-claude-sidecar")))
+        .filter(|path| path.is_file());
+    if own.is_some() {
+        return own;
+    }
     let name = "Dev Command Center.app/Contents/MacOS/dcc-claude-sidecar";
     let mut roots = vec![std::path::PathBuf::from("/Applications")];
     roots.extend(dirs::home_dir().map(|home| home.join("Applications")));
@@ -23,9 +31,8 @@ fn installed_claude_helper() -> Option<std::path::PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// The Claude provider finds its helper next to the running executable, which
-/// is the desktop's, not this app's: point it at the installed one. Call at
-/// startup, before any thread starts.
+/// The Claude provider's helper: the one in this app's bundle, or else the
+/// installed desktop's. Call at startup, before any thread starts.
 pub fn locate_claude_helper() {
     const VARIABLE: &str = "DCC_CLAUDE_SIDECAR_PATH";
     if std::env::var_os(VARIABLE).is_some() {
