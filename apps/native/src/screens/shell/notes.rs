@@ -1,34 +1,45 @@
-//! "Anotações" over the window (`notesOpen`): the sidebar's row opens the
-//! library, on the task shown (its project, task and conversation) and the
-//! app's projects.
+//! "Anotações" over the window (`notesOpen`): the notes and their balloons
+//! from the start, told the task shown (its project, task and
+//! conversation) and the app's projects as they change; the sidebar's row
+//! opens the library.
 
-use gpui::{AnyElement, AppContext, Context, Entity, IntoElement, Window};
+use gpui::{AnyElement, AppContext, Context, Entity, IntoElement, Subscription, Window};
 
 use super::{Shell, Surface};
 use crate::data::notes::NotesStore;
 use crate::screens::notes::{NoteProject, NotesScope, NotesWorkspace};
 
 impl Shell {
-    fn notes_workspace(
-        &mut self,
+    /// The notes, made with the shell: their balloons come back on entering a task.
+    pub(super) fn new_notes(
+        sidebar: &Entity<crate::screens::sidebar::Sidebar>,
+        conversation: &Entity<crate::screens::conversation::ConversationView>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Entity<NotesWorkspace> {
-        if let Some(notes) = &self.notes {
-            return notes.clone();
-        }
+    ) -> (Entity<NotesWorkspace>, Vec<Subscription>) {
         let store = cx.new(|_| {
             if cfg!(test) {
-                let dir = std::env::temp_dir().join("dcc-native-test-notes");
+                let dir = std::env::temp_dir()
+                    .join(format!("dcc-native-test-notes-{}", std::process::id()));
                 let _ = std::fs::create_dir_all(&dir);
                 NotesStore::new(dir.join("database.sqlite"), dir.join("notes-pending.json"))
             } else {
                 NotesStore::for_app()
             }
         });
-        let notes = cx.new(|cx| NotesWorkspace::new(store, window, cx));
-        self.notes = Some(notes.clone());
-        notes
+        let notes = cx.new(|cx| {
+            let notes = NotesWorkspace::new(store, window, cx);
+            if cfg!(test) {
+                notes
+            } else {
+                notes.with_positions(crate::prefs::native_file("notes-positions.json"))
+            }
+        });
+        let follow = vec![
+            cx.observe(sidebar, |shell, _, cx| shell.feed_notes(cx)),
+            cx.observe(conversation, |shell, _, cx| shell.feed_notes(cx)),
+        ];
+        (notes, follow)
     }
 
     /// `scope`: the task on screen, while the conversation shows.
@@ -58,7 +69,8 @@ impl Shell {
         })
     }
 
-    pub(super) fn open_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The task on screen and the projects, for the notes.
+    pub(super) fn feed_notes(&mut self, cx: &mut Context<Self>) {
         let scope = self.notes_scope(cx);
         let projects = self
             .sidebar
@@ -69,17 +81,21 @@ impl Shell {
                 id: project.project_id.clone(),
                 name: project.display_name.clone(),
             })
-            .collect();
-        let notes = self.notes_workspace(window, cx);
+            .collect::<Vec<_>>();
+        let notes = self.notes.clone();
         notes.update(cx, |notes, cx| {
-            notes.set_context(scope, projects, cx);
-            notes.open_library(cx);
+            if notes.scope != scope || notes.projects != projects {
+                notes.set_context(scope, projects, cx);
+            }
         });
     }
 
-    pub(super) fn notes_overlay(&self) -> Option<AnyElement> {
-        self.notes
-            .as_ref()
-            .map(|notes| notes.clone().into_any_element())
+    pub(super) fn open_notes(&mut self, cx: &mut Context<Self>) {
+        self.feed_notes(cx);
+        self.notes.update(cx, |notes, cx| notes.open_library(cx));
+    }
+
+    pub(super) fn notes_overlay(&self) -> AnyElement {
+        self.notes.clone().into_any_element()
     }
 }

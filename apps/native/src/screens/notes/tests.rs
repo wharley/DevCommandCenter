@@ -135,7 +135,7 @@ fn the_library_filters_opens_creates_and_deletes(cx: &mut TestAppContext) {
         "the task is in another project"
     );
     let floating = notes.read_with(cx, |notes, _| notes.floating.clone());
-    assert_eq!(floating.last(), Some(&created.id));
+    assert_eq!(floating.last().map(|(id, _)| id), Some(&created.id));
     // Deleting the completed ones, after the confirmation.
     notes.update(cx, |notes, cx| {
         notes.open_library(cx);

@@ -42,6 +42,7 @@ pub mod keep_awake;
 pub mod loader;
 pub mod mcp_advanced;
 pub mod model_picker;
+pub mod note_balloons;
 pub mod notes;
 pub mod open_project;
 pub mod plan_checklist;

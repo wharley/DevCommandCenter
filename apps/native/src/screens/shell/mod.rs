@@ -134,8 +134,9 @@ pub struct Shell {
     skills: Option<skills::OpenSkills>,
     /// "Feedback DCC", while open.
     feedback: Option<feedback::OpenFeedback>,
-    /// The project notes, once "Anotações" opened.
-    notes: Option<Entity<crate::screens::notes::NotesWorkspace>>,
+    /// The project notes and their balloons.
+    notes: Entity<crate::screens::notes::NotesWorkspace>,
+    _notes: Vec<Subscription>,
     /// "DCC Usage", while open.
     usage: Option<usage::OpenUsage>,
     /// The command palette (⌘K), while open.
@@ -271,7 +272,10 @@ impl Shell {
         browser::trim_cache_daily(cx);
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
+        let (notes, notes_follow) = Self::new_notes(&sidebar, &conversation, window, cx);
         Self {
+            notes,
+            _notes: notes_follow,
             delivery,
             browser: browser::BrowserState::new(),
             browser_approvals,
@@ -285,7 +289,6 @@ impl Shell {
             palette: None,
             usage: None,
             feedback: None,
-            notes: None,
             skills: None,
             settings: None,
             terminal,
@@ -548,6 +551,7 @@ impl Shell {
 
     fn show(&mut self, surface: Surface, cx: &mut Context<Self>) {
         self.surface = surface;
+        self.feed_notes(cx);
         let page = match surface {
             Surface::NewTask => Some(NavPage::NewTask),
             Surface::PullRequests => Some(NavPage::PullRequests),
@@ -866,7 +870,7 @@ impl Render for Shell {
             .children(self.settings_overlay())
             .children(self.skills_overlay())
             .children(self.feedback_overlay())
-            .children(self.notes_overlay())
+            .child(self.notes_overlay())
             .children(self.usage_overlay())
             .children(self.palette_overlay())
             .children(self.file_finder_overlay())

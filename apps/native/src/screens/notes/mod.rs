@@ -1,9 +1,14 @@
 //! Project notes on screen (`NotesWorkspace`): the library dialog —
 //! search, "Nova anotação", Abertas/Concluídas, the project and
 //! conversation filters, the notes as cards — and deleting them. A note
-//! picked or created opens as a balloon; the balloons are drawn in the next
-//! slice, this one keeps which are open.
+//! picked or created opens as a balloon over the window (`balloons.rs`);
+//! entering a task brings its notes' balloons back.
 
+mod balloon;
+#[cfg(test)]
+mod balloon_tests;
+mod balloon_view;
+mod balloons;
 mod card;
 mod library;
 mod palette;
@@ -14,6 +19,10 @@ use gpui::{
     AppContext, Context, Entity, EventEmitter, Render, Subscription, Window, div, prelude::*,
 };
 
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+
+use crate::data::note_balloons::{BalloonScope, FloatingState, Positions, read_positions};
 use crate::data::notes::{CreateProjectNote, NotesStore, ProjectNote};
 use crate::i18n::Translate;
 use crate::ui::Toaster;
@@ -59,6 +68,10 @@ impl StatusFilter {
 pub enum NotesEvent {
     /// The open notes' count changed (the sidebar's badge).
     Count(usize),
+    /// "Adicionar à conversa atual": the note's text for the composer.
+    Use(String),
+    /// "Criar tarefa" from this note.
+    CreateTask(String),
 }
 
 pub struct NotesWorkspace {
@@ -72,8 +85,22 @@ pub struct NotesWorkspace {
     /// A conversation's title; `None`: every one.
     pub conversation_filter: Option<String>,
     pub search: Entity<TextInput>,
-    /// The balloons open, oldest first.
-    pub floating: Vec<String>,
+    /// The balloons open and where, oldest first.
+    pub floating: Vec<(String, FloatingState)>,
+    /// Every balloon's last place, open or not.
+    pub saved: Positions,
+    /// Where `saved` is kept (none under test unless given).
+    pub positions_path: Option<PathBuf>,
+    /// Closed on this visit to the task.
+    pub dismissed: HashSet<String>,
+    /// The task the balloons were last restored for.
+    pub last_scope: Option<Option<BalloonScope>>,
+    pub balloons: HashMap<String, (Entity<balloon::NoteBalloon>, Subscription)>,
+    /// Balloons waiting for the window to be made.
+    pending_balloons: Vec<(String, FloatingState, Option<gpui::SharedString>)>,
+    pub dragging: Option<balloons::Drag>,
+    pub viewport_width: f32,
+    persist: Option<gpui::Task<()>>,
     /// The balloon whose title takes the focus.
     pub focus_note: Option<String>,
     /// Waiting for "Excluir".
@@ -135,8 +162,9 @@ impl NotesWorkspace {
                     cx.notify();
                 }
             }),
-            cx.observe(&store, |_, store, cx| {
+            cx.observe(&store, |workspace, store, cx| {
                 cx.emit(NotesEvent::Count(store.read(cx).open_count()));
+                workspace.restore_balloons(cx);
                 cx.notify();
             }),
         ];
@@ -151,12 +179,28 @@ impl NotesWorkspace {
             conversation_filter: None,
             search,
             floating: Vec::new(),
+            saved: Positions::new(),
+            positions_path: None,
+            dismissed: HashSet::new(),
+            last_scope: None,
+            balloons: HashMap::new(),
+            pending_balloons: Vec::new(),
+            dragging: None,
+            viewport_width: f32::from(window.viewport_size().width),
+            persist: None,
             focus_note: None,
             delete_ids: Vec::new(),
             busy: false,
             creating: false,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The balloons' places kept in `path` (`dcc.notes.positions.v1`).
+    pub fn with_positions(mut self, path: PathBuf) -> Self {
+        self.saved = read_positions(&path);
+        self.positions_path = Some(path);
+        self
     }
 
     /// The task on screen and the projects, from the shell.
@@ -166,8 +210,12 @@ impl NotesWorkspace {
         projects: Vec<NoteProject>,
         cx: &mut Context<Self>,
     ) {
+        let moved = self.scope != scope;
         self.scope = scope;
         self.projects = projects;
+        if moved {
+            self.restore_balloons(cx);
+        }
         cx.notify();
     }
 
@@ -222,18 +270,26 @@ impl NotesWorkspace {
     /// `show`: its balloon in front (with three others at most); the library closes.
     pub fn show(&mut self, id: &str, cx: &mut Context<Self>) {
         self.focus_note = Some(id.to_string());
-        self.floating.retain(|open| open != id);
+        self.dismissed.remove(id);
+        self.floating.retain(|(open, _)| open != id);
         let extra = self.floating.len().saturating_sub(OTHER_BALLOONS);
         self.floating.drain(..extra);
-        self.floating.push(id.to_string());
+        let state = self.place_for(id, self.floating.len());
+        self.floating.push((id.to_string(), state));
         self.open = false;
-        cx.notify();
+        self.places_changed(cx);
+        self.sync_balloons(cx);
     }
 
-    /// `close`: the balloon goes; the note stays.
+    /// `close`: the balloon goes for this visit; the note stays.
     pub fn close_balloon(&mut self, id: &str, cx: &mut Context<Self>) {
-        self.floating.retain(|open| open != id);
-        cx.notify();
+        self.dismissed.insert(id.to_string());
+        if let Some((_, state)) = self.floating.iter().find(|(open, _)| open == id) {
+            self.saved.insert(id.to_string(), *state);
+        }
+        self.floating.retain(|(open, _)| open != id);
+        self.sync_balloons(cx);
+        self.places_changed(cx);
     }
 
     /// `create`: in the filter's project while the library shows, else the task's.
@@ -324,7 +380,9 @@ impl NotesWorkspace {
                 workspace.busy = false;
                 match gone {
                     Ok(()) => {
-                        workspace.floating.retain(|id| !ids.contains(id));
+                        for id in &ids {
+                            workspace.close_balloon(id, cx);
+                        }
                         workspace.delete_ids.clear();
                     }
                     Err(_) => Toaster::error(cx.t("notes.deleteError"), cx),
@@ -338,7 +396,15 @@ impl NotesWorkspace {
 
 impl Render for NotesWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let balloons = if self.open {
+            Vec::new()
+        } else {
+            self.balloons_layer(window, cx)
+        };
         div()
+            .absolute()
+            .inset_0()
+            .children(balloons)
             .children(self.open.then(|| self.library(window, cx)))
             .children(self.delete_dialog(cx))
     }
