@@ -16,7 +16,7 @@ const MIN_HEIGHT: f32 = 700.0;
 
 pub fn open_main(prefs: Prefs, prefs_path: PathBuf, cx: &mut App) -> anyhow::Result<()> {
     let bounds = Bounds::centered(None, size(px(WIDTH), px(HEIGHT)), cx);
-    cx.open_window(
+    let handle = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(MIN_WIDTH), px(MIN_HEIGHT))),
@@ -31,8 +31,18 @@ pub fn open_main(prefs: Prefs, prefs_path: PathBuf, cx: &mut App) -> anyhow::Res
         },
         |window, cx| {
             color_space::tag_as_srgb(window);
+            // With the menu bar item, closing hides the app (`prevent_close`).
+            window.on_window_should_close(cx, |_, cx| {
+                if super::menu_bar::hides_on_close() {
+                    cx.hide();
+                    false
+                } else {
+                    true
+                }
+            });
             cx.new(|cx| Shell::new(prefs, prefs_path, window, cx))
         },
     )?;
+    cx.set_global(super::menu_bar::MainWindow(handle));
     Ok(())
 }

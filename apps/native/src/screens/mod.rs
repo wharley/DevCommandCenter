@@ -13,6 +13,7 @@ pub mod diff_view;
 pub mod feedback;
 pub mod file_view;
 pub mod help;
+pub mod menu_bar;
 pub mod merge;
 pub mod new_task;
 pub mod notes;

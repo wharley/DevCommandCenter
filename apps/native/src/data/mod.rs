@@ -41,6 +41,7 @@ pub mod highlight;
 pub mod keep_awake;
 pub mod loader;
 pub mod mcp_advanced;
+pub mod menu_bar;
 pub mod model_picker;
 pub mod note_balloons;
 pub mod notes;

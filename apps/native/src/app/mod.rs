@@ -1,6 +1,9 @@
 //! Boot: fonts, theme, menus and the main window.
 
 mod color_space;
+pub mod menu_bar;
+#[cfg(target_os = "macos")]
+mod menu_bar_item;
 mod menus;
 mod window;
 
@@ -55,6 +58,7 @@ pub fn run() {
             cx.quit();
             return;
         }
+        menu_bar::install(cx);
         cx.activate(true);
     });
 }

@@ -12,6 +12,7 @@ mod editor;
 mod feedback;
 mod help;
 pub mod layout;
+mod menu_bar;
 mod merge;
 mod notes;
 mod onboarding;
