@@ -43,8 +43,33 @@ pub fn install(cx: &mut App) {
             }
         })
         .detach();
+        follow_keep_awake(cx);
     }
     let _ = cx;
+}
+
+/// The keep-awake hold, read from the desktop every 5s (it owns the hold).
+#[cfg(target_os = "macos")]
+fn follow_keep_awake(cx: &mut App) {
+    cx.spawn(async move |cx| {
+        loop {
+            let hold = cx
+                .background_executor()
+                .spawn(async {
+                    crate::data::desktop_api::DesktopApi::load()
+                        .and_then(|api| api.keep_awake_status())
+                        .and_then(|status| status.active)
+                })
+                .await;
+            super::menu_bar_item::set_keep_awake(crate::data::keep_awake::menu_bar_tooltip(
+                hold.as_ref(),
+            ));
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(5))
+                .await;
+        }
+    })
+    .detach();
 }
 
 /// Whether the window should hide on close instead of quitting.

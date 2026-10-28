@@ -2,7 +2,7 @@
 //! of the app icon in one template stroke, so it takes the bar's own
 //! contrast in light and dark; "Dev Command Center" as its tooltip; a click
 //! hands the button's place on screen to the app, which opens the panel
-//! under it.
+//! under it. While the Mac is held awake a ☕ sits beside it.
 
 use std::cell::RefCell;
 
@@ -25,6 +25,8 @@ type OnClick = Box<dyn Fn(ButtonPlace)>;
 
 thread_local! {
     static ON_CLICK: RefCell<Option<OnClick>> = const { RefCell::new(None) };
+    /// Kept so it applies when the item is made later.
+    static KEEP_AWAKE: RefCell<Option<String>> = const { RefCell::new(None) };
     static ITEM: RefCell<Option<(Retained<AnyObject>, Retained<Target>)>> = const { RefCell::new(None) };
 }
 
@@ -159,7 +161,63 @@ pub fn install(on_click: impl Fn(ButtonPlace) + 'static) -> bool {
         ITEM.with(|slot| *slot.borrow_mut() = Some((item, target)));
     }
     ON_CLICK.with(|click| *click.borrow_mut() = Some(Box::new(on_click)));
+    apply_keep_awake();
     true
+}
+
+/// `dcc_menu_bar_set_keep_awake`: ☕ beside the icon while the Mac is held
+/// awake, the tooltip saying why; safe before the item exists.
+pub fn set_keep_awake(tooltip: Option<String>) {
+    let changed = KEEP_AWAKE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let changed = *slot != tooltip;
+        *slot = tooltip;
+        changed
+    });
+    if changed {
+        apply_keep_awake();
+    }
+}
+
+/// `applyKeepAwake`
+fn apply_keep_awake() {
+    let tooltip = KEEP_AWAKE.with(|slot| slot.borrow().clone());
+    ITEM.with(|item| {
+        let item = item.borrow();
+        let Some((item, _)) = item.as_ref() else {
+            return;
+        };
+        unsafe {
+            let button: Option<Retained<AnyObject>> = msg_send![&**item, button];
+            let Some(button) = button else {
+                return;
+            };
+            match &tooltip {
+                Some(tooltip) => {
+                    // NSVariableStatusItemLength, NSImageLeading
+                    let _: () = msg_send![&**item, setLength: -1.0f64];
+                    let title = NSString::from_str("\u{2615}");
+                    let _: () = msg_send![&*button, setTitle: &*title];
+                    let _: () = msg_send![&*button, setImagePosition: 7usize];
+                    let text = NSString::from_str(tooltip);
+                    let _: () = msg_send![&*button, setToolTip: &*text];
+                    let label = NSString::from_str(&format!("DCC. {tooltip}"));
+                    let _: () = msg_send![&*button, setAccessibilityLabel: &*label];
+                }
+                None => {
+                    // NSSquareStatusItemLength, NSImageOnly
+                    let _: () = msg_send![&**item, setLength: -2.0f64];
+                    let title = NSString::from_str("");
+                    let _: () = msg_send![&*button, setTitle: &*title];
+                    let _: () = msg_send![&*button, setImagePosition: 1usize];
+                    let text = NSString::from_str("Dev Command Center");
+                    let _: () = msg_send![&*button, setToolTip: &*text];
+                    let label = NSString::from_str("DCC");
+                    let _: () = msg_send![&*button, setAccessibilityLabel: &*label];
+                }
+            }
+        }
+    });
 }
 
 /// Whether the item is in the bar (closing the window then hides it).

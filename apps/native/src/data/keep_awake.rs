@@ -43,6 +43,15 @@ pub enum Reason {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Hold {
     pub reason: Reason,
+    /// The desktop's own words for it (`HoldReason::label`).
+    #[serde(default)]
+    pub label: String,
+}
+
+/// The menu bar item's tooltip while the Mac is held awake
+/// (`set_keep_awake`); `None` when it is not.
+pub fn menu_bar_tooltip(hold: Option<&Hold>) -> Option<String> {
+    hold.map(|hold| format!("Dev Command Center · Mac acordado: {}", hold.label))
 }
 
 /// `KeepAwakeStatus`
@@ -99,6 +108,20 @@ impl DesktopApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_menu_bar_says_why_the_mac_stays_awake() {
+        assert_eq!(menu_bar_tooltip(None), None);
+        let hold: Hold = serde_json::from_value(serde_json::json!({
+            "reason": { "kind": "agentsWorking", "count": 2 },
+            "label": "2 agentes trabalhando"
+        }))
+        .unwrap();
+        assert_eq!(
+            menu_bar_tooltip(Some(&hold)).as_deref(),
+            Some("Dev Command Center · Mac acordado: 2 agentes trabalhando")
+        );
+    }
 
     #[test]
     fn statuses_and_reasons_read_like_the_desktop() {
