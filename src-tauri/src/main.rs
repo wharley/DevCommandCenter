@@ -4200,6 +4200,26 @@ impl dev_command_center_tauri::http_api::DesktopShortcuts for HttpShortcuts {
         quick_composer::toggle(&self.0)
     }
 
+    fn begin_quick_launch(&self, launch: Value) -> Result<Value, String> {
+        let state = self
+            .0
+            .try_state::<quick_composer::QuickComposerState>()
+            .ok_or("unavailable")?;
+        let launch = serde_json::from_value(launch).map_err(|error| error.to_string())?;
+        let begun = quick_composer::begin(&state, launch)?;
+        serde_json::to_value(begun).map_err(|error| error.to_string())
+    }
+
+    fn checkpoint_quick_launch(&self, launch: Value) -> Result<Value, String> {
+        let state = self
+            .0
+            .try_state::<quick_composer::QuickComposerState>()
+            .ok_or("unavailable")?;
+        let launch = serde_json::from_value(launch).map_err(|error| error.to_string())?;
+        let saved = quick_composer::checkpoint(&state, launch)?;
+        serde_json::to_value(saved).map_err(|error| error.to_string())
+    }
+
     fn appshots(&self) -> Result<Value, String> {
         let status = appshot_commands::settings_status(&self.0)?;
         serde_json::to_value(status).map_err(|error| error.to_string())

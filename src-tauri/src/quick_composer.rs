@@ -138,6 +138,12 @@ pub fn quick_composer_begin(
     launch: Launch,
 ) -> Result<Launch, String> {
     panel_only(&window)?;
+    begin(&state, launch)
+}
+
+/// `quick_composer_begin` without the window check (the native app's quick
+/// composer, over the loopback API).
+pub fn begin(state: &QuickComposerState, launch: Launch) -> Result<Launch, String> {
     validate_launch(&launch)?;
     let mut saved = state.saved.lock().map_err(|e| e.to_string())?;
     if let Some(previous) = &saved.launch {
@@ -207,6 +213,11 @@ pub fn quick_composer_checkpoint(
     launch: Launch,
 ) -> Result<Launch, String> {
     panel_only(&window)?;
+    checkpoint(&state, launch)
+}
+
+/// `quick_composer_checkpoint` without the window check.
+pub fn checkpoint(state: &QuickComposerState, launch: Launch) -> Result<Launch, String> {
     let mut saved = state.saved.lock().map_err(|e| e.to_string())?;
     let current = saved.launch.as_ref().ok_or("Missing launch")?;
     transition(current, &launch)?;
@@ -297,35 +308,18 @@ pub fn quick_composer_toggle(window: Webview, app: AppHandle) -> Result<(), Stri
     trusted(&window)?;
     toggle(&app)
 }
+/// On this branch the native app draws the quick composer: the key and
+/// "Abrir" reach it while it listens.
 pub fn toggle(app: &AppHandle) -> Result<(), String> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = app;
-        Err("unsupported".into())
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let handle = app.clone();
-        app.run_on_main_thread(move || {
-            if unsafe { native::dcc_quick_composer_toggle() } {
-                let _ = handle.emit_to(LABEL, "quick-composer-shown", ());
-            }
-        })
-        .map_err(|e| e.to_string())
+    let _ = app;
+    if dev_command_center_tauri::http_api::native_quick_composer().toggle() {
+        Ok(())
+    } else {
+        Err("unavailable".into())
     }
 }
 pub fn show(app: &AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let handle = app.clone();
-        return app.run_on_main_thread(move || {
-            if unsafe { native::dcc_quick_composer_show() } {
-                let _ = handle.emit_to(LABEL, "quick-composer-shown", ());
-            }
-        }).map_err(|e| e.to_string());
-    }
-    #[cfg(not(target_os = "macos"))]
-    { let _ = app; Err("unsupported".into()) }
+    toggle(app)
 }
 #[tauri::command]
 pub fn quick_composer_hide(window: Webview, app: AppHandle) -> Result<(), String> {
@@ -396,27 +390,11 @@ pub fn setup(app: &AppHandle, app_data: PathBuf) -> Result<(), String> {
         saved: Mutex::new(saved),
         shortcut_error: Mutex::new(false),
     });
+    // The panel itself is the native app's on this branch; the desktop keeps
+    // the key and the journal.
     #[cfg(target_os = "macos")]
     {
         use tauri_plugin_global_shortcut::GlobalShortcutExt;
-        let panel = tauri::WebviewWindowBuilder::new(
-            app,
-            LABEL,
-            tauri::WebviewUrl::App("index.html?quick-composer=1".into()),
-        )
-        .title("DCC — Quick composer")
-        .inner_size(720., 440.)
-        .visible(false)
-        .focused(false)
-        .resizable(false)
-        .skip_taskbar(true)
-        .on_navigation(|url| crate::quick_composer::local_navigation(url))
-        .build()
-        .map_err(|e| e.to_string())?;
-        let pointer = panel.ns_window().map_err(|e| e.to_string())?;
-        if !unsafe { native::dcc_quick_composer_create(pointer) } {
-            return Err("Could not create quick composer panel".into());
-        }
         let state = app.state::<QuickComposerState>();
         let saved = state.saved.lock().map_err(|e| e.to_string())?;
         if let Some(shortcut) = &saved.shortcut {
@@ -427,15 +405,6 @@ pub fn setup(app: &AppHandle, app_data: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-pub(crate) fn local_navigation(url: &url::Url) -> bool {
-    let packaged = url.scheme() == "tauri" && url.host_str() == Some("localhost");
-    let dev = cfg!(debug_assertions)
-        && url.scheme() == "http"
-        && url.host_str() == Some("localhost")
-        && url.port() == Some(5173);
-    (packaged || dev) && matches!(url.path(), "/" | "/index.html")
-}
 pub fn shutdown(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     unsafe {
@@ -448,9 +417,6 @@ pub fn shutdown(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 mod native {
     extern "C" {
-        pub fn dcc_quick_composer_create(window: *mut std::ffi::c_void) -> bool;
-        pub fn dcc_quick_composer_toggle() -> bool;
-        pub fn dcc_quick_composer_show() -> bool;
         pub fn dcc_quick_composer_hide();
         pub fn dcc_quick_composer_destroy();
     }

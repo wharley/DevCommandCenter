@@ -72,8 +72,8 @@ mod forge;
 mod git_changes;
 mod git_conflicts;
 mod keep_awake;
-mod menu_bar;
 mod mcp;
+mod menu_bar;
 mod mobile;
 mod provider_accounts;
 mod provider_usage;
@@ -93,6 +93,7 @@ pub use browser_opens::native_browser_opens;
 pub use computer_bridge::{native_computer, DesktopComputer};
 pub use keep_awake::DesktopKeepAwake;
 pub use menu_bar::DesktopMenuBar;
+pub use shortcuts::native_quick_composer;
 pub use shortcuts::DesktopShortcuts;
 pub use terminals::{publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals};
 
@@ -841,6 +842,18 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/quick-composer/toggle",
             post(shortcuts::toggle_quick_composer),
+        )
+        .route(
+            "/api/v1/quick-composer/stream",
+            get(shortcuts::quick_composer_stream),
+        )
+        .route(
+            "/api/v1/quick-composer/begin",
+            post(shortcuts::begin_quick_launch),
+        )
+        .route(
+            "/api/v1/quick-composer/checkpoint",
+            post(shortcuts::checkpoint_quick_launch),
         )
         .route("/api/v1/appshots/status", get(shortcuts::appshots))
         .route("/api/v1/appshots/shortcut", put(shortcuts::set_appshots))
@@ -1848,6 +1861,9 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "GET /api/v1/quick-composer/status",
             "PUT /api/v1/quick-composer/shortcut",
             "POST /api/v1/quick-composer/toggle",
+            "GET /api/v1/quick-composer/stream",
+            "POST /api/v1/quick-composer/begin",
+            "POST /api/v1/quick-composer/checkpoint",
             "GET /api/v1/appshots/status",
             "PUT /api/v1/appshots/shortcut",
             "POST /api/v1/skills/save",
@@ -3025,6 +3041,9 @@ struct CreateTaskBody {
     /// The multi-project task's name (the desktop's "Nova tarefa").
     #[serde(default)]
     bundle_name: Option<String>,
+    /// The task's own name (the quick composer's first line).
+    #[serde(default)]
+    name: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -3088,7 +3107,7 @@ async fn create_task_handler(
                 project_id: dcc_core::domain::project::ProjectId(body.project_id),
                 workspace_root: body.workspace_root,
                 base_branch: body.base_branch,
-                name: None,
+                name: body.name.clone(),
                 isolation_mode: body.isolation_mode,
                 context_folders,
             },
@@ -3102,6 +3121,7 @@ async fn create_task_handler(
                 CreateWorkspaceBundleForReposInput {
                     name: body
                         .bundle_name
+                        .or(body.name)
                         .unwrap_or_else(|| "Nova tarefa".to_string()),
                     projects,
                 },
@@ -5646,6 +5666,20 @@ mod tests {
                 self.0.lock().unwrap().push("toggle".into());
                 Ok(())
             }
+            fn begin_quick_launch(&self, launch: Value) -> Result<Value, String> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(format!("begin {}", launch["phase"]));
+                Ok(launch)
+            }
+            fn checkpoint_quick_launch(&self, launch: Value) -> Result<Value, String> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(format!("checkpoint {}", launch["phase"]));
+                Ok(launch)
+            }
             fn appshots(&self) -> Result<Value, String> {
                 Ok(json!({ "supported": true, "shortcut": null }))
             }
@@ -5682,9 +5716,27 @@ mod tests {
         )
         .await;
         post_json(&fixture.app, "/api/v1/quick-composer/toggle", json!({})).await;
+        let (_, begun) = post_json(
+            &fixture.app,
+            "/api/v1/quick-composer/begin",
+            json!({ "phase": "pending" }),
+        )
+        .await;
+        assert_eq!(begun["phase"], "pending");
+        post_json(
+            &fixture.app,
+            "/api/v1/quick-composer/checkpoint",
+            json!({ "phase": "creating" }),
+        )
+        .await;
         assert_eq!(
             *fake.0.lock().unwrap(),
-            ["appshots None".to_string(), "toggle".to_string()]
+            [
+                "appshots None".to_string(),
+                "toggle".to_string(),
+                "begin \"pending\"".to_string(),
+                "checkpoint \"creating\"".to_string()
+            ]
         );
     }
 
@@ -5731,7 +5783,9 @@ mod tests {
         struct Fake;
         impl DesktopMenuBar for Fake {
             fn snapshot(&self) -> Result<Value, String> {
-                Ok(json!({ "tasks": [{ "workspaceId": "w", "status": "running" }], "metrics": null }))
+                Ok(
+                    json!({ "tasks": [{ "workspaceId": "w", "status": "running" }], "metrics": null }),
+                )
             }
         }
         let fixture = embedded_fixture().await;
