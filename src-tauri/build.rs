@@ -8,16 +8,12 @@ use dcc_tauri::commands::workspace_cleanup::{
 };
 use std::{env, fs, path::PathBuf, process::Command};
 
-fn build_macos_computer_bridge() {
+fn build_macos_desktop_bridges() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set by Cargo"));
-    let source = PathBuf::from("native/computer_use_macos.m");
-    let object = out_dir.join("computer_use_macos.o");
-    let archive = out_dir.join("libdcc_computer_use_macos.a");
-    println!("cargo:rerun-if-changed={}", source.display());
-    println!("cargo:rerun-if-changed=native/computer_use_macos.h");
+    let archive = out_dir.join("libdcc_desktop_macos.a");
     println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
     let target = env::var("TARGET").unwrap_or_default();
     let architecture = if target.starts_with("aarch64-") {
@@ -35,17 +31,6 @@ fn build_macos_computer_bridge() {
             "10.13".to_string()
         }
     });
-    let compiled = Command::new("xcrun")
-        .args(["clang", "-fobjc-arc", "-c"])
-        .arg(&source)
-        .args(["-arch", architecture])
-        .arg(format!("-mmacosx-version-min={deployment_target}"))
-        .args(["-o"])
-        .arg(&object)
-        .status()
-        .expect("xcrun clang must be available to build macOS computer use")
-        .success();
-    assert!(compiled, "failed to compile the macOS computer-use bridge");
     let quick_object = out_dir.join("quick_composer_macos.o");
     println!("cargo:rerun-if-changed=native/quick_composer_macos.m");
     assert!(Command::new("xcrun")
@@ -70,21 +55,20 @@ fn build_macos_computer_bridge() {
     let archived = Command::new("ar")
         .args(["crus"])
         .arg(&archive)
-        .arg(&object)
         .arg(&quick_object)
         .arg(&menu_bar_object)
         .status()
-        .expect("ar must be available to build macOS computer use")
+        .expect("ar must be available to build the macOS menu bar and quick composer")
         .success();
-    assert!(archived, "failed to archive the macOS computer-use bridge");
+    assert!(archived, "failed to archive the macOS menu bar and quick composer");
     println!("cargo:rustc-link-search=native={}", out_dir.display());
-    println!("cargo:rustc-link-lib=static=dcc_computer_use_macos");
+    println!("cargo:rustc-link-lib=static=dcc_desktop_macos");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=WebKit");
     println!("cargo:rustc-link-lib=framework=ApplicationServices");
     println!("cargo:rustc-link-lib=framework=ImageIO");
-    // The bridge itself is statically archived. ScreenCaptureKit is weakly
-    // loaded because this feature is guarded at runtime on macOS 14+.
+    // Computer use (in dcc-server) weakly loads ScreenCaptureKit, guarded at
+    // runtime on macOS 14+.
     println!("cargo:rustc-link-arg=-Wl,-weak_framework,ScreenCaptureKit");
 }
 
@@ -615,7 +599,7 @@ struct DelegationMethods {
 }
 
 fn main() {
-    build_macos_computer_bridge();
+    build_macos_desktop_bridges();
     tauri_build::build();
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("missing manifest dir"));

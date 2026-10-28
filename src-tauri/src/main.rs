@@ -6,8 +6,6 @@ mod appshot_commands;
 mod attachment_commands;
 mod browser_agent_requests;
 mod browser_commands;
-mod browser_input;
-mod browser_mcp_bridge;
 mod coderabbit_commands;
 mod computer_use_commands;
 mod delegation_commands;
@@ -38,6 +36,7 @@ use dcc_tauri::{
     state::{SessionCommandState, WorkspaceCommandState},
 };
 use dev_command_center_tauri::ai_memory_sidecar::AiMemorySidecar;
+use dev_command_center_tauri::browser_mcp_bridge;
 use dev_command_center_tauri::command_api::{db_error, iso_now, next_id, ApiError, ApiResult};
 use dev_command_center_tauri::daemon_client::{ensure_sidecar_running, rpc_with_info, DaemonRuntimeInfo};
 use dev_command_center_tauri::decision_provider_settings::DecisionProviderSettings;
@@ -2380,7 +2379,7 @@ fn spawn_terminal_session_with_options(
     }
     let reader_thread = Some(spawn_terminal_reader_thread(
         reader,
-        terminal_events(app),
+        named_events(app),
         pty_id.clone(),
         pane_id_opt.clone(),
         title_state.clone(),
@@ -5759,14 +5758,14 @@ fn terminal_state(state: &AppState) -> TerminalState {
     }
 }
 
-/// The terminals' events, to the webview.
-fn terminal_events(app: &AppHandle) -> TerminalEvents {
+/// Events by name (terminals, Browser approvals, computer use), to the webview.
+fn named_events(app: &AppHandle) -> TerminalEvents {
     TerminalEvents(dcc_tauri::app_events::AppEvents::tauri_emitter(app.clone()))
 }
 
 #[tauri::command]
 fn terminal_spawn(state: State<'_, AppState>, app: AppHandle, options: Value) -> ApiResult<Value> {
-    terminals::terminal_spawn(&terminal_state(&state), terminal_events(&app), options)
+    terminals::terminal_spawn(&terminal_state(&state), named_events(&app), options)
 }
 
 #[tauri::command]
@@ -5778,7 +5777,7 @@ fn terminal_get_or_create(
 ) -> ApiResult<Value> {
     terminals::terminal_get_or_create(
         &terminal_state(&state),
-        terminal_events(&app),
+        named_events(&app),
         mission_id,
         options,
     )
@@ -5801,7 +5800,7 @@ fn terminal_resize(
 
 #[tauri::command]
 fn terminal_kill(state: State<'_, AppState>, app: AppHandle, pty_id: String) -> ApiResult<Value> {
-    terminals::terminal_kill(&terminal_state(&state), terminal_events(&app), pty_id)
+    terminals::terminal_kill(&terminal_state(&state), named_events(&app), pty_id)
 }
 
 #[tauri::command]
@@ -5903,7 +5902,7 @@ fn kill_all_terminals(state: &AppState, app: &AppHandle) {
     for (pty_id, terminal) in drained {
         finalize_managed_terminal_removal(
             &terminal_state(state),
-            &terminal_events(app),
+            &named_events(app),
             pty_id,
             terminal,
             false,
@@ -5959,7 +5958,7 @@ fn terminal_kill_by_mission_id(
         if let Some(t) = terminal {
             finalize_managed_terminal_removal(
                 &terminal_state(&state),
-                &terminal_events(&app),
+                &named_events(&app),
                 id,
                 t,
                 true,
@@ -6073,7 +6072,7 @@ fn terminal_kill_by_pane_id(
         if let Some(t) = terminal {
             finalize_managed_terminal_removal(
                 &terminal_state(&state),
-                &terminal_events(&app),
+                &named_events(&app),
                 id,
                 t,
                 true,
@@ -6644,7 +6643,7 @@ pub fn run() {
                 });
             }
             let browser_mcp_bridge = match tauri::async_runtime::block_on(BrowserMcpBridge::start(
-                Some(app.handle().clone()),
+                Some(named_events(app.handle())),
                 browser_state.clone(),
                 browser_agent_requests.clone(),
                 session_command_state.clone(),
@@ -6691,7 +6690,7 @@ pub fn run() {
                 app.manage(gateway);
             }
             let desktop_agent_requests = desktop_agent_requests::DesktopAgentRequests::new(
-                app.handle().clone(),
+                named_events(app.handle()),
                 browser_agent_requests.clone(),
                 browser_state.clone(),
                 computer_use_state.clone(),

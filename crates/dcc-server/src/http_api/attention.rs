@@ -38,32 +38,12 @@ const WATCH_INTERVAL: Duration = Duration::from_millis(500);
 const BLOCKERS_MAX_AGE: Duration = Duration::from_secs(30);
 const BLOCKER_WATCH_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Runs on the caller's Tokio runtime, or a runtime of its own when there is
-/// none (the desktop attaches from its setup hook).
+/// Background work on the caller's runtime or the server's own.
 pub(super) fn spawn_background<F>(future: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    match tokio::runtime::Handle::try_current() {
-        Ok(handle) => {
-            handle.spawn(future);
-        }
-        Err(_) => {
-            fallback_runtime().spawn(future);
-        }
-    }
-}
-
-fn fallback_runtime() -> &'static tokio::runtime::Runtime {
-    static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .thread_name("dcc-attention")
-            .enable_all()
-            .build()
-            .expect("the attention watcher's runtime")
-    })
+    crate::runtime::spawn(future);
 }
 
 impl HttpBackend {

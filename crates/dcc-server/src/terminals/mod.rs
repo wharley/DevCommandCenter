@@ -19,7 +19,6 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use portable_pty::{Child as PtyChild, MasterPty};
 use rusqlite::{params, Connection};
-use serde::Serialize;
 
 pub use reader::*;
 pub use session::*;
@@ -35,16 +34,8 @@ pub struct TerminalState {
 }
 
 /// Where the terminals' events go by name (`terminal-attention`,
-/// `terminal-activity`, `terminal-exit`): the desktop's webview, or nowhere.
-#[derive(Clone)]
-pub struct TerminalEvents(pub Arc<dyn dcc_tauri::app_events::AppEmitter>);
-
-impl TerminalEvents {
-    pub fn emit<T: Serialize>(&self, event: &str, payload: T) -> Result<(), String> {
-        let payload = serde_json::to_value(payload).map_err(|error| error.to_string())?;
-        self.0.emit(event, payload)
-    }
-}
+/// `terminal-activity`, `terminal-exit`).
+pub use crate::named_events::NamedEvents as TerminalEvents;
 
 /// Últimas N linhas de stdout/stderr por sessão (reidratação do xterm ao remontar).
 pub const TERMINAL_OUTPUT_MAX_LINES: usize = 1000;

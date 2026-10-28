@@ -32,7 +32,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
-use tauri::Emitter;
 use tokio::sync::oneshot;
 use tower::limit::ConcurrencyLimitLayer;
 use url::Url;
@@ -48,8 +47,8 @@ use crate::browser_commands::{
 };
 use crate::computer_use_commands::{
     parse_element_ref, ComputerActionError, ComputerActionTarget, ComputerCapture,
-    ComputerElements, ComputerInputMethod, ComputerTargetSnapshot, ComputerUseState,
-    PointerButton, MAX_SCROLL_DELTA,
+    ComputerElements, ComputerInputMethod, ComputerTargetSnapshot, ComputerUseState, PointerButton,
+    MAX_SCROLL_DELTA,
 };
 use dcc_tauri::connector_gateway::{ConnectorCall, ConnectorGateway, ConnectorResponse};
 use dcc_tauri::state::{
@@ -118,12 +117,11 @@ async fn session_runs_in_full_access(sessions: &SessionCommandState, session_id:
         provider::ProviderApprovalPolicy,
         session::{SessionEventKind, SessionId},
     };
-    let Ok(events) =
-        dcc_core::ports::SessionEventRepo::list_events_by_session(
-            sessions,
-            &SessionId(session_id.to_string()),
-        )
-        .await
+    let Ok(events) = dcc_core::ports::SessionEventRepo::list_events_by_session(
+        sessions,
+        &SessionId(session_id.to_string()),
+    )
+    .await
     else {
         return false;
     };
@@ -264,7 +262,7 @@ impl TokenRegistry {
 /// The loopback listener and its lease-bound session registry. No plaintext
 /// bearer token is retained after `project_for_session` returns.
 pub struct BrowserMcpBridge {
-    app: Option<tauri::AppHandle>,
+    app: Option<crate::named_events::NamedEvents>,
     browser: BrowserState,
     browser_requests: BrowserAgentRequestBroker,
     sessions: SessionCommandState,
@@ -278,7 +276,7 @@ pub struct BrowserMcpBridge {
 
 impl BrowserMcpBridge {
     pub async fn start(
-        app: Option<tauri::AppHandle>,
+        app: Option<crate::named_events::NamedEvents>,
         browser: BrowserState,
         browser_requests: BrowserAgentRequestBroker,
         sessions: SessionCommandState,
@@ -366,14 +364,13 @@ impl BrowserMcpBridge {
             phase,
         };
         if let Ok(event) = serde_json::to_value(&notice) {
-            dev_command_center_tauri::http_api::native_computer()
-                .publish("computer-activity", event);
+            crate::http_api::native_computer().publish("computer-activity", event);
         }
         let _ = app.emit("computer-use-activity", notice);
     }
 
     fn emit_computer_preview_updated(&self, session_id: &str) {
-        dev_command_center_tauri::http_api::native_computer().publish(
+        crate::http_api::native_computer().publish(
             "computer-preview-updated",
             serde_json::json!({ "sessionId": session_id }),
         );
@@ -1165,10 +1162,9 @@ fn propose_task_args_are_well_formed(args: &ProposeTaskArgs) -> bool {
         && args.provider.as_deref().is_none_or(|provider| {
             dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS.contains(&provider.trim())
         })
-        && args
-            .model
-            .as_deref()
-            .is_none_or(|model| model.chars().count() <= 128 && !model.chars().any(char::is_control))
+        && args.model.as_deref().is_none_or(|model| {
+            model.chars().count() <= 128 && !model.chars().any(char::is_control)
+        })
         && matches!(args.start.as_deref(), None | Some("propose") | Some("now"))
 }
 
@@ -1179,13 +1175,13 @@ fn delegate_task_args_are_well_formed(args: &DelegateTaskArgs) -> bool {
         && args.provider.as_deref().is_none_or(|provider| {
             dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS.contains(&provider.trim())
         })
-        && args
-            .model
-            .as_deref()
-            .is_none_or(|model| model.chars().count() <= 128 && !model.chars().any(char::is_control))
+        && args.model.as_deref().is_none_or(|model| {
+            model.chars().count() <= 128 && !model.chars().any(char::is_control)
+        })
         && valid_wait_seconds(args.timeout_seconds)
         && args.title.as_deref().is_none_or(|title| {
-            title.chars().count() <= MAX_DELEGATED_TITLE_CHARS && !title.chars().any(char::is_control)
+            title.chars().count() <= MAX_DELEGATED_TITLE_CHARS
+                && !title.chars().any(char::is_control)
         })
 }
 
@@ -1868,26 +1864,27 @@ async fn dispatch_tool(
                 let session_id = binding.session_id.clone();
                 let lease_id = binding.lease_id.clone();
                 let result = computer_blocking(move || {
-                    Ok(computer.click(
-                        &session_id,
-                        &lease_id,
-                        &args.target,
-                        &at,
-                        args.button,
-                        args.click_count,
-                    )
-                    .map(|method| {
-                        let clicks = match (args.button, args.click_count) {
-                            (PointerButton::Right, _) => "Right-clicked",
-                            (_, 2) => "Double-clicked",
-                            _ => "Clicked",
-                        };
-                        format!(
-                            "{clicks} {} {}",
-                            describe_action_target(&at),
-                            describe_input_method(method)
+                    Ok(computer
+                        .click(
+                            &session_id,
+                            &lease_id,
+                            &args.target,
+                            &at,
+                            args.button,
+                            args.click_count,
                         )
-                    }))
+                        .map(|method| {
+                            let clicks = match (args.button, args.click_count) {
+                                (PointerButton::Right, _) => "Right-clicked",
+                                (_, 2) => "Double-clicked",
+                                _ => "Clicked",
+                            };
+                            format!(
+                                "{clicks} {} {}",
+                                describe_action_target(&at),
+                                describe_input_method(method)
+                            )
+                        }))
                 })
                 .await;
                 computer_action_dispatch(bridge, binding, &target, result).await
@@ -1979,10 +1976,7 @@ async fn dispatch_tool(
                             &args.value,
                         )
                         .map(|()| {
-                            format!(
-                                "Set the value of {} through accessibility",
-                                args.reference
-                            )
+                            format!("Set the value of {} through accessibility", args.reference)
                         }))
                 })
                 .await;
@@ -2407,8 +2401,13 @@ async fn wait_reply(
     task_id: &str,
     timeout: Duration,
 ) -> ToolDispatch {
-    match dcc_tauri::delegation_runtime::wait_for_delegation(&bridge.sessions, parent, task_id, timeout)
-        .await
+    match dcc_tauri::delegation_runtime::wait_for_delegation(
+        &bridge.sessions,
+        parent,
+        task_id,
+        timeout,
+    )
+    .await
     {
         Ok(outcome) => {
             let mut view = delegation_task_view(&outcome.delegation);
@@ -2503,7 +2502,9 @@ async fn dispatch_delegation_tool(
                     );
                     reply("Delegated task started.", view)
                 }
-                Err(error) => ToolDispatch::computer_error(&format!("Delegation rejected: {error}")),
+                Err(error) => {
+                    ToolDispatch::computer_error(&format!("Delegation rejected: {error}"))
+                }
             }
         }
         "dcc_propose_task" => {
@@ -2537,11 +2538,17 @@ async fn dispatch_delegation_tool(
                         "The proposal waits as a card in this conversation; nothing runs until the human starts it. Mention it in your reply and end your turn or continue other work."
                     });
                     reply(
-                        if start_now { "Task started." } else { "Task proposed." },
+                        if start_now {
+                            "Task started."
+                        } else {
+                            "Task proposed."
+                        },
                         view,
                     )
                 }
-                Err(error) => ToolDispatch::computer_error(&format!("Task proposal rejected: {error}")),
+                Err(error) => {
+                    ToolDispatch::computer_error(&format!("Task proposal rejected: {error}"))
+                }
             }
         }
         "dcc_task_message" => {
@@ -2584,7 +2591,9 @@ async fn dispatch_delegation_tool(
             )
             .await
             {
-                Ok(delegation) => reply("Delegated task status.", delegation_task_view(&delegation)),
+                Ok(delegation) => {
+                    reply("Delegated task status.", delegation_task_view(&delegation))
+                }
                 Err(error) => ToolDispatch::computer_error(&error),
             }
         }
@@ -2595,7 +2604,13 @@ async fn dispatch_delegation_tool(
             else {
                 return ToolDispatch::computer_error("invalid dcc_task_wait arguments");
             };
-            wait_reply(bridge, &parent, &args.task_id, wait_duration(args.timeout_seconds)).await
+            wait_reply(
+                bridge,
+                &parent,
+                &args.task_id,
+                wait_duration(args.timeout_seconds),
+            )
+            .await
         }
         "dcc_task_cancel" => {
             let Some(args) = call
@@ -2612,7 +2627,10 @@ async fn dispatch_delegation_tool(
             )
             .await
             {
-                Ok(delegation) => reply("Delegated task cancelled.", delegation_task_view(&delegation)),
+                Ok(delegation) => reply(
+                    "Delegated task cancelled.",
+                    delegation_task_view(&delegation),
+                ),
                 Err(error) => ToolDispatch::computer_error(&error),
             }
         }
@@ -2776,15 +2794,17 @@ async fn computer_action_dispatch(
     })
     .await;
     let response = match observation {
-        Ok(capture) => computer_observation_response(
-            &if failed {
-                format!("{summary}. The window as it is now, with a new generation:")
-            } else {
-                format!("{summary}. The window afterwards, with a new generation for the next action:")
-            },
-            &capture,
-            failed,
-        ),
+        Ok(capture) => {
+            computer_observation_response(
+                &if failed {
+                    format!("{summary}. The window as it is now, with a new generation:")
+                } else {
+                    format!("{summary}. The window afterwards, with a new generation for the next action:")
+                },
+                &capture,
+                failed,
+            )
+        }
         Err(error) => {
             json!({"content":[{"type":"text","text":format!("{summary}. Observing the window afterwards failed: {error}. Call dcc_computer_status, then capture the target again.")}],"isError":failed})
         }
@@ -2906,7 +2926,8 @@ fn tools() -> Vec<Value> {
         "height":{"type":"number","exclusiveMinimum":0},
         "generation":{"type":"string","minLength":32,"maxLength":32,"pattern":"^[a-f0-9]{32}$"}
     },"required":["bundleId","name","windowId","title","width","height","generation"]});
-    let computer_ref = json!({"type":"string","minLength":2,"maxLength":4,"pattern":"^e[1-9][0-9]{0,2}$"});
+    let computer_ref =
+        json!({"type":"string","minLength":2,"maxLength":4,"pattern":"^e[1-9][0-9]{0,2}$"});
     let computer_keys = json!([
         "ENTER",
         "TAB",
@@ -3179,7 +3200,6 @@ mod tests {
         assert_eq!(dcc.tools.len(), DCC_MCP_TOOL_COUNT);
     }
 
-
     fn empty_connector_gateway(temp: &TempDir) -> ConnectorGateway {
         let repo = dcc_infra::mcp_db::SqliteMcpRepo::open(temp.path().join("connectors.sqlite"))
             .expect("connector registry");
@@ -3222,10 +3242,14 @@ mod tests {
         );
         let app = browser_mcp_router(Arc::clone(&bridge));
 
-        let unauthenticated = router_call(&app, connector_request("POST", "mcp-granted", None)).await;
+        let unauthenticated =
+            router_call(&app, connector_request("POST", "mcp-granted", None)).await;
         assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
-        let not_granted =
-            router_call(&app, connector_request("POST", "mcp-granted", Some(TEST_BEARER))).await;
+        let not_granted = router_call(
+            &app,
+            connector_request("POST", "mcp-granted", Some(TEST_BEARER)),
+        )
+        .await;
         assert_eq!(not_granted.status(), StatusCode::NOT_FOUND);
 
         bridge
@@ -3239,23 +3263,36 @@ mod tests {
             );
         // The definition is gone from the registry, so the gateway answers a
         // JSON-RPC error instead of an HTTP failure the provider would act on.
-        let granted =
-            router_call(&app, connector_request("POST", "mcp-granted", Some(TEST_BEARER))).await;
+        let granted = router_call(
+            &app,
+            connector_request("POST", "mcp-granted", Some(TEST_BEARER)),
+        )
+        .await;
         assert_eq!(granted.status(), StatusCode::OK);
         let body = response_json(granted).await;
         assert_eq!(body["id"], 1);
         assert!(body["error"]["message"]
             .as_str()
             .is_some_and(|message| message.contains("disconnected")));
-        let other =
-            router_call(&app, connector_request("POST", "mcp-other", Some(TEST_BEARER))).await;
+        let other = router_call(
+            &app,
+            connector_request("POST", "mcp-other", Some(TEST_BEARER)),
+        )
+        .await;
         assert_eq!(other.status(), StatusCode::NOT_FOUND);
-        let get = router_call(&app, connector_request("GET", "mcp-granted", Some(TEST_BEARER))).await;
+        let get = router_call(
+            &app,
+            connector_request("GET", "mcp-granted", Some(TEST_BEARER)),
+        )
+        .await;
         assert_eq!(get.status(), StatusCode::METHOD_NOT_ALLOWED);
 
         bridge.revoke_session(&SessionId(binding.session_id.clone()), &binding.lease_id);
-        let revoked =
-            router_call(&app, connector_request("POST", "mcp-granted", Some(TEST_BEARER))).await;
+        let revoked = router_call(
+            &app,
+            connector_request("POST", "mcp-granted", Some(TEST_BEARER)),
+        )
+        .await;
         assert_eq!(revoked.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -3297,7 +3334,10 @@ mod tests {
             panic!("connectors are served over HTTP");
         };
         assert_eq!(url, "http://127.0.0.1:0/mcp/connectors/mcp-clickup");
-        let ProviderMcpTransport::Http { headers: browser_headers, .. } = &lease.servers[0].transport
+        let ProviderMcpTransport::Http {
+            headers: browser_headers,
+            ..
+        } = &lease.servers[0].transport
         else {
             panic!("browser server is HTTP");
         };
@@ -4022,7 +4062,9 @@ mod tests {
         assert!(computer_click_args_are_well_formed(&json!({
             "target": target, "x": 12.0, "y": 24.0, "clickCount": 2, "button": "right"
         })));
-        assert!(computer_click_args_are_well_formed(&json!({"target": target, "ref": "e12"})));
+        assert!(computer_click_args_are_well_formed(
+            &json!({"target": target, "ref": "e12"})
+        ));
         for invalid in [
             json!({"target": target, "x": 12.0, "y": 24.0, "clickCount": 3}),
             json!({"target": target, "x": 12.0}),
@@ -4099,7 +4141,10 @@ mod tests {
         let text = computer_elements_text(&many);
         assert!(text.len() <= MAX_COMPUTER_ELEMENTS_TEXT_CHARS + 64);
         assert!(text.ends_with("(more elements omitted)\n"));
-        assert!(text.lines().skip(1).all(|line| line == long_line || line.starts_with('…')));
+        assert!(text
+            .lines()
+            .skip(1)
+            .all(|line| line == long_line || line.starts_with('…')));
         assert!(computer_elements_text(&ComputerElements {
             available: false,
             count: 0,
@@ -4121,8 +4166,14 @@ mod tests {
             "dcc_delegate_task",
             json!({"task":"Review the diff","mode":"review","provider":"codex"})
         )));
-        assert!(tool_call_is_well_formed(&call("dcc_delegate_task", json!({"task":"Explain"}))));
-        assert!(!tool_call_is_well_formed(&call("dcc_delegate_task", json!({"task":"  "}))));
+        assert!(tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"Explain"})
+        )));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_delegate_task",
+            json!({"task":"  "})
+        )));
         assert!(!tool_call_is_well_formed(&call(
             "dcc_delegate_task",
             json!({"task":"x","mode":"deploy"})
@@ -4159,13 +4210,22 @@ mod tests {
             "dcc_delegate_task",
             json!({"task":"x","wait":true,"timeoutSeconds":601})
         )));
-        assert!(tool_call_is_well_formed(&call("dcc_task_wait", json!({"taskId":"abc"}))));
+        assert!(tool_call_is_well_formed(&call(
+            "dcc_task_wait",
+            json!({"taskId":"abc"})
+        )));
         assert!(!tool_call_is_well_formed(&call(
             "dcc_task_wait",
             json!({"taskId":"abc","timeoutSeconds":0})
         )));
-        assert!(tool_call_is_well_formed(&call("dcc_task_status", json!({"taskId":"abc"}))));
-        assert!(!tool_call_is_well_formed(&call("dcc_task_status", json!({"taskId":""}))));
+        assert!(tool_call_is_well_formed(&call(
+            "dcc_task_status",
+            json!({"taskId":"abc"})
+        )));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_task_status",
+            json!({"taskId":""})
+        )));
         assert!(tool_call_is_well_formed(&call(
             "dcc_task_cancel",
             json!({"taskId":"abc","reason":"no longer needed"})
@@ -4187,7 +4247,10 @@ mod tests {
             "dcc_propose_task",
             json!({"title":"Fase 2","task":"x","edits":false,"worktree":true,"provider":"codex","start":"now"})
         )));
-        assert!(!tool_call_is_well_formed(&call("dcc_propose_task", json!({"task":"no title"}))));
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_propose_task",
+            json!({"task":"no title"})
+        )));
         assert!(!tool_call_is_well_formed(&call(
             "dcc_propose_task",
             json!({"title":"x","task":"y","start":"later"})
@@ -4213,7 +4276,10 @@ mod tests {
                     "dcc_task_message" => json!({"taskId":"abc","message":"m"}),
                     _ => json!({"taskId":"abc"}),
                 };
-                assert!(tool_call_is_well_formed(&call(name, arguments)), "{name} is rejected");
+                assert!(
+                    tool_call_is_well_formed(&call(name, arguments)),
+                    "{name} is rejected"
+                );
             }
         }
     }
@@ -4381,7 +4447,11 @@ mod tests {
             find_tool("dcc_computer_click")["inputSchema"]["properties"]["button"]["enum"],
             json!(["left", "right"])
         );
-        for name in ["dcc_computer_click", "dcc_computer_scroll", "dcc_computer_set_value"] {
+        for name in [
+            "dcc_computer_click",
+            "dcc_computer_scroll",
+            "dcc_computer_set_value",
+        ] {
             assert_eq!(
                 find_tool(name)["inputSchema"]["properties"]["ref"]["pattern"],
                 json!("^e[1-9][0-9]{0,2}$")
