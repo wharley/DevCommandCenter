@@ -1,7 +1,8 @@
 //! Draws the block model with `.assistant-markdown-scale` and Streamdown's
 //! classes: paragraphs at 1.82 line height, 0.75rem between blocks, headings
 //! at 1.35/1.2/1.1em, lists inset 1.35rem, code in a bordered card with its
-//! language on top, tables in a framed sidebar-tinted box.
+//! language on top (with "Copiar" on hover), tables in a framed
+//! sidebar-tinted box.
 
 use gpui::{
     AnyElement, App, FontStyle, FontWeight, HighlightStyle, InteractiveText, SharedString,
@@ -13,6 +14,10 @@ use crate::theme::ActiveTheme;
 
 /// `0.75rem` between blocks.
 const BLOCK_GAP: f32 = 12.0;
+/// `group/code`: a code block's own actions show while it is hovered.
+const CODE_GROUP: &str = "markdown-code-block";
+/// How long the copied check stays.
+const COPIED_FOR: std::time::Duration = std::time::Duration::from_millis(2000);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MarkdownStyle {
@@ -221,10 +226,16 @@ fn code_block(
         (true, false, Some(limit)) => lines[..limit].join("\n"),
         _ => code.to_string(),
     };
-    let header = language.map(|language| {
+    let copy = copy_action(code, path, window, cx);
+    let (header, floating) = match language {
+        Some(language) => (Some((language, copy)), None),
+        None => (None, Some(copy)),
+    };
+    let header = header.map(|(language, copy)| {
         div()
             .flex()
             .items_center()
+            .justify_between()
             .h(px(32.0))
             .pl(px(12.0))
             .pr(px(6.0))
@@ -239,6 +250,17 @@ fn code_block(
                     .text_color(colors.muted_foreground.opacity(0.7))
                     .child(SharedString::from(language.to_string())),
             )
+            .child(copy)
+    });
+    // Without a language the actions float in the corner (`top-1 right-1.5`).
+    let floating = floating.map(|copy| {
+        div()
+            .absolute()
+            .top(px(4.0))
+            .right(px(6.0))
+            .rounded(px(6.0))
+            .bg(colors.background.opacity(0.85))
+            .child(copy)
     });
     let toggle = collapsible.then(|| {
         let state = expanded_state.clone();
@@ -284,6 +306,8 @@ fn code_block(
             .child(label)
     });
     div()
+        .group(CODE_GROUP)
+        .relative()
         .my(px(12.0))
         .w_full()
         .min_w_0()
@@ -306,6 +330,68 @@ fn code_block(
                 .child(div().whitespace_nowrap().child(SharedString::from(visible))),
         )
         .children(toggle)
+        .children(floating)
+        .into_any_element()
+}
+
+/// `CodeBlockCopyButton`: copies the whole block (also what a fold hides)
+/// and shows a check for a moment.
+fn copy_action(code: &str, path: &str, window: &mut Window, cx: &mut App) -> AnyElement {
+    let colors = cx.theme().colors.clone();
+    let copied =
+        window.use_keyed_state(SharedString::from(format!("{path}-copied")), cx, |_, _| {
+            false
+        });
+    let done = *copied.read(cx);
+    let code = code.to_string();
+    let (muted, foreground, hover) = (
+        colors.muted_foreground.opacity(0.7),
+        colors.foreground,
+        colors.accent.opacity(0.7),
+    );
+    let button = div()
+        .id(SharedString::from(format!("{path}-copy")))
+        .debug_selector(|| "markdown-code-copy".into())
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(24.0))
+        .rounded(px(6.0))
+        .cursor_pointer()
+        .text_color(muted)
+        .hover(move |style| style.bg(hover).text_color(foreground))
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(code.clone()));
+            copied.update(cx, |copied, cx| {
+                *copied = true;
+                cx.notify();
+            });
+            let copied = copied.clone();
+            cx.spawn(async move |cx| {
+                cx.background_executor().timer(COPIED_FOR).await;
+                copied.update(cx, |copied, cx| {
+                    *copied = false;
+                    cx.notify();
+                });
+            })
+            .detach();
+        })
+        .child(crate::ui::Icon::new(if done { "check" } else { "copy" }).size(14.0));
+    div()
+        .flex()
+        .items_center()
+        // `opacity-0 group-hover/code:opacity-100`; the check stays visible.
+        .when(!done, |actions| {
+            actions
+                .opacity(0.0)
+                .group_hover(CODE_GROUP, |style| style.opacity(1.0))
+        })
+        .child(crate::ui::Tooltip::text(
+            SharedString::from(format!("{path}-copy-tip")),
+            button,
+            crate::i18n::Translate::t(cx, "conversation.message.codeCopy"),
+        ))
         .into_any_element()
 }
 
@@ -425,4 +511,58 @@ pub fn render_markdown(
         .text_size(px(style.size))
         .children(blocks(markdown, style, id, window, cx))
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{
+        Modifiers, Render, TestAppContext, VisualTestContext, Window, WindowAppearance, div,
+        prelude::*,
+    };
+
+    use super::{MarkdownStyle, render_markdown};
+    use crate::theme::{Theme, ThemePreference};
+
+    struct Reply(Vec<super::Block>);
+
+    impl Render for Reply {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            div().size_full().child(render_markdown(
+                &self.0,
+                MarkdownStyle::reply(),
+                "reply",
+                window,
+                cx,
+            ))
+        }
+    }
+
+    #[gpui::test]
+    fn a_code_block_copies_its_whole_text(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+            crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        });
+        let blocks = super::super::parse(
+            "Rode:\n\n```sh\n./scripts/package-app.sh\nopen dist/Cmdori.app --args --show\n```\n",
+        );
+        let (_, cx): (_, &mut VisualTestContext) =
+            cx.add_window_view(move |_, _| Reply(blocks.clone()));
+        cx.run_until_parked();
+        let copy = cx
+            .debug_bounds("markdown-code-copy")
+            .expect("the copy button");
+        cx.simulate_mouse_move(copy.center(), None, Modifiers::none());
+        cx.simulate_click(copy.center(), Modifiers::none());
+        cx.run_until_parked();
+        let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+        assert_eq!(
+            copied.as_deref(),
+            Some("./scripts/package-app.sh\nopen dist/Cmdori.app --args --show")
+        );
+    }
 }

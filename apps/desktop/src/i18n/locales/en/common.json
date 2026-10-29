@@ -4157,7 +4157,8 @@
       "copyAssistant": "Copy assistant message",
       "copyUser": "Copy {{label}} message",
       "codeShowAll": "Show all {{lines}} lines",
-      "codeCollapse": "Collapse"
+      "codeCollapse": "Collapse",
+      "codeCopy": "Copy code"
     },
     "editFromHere": {
       "title": "Edit from this message",
