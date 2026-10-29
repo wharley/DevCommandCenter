@@ -1652,67 +1652,50 @@ pub async fn pull_request_hub_list(
     pull_request_hub_list_with_state(&state, input).await
 }
 
+/// How many repositories ask their forge at once: each is a `gh`/`glab` call
+/// of a few seconds, so ten projects one after another took half a minute.
+const HUB_LIST_PARALLELISM: usize = 6;
+
 /// `pull_request_hub_list` for callers without a Tauri `State` (the HTTP API).
 pub async fn pull_request_hub_list_with_state(
     state: &WorkspaceCommandState,
     _input: PullRequestHubListInput,
 ) -> Result<PullRequestHubListOutput, String> {
+    use futures::StreamExt;
+
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let repositories = repo
         .list_repositories()
         .await
         .map_err(|error| error.to_string())?;
-    let workspaces = repo
-        .list_workspaces()
-        .await
-        .map_err(|error| error.to_string())?;
+    let workspaces = std::sync::Arc::new(
+        repo.list_workspaces()
+            .await
+            .map_err(|error| error.to_string())?,
+    );
+    let lookups = repositories
+        .into_iter()
+        .filter(|repository| !repository.root_path.trim().is_empty())
+        .map(|repository| {
+            let db_path = state.db_path.clone();
+            let workspaces = std::sync::Arc::clone(&workspaces);
+            async move {
+                let looked_up = repository.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    hub_items_for_repository(&db_path, &looked_up, &workspaces)
+                })
+                .await
+                .unwrap_or_else(|error| Err(error.to_string()));
+                (repository, result)
+            }
+        });
+    let results: Vec<_> = futures::stream::iter(lookups)
+        .buffered(HUB_LIST_PARALLELISM)
+        .collect()
+        .await;
     let mut items = Vec::new();
     let mut warnings = Vec::new();
-    for repository in repositories {
-        let root = repository.root_path.trim();
-        if root.is_empty() {
-            continue;
-        }
-        let result = (|| -> Result<Vec<PullRequestHubItem>, String> {
-            let context = forge_context::resolve_workspace_forge_context(
-                &state.db_path,
-                root,
-                repository.forge_login.as_deref(),
-            )?
-            .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
-            let raw = match context.provider {
-                ForgeCliProvider::Github => {
-                    crate::commands::forge::github::list_pull_requests_json(
-                        root,
-                        &context.host,
-                        context.effective_login.as_deref(),
-                    )?
-                }
-                ForgeCliProvider::Gitlab => {
-                    crate::commands::forge::gitlab::list_merge_requests_json(
-                        root,
-                        &context.host,
-                        &context.namespace,
-                        &context.repo,
-                        context.effective_login.as_deref(),
-                    )?
-                }
-            };
-            let values = raw
-                .as_array()
-                .ok_or_else(|| "Forge returned an unexpected pull request list.".to_string())?;
-            Ok(values
-                .iter()
-                .filter_map(|value| match context.provider {
-                    ForgeCliProvider::Github => {
-                        github_hub_item(value, &context, &repository, &workspaces)
-                    }
-                    ForgeCliProvider::Gitlab => {
-                        gitlab_hub_item(value, &context, &repository, &workspaces)
-                    }
-                })
-                .collect())
-        })();
+    for (repository, result) in results {
         match result {
             Ok(mut repository_items) => items.append(&mut repository_items),
             Err(message) => warnings.push(PullRequestHubWarning {
@@ -1724,6 +1707,45 @@ pub async fn pull_request_hub_list_with_state(
     }
     items.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
     Ok(PullRequestHubListOutput { items, warnings })
+}
+
+/// One repository's open pull requests, read through its forge's CLI.
+fn hub_items_for_repository(
+    db_path: &std::path::Path,
+    repository: &dcc_core::domain::repository::Repository,
+    workspaces: &[dcc_core::domain::workspace::Workspace],
+) -> Result<Vec<PullRequestHubItem>, String> {
+    let root = repository.root_path.trim();
+    let context = forge_context::resolve_workspace_forge_context(
+        db_path,
+        root,
+        repository.forge_login.as_deref(),
+    )?
+    .ok_or_else(|| "No GitHub or GitLab remote was found.".to_string())?;
+    let raw = match context.provider {
+        ForgeCliProvider::Github => crate::commands::forge::github::list_pull_requests_json(
+            root,
+            &context.host,
+            context.effective_login.as_deref(),
+        )?,
+        ForgeCliProvider::Gitlab => crate::commands::forge::gitlab::list_merge_requests_json(
+            root,
+            &context.host,
+            &context.namespace,
+            &context.repo,
+            context.effective_login.as_deref(),
+        )?,
+    };
+    let values = raw
+        .as_array()
+        .ok_or_else(|| "Forge returned an unexpected pull request list.".to_string())?;
+    Ok(values
+        .iter()
+        .filter_map(|value| match context.provider {
+            ForgeCliProvider::Github => github_hub_item(value, &context, repository, workspaces),
+            ForgeCliProvider::Gitlab => gitlab_hub_item(value, &context, repository, workspaces),
+        })
+        .collect())
 }
 
 fn github_comment(value: &Value) -> Option<PullRequestHubComment> {
