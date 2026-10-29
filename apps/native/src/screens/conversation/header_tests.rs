@@ -499,3 +499,21 @@ fn calling_an_agent_starts_its_bound_session_with_the_kickoff(cx: &mut TestAppCo
     cx.run_until_parked();
     assert!(cx.update(|_, cx| view.read(cx).header.calling.is_none()));
 }
+
+#[gpui::test]
+fn a_narrow_header_shortens_the_title_instead_of_drawing_under_the_buttons(
+    cx: &mut TestAppContext,
+) {
+    let (_view, cx, _events, _server) = open(cx, Vec::new());
+    // The thread beside an open Browser: the buttons need the room.
+    cx.simulate_resize(gpui::size(gpui::px(420.0), gpui::px(600.0)));
+    cx.run_until_parked();
+    let title = cx.debug_bounds("header-title").expect("the title");
+    let resume = cx.debug_bounds("header-resume").expect("the first button");
+    assert!(
+        title.right() <= resume.left(),
+        "the title ends at {:?}, the buttons start at {:?}",
+        title.right(),
+        resume.left()
+    );
+}

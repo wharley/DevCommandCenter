@@ -243,20 +243,26 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
                         .items_center()
                         .gap(px(8.0))
                         .children(badge)
-                        .child(Tooltip::text(
-                            "header-title-tip",
-                            div()
-                                .id("header-title")
-                                .min_w_0()
-                                .flex_1()
-                                .truncate()
-                                .text_size(px(13.0))
-                                .line_height(px(20.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(colors.foreground)
-                                .child(title),
-                            full_title,
-                        )),
+                        .child(
+                            Tooltip::text(
+                                "header-title-tip",
+                                div()
+                                    .id("header-title")
+                                    .debug_selector(|| "header-title".into())
+                                    .min_w_0()
+                                    .flex_1()
+                                    .truncate()
+                                    .text_size(px(13.0))
+                                    .line_height(px(20.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(colors.foreground)
+                                    .child(title),
+                                full_title,
+                            )
+                            // `min-w-0 flex-1`: the title gives way to the buttons
+                            // (truncated, down to nothing) instead of under them.
+                            .fill(),
+                        ),
                 )
                 .child(
                     div()
