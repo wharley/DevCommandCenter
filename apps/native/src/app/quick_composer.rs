@@ -8,8 +8,8 @@
 use std::time::Duration;
 
 use gpui::{
-    App, AppContext, Bounds, Focusable, Global, TitlebarOptions, WindowBounds, WindowHandle,
-    WindowKind, WindowOptions, px, size,
+    App, AppContext, Bounds, Focusable, Global, WindowBounds, WindowHandle, WindowKind,
+    WindowOptions, px, size,
 };
 
 use crate::screens::quick_composer::{HEIGHT, QuickComposer, QuickComposerEvent, WIDTH};
@@ -76,11 +76,9 @@ pub fn show(cx: &mut App) {
     let bounds = Bounds::centered(None, size(px(WIDTH), px(HEIGHT)), cx);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(TitlebarOptions {
-            title: Some("DCC".into()),
-            appears_transparent: true,
-            traffic_light_position: None,
-        }),
+        // Titled, full-size content, no close/minimize/zoom: the panel's own
+        // header has the X (`quick_composer_macos.m`'s style mask).
+        titlebar: None,
         focus: true,
         show: true,
         kind: WindowKind::PopUp,
