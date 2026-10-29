@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use dcc_core::domain::agent::AgentAvatar;
-use gpui::{Animation, AnimationExt, App, Image, ImageFormat, Window, div, img, prelude::*, px};
+use gpui::{AnimationExt, App, Image, ImageFormat, Window, div, img, prelude::*, px};
 
 use crate::data::agents::AgentState;
 
@@ -152,7 +152,7 @@ impl RenderOnce for AgentAvatarView {
         frame
             .with_animation(
                 self.id,
-                Animation::new(Duration::from_millis(1100)).repeat(),
+                crate::ui::looping(Duration::from_millis(1100)),
                 move |frame, delta| {
                     let wave = (1.0 - (delta * std::f32::consts::TAU).cos()) / 2.0;
                     frame.top(px(size * (0.06 - 0.14 * wave)))

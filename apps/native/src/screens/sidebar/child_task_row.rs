@@ -5,8 +5,7 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, ClickEvent, Context, SharedString, Window, div,
-    prelude::*, px,
+    AnimationExt, AnyElement, ClickEvent, Context, SharedString, Window, div, prelude::*, px,
 };
 
 use super::{Sidebar, SidebarEvent};
@@ -20,7 +19,7 @@ use crate::theme::{ActiveTheme, Appearance};
 fn pulse(dot: gpui::Div, id: SharedString) -> AnyElement {
     dot.with_animation(
         id,
-        Animation::new(Duration::from_secs(2)).repeat(),
+        crate::ui::looping(Duration::from_secs(2)),
         |dot, delta| {
             let wave = (delta * std::f32::consts::TAU).cos();
             dot.opacity(0.75 + 0.25 * wave)

@@ -5,8 +5,8 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, FontWeight, IntoElement, ObjectFit, Render, StyledImage, Window, div,
-    img, prelude::*, px,
+    AnimationExt, FontWeight, IntoElement, ObjectFit, Render, StyledImage, Window, div, img,
+    prelude::*, px,
 };
 
 use super::preview::{ComputerPreview, activity_label_key};
@@ -88,7 +88,7 @@ impl Render for ComputerPreview {
                         .bg(colors.primary)
                         .with_animation(
                             "computer-preview-ping",
-                            Animation::new(Duration::from_secs(1)).repeat(),
+                            crate::ui::looping(Duration::from_secs(1)),
                             |ping, delta| ping.opacity(0.6 * (1.0 - delta)),
                         ),
                 )

@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use gpui::{Animation, AnimationExt, ClickEvent, Context, Window, div, prelude::*, px};
+use gpui::{AnimationExt, ClickEvent, Context, Window, div, prelude::*, px};
 
 use super::labels::emerald_text;
 use super::{Sidebar, SidebarEvent};
@@ -102,7 +102,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
                                     .bg(tw::EMERALD_500.hsla())
                                     .with_animation(
                                         "running-pulse",
-                                        Animation::new(Duration::from_secs(2)).repeat(),
+                                        crate::ui::looping(Duration::from_secs(2)),
                                         |dot, delta| {
                                             let wave = (delta * std::f32::consts::TAU).cos();
                                             dot.opacity(0.75 + 0.25 * wave)

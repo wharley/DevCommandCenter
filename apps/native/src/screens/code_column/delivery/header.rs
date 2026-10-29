@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use dcc_core::domain::commit_mode::{CommitButtonStatus, CommitMode, commit_translation_key};
 use gpui::{
-    Animation, AnimationExt, AnyElement, BoxShadow, Context, FontWeight, Hsla, SharedString, div,
+    AnimationExt, AnyElement, BoxShadow, Context, FontWeight, Hsla, SharedString, div,
     linear_color_stop, linear_gradient, point, prelude::*, px, relative,
 };
 
@@ -216,7 +216,7 @@ fn shimmer(cx: &Context<CodeColumn>) -> AnyElement {
                 .w(relative(1.0))
                 .with_animation(
                     "delivery-shimmer",
-                    Animation::new(Duration::from_secs(2)).repeat(),
+                    crate::ui::looping(Duration::from_secs(2)),
                     move |line, delta| {
                         line.left(relative(delta * 2.0 - 1.0)).bg(linear_gradient(
                             90.0,

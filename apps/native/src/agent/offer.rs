@@ -6,8 +6,8 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, Context, EventEmitter, FontWeight, HighlightStyle, IntoElement,
-    Render, SharedString, StyledText, Task, Window, div, prelude::*, px,
+    AnimationExt, Context, EventEmitter, FontWeight, HighlightStyle, IntoElement, Render,
+    SharedString, StyledText, Task, Window, div, prelude::*, px,
 };
 
 use super::AgentAvatarView;
@@ -108,7 +108,7 @@ impl Render for OfferThought {
                         .bg(colors.muted_foreground)
                         .with_animation(
                             SharedString::from(format!("{id}-dot-{dot}")),
-                            Animation::new(Duration::from_millis(1000)).repeat(),
+                            crate::ui::looping(Duration::from_millis(1000)),
                             move |dot_el, delta| {
                                 // `dcc-agent-thinking-dot`, each 150ms later.
                                 let phase = (delta - dot as f32 * 0.15).rem_euclid(1.0);
@@ -148,7 +148,7 @@ impl Render for OfferThought {
                             .bg(colors.foreground)
                             .with_animation(
                                 SharedString::from(format!("{id}-caret")),
-                                Animation::new(Duration::from_millis(800)).repeat(),
+                                crate::ui::looping(Duration::from_millis(800)),
                                 |caret, delta| caret.opacity(if delta < 0.5 { 1.0 } else { 0.0 }),
                             ),
                     )
@@ -232,7 +232,7 @@ impl Render for OfferThought {
                         ))
                         .with_animation(
                             SharedString::from(format!("{id}-float")),
-                            Animation::new(Duration::from_millis(2600)).repeat(),
+                            crate::ui::looping(Duration::from_millis(2600)),
                             // `dcc-agent-bob`: 6% down → 8% up → 6% down.
                             |frame, delta| {
                                 let wave = (1.0 - (delta * std::f32::consts::TAU).cos()) / 2.0;

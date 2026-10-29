@@ -89,6 +89,19 @@ impl RenderOnce for Checkbox {
 }
 
 /// `Loader2` turning once a second, in the text color around it.
+/// Decorative loops (spinners, pulses, the bob) redraw this often at most:
+/// each frame of an animation lays the whole window out again, so a display
+/// link pace (up to 120 Hz) kept the app busy for as long as an agent ran.
+const LOOP_FPS: f32 = 24.0;
+
+/// A repeating animation on the app's shared clock, throttled to
+/// `LOOP_FPS`: every loop on screen wakes together, one frame per tick.
+pub fn looping(duration: Duration) -> Animation {
+    Animation::new(duration)
+        .repeat_synced()
+        .with_max_fps(LOOP_FPS)
+}
+
 pub fn spinner(id: impl Into<ElementId>, size: f32) -> Spinner {
     Spinner {
         id: id.into(),
@@ -113,7 +126,7 @@ impl RenderOnce for Spinner {
                 .text_color(color)
                 .with_animation(
                     self.id,
-                    Animation::new(Duration::from_secs(1)).repeat(),
+                    crate::ui::looping(Duration::from_secs(1)),
                     |svg, delta| svg.with_transformation(Transformation::rotate(percentage(delta))),
                 ),
         )
@@ -170,7 +183,7 @@ impl RenderOnce for ThinkingIndicator {
                                     format!("{:?}-dot", self.id).into(),
                                     index as u64,
                                 ),
-                                Animation::new(Duration::from_millis(1200)).repeat(),
+                                crate::ui::looping(Duration::from_millis(1200)),
                                 move |dot, delta| {
                                     // Tailwind `pulse`: opacity 1 → .5 → 1, shifted by the delay.
                                     let phase = (delta + delay as f32 / 1200.0).fract();

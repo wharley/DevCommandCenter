@@ -286,7 +286,7 @@ fn prose(
     cx: &mut Context<ConversationView>,
 ) -> AnyElement {
     let blocks = if streaming {
-        view.paced_markdown(id, content, window)
+        view.paced_markdown(id, content, window, cx)
     } else {
         view.markdown(content)
     };

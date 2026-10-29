@@ -37,8 +37,8 @@ use std::time::{Duration, Instant};
 
 use dcc_core::domain::timeline::{Role, TimelineMessage};
 use gpui::{
-    AnyElement, Context, Entity, FollowMode, ListAlignment, ListState, SharedString, Task, Window,
-    div, list, prelude::*, px,
+    AnyElement, App, Context, Entity, FollowMode, ListAlignment, ListState, SharedString, Task,
+    Window, div, list, prelude::*, px,
 };
 
 use crate::data::conversation::{self, Conversation, EventCache};
@@ -103,6 +103,8 @@ pub struct ConversationView {
     markdown: RefCell<HashMap<u64, Rc<Vec<Block>>>>,
     /// Streaming prose being revealed, with what was last laid out.
     paced: RefCell<HashMap<SharedString, PacedProse>>,
+    /// A wake-up for the reveal's next step is already scheduled.
+    paced_wake: Rc<std::cell::Cell<bool>>,
     mascot_frame: bool,
     now_ms: i64,
     /// The list's width at the last frame (rows can't ask the list while it
@@ -174,6 +176,7 @@ impl ConversationView {
             run_limits: HashMap::new(),
             markdown: RefCell::new(HashMap::new()),
             paced: RefCell::new(HashMap::new()),
+            paced_wake: Rc::default(),
             mascot_frame: false,
             now_ms: time::now_ms(),
             viewport_width: 0.0,
@@ -515,20 +518,30 @@ impl ConversationView {
             .clone()
     }
 
-    /// Streaming prose as far as the reveal got, with the caret, asking for
-    /// the next frame while there is more to show.
+    /// Streaming prose as far as the reveal got, with the caret, waking
+    /// again at its next step while there is more to show. A timer, not
+    /// every display frame: each frame lays the whole window out.
     pub(crate) fn paced_markdown(
         &self,
         key: &str,
         target: &str,
         window: &mut Window,
+        cx: &mut App,
     ) -> Rc<Vec<Block>> {
         let mut paced = self.paced.borrow_mut();
         let (state, laid_out, blocks) = paced
             .entry(SharedString::from(key.to_string()))
             .or_insert_with(|| (paced::Paced::new(target), usize::MAX, Rc::new(Vec::new())));
-        if state.advance(target, Instant::now()) {
-            window.request_animation_frame();
+        if state.advance(target, Instant::now()) && !self.paced_wake.replace(true) {
+            let wake = self.paced_wake.clone();
+            let view = window.current_view();
+            window
+                .spawn(cx, async move |cx| {
+                    cx.background_executor().timer(paced::COMMIT_INTERVAL).await;
+                    wake.set(false);
+                    cx.update(move |_, cx| cx.notify(view)).ok();
+                })
+                .detach();
         }
         if *laid_out != state.shown {
             *laid_out = state.shown;

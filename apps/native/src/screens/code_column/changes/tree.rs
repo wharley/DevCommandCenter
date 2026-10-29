@@ -5,8 +5,7 @@
 use std::collections::BTreeMap;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, Context, FontWeight, div, img, prelude::*,
-    pulsating_between, px,
+    AnimationExt, AnyElement, Context, FontWeight, div, img, prelude::*, pulsating_between, px,
 };
 
 use super::super::CodeColumn;
@@ -271,8 +270,7 @@ fn name(text: String, flashing: bool, at: usize, cx: &Context<CodeColumn>) -> An
     label
         .with_animation(
             ("changes-file-flash", at),
-            Animation::new(std::time::Duration::from_secs(1))
-                .repeat()
+            crate::ui::looping(std::time::Duration::from_secs(1))
                 .with_easing(pulsating_between(0.0, 1.0)),
             move |label, delta| {
                 let mix = |a: f32, b: f32| a + (b - a) * delta;
