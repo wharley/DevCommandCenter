@@ -96,6 +96,7 @@ impl CodeColumn {
 
     fn pick_reviewer(&mut self, login: String, cx: &mut Context<Self>) {
         self.review.picker = None;
+        cx.notify();
         self.change_reviewer(login, ReviewerAction::Request, cx);
     }
 }

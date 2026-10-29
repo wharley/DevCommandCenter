@@ -109,6 +109,9 @@ pub struct ConversationView {
     focus: gpui::FocusHandle,
     /// "Copiar" open at this point after a right click on the selection.
     copy_menu: Option<gpui::Point<gpui::Pixels>>,
+    /// Frames this view drew (the shell's cache test).
+    #[cfg(test)]
+    pub(crate) renders: std::cell::Cell<usize>,
     /// A wake-up for the reveal's next step is already scheduled.
     paced_wake: Rc<std::cell::Cell<bool>>,
     mascot_frame: bool,
@@ -183,6 +186,8 @@ impl ConversationView {
             markdown: RefCell::new(HashMap::new()),
             paced: RefCell::new(HashMap::new()),
             paced_wake: Rc::default(),
+            #[cfg(test)]
+            renders: Default::default(),
             selection: Default::default(),
             focus: cx.focus_handle(),
             copy_menu: None,
@@ -732,6 +737,8 @@ impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport_width = f32::from(self.list.viewport_bounds().size.width);
         self.selection.begin_frame();
+        #[cfg(test)]
+        self.renders.set(self.renders.get() + 1);
         if self.prefill.is_some() && self.composer.read(cx).session.usable() {
             let text = self.prefill.take().unwrap_or_default();
             let composer = self.composer.clone();

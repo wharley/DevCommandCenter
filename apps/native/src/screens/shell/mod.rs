@@ -6,6 +6,7 @@ mod annotation;
 mod bootstrap;
 mod browser;
 mod browser_opens;
+mod cached;
 mod computer;
 mod delivery;
 mod editor;
@@ -177,8 +178,9 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Self {
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
+            // Every view repaints, cached ones included.
             if Theme::sync_with_window(window, cx) {
-                cx.notify();
+                window.refresh();
             }
         });
         let sidebar = cx.new(|cx| {
@@ -710,7 +712,7 @@ impl Shell {
     fn conversation_with_stage(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let stage = self.stage.read(cx);
         if !stage.has_content() {
-            return self.conversation.clone().into_any_element();
+            return self.conversation_view();
         }
         let chat = stage.chat_active();
         div()
@@ -728,7 +730,7 @@ impl Shell {
                     .min_h_0()
                     .min_w_0()
                     .pt(px(36.0))
-                    .child(self.conversation.clone()),
+                    .child(self.conversation_view()),
             )
             .child(
                 div()
@@ -835,7 +837,7 @@ impl Render for Shell {
                     this.resize_browser(f32::from(event.event.position.x), window, cx)
                 },
             ))
-            .child(SidebarRegion::new(self.layout.sidebar_rail_width()).child(self.sidebar.clone()))
+            .child(SidebarRegion::new(self.layout.sidebar_rail_width()).child(self.sidebar_view()))
             .child(
                 ResizeHandle::new("sidebar-resize", SidebarResize)
                     .left(px(self.layout.separator_left()))
@@ -846,7 +848,10 @@ impl Render for Shell {
                             .ok();
                     }),
             )
-            .children(self.code_column_shown(cx).then(|| self.code_column.clone()))
+            .children(
+                self.code_column_shown(cx)
+                    .then(|| self.code_column_view(cx)),
+            )
             .child(MainRegion::default().child(match self.surface {
                 // No task at all: `WorkspaceBootstrapState`.
                 Surface::Conversation if self.sidebar.read(cx).has_open_task() == Some(false) => {

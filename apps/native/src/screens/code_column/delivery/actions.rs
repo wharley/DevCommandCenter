@@ -473,6 +473,7 @@ impl CodeColumn {
                     // Let a later read try again.
                     column.delivery.completed = None;
                     Toaster::error(complete_error(error, cx), cx);
+                    cx.notify();
                 }
             });
         })

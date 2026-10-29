@@ -109,6 +109,7 @@ impl CodeColumn {
 
     pub(crate) fn retry_pipeline_read(&mut self, cx: &mut Context<Self>) {
         self.review.pipeline = Some(PipelineLoad::Pending);
+        cx.notify();
         self.read_review(true, cx);
     }
 }

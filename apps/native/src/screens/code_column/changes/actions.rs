@@ -84,6 +84,7 @@ impl CodeColumn {
     /// file back to HEAD (a new one removed).
     pub(crate) fn revert_all(&mut self, cx: &mut Context<Self>) {
         self.changes.confirm_revert = false;
+        cx.notify();
         let staged = self.staged_paths();
         let mut all: Vec<String> = Vec::new();
         for path in self

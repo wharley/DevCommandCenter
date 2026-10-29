@@ -450,6 +450,7 @@ impl CodeColumn {
 
     pub(crate) fn retry_review(&mut self, cx: &mut Context<Self>) {
         self.review.state = Some(ReviewLoad::Pending);
+        cx.notify();
         self.read_review(true, cx);
     }
 }

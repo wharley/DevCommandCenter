@@ -95,6 +95,7 @@ impl Sidebar {
             turn,
             _clear: clear,
         });
+        cx.notify();
     }
 
     /// Marks the hold section a known task just moved into.

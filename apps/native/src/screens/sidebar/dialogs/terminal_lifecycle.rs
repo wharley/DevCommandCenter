@@ -50,6 +50,7 @@ impl Sidebar {
         };
         let (task_id, action) = (dialog.task_id.clone(), dialog.action);
         self.dialog = None;
+        cx.notify();
         self.perform_row_action(&task_id, action, window, cx);
     }
 
@@ -84,6 +85,7 @@ impl Sidebar {
             }
             let _ = this.update_in(cx, |sidebar, window, cx| {
                 sidebar.dialog = None;
+                cx.notify();
                 sidebar.perform_row_action(&task_id, action, window, cx);
             });
         })

@@ -120,7 +120,7 @@ impl ConversationView {
             .map(|found| found.message_id.as_str())
     }
 
-    fn reveal_find(&mut self, _cx: &mut Context<Self>) {
+    fn reveal_find(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.find_focus().map(str::to_string) else {
             return;
         };
@@ -133,6 +133,7 @@ impl ConversationView {
             // pull the view back from the hit.
             self.list.pause_following_tail();
             self.list.scroll_to_reveal_item(index + 1);
+            cx.notify();
         }
     }
 

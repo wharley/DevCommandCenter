@@ -22,7 +22,10 @@ pub(super) fn link(
         crate::data::desktop_api::DesktopApi::load()
     };
     let preview = cx.new(|_| ComputerPreview::new(api));
-    conversation.update(cx, |view, _| view.computer_preview = Some(preview.clone()));
+    conversation.update(cx, |view, cx| {
+        view.computer_preview = Some(preview.clone());
+        cx.notify();
+    });
     let live = {
         let preview = preview.clone();
         cx.subscribe(approvals, move |_, _, LiveEvent(event), cx| {

@@ -800,3 +800,25 @@ fn finishing_the_onboarding_keeps_it_closed(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("onboarding").is_none());
     assert!(Prefs::load(&dir.path().join("native-ui.json")).onboarding_complete);
 }
+
+#[gpui::test]
+fn the_sidebar_changing_leaves_the_conversation_drawn_from_cache(cx: &mut TestAppContext) {
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    cx.run_until_parked();
+    let (sidebar, conversation) = shell.read_with(cx, |shell, _| {
+        (shell.sidebar.clone(), shell.conversation.clone())
+    });
+    let renders = |cx: &mut gpui::VisualTestContext| {
+        conversation.read_with(cx, |conversation, _| conversation.renders.get())
+    };
+    let before = renders(cx);
+    assert!(before > 0, "the conversation is on screen");
+    // The sidebar ticks (a running agent's pulse): the frame reuses the conversation.
+    sidebar.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    assert_eq!(renders(cx), before);
+    // The conversation itself changes: it draws again.
+    conversation.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    assert_eq!(renders(cx), before + 1);
+}
