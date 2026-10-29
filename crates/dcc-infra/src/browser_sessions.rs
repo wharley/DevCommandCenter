@@ -1,4 +1,4 @@
-//! Using a login the person already has in Chrome or Arc on this Mac
+//! Using a login the person already has in a Chromium browser on this Mac
 //! (`browser_sessions.rs`, shared by the desktop and the native app): the
 //! profiles found from metadata alone, then — only when the person picks
 //! one for the site open in the Browser — that site's cookies read from the
@@ -82,21 +82,31 @@ struct ChromiumCookie {
     host_digest: bool,
 }
 
+/// The Chromium browsers whose logins can be used: an id, the Keychain item
+/// holding its cookie key, and its profiles' folder under Application
+/// Support. One not installed has no folder and lists nothing.
+const BROWSERS: &[(&str, &str, &str)] = &[
+    ("chrome", "Chrome Safe Storage", "Google/Chrome"),
+    ("arc", "Arc Safe Storage", "Arc/User Data"),
+    ("dia", "Dia Safe Storage", "Dia/User Data"),
+    ("brave", "Brave Safe Storage", "BraveSoftware/Brave-Browser"),
+    ("edge", "Microsoft Edge Safe Storage", "Microsoft Edge"),
+    ("vivaldi", "Vivaldi Safe Storage", "Vivaldi"),
+    ("chromium", "Chromium Safe Storage", "Chromium"),
+];
+
 fn sources() -> Vec<ProfileSource> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let Some(home) = home else { return Vec::new() };
-    vec![
-        ProfileSource {
-            browser: "chrome",
-            keychain_service: "Chrome Safe Storage",
-            root: home.join("Library/Application Support/Google/Chrome"),
-        },
-        ProfileSource {
-            browser: "arc",
-            keychain_service: "Arc Safe Storage",
-            root: home.join("Library/Application Support/Arc/User Data"),
-        },
-    ]
+    let support = home.join("Library/Application Support");
+    BROWSERS
+        .iter()
+        .map(|(browser, keychain_service, folder)| ProfileSource {
+            browser,
+            keychain_service,
+            root: support.join(folder),
+        })
+        .collect()
 }
 
 fn profile_id(browser: &str, directory_name: &str) -> String {
@@ -401,6 +411,27 @@ mod tests {
             .encrypt_padded_mut::<Pkcs7>(&mut plaintext, message_len)
             .unwrap();
         [b"v10".as_slice(), encrypted].concat()
+    }
+
+    #[test]
+    fn every_chromium_browser_has_its_own_id_and_keychain_item() {
+        let ids: std::collections::HashSet<_> = BROWSERS.iter().map(|(id, ..)| id).collect();
+        let keys: std::collections::HashSet<_> = BROWSERS.iter().map(|(_, key, _)| key).collect();
+        assert_eq!(ids.len(), BROWSERS.len());
+        assert_eq!(keys.len(), BROWSERS.len());
+        assert!(BROWSERS.iter().any(|(id, key, folder)| *id == "dia"
+            && *key == "Dia Safe Storage"
+            && *folder == "Dia/User Data"));
+    }
+
+    /// This Mac's profiles, from metadata only (no cookie read, no Keychain):
+    /// `cargo test -p dcc-infra lists_this_macs_profiles -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn lists_this_macs_profiles() {
+        for profile in list_profiles() {
+            println!("{} {} {}", profile.id, profile.browser, profile.name);
+        }
     }
 
     #[test]
