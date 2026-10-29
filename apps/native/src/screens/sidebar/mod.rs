@@ -220,11 +220,19 @@ impl Sidebar {
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(GIT_WAKE).await;
-                let Ok((watched, cache)) = this.update(cx, |sidebar, _| {
-                    (sidebar.state.watched(), sidebar.state.git.clone())
+                let Ok((watched, cache, foreground)) = this.update(cx, |sidebar, cx| {
+                    (
+                        sidebar.state.watched(),
+                        sidebar.state.git.clone(),
+                        crate::data::foreground::is_foreground(cx),
+                    )
                 }) else {
                     return;
                 };
+                // The window behind others: no `git`/`gh` per task meanwhile.
+                if !foreground {
+                    continue;
+                }
                 let path = db_path.clone();
                 let now = time::now_ms();
                 let cache = cx

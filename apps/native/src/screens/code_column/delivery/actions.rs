@@ -499,7 +499,7 @@ impl CodeColumn {
                     column.apply_status(status, cx);
                 }
                 column.read_branch(cx);
-                column.read_pull_request(cx);
+                column.read_pull_request(true, cx);
                 column.read_review(true, cx);
             });
         })

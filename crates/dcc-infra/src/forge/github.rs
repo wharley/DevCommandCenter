@@ -22,7 +22,9 @@ struct CachedGithubAuthStatus {
     cached_at: Instant,
 }
 
-const GITHUB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
+/// The polls (pull requests, reviews, CI) ask several times a minute; a sign-in made
+/// elsewhere shows within this.
+const GITHUB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(30);
 
 static GITHUB_AUTH_STATUS_CACHE: LazyLock<
     Mutex<std::collections::HashMap<String, CachedGithubAuthStatus>>,

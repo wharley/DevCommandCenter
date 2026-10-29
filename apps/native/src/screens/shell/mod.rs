@@ -125,6 +125,8 @@ pub struct Shell {
         Subscription,
     )>,
     _appearance: Subscription,
+    /// Background reads pause while the window is behind (`data::foreground`).
+    _activation: Subscription,
     _sidebar_events: Subscription,
     _sidebar_data: Subscription,
     _new_task_events: Subscription,
@@ -177,6 +179,15 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let activation = cx.observe_window_activation(window, |shell, window, cx| {
+            let active = window.is_window_active();
+            cx.set_global(crate::data::foreground::Foreground(active));
+            if active {
+                shell
+                    .code_column
+                    .update(cx, |column, cx| column.read_now(cx));
+            }
+        });
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
             // Every view repaints, cached ones included.
             if Theme::sync_with_window(window, cx) {
@@ -328,6 +339,7 @@ impl Shell {
             annotation: None,
             bootstrap_provider: None,
             _appearance: appearance,
+            _activation: activation,
             _sidebar_events: sidebar_events,
             _sidebar_data: sidebar_data,
             _new_task_events: new_task_events,

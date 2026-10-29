@@ -33,6 +33,9 @@ use gpui::{Context, Entity};
 use super::CodeColumn;
 use crate::ui::text_area::TextArea;
 
+/// How often the status loop reads the pull request again.
+const PR_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// A step that asks first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Confirm {
@@ -66,6 +69,8 @@ pub(crate) struct Delivery {
     /// worktree decide the completion after a merge).
     pub task: Option<Workspace>,
     pub pr: Option<WorkspacePrStatusOutput>,
+    /// When and for which branch the pull request was last read.
+    pub pr_read: Option<(std::time::Instant, Option<String>)>,
     /// A step is running (`isGitActionInProgress`).
     pub busy: bool,
     pub syncing: bool,
@@ -142,14 +147,24 @@ impl CodeColumn {
         )
     }
 
-    /// The task and its pull request, read with the status every ten
-    /// seconds (`useWorkspacePrStatus`), the column shown or not: the
-    /// conversation header's delivery needs them.
-    pub(crate) fn read_pull_request(&mut self, cx: &mut Context<Self>) {
+    /// The task and its pull request, the column shown or not: the
+    /// conversation header's delivery needs them. With the status they are
+    /// read every `PR_EVERY` (each read runs `gh`/`glab` several times), at
+    /// once when the branch changes or a step asks (`force`).
+    pub(crate) fn read_pull_request(&mut self, force: bool, cx: &mut Context<Self>) {
         let Some(root) = self.root.clone() else {
             return;
         };
         let (db_path, branch) = (self.db_path.clone(), self.current_branch());
+        let fresh = self
+            .delivery
+            .pr_read
+            .as_ref()
+            .is_some_and(|(at, read)| at.elapsed() < PR_EVERY && *read == branch);
+        if !force && fresh {
+            return;
+        }
+        self.delivery.pr_read = Some((std::time::Instant::now(), branch.clone()));
         self._pull_request = Some(cx.spawn(async move |this, cx| {
             let path = root.clone();
             let (task, pr, policy) = cx

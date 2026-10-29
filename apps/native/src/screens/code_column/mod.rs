@@ -254,7 +254,7 @@ impl CodeColumn {
             cx.emit(CodeColumnEvent::TabChanged(tab));
             // Read again now rather than at the next status.
             self.read_branch(cx);
-            self.read_pull_request(cx);
+            self.read_pull_request(true, cx);
             self.read_review(false, cx);
             if tab == CodeColumnTab::Changes {
                 self.read_last_turn(cx);
@@ -401,6 +401,14 @@ impl CodeColumn {
         }));
     }
 
+    /// The window came back: status, branch and pull request now.
+    pub(crate) fn read_now(&mut self, cx: &mut Context<Self>) {
+        if self.root.is_some() {
+            self.delivery.pr_read = None;
+            self._status = Some(self.status_loop(cx));
+        }
+    }
+
     /// Git status every ten seconds; when a file appears or goes away the
     /// file list is read again (an agent created or deleted something).
     fn status_loop(&self, cx: &mut Context<Self>) -> Task<()> {
@@ -410,6 +418,14 @@ impl CodeColumn {
                 return;
             };
             loop {
+                let foreground = this
+                    .update(cx, |_, cx| crate::data::foreground::is_foreground(cx))
+                    .unwrap_or(false);
+                if !foreground {
+                    // Nobody looks: read again as the window comes back (`read_now`).
+                    cx.background_executor().timer(GIT_EVERY).await;
+                    continue;
+                }
                 let path = root.clone();
                 // A read after the first one runs the header's line (`isFetching`).
                 let _ = this.update(cx, |column, cx| {
@@ -433,7 +449,7 @@ impl CodeColumn {
                         Ok(status) => {
                             column.apply_status(status, cx);
                             column.read_branch(cx);
-                            column.read_pull_request(cx);
+                            column.read_pull_request(false, cx);
                             column.read_review(false, cx);
                         }
                         Err(error) => {

@@ -34,6 +34,7 @@ pub mod diagnostics;
 pub mod diff;
 pub mod disk;
 pub mod feedback;
+pub mod foreground;
 pub mod forge;
 pub mod forge_cli;
 pub mod git_watch;

@@ -22,7 +22,9 @@ struct CachedGitlabAuthStatus {
     cached_at: Instant,
 }
 
-const GITLAB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
+/// The polls (merge requests, reviews, pipelines) ask several times a minute; a sign-in made
+/// elsewhere shows within this.
+const GITLAB_AUTH_STATUS_CACHE_TTL: Duration = Duration::from_secs(30);
 
 static GITLAB_AUTH_STATUS_CACHE: LazyLock<
     Mutex<std::collections::HashMap<String, CachedGitlabAuthStatus>>,
