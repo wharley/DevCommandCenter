@@ -2,9 +2,9 @@
 //! the theme's colors.
 
 use gpui::{
-    App, Bounds, ElementId, ElementInputHandler, Entity, GlobalElementId, LayoutId, PaintQuad,
-    Pixels, ShapedLine, Style, TextRun, UnderlineStyle, Window, fill, point, prelude::*, px,
-    relative, size,
+    App, Bounds, ContentMask, ElementId, ElementInputHandler, Entity, GlobalElementId, LayoutId,
+    PaintQuad, Pixels, ShapedLine, Style, TextRun, UnderlineStyle, Window, fill, point, prelude::*,
+    px, relative, size,
 };
 
 use super::TextInput;
@@ -22,6 +22,7 @@ impl TextElement {
 
 pub struct PrepaintState {
     line: Option<ShapedLine>,
+    scroll_x: Pixels,
     cursor: Option<PaintQuad>,
     selection: Option<PaintQuad>,
 }
@@ -125,13 +126,22 @@ impl Element for TextElement {
         let line = window
             .text_system()
             .shape_line(display_text, font_size, &runs, None);
+        let focused = input.focus_handle.is_focused(window);
+        let scroll_x = scroll_for(
+            input.scroll_x,
+            line.x_for_index(cursor),
+            line.width,
+            bounds.size.width,
+            focused,
+        );
+        let left = bounds.left() - scroll_x;
         let (selection, cursor) = if selected_range.is_empty() {
             let x = line.x_for_index(cursor);
             (
                 None,
                 Some(fill(
                     Bounds::new(
-                        point(bounds.left() + x, bounds.top()),
+                        point(left + x, bounds.top()),
                         size(px(1.0), bounds.size.height),
                     ),
                     caret,
@@ -141,14 +151,8 @@ impl Element for TextElement {
             (
                 Some(fill(
                     Bounds::from_corners(
-                        point(
-                            bounds.left() + line.x_for_index(selected_range.start),
-                            bounds.top(),
-                        ),
-                        point(
-                            bounds.left() + line.x_for_index(selected_range.end),
-                            bounds.bottom(),
-                        ),
+                        point(left + line.x_for_index(selected_range.start), bounds.top()),
+                        point(left + line.x_for_index(selected_range.end), bounds.bottom()),
                     ),
                     selection_color,
                 )),
@@ -157,6 +161,7 @@ impl Element for TextElement {
         };
         PrepaintState {
             line: Some(line),
+            scroll_x,
             cursor,
             selection,
         }
@@ -178,28 +183,99 @@ impl Element for TextElement {
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
-        if let Some(selection) = prepaint.selection.take() {
-            window.paint_quad(selection)
-        }
         let Some(line) = prepaint.line.take() else {
             return;
         };
-        let _ = line.paint(
-            bounds.origin,
-            window.line_height(),
-            gpui::TextAlign::Left,
-            None,
-            window,
-            cx,
-        );
-        if focus_handle.is_focused(window)
-            && let Some(cursor) = prepaint.cursor.take()
-        {
-            window.paint_quad(cursor);
-        }
+        let scroll_x = prepaint.scroll_x;
+        // A line wider than the field stays inside it.
+        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            if let Some(selection) = prepaint.selection.take() {
+                window.paint_quad(selection)
+            }
+            let _ = line.paint(
+                point(bounds.left() - scroll_x, bounds.top()),
+                window.line_height(),
+                gpui::TextAlign::Left,
+                None,
+                window,
+                cx,
+            );
+            if focus_handle.is_focused(window)
+                && let Some(cursor) = prepaint.cursor.take()
+            {
+                window.paint_quad(cursor);
+            }
+        });
         self.input.update(cx, |input, _| {
             input.last_layout = Some(line);
             input.last_bounds = Some(bounds);
+            input.scroll_x = scroll_x;
         });
+    }
+}
+
+/// How far a line `width` wide scrolls in a field `visible` wide: unfocused,
+/// it shows its start (an address bar's host); focused, it keeps the caret
+/// in sight, moving only as much as it must.
+fn scroll_for(
+    previous: Pixels,
+    caret: Pixels,
+    width: Pixels,
+    visible: Pixels,
+    focused: bool,
+) -> Pixels {
+    // Room for the caret after the last letter.
+    let most = (width + px(1.0) - visible).max(Pixels::ZERO);
+    if !focused || most == Pixels::ZERO {
+        return Pixels::ZERO;
+    }
+    let scroll = if caret < previous {
+        caret
+    } else if caret + px(1.0) > previous + visible {
+        caret + px(1.0) - visible
+    } else {
+        previous
+    };
+    scroll.clamp(Pixels::ZERO, most)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scroll_for;
+    use gpui::px;
+
+    #[test]
+    fn a_line_that_fits_never_scrolls() {
+        assert_eq!(
+            scroll_for(px(0.0), px(80.0), px(80.0), px(200.0), true),
+            px(0.0)
+        );
+    }
+
+    #[test]
+    fn unfocused_a_long_line_shows_its_start() {
+        assert_eq!(
+            scroll_for(px(120.0), px(500.0), px(500.0), px(200.0), false),
+            px(0.0)
+        );
+    }
+
+    #[test]
+    fn focused_the_caret_stays_in_sight() {
+        // At the end of a 500px line in a 200px field.
+        assert_eq!(
+            scroll_for(px(0.0), px(500.0), px(500.0), px(200.0), true),
+            px(301.0)
+        );
+        // Moving left inside the view keeps the scroll.
+        assert_eq!(
+            scroll_for(px(301.0), px(400.0), px(500.0), px(200.0), true),
+            px(301.0)
+        );
+        // Past the left edge, the view follows the caret.
+        assert_eq!(
+            scroll_for(px(301.0), px(40.0), px(500.0), px(200.0), true),
+            px(40.0)
+        );
     }
 }

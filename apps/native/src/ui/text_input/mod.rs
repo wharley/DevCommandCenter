@@ -85,6 +85,8 @@ pub struct TextInput {
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
+    /// How far the line is scrolled left so the caret stays in the field.
+    scroll_x: Pixels,
     is_selecting: bool,
     _blur: Option<Subscription>,
 }
@@ -108,6 +110,7 @@ impl TextInput {
             marked_range: None,
             last_layout: None,
             last_bounds: None,
+            scroll_x: Pixels::ZERO,
             is_selecting: false,
             _blur: Some(blur),
         }
@@ -358,7 +361,7 @@ impl TextInput {
         if position.y > bounds.bottom() {
             return self.content.len();
         }
-        self.to_content(line.closest_index_for_x(position.x - bounds.left()))
+        self.to_content(line.closest_index_for_x(position.x - bounds.left() + self.scroll_x))
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
