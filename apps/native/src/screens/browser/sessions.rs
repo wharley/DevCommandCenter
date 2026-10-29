@@ -73,6 +73,11 @@ pub fn browser_name(browser: &str) -> String {
     match browser.trim().to_lowercase().as_str() {
         "arc" => "Arc".into(),
         "chrome" => "Google Chrome".into(),
+        "dia" => "Dia".into(),
+        "brave" => "Brave".into(),
+        "edge" => "Microsoft Edge".into(),
+        "vivaldi" => "Vivaldi".into(),
+        "chromium" => "Chromium".into(),
         _ => browser.to_string(),
     }
 }
@@ -246,6 +251,8 @@ mod tests {
     fn the_browsers_read_like_the_desktop() {
         assert_eq!(browser_name("chrome"), "Google Chrome");
         assert_eq!(browser_name(" Arc "), "Arc");
-        assert_eq!(browser_name("brave"), "brave");
+        assert_eq!(browser_name("dia"), "Dia");
+        assert_eq!(browser_name("edge"), "Microsoft Edge");
+        assert_eq!(browser_name("comet"), "comet");
     }
 }
