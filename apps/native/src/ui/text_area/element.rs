@@ -7,6 +7,8 @@
 //! replaced by enough narrow no-break spaces (U+202F, which never wrap) to
 //! hold it, and `DisplayMap` turns offsets between the two.
 
+use std::ops::Range;
+
 use gpui::{
     App, AvailableSpace, Bounds, ElementId, ElementInputHandler, Entity, GlobalElementId, Hsla,
     LayoutId, PaintQuad, Pixels, SharedString, Size, Style, TextRun, UnderlineStyle, Window,
@@ -122,6 +124,7 @@ fn display(
     area: &TextArea,
     color: Hsla,
     placeholder: Hsla,
+    marker: Hsla,
     window: &Window,
     cx: &App,
 ) -> LayoutState {
@@ -169,41 +172,65 @@ fn display(
         underline: None,
         strikethrough: None,
     };
-    let runs = match area.buffer.marked.as_ref() {
-        Some(marked) => {
-            let start = map.to_display(marked.start);
-            let end = map.to_display(marked.end);
-            [
-                TextRun {
-                    len: start,
-                    ..run.clone()
-                },
-                TextRun {
-                    len: end - start,
-                    underline: Some(UnderlineStyle {
-                        color: Some(color),
-                        thickness: px(1.0),
-                        wavy: false,
-                    }),
-                    ..run.clone()
-                },
-                TextRun {
-                    len: out.len() - end,
-                    ..run
-                },
-            ]
+    let marked = area
+        .buffer
+        .marked
+        .as_ref()
+        .map(|marked| map.to_display(marked.start)..map.to_display(marked.end));
+    let faint: Vec<_> = if area.lists {
+        super::lists::marker_spans(text)
             .into_iter()
-            .filter(|run| run.len > 0)
+            .map(|span| map.to_display(span.start)..map.to_display(span.end))
             .collect()
-        }
-        None => vec![run],
+    } else {
+        Vec::new()
     };
+    let runs = styled_runs(&run, out.len(), &faint, marker, marked);
     LayoutState {
         text: SharedString::from(out),
         runs,
         map,
         chips,
     }
+}
+
+/// The line's runs: list markers in `faint`, the IME's text underlined.
+fn styled_runs(
+    run: &TextRun,
+    len: usize,
+    faint: &[Range<usize>],
+    faint_color: Hsla,
+    marked: Option<Range<usize>>,
+) -> Vec<TextRun> {
+    let mut cuts = vec![0, len];
+    for range in faint.iter().chain(marked.as_ref()) {
+        cuts.extend([range.start.min(len), range.end.min(len)]);
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+    cuts.windows(2)
+        .map(|cut| {
+            let inside = |range: &Range<usize>| range.start <= cut[0] && cut[1] <= range.end;
+            TextRun {
+                len: cut[1] - cut[0],
+                color: if faint.iter().any(inside) {
+                    faint_color
+                } else {
+                    run.color
+                },
+                underline: marked
+                    .as_ref()
+                    .filter(|range| inside(range))
+                    .map(|_| UnderlineStyle {
+                        color: Some(run.color),
+                        thickness: px(1.0),
+                        wavy: false,
+                    }),
+                ..run.clone()
+            }
+        })
+        .filter(|run| run.len > 0)
+        .collect()
 }
 
 fn shape(
@@ -293,6 +320,7 @@ impl Element for TextAreaElement {
             self.area.read(cx),
             colors.foreground,
             colors.muted_foreground.opacity(0.7),
+            colors.muted_foreground,
             window,
             cx,
         );

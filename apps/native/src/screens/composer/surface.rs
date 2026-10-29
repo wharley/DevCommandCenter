@@ -330,6 +330,19 @@ pub(super) fn render(
                                 })
                                 .child(composer.input.clone()),
                         )
+                        // `composer-list-hint`
+                        .when(composer.input.read(cx).in_list(), |surface| {
+                            surface.child(
+                                div()
+                                    .debug_selector(|| "composer-list-hint".into())
+                                    .mt(px(4.0))
+                                    .flex()
+                                    .justify_end()
+                                    .text_size(px(10.0))
+                                    .text_color(colors.muted_foreground)
+                                    .child(cx.t("composer.richText.listHint")),
+                            )
+                        })
                         .child(
                             div()
                                 .mt(px(10.0))

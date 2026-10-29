@@ -302,6 +302,21 @@ impl<C: Clone> Buffer<C> {
         self.marked = None;
     }
 
+    /// Several edits as one undo step (a list marker, emphasis marks). They
+    /// must not overlap or cover a chip; `selection` is set after them.
+    pub fn splice(&mut self, mut edits: Vec<(Range<usize>, String)>, selection: Range<usize>) {
+        self.record(EditKind::Other, Instant::now());
+        edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+        for (range, text) in edits {
+            let range = self.clamp(range.start)..self.clamp(range.end);
+            debug_assert!(!self.text[range.clone()].contains(CHIP));
+            self.text.replace_range(range, &text.replace(CHIP, ""));
+        }
+        self.selection = self.clamp(selection.start)..self.clamp(selection.end);
+        self.reversed = false;
+        self.marked = None;
+    }
+
     /// IME composition: the text stays marked until committed.
     pub fn replace_and_mark(
         &mut self,

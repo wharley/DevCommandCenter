@@ -7,6 +7,7 @@ mod buffer;
 pub mod chip;
 mod element;
 mod handler;
+mod lists;
 
 use std::ops::Range;
 
@@ -70,10 +71,16 @@ actions!(
         Undo,
         Redo,
         ShowCharacterPalette,
+        Outdent,
+        SubmitNow,
+        Bold,
+        Italic,
     ]
 );
 
 const CONTEXT: &str = "TextArea";
+/// A field that writes Markdown lists and emphasis (the composer's).
+const MARKDOWN_CONTEXT: &str = "TextArea markdown";
 
 /// Registers the field's keys; call once at startup.
 pub fn bind_keys(cx: &mut App) {
@@ -118,6 +125,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-z", Undo, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-z", Redo, Some(CONTEXT)),
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, Some(CONTEXT)),
+        KeyBinding::new("cmd-enter", SubmitNow, Some("markdown")),
+        KeyBinding::new("shift-tab", Outdent, Some("markdown")),
+        KeyBinding::new("cmd-b", Bold, Some("markdown")),
+        KeyBinding::new("cmd-i", Italic, Some("markdown")),
     ]);
 }
 
@@ -213,6 +224,8 @@ pub struct TextArea {
     placeholder: SharedString,
     max_height: Option<Pixels>,
     disabled: bool,
+    /// Writes Markdown lists and emphasis (the composer's).
+    lists: bool,
     pub(crate) layout: Option<Layout>,
     pub(crate) scroll_y: Pixels,
     /// Scroll so the caret shows at the next frame.
@@ -238,6 +251,7 @@ impl TextArea {
             placeholder: SharedString::default(),
             max_height: None,
             disabled: false,
+            lists: false,
             layout: None,
             scroll_y: px(0.0),
             reveal_cursor: false,
@@ -256,6 +270,19 @@ impl TextArea {
     pub fn with_max_height(mut self, height: f32) -> Self {
         self.max_height = Some(px(height));
         self
+    }
+
+    /// Writes Markdown lists and emphasis: Enter continues a list, ⌘Enter
+    /// sends, Tab / Shift+Tab nest, ⌘B / ⌘I.
+    pub fn with_lists(mut self) -> Self {
+        self.lists = true;
+        self
+    }
+
+    /// Whether the caret is on a list item (the composer then says how Enter
+    /// works).
+    pub fn in_list(&self) -> bool {
+        self.lists && lists::in_list(self.buffer.text(), self.buffer.cursor())
     }
 
     pub fn set_placeholder(
@@ -444,7 +471,7 @@ impl TextArea {
     fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
         if self.menu_open {
             cx.emit(TextAreaEvent::MenuAccept);
-        } else {
+        } else if !self.nest(cx) {
             window.focus_next(cx);
         }
     }
@@ -576,11 +603,11 @@ impl TextArea {
         if self.buffer.marked.is_some() {
             return;
         }
-        cx.emit(if self.menu_open {
-            TextAreaEvent::MenuAccept
-        } else {
-            TextAreaEvent::Submitted
-        });
+        if self.menu_open {
+            cx.emit(TextAreaEvent::MenuAccept);
+        } else if !self.continue_list(cx) {
+            cx.emit(TextAreaEvent::Submitted);
+        }
     }
 
     fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
@@ -736,9 +763,17 @@ impl Render for TextArea {
             .flex()
             .w_full()
             .min_w_0()
-            .key_context(CONTEXT)
+            .key_context(if self.lists {
+                MARKDOWN_CONTEXT
+            } else {
+                CONTEXT
+            })
             .track_focus(&self.focus_handle(cx))
             .cursor(CursorStyle::IBeam)
+            .on_action(cx.listener(Self::outdent))
+            .on_action(cx.listener(Self::submit_now))
+            .on_action(cx.listener(Self::bold))
+            .on_action(cx.listener(Self::italic))
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::delete_word_left))

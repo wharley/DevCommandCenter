@@ -8,7 +8,9 @@ use crate::data::desktop_api::DesktopApi;
 use crate::test_support::{fake_desktop, fake_desktop_answers};
 use crate::theme::{Theme, ThemePreference};
 
-fn open(cx: &mut TestAppContext) -> (gpui::Entity<Composer>, &mut gpui::VisualTestContext) {
+pub(super) fn open(
+    cx: &mut TestAppContext,
+) -> (gpui::Entity<Composer>, &mut gpui::VisualTestContext) {
     cx.update(|cx| {
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
         crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
@@ -17,7 +19,7 @@ fn open(cx: &mut TestAppContext) -> (gpui::Entity<Composer>, &mut gpui::VisualTe
     cx.add_window_view(Composer::new)
 }
 
-fn session(id: &str) -> ComposerSession {
+pub(super) fn session(id: &str) -> ComposerSession {
     ComposerSession {
         session_id: Some(id.into()),
         provider_id: Some("claude_code".into()),
@@ -566,7 +568,7 @@ fn objective(generation: u64) -> dcc_core::domain::objective::SessionObjective {
     objective
 }
 
-fn with_catalog(composer: &mut Composer, port: u16) {
+pub(super) fn with_catalog(composer: &mut Composer, port: u16) {
     composer.endpoint = Some(DesktopApi::new(port, "k"));
     composer.catalog = Some(std::sync::Arc::new(catalog()));
     composer.catalog_at = Some(std::time::Instant::now());

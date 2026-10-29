@@ -21,6 +21,8 @@ mod prompt;
 mod queue;
 mod settings;
 pub(crate) use settings::load_settings;
+#[cfg(test)]
+mod list_tests;
 mod strips;
 mod surface;
 #[cfg(test)]
@@ -176,6 +178,7 @@ impl Composer {
             TextArea::new(window, cx)
                 .with_placeholder(placeholder)
                 .with_max_height(INPUT_MAX_HEIGHT)
+                .with_lists()
         });
         let input_events = cx.subscribe_in(
             &input,
