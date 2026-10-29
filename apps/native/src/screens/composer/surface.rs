@@ -22,7 +22,7 @@ fn model_chip(composer: &Composer, cx: &mut Context<Composer>) -> Option<AnyElem
         .model()
         .map(|model| model.label.clone())
         .unwrap_or_else(|| model_id.clone());
-    let disabled = !composer.session.usable();
+    let disabled = composer.turn_settings_disabled();
     let hover = colors.accent.opacity(0.6);
     let trigger = div()
         .flex()

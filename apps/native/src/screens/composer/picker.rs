@@ -108,7 +108,7 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if open == self.picker.open {
+        if open == self.picker.open || (open && self.turn_settings_disabled()) {
             return;
         }
         if open {

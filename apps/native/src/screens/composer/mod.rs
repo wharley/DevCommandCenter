@@ -225,6 +225,13 @@ impl Composer {
     }
 
     /// Follows the conversation: switching sessions swaps the draft.
+    /// `turnSettingsDisabled`: the model, the approval and "Planejar" wait
+    /// while a turn runs; the running turn keeps what it was sent with, and a
+    /// follow-up queued meanwhile must not switch provider under it.
+    pub(crate) fn turn_settings_disabled(&self) -> bool {
+        !self.session.usable() || self.session.running
+    }
+
     /// Whether the toolbar is wider than `max` (unknown before the first frame).
     pub(crate) fn fits(&self, max: f32) -> bool {
         let width = self.width.get();

@@ -188,6 +188,9 @@ impl Composer {
     }
 
     pub(crate) fn set_approval(&mut self, policy: ProviderApprovalPolicy, cx: &mut Context<Self>) {
+        if self.turn_settings_disabled() {
+            return;
+        }
         let Some(provider) = self.selected_provider_id() else {
             return;
         };
@@ -209,6 +212,9 @@ impl Composer {
     }
 
     pub(crate) fn toggle_plan(&mut self, cx: &mut Context<Self>) {
+        if self.turn_settings_disabled() {
+            return;
+        }
         crate::data::ux_metrics::record("advanced_composer_control_used");
         let on = !self.plan_mode();
         let task = self.task().to_string();

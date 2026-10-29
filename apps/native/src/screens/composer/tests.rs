@@ -928,3 +928,25 @@ fn the_setup_warning_opens_the_terminal(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(opened.get());
 }
+
+#[gpui::test]
+fn a_running_turn_keeps_its_model_approval_and_plan(cx: &mut TestAppContext) {
+    let (composer, cx) = open(cx);
+    composer.update_in(cx, |composer, window, cx| {
+        composer.set_session(
+            ComposerSession {
+                running: true,
+                ..session("a")
+            },
+            cx,
+        );
+        assert!(composer.turn_settings_disabled());
+        composer.set_picker_open(true, window, cx);
+        assert!(!composer.picker.open, "the picker waits for the turn");
+        let plan = composer.plan_mode();
+        composer.toggle_plan(cx);
+        assert_eq!(composer.plan_mode(), plan, "Planejar waits too");
+        composer.set_session(session("a"), cx);
+        assert!(!composer.turn_settings_disabled());
+    });
+}
