@@ -14,6 +14,8 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+mod motion;
+
 use element::TextElement;
 
 actions!(
@@ -60,6 +62,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", Submit, Some(CONTEXT)),
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),
     ]);
+    motion::bind_keys(cx);
 }
 
 /// What a masked field shows per character (`•`).
@@ -462,6 +465,16 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
+            .on_action(cx.listener(Self::select_to_start))
+            .on_action(cx.listener(Self::select_to_end))
+            .on_action(cx.listener(Self::word_left))
+            .on_action(cx.listener(Self::word_right))
+            .on_action(cx.listener(Self::select_word_left))
+            .on_action(cx.listener(Self::select_word_right))
+            .on_action(cx.listener(Self::delete_word_left))
+            .on_action(cx.listener(Self::delete_word_right))
+            .on_action(cx.listener(Self::delete_to_start))
+            .on_action(cx.listener(Self::delete_to_end))
             .on_action(cx.listener(Self::show_character_palette))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::cut))
