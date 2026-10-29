@@ -60,6 +60,32 @@ pub fn severity(window: &ProviderUsageWindow) -> Option<Severity> {
     }
 }
 
+/// A window's text colour: `text-amber-600 dark:text-amber-400` near the
+/// end, `text-destructive` at it, `None` to keep the row's own.
+pub fn tone(severity: Option<Severity>, cx: &gpui::App) -> Option<gpui::Hsla> {
+    use crate::theme::{ActiveTheme, Appearance, tailwind as tw};
+    let colors = &cx.theme().colors;
+    severity.map(|severity| match severity {
+        Severity::Critical => colors.destructive,
+        Severity::Warning => match cx.theme().appearance {
+            Appearance::Light => tw::AMBER_600.hsla(),
+            Appearance::Dark => tw::AMBER_400.hsla(),
+        },
+    })
+}
+
+/// A window's bar: `bg-amber-500`, `bg-destructive`, else the foreground at
+/// `rest`.
+pub fn bar_fill(severity: Option<Severity>, cx: &gpui::App, rest: f32) -> gpui::Hsla {
+    use crate::theme::{ActiveTheme, tailwind as tw};
+    let colors = &cx.theme().colors;
+    match severity {
+        Some(Severity::Critical) => colors.destructive,
+        Some(Severity::Warning) => tw::AMBER_500.hsla(),
+        None => colors.foreground.opacity(rest),
+    }
+}
+
 /// `windowLabel`: the key under `settings.model`, or the id spelled out.
 pub fn window_label(window: &ProviderUsageWindow) -> Result<&'static str, String> {
     let known = match window.id.as_str() {

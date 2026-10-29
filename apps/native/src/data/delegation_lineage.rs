@@ -106,6 +106,7 @@ mod tests {
             title: title.into(),
             provider_id: "codex".into(),
             model: None,
+            account_id: None,
             state: "active".into(),
             turn_count: 1,
             running: false,

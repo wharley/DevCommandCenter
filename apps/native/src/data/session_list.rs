@@ -13,6 +13,9 @@ pub struct SessionRow {
     pub title: String,
     pub provider_id: String,
     pub model: Option<String>,
+    /// The provider account it runs as (`providerRuntime.accountId`); `None`
+    /// is the system login.
+    pub account_id: Option<String>,
     /// `projection.state` as the desktop names it (`active`, `completed`…).
     pub state: String,
     pub turn_count: u32,
@@ -42,6 +45,11 @@ fn row(summary: &WorkspaceSessionSummary, depth: u8) -> SessionRow {
         title: summary.thread.title.clone(),
         provider_id: summary.session.provider_id.clone(),
         model: summary.session.model.clone(),
+        account_id: summary
+            .session
+            .provider_runtime
+            .as_ref()
+            .and_then(|runtime| runtime.account_id.clone()),
         state: state_name(&summary.projection.state).to_string(),
         turn_count: summary.projection.turn_count,
         running: active && summary.projection.active_turn_id.is_some(),

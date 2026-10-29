@@ -129,7 +129,9 @@ impl ConversationView {
             .as_ref()
             .and_then(|data| data.rows.iter().position(|row| row.id == id));
         if let Some(index) = index {
-            // The list starts with the top room.
+            // The list starts with the top room. Following the end would
+            // pull the view back from the hit.
+            self.list.pause_following_tail();
             self.list.scroll_to_reveal_item(index + 1);
         }
     }

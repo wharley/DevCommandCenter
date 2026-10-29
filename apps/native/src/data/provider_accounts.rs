@@ -65,10 +65,13 @@ fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
 }
 
 impl DesktopApi {
-    /// `listProviderAccounts`
+    /// `listProviderAccounts`; the list is also what a pick is checked against.
     pub fn provider_accounts(&self) -> Result<Vec<ProviderAccount>, ApiError> {
         let value = self.get("/api/v1/provider-accounts")?;
-        decode(value.get("accounts").cloned().unwrap_or(Value::Null))
+        let accounts: Vec<ProviderAccount> =
+            decode(value.get("accounts").cloned().unwrap_or(Value::Null))?;
+        super::account_selection::remember(&accounts);
+        Ok(accounts)
     }
 
     /// `createProviderAccount`

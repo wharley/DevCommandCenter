@@ -494,12 +494,17 @@ pub(in crate::screens::composer) fn objective_control(
             None => trigger.text_color(colors.muted_foreground.opacity(0.7)),
         })
         .child(Icon::new("target").size(13.0).stroke(1.8).color(tone))
-        .child(
-            div()
-                .text_size(px(12.0))
-                .line_height(px(16.0))
-                .font_weight(FontWeight::MEDIUM)
-                .child(cx.t("composer.objective.compact")),
+        .when(
+            composer.fits(super::super::narrow::PLAN_LABELS),
+            |trigger| {
+                trigger.child(
+                    div()
+                        .text_size(px(12.0))
+                        .line_height(px(16.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(cx.t("composer.objective.compact")),
+                )
+            },
         );
     let title = cx.t("composer.objective.tooltipTitle");
     let description = cx.t("composer.objective.tooltipDescription");

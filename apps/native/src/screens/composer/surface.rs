@@ -44,32 +44,52 @@ fn model_chip(composer: &Composer, cx: &mut Context<Composer>) -> Option<AnyElem
                 .as_deref()
                 .map(|provider| ProviderIcon::new(provider).size(13.0)),
         )
-        .child(
-            div()
-                .min_w_0()
-                .truncate()
-                .text_size(px(12.0))
-                .line_height(px(16.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(colors.foreground)
-                .child(SharedString::from(picker::compact_model(
-                    provider.as_deref(),
-                    &label,
-                ))),
-        )
-        .when(!composer.effort_levels().is_empty(), |chip| {
+        .when(composer.fits(super::narrow::MODEL), |chip| {
             chip.child(
                 div()
-                    .flex_shrink_0()
+                    .min_w_0()
+                    .truncate()
                     .text_size(px(12.0))
                     .line_height(px(16.0))
-                    .text_color(colors.muted_foreground)
-                    .child(format!(
-                        "· {}",
-                        cx.t(&format!("composer.effort.{}", composer.effort_label_id()))
-                    )),
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(colors.foreground)
+                    .child(SharedString::from(picker::compact_model(
+                        provider.as_deref(),
+                        &label,
+                    ))),
             )
         })
+        .children(
+            composer
+                .shown_account_label()
+                .filter(|_| composer.fits(super::narrow::EFFORT))
+                .map(|account| {
+                    div()
+                        .flex_shrink_0()
+                        .max_w(px(80.0))
+                        .truncate()
+                        .text_size(px(12.0))
+                        .line_height(px(16.0))
+                        .text_color(colors.muted_foreground)
+                        .child(format!("· {account}"))
+                }),
+        )
+        .when(
+            !composer.effort_levels().is_empty() && composer.fits(super::narrow::EFFORT),
+            |chip| {
+                chip.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(px(12.0))
+                        .line_height(px(16.0))
+                        .text_color(colors.muted_foreground)
+                        .child(format!(
+                            "· {}",
+                            cx.t(&format!("composer.effort.{}", composer.effort_label_id()))
+                        )),
+                )
+            },
+        )
         .child(
             div()
                 .flex_shrink_0()
@@ -224,8 +244,35 @@ pub(super) fn render(
     let density = crate::theme::Density::current(cx);
     let (padding_x, padding_y) = density.composer_padding();
     let drop_border = mix_oklab(colors.accent_calm, 0.7, colors.border);
+    let width = composer.width.clone();
+    let weak = cx.weak_entity();
+    let measure = gpui::canvas(
+        move |bounds, _, cx| {
+            let now = f32::from(bounds.size.width);
+            let before = width.replace(now);
+            // A breakpoint crossed: draw the toolbar again for the new width.
+            let crossed = [
+                super::narrow::PLAN_LABELS,
+                super::narrow::EFFORT,
+                super::narrow::APPROVAL_LABEL,
+                super::narrow::MODEL,
+            ]
+            .iter()
+            .any(|edge| (before > *edge) != (now > *edge));
+            if crossed {
+                let _ = weak.update(cx, |_, cx| cx.notify());
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full();
     div()
+        .relative()
         .flex_shrink_0()
+        .child(measure)
         .px(px(16.0))
         .pb(px(12.0))
         .pt(px(8.0))
@@ -291,9 +338,12 @@ pub(super) fn render(
                                 .justify_between()
                                 .gap(px(12.0))
                                 .child(
+                                    // `min-w-0 overflow-hidden`: what still does not
+                                    // fit is cut, never drawn over the chip.
                                     div()
                                         .flex()
                                         .min_w_0()
+                                        .overflow_hidden()
                                         .items_center()
                                         .gap(px(6.0))
                                         .child(popups::attach_menu(composer, cx))

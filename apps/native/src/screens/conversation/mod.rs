@@ -36,8 +36,8 @@ use std::time::{Duration, Instant};
 
 use dcc_core::domain::timeline::{Role, TimelineMessage};
 use gpui::{
-    AnyElement, Context, Entity, ListAlignment, ListState, SharedString, Task, Window, div, list,
-    prelude::*, px,
+    AnyElement, Context, Entity, FollowMode, ListAlignment, ListState, SharedString, Task, Window,
+    div, list, prelude::*, px,
 };
 
 use crate::data::conversation::{self, Conversation, EventCache};
@@ -148,7 +148,10 @@ impl ConversationView {
                     ComposerEvent::QuickSubmit(_) => {}
                 },
             );
-        let list = ListState::new(0, ListAlignment::Bottom, px(800.0));
+        // A short thread starts under the header and grows down; a long one
+        // keeps to its end while the person reads there (`use-stick-to-bottom`).
+        let list = ListState::new(0, ListAlignment::Top, px(800.0));
+        list.set_follow_mode(FollowMode::Tail);
         let weak = cx.weak_entity();
         list.set_scroll_handler(move |_, _, cx| {
             let _ = weak.update(cx, |view: &mut ConversationView, cx| view.list_scrolled(cx));
@@ -361,6 +364,8 @@ impl ConversationView {
             != Some(review_strip::waiting(&next));
         if self.data.is_none() {
             self.list.reset(next.rows.len() + 2);
+            // A conversation opens at its end.
+            self.list.set_follow_mode(FollowMode::Tail);
         } else if span.start != span.end || count > 0 {
             // Items are [top spacer, rows…, bottom spacer].
             self.list.splice(span.start + 1..span.end + 1, count);
@@ -373,6 +378,11 @@ impl ConversationView {
             task_id: Some(next.task_id.clone()),
             session_id: next.session_id.clone(),
             provider_id: next.provider_id.clone(),
+            account_id: next
+                .session_id
+                .as_ref()
+                .and_then(|id| next.sessions.iter().find(|row| &row.id == id))
+                .and_then(|row| row.account_id.clone()),
             model: next.model.clone(),
             running: next.running,
             aborted: next.aborted,

@@ -10,16 +10,16 @@ use dcc_core::domain::provider::{
     ProviderUsageWindow,
 };
 use dcc_core::ports::provider::ProviderRuntimeConfig;
-use gpui::{AnyElement, Context, FontWeight, Hsla, SharedString, div, prelude::*, px, relative};
+use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*, px, relative};
 
 use super::super::Settings;
 use super::accounts::{AccountKey, Status};
 use crate::data::provider_usage::{
-    Redeemable, Severity, redeemable, severity, short_date_time, short_time, tightest, window_label,
+    Redeemable, bar_fill, redeemable, severity, short_date_time, short_time, tightest, tone,
+    window_label,
 };
 use crate::i18n::{Args, Translate};
-use crate::theme::tailwind as tw;
-use crate::theme::{ActiveTheme, Appearance};
+use crate::theme::ActiveTheme;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Toaster, spinner};
 
 #[derive(Clone, Debug)]
@@ -43,26 +43,6 @@ pub(in super::super) struct Usage {
 
 pub(super) fn english(cx: &gpui::App) -> bool {
     cx.global::<crate::i18n::I18n>().locale() == crate::i18n::Locale::En
-}
-
-fn tone(severity: Option<Severity>, cx: &gpui::App) -> Option<Hsla> {
-    let colors = &cx.theme().colors;
-    severity.map(|severity| match severity {
-        Severity::Critical => colors.destructive,
-        Severity::Warning => match cx.theme().appearance {
-            Appearance::Light => tw::AMBER_600.hsla(),
-            Appearance::Dark => tw::AMBER_400.hsla(),
-        },
-    })
-}
-
-fn bar_fill(severity: Option<Severity>, cx: &gpui::App, rest: f32) -> Hsla {
-    let colors = &cx.theme().colors;
-    match severity {
-        Some(Severity::Critical) => colors.destructive,
-        Some(Severity::Warning) => tw::AMBER_500.hsla(),
-        None => colors.foreground.opacity(rest),
-    }
 }
 
 impl Settings {

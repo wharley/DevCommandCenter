@@ -105,14 +105,16 @@ pub(super) fn approval_menu(composer: &Composer, cx: &mut Context<Composer>) -> 
                 .size(13.0)
                 .stroke(1.8),
         )
-        .child(
-            div()
-                .text_size(px(12.0))
-                .line_height(px(16.0))
-                .font_weight(FontWeight::MEDIUM)
-                .whitespace_nowrap()
-                .child(policy_text(selected, "label", cx)),
-        )
+        .when(composer.fits(super::narrow::APPROVAL_LABEL), |trigger| {
+            trigger.child(
+                div()
+                    .text_size(px(12.0))
+                    .line_height(px(16.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .whitespace_nowrap()
+                    .child(policy_text(selected, "label", cx)),
+            )
+        })
         .child(
             div()
                 .opacity(0.4)
@@ -363,12 +365,14 @@ pub(super) fn plan_toggle(composer: &Composer, cx: &mut Context<Composer>) -> An
         })
         .when(disabled, |button| button.opacity(0.45))
         .child(Icon::new("clipboard-list").size(13.0).stroke(1.8))
-        .child(
-            div()
-                .text_size(px(12.0))
-                .line_height(px(16.0))
-                .font_weight(FontWeight::MEDIUM)
-                .child(cx.t("composer.controls.plan")),
-        );
+        .when(composer.fits(super::narrow::PLAN_LABELS), |button| {
+            button.child(
+                div()
+                    .text_size(px(12.0))
+                    .line_height(px(16.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(cx.t("composer.controls.plan")),
+            )
+        });
     Tooltip::text("composer-plan-tip", trigger, hint).into_any_element()
 }

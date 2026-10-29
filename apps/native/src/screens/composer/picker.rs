@@ -41,6 +41,10 @@ pub(crate) struct PickerState {
     pub search: gpui::Entity<TextInput>,
     pub slider: Rc<Cell<Option<Bounds<Pixels>>>>,
     pub dragging: bool,
+    /// The selected provider's plan usage, under the effort.
+    pub usage: super::account_usage::AccountUsage,
+    /// The account picked per provider, under the tabs.
+    pub accounts: super::accounts::Accounts,
     _search_events: gpui::Subscription,
 }
 
@@ -73,6 +77,8 @@ impl PickerState {
             search,
             slider: Rc::new(Cell::new(None)),
             dragging: false,
+            usage: Default::default(),
+            accounts: Default::default(),
             _search_events: events,
         }
     }
@@ -111,6 +117,8 @@ impl Composer {
         self.picker.open = open;
         if open {
             self.refresh_catalog(cx);
+            self.refresh_accounts(cx);
+            self.refresh_account_usage(cx);
             if let Some(catalog) = self.catalog.as_ref() {
                 self.picker.tab = model_picker::initial_tab(
                     catalog,
@@ -812,6 +820,7 @@ fn panel(composer: &Composer, cx: &mut Context<Composer>) -> AnyElement {
         .min_h_0()
         .on_key_down(cx.listener(Composer::on_picker_key))
         .child(tabs(composer, cx))
+        .children(super::accounts::account_strip(composer, cx))
         .child(
             div()
                 .flex()
@@ -838,6 +847,7 @@ fn panel(composer: &Composer, cx: &mut Context<Composer>) -> AnyElement {
         .child(list(composer, &rows, cx))
         .children(hidden_line)
         .child(effort_section(composer, cx))
+        .children(super::account_usage::account_usage_strip(composer, cx))
         .into_any_element()
 }
 

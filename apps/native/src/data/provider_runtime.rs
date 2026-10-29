@@ -109,7 +109,11 @@ pub fn for_provider(provider_id: &str) -> Option<ProviderRuntimeConfig> {
         .providers
         .into_iter()
         .find(|provider| provider.id.0 == provider_id)?;
-    Some(load().runtime_for(&provider))
+    let mut runtime = load().runtime_for(&provider);
+    if provider.capabilities.supports_accounts {
+        runtime.account_id = super::account_selection::for_new_conversation(provider_id);
+    }
+    Some(runtime)
 }
 
 impl Store {

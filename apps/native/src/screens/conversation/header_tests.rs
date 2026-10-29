@@ -24,6 +24,7 @@ fn row(id: &str, state: &str, running: bool, archived: bool, depth: u8) -> Sessi
         title: format!("Conversa {id}"),
         provider_id: "codex".into(),
         model: None,
+        account_id: None,
         state: state.into(),
         turn_count: 2,
         running,

@@ -284,7 +284,7 @@ impl Composer {
             // Read at each send: Settings may have just changed it.
             provider_runtime: self
                 .provider()
-                .map(|provider| crate::data::provider_runtime::load().runtime_for(provider)),
+                .map(|provider| self.runtime_with_account(provider)),
         }
     }
 

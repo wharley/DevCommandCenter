@@ -4,6 +4,8 @@
 //! conversation while you move between tasks. Files go in as chips: the +
 //! menu, a pasted image, a drop, or `@arquivo`.
 
+mod account_usage;
+mod accounts;
 mod annotation;
 mod attachments;
 mod context_rail;
@@ -42,6 +44,9 @@ pub struct ComposerSession {
     pub task_id: Option<String>,
     pub session_id: Option<String>,
     pub provider_id: Option<String>,
+    /// The account the conversation runs as (`None`: the system login); it
+    /// keeps it while it stays on its provider.
+    pub account_id: Option<String>,
     pub model: Option<String>,
     pub running: bool,
     pub aborted: bool,
@@ -62,6 +67,19 @@ pub struct ComposerSession {
     pub objective: Option<dcc_core::domain::objective::SessionObjective>,
     pub auto_resume: bool,
     pub context: Option<crate::data::conversation::ExecutionContext>,
+}
+
+/// `@container header-actions (max-width: …)`: the toolbar's labels give way
+/// as the conversation narrows, the least needed first.
+pub(crate) mod narrow {
+    /// "Planejar" and "Objetivo" keep only their icons.
+    pub const PLAN_LABELS: f32 = 720.0;
+    /// The chip drops the effort (and the account).
+    pub const EFFORT: f32 = 620.0;
+    /// The approval menu keeps only its shield.
+    pub const APPROVAL_LABEL: f32 = 500.0;
+    /// The chip keeps only the provider's icon.
+    pub const MODEL: f32 = 420.0;
 }
 
 impl ComposerSession {
@@ -113,6 +131,8 @@ pub(crate) enum Busy {
 
 pub struct Composer {
     pub(crate) input: Entity<TextArea>,
+    /// The composer's width at the last frame (`@container header-actions`).
+    pub(crate) width: std::rc::Rc<std::cell::Cell<f32>>,
     pub(crate) session: ComposerSession,
     /// In the quick composer: the send goes to the host (`QuickSubmit`).
     pub(crate) quick: bool,
@@ -175,6 +195,7 @@ impl Composer {
         let input_changes = cx.observe(&input, |this, _, cx| this.update_mention(cx));
         Self {
             input,
+            width: Default::default(),
             session: ComposerSession::default(),
             quick: false,
             drafts: drafts::load(),
@@ -204,12 +225,22 @@ impl Composer {
     }
 
     /// Follows the conversation: switching sessions swaps the draft.
+    /// Whether the toolbar is wider than `max` (unknown before the first frame).
+    pub(crate) fn fits(&self, max: f32) -> bool {
+        let width = self.width.get();
+        width == 0.0 || width > max
+    }
+
     pub fn set_session(&mut self, session: ComposerSession, cx: &mut Context<Self>) {
         if session == self.session {
             return;
         }
         let switched = session.draft_key() != self.session.draft_key();
         self.session = session;
+        // The chip names the account: read them once.
+        if crate::data::account_selection::known().is_none() && !cfg!(test) {
+            self.refresh_accounts(cx);
+        }
         if switched {
             let draft = self
                 .session
