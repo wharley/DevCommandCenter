@@ -5,6 +5,18 @@ use gpui::{BoxShadow, Hsla, point, px};
 
 use crate::theme::Theme;
 
+/// shadcn's Input fill (transparent, `dark:bg-input/30`) made opaque over a
+/// dialog's `popover`: GPUI paints a focus ring's shadow as a filled shape
+/// under its element, so a see-through field would fill with the ring.
+pub fn input_fill(theme: &Theme) -> Hsla {
+    let colors = &theme.colors;
+    if theme.appearance == crate::theme::Appearance::Dark {
+        crate::theme::color::mix_srgb(colors.input, 0.3, colors.popover)
+    } else {
+        colors.popover
+    }
+}
+
 /// `--dcc-surface-edge`: the border at 80%.
 pub fn surface_edge(theme: &Theme) -> Hsla {
     theme.colors.border.opacity(0.8)

@@ -44,10 +44,14 @@ fn point(icon: &'static str, title: SharedString, body: AnyElement, cx: &gpui::A
         .child(
             div()
                 .mt(px(2.0))
+                .flex_none()
                 .child(Icon::new(icon).size(16.0).color(colors.muted_foreground)),
         )
         .child(
+            // `min-w-0 flex-1`: the text wraps inside the dialog.
             div()
+                .min_w_0()
+                .flex_1()
                 .child(
                     div()
                         .text_size(px(12.0))

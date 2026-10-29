@@ -25,6 +25,7 @@ mod system_rows;
 #[cfg(test)]
 mod tests;
 mod tool_row;
+mod trail;
 mod user_row;
 
 use std::cell::RefCell;
@@ -121,6 +122,8 @@ pub struct ConversationView {
     _call_agents: gpui::Subscription,
     /// "Buscar na conversa", while open.
     find: Option<find_bar::FindBar>,
+    /// `ConversationTrail`, in the left gutter of a wide thread.
+    trail: trail::TrailState,
     _clock: Task<()>,
 }
 
@@ -178,6 +181,7 @@ impl ConversationView {
             call_agents,
             _call_agents: call_agent_events,
             find: None,
+            trail: trail::TrailState::default(),
             _clock: Self::clock_loop(cx),
         }
     }
@@ -697,6 +701,9 @@ impl Render for ConversationView {
             let handle = gpui::Focusable::focus_handle(self.composer.read(cx).input.read(cx), cx);
             window.focus(&handle, cx);
         }
+        let trail = (!self.loading && self.viewport_width >= TRAIL_WIDTH)
+            .then(|| self.trail(cx))
+            .flatten();
         let muted = cx.theme().colors.muted_foreground;
         let entity = cx.entity();
         let empty = self.data.as_ref().is_none_or(|data| data.rows.is_empty());
@@ -750,6 +757,7 @@ impl Render for ConversationView {
                     .flex_1()
                     .min_h_0()
                     .child(body)
+                    .children(trail)
                     .when(!self.loading && !empty, |area| {
                         area.child(ListScrollbar::new(
                             "conversation-scrollbar",

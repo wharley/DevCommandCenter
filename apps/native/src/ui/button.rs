@@ -165,12 +165,9 @@ impl RenderOnce for Button {
         let colors = &theme.colors;
         let dark = theme.appearance == Appearance::Dark;
         let (background, foreground, border, hover_background) = match self.variant {
-            Variant::Default => (
-                Some(colors.primary),
-                colors.primary_foreground,
-                None,
-                Some(colors.primary.opacity(0.8)),
-            ),
+            // `[a]:hover:bg-primary/80`: only a link styled as a button
+            // changes on hover; the text stays `primary-foreground`.
+            Variant::Default => (Some(colors.primary), colors.primary_foreground, None, None),
             Variant::Secondary => (
                 Some(colors.secondary),
                 colors.secondary_foreground,
@@ -213,7 +210,12 @@ impl RenderOnce for Button {
             None if self.muted => colors.muted_foreground,
             None => foreground,
         };
-        let hover_foreground = self.hover_text.unwrap_or(colors.foreground);
+        // Only ghost and outline (and a muted label) take `hover:text-foreground`;
+        // a filled button keeps its own text colour on its hover background.
+        let hover_foreground = self.hover_text.or_else(|| {
+            (self.muted || matches!(self.variant, Variant::Ghost | Variant::Outline))
+                .then_some(colors.foreground)
+        });
         let (width, height, padding) = match self.size {
             Size::Default => (None, 32.0, 12.0),
             Size::Sm => (None, 28.0, 10.0),
@@ -273,7 +275,10 @@ impl RenderOnce for Button {
                 button
                     .cursor_pointer()
                     .hover(move |style| {
-                        let style = style.text_color(hover_foreground);
+                        let style = match hover_foreground {
+                            Some(color) => style.text_color(color),
+                            None => style,
+                        };
                         match hover_background {
                             Some(background) if current_background.is_none() => {
                                 style.bg(background)

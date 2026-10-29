@@ -34,6 +34,7 @@ impl TerminalDock {
             .rounded(radius.lg)
             .border_1()
             .border_color(if focused { colors.ring } else { colors.input })
+            .bg(crate::ui::input_fill(cx.theme()))
             .when(focused, |field| {
                 field.shadow(vec![gpui::BoxShadow {
                     color: colors.ring.opacity(0.5),

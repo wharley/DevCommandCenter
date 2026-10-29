@@ -12,7 +12,7 @@ use gpui::{
 use super::super::CodeColumn;
 use super::{Confirm, PreviewOrigin};
 use crate::i18n::{Args, Translate};
-use crate::theme::{ActiveTheme, Appearance, fonts};
+use crate::theme::{ActiveTheme, fonts};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog, dialog_footer, dialog_header, spinner};
 
 /// shadcn's `Input` (one line, 36px) or `Textarea` (`min-h-*`), in
@@ -27,7 +27,6 @@ pub(super) fn field(
 ) -> AnyElement {
     let colors = cx.theme().colors.clone();
     let focused = focus.is_focused(window);
-    let dark = cx.theme().appearance == Appearance::Dark;
     div()
         .when_some(min_height, |field, height| field.min_h(px(height)))
         .when(min_height.is_none(), |field| {
@@ -37,7 +36,7 @@ pub(super) fn field(
         .rounded(px(8.0))
         .border_1()
         .border_color(if focused { colors.ring } else { colors.input })
-        .when(dark, |field| field.bg(colors.input.opacity(0.3)))
+        .bg(crate::ui::input_fill(cx.theme()))
         .when(focused, |field| {
             field.shadow(vec![gpui::BoxShadow {
                 color: colors.ring.opacity(0.5),

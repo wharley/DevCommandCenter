@@ -36,7 +36,7 @@ pub use kbd::{command_key, shortcut_keys};
 pub use menu::{ItemStyle, Menu, MenuAlign, MenuEntry, MenuItem};
 pub use resize_handle::ResizeHandle;
 pub use scrollbar::ListScrollbar;
-pub use surface::{card_shadow, surface_edge};
+pub use surface::{card_shadow, input_fill, surface_edge};
 pub use switch::{Switch, SwitchSize};
 pub use tabs::Tabs;
 pub use text::{Tracked, tabular_nums};
