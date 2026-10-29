@@ -9,8 +9,9 @@ use std::time::Instant;
 use gpui::{ClipboardEntry, Context, ImageFormat, PathPromptOptions};
 
 use super::Composer;
-use super::mentions::{self, FileList, MentionMenu};
+use super::mentions::{self, FileList, MentionMenu, MenuItem};
 use super::prompt::relative_to_workspace;
+use super::slash;
 use crate::data::prompt::is_image_path;
 use crate::i18n::Translate;
 use crate::ui::Toaster;
@@ -127,6 +128,13 @@ impl Composer {
                 input.has_selection(),
             )
         };
+        self.highlight_typed_command(cx);
+        if !has_selection && let Some((range, query)) = slash::trigger(&before) {
+            let idle = self.session.session_id.is_some() && !self.session.running;
+            let commands = slash::filter(&slash::available(self.provider(), idle), &query);
+            let options = commands.into_iter().map(MenuItem::Command).collect();
+            return self.open_menu(range, options, cx);
+        }
         let Some(root) = self.session.workspace_path.clone() else {
             return self.close_mention(cx);
         };
@@ -147,7 +155,19 @@ impl Composer {
         {
             self.load_files(root, cx);
         }
-        let options = mentions::filter(&files, &query);
+        let options = mentions::filter(&files, &query)
+            .into_iter()
+            .map(MenuItem::File)
+            .collect();
+        self.open_menu(range, options, cx);
+    }
+
+    fn open_menu(
+        &mut self,
+        range: std::ops::Range<usize>,
+        options: Vec<MenuItem>,
+        cx: &mut Context<Self>,
+    ) {
         if options.is_empty() {
             return self.close_mention(cx);
         }
@@ -215,19 +235,44 @@ impl Composer {
         }
     }
 
-    /// The pick replaces the typed `@query` with a chip and a space.
+    /// A file replaces the typed `@query` with a chip and a space; a command
+    /// runs (`clientActionHandlers`) or goes in for the person to finish.
     pub(crate) fn accept_mention(&mut self, index: Option<usize>, cx: &mut Context<Self>) {
         let Some(menu) = self.mention.take() else {
             return;
         };
-        let Some(path) = menu.options.get(index.unwrap_or(menu.selected)).cloned() else {
+        let Some(item) = menu.options.get(index.unwrap_or(menu.selected)).cloned() else {
             return;
         };
-        self.input.update(cx, |input, cx| {
-            input.set_menu_open(false);
-            input.insert_chip(Chip::File(path), Some(menu.range.clone()), cx);
-            input.insert(" ", cx);
-        });
+        self.input.update(cx, |input, _| input.set_menu_open(false));
+        match item {
+            MenuItem::File(path) => self.input.update(cx, |input, cx| {
+                input.insert_chip(Chip::File(path), Some(menu.range.clone()), cx);
+                input.insert(" ", cx);
+            }),
+            MenuItem::Command(slash::Command::Clear) => {
+                self.input.update(cx, |input, cx| input.set_text("", cx));
+            }
+            MenuItem::Command(slash::Command::Compact) => {
+                self.input.update(cx, |input, cx| input.set_text("", cx));
+                self.send_text("/compact", cx);
+            }
+            MenuItem::Command(command) => self.input.update(cx, |input, cx| {
+                input.replace_range(menu.range.clone(), &format!("/{} ", command.name()), cx)
+            }),
+        }
         cx.notify();
+    }
+
+    /// Paints a leading command the provider runs (`/goal …`) as recognized.
+    fn highlight_typed_command(&mut self, cx: &mut Context<Self>) {
+        let names: Vec<&'static str> = slash::available(self.provider(), true)
+            .into_iter()
+            .filter(|command| command.runs_when_typed())
+            .map(slash::Command::name)
+            .collect();
+        let range = slash::leading(self.input.read(cx).text(), &names);
+        self.input
+            .update(cx, |input, _| input.set_command_range(range));
     }
 }

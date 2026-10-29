@@ -20,9 +20,12 @@ mod popups;
 mod prompt;
 mod queue;
 mod settings;
+mod slash;
 pub(crate) use settings::load_settings;
 #[cfg(test)]
 mod list_tests;
+#[cfg(test)]
+mod slash_tests;
 mod strips;
 mod surface;
 #[cfg(test)]

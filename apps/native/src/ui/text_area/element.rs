@@ -124,7 +124,7 @@ fn display(
     area: &TextArea,
     color: Hsla,
     placeholder: Hsla,
-    marker: Hsla,
+    accents: Accents,
     window: &Window,
     cx: &App,
 ) -> LayoutState {
@@ -177,15 +177,26 @@ fn display(
         .marked
         .as_ref()
         .map(|marked| map.to_display(marked.start)..map.to_display(marked.end));
-    let faint: Vec<_> = if area.lists {
-        super::lists::marker_spans(text)
-            .into_iter()
-            .map(|span| map.to_display(span.start)..map.to_display(span.end))
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let runs = styled_runs(&run, out.len(), &faint, marker, marked);
+    let mut spans: Vec<Span> = Vec::new();
+    if area.lists {
+        spans.extend(
+            super::lists::marker_spans(text)
+                .into_iter()
+                .map(|span| Span {
+                    range: map.to_display(span.start)..map.to_display(span.end),
+                    color: accents.marker,
+                    background: None,
+                }),
+        );
+    }
+    if let Some(command) = area.command.clone().filter(|range| range.end <= text.len()) {
+        spans.push(Span {
+            range: map.to_display(command.start)..map.to_display(command.end),
+            color: accents.command,
+            background: Some(accents.command.opacity(0.1)),
+        });
+    }
+    let runs = styled_runs(&run, out.len(), &spans, marked);
     LayoutState {
         text: SharedString::from(out),
         runs,
@@ -194,16 +205,27 @@ fn display(
     }
 }
 
-/// The line's runs: list markers in `faint`, the IME's text underlined.
+/// Colors over the text: list markers, a recognized `/command`.
+pub(super) struct Accents {
+    pub marker: Hsla,
+    pub command: Hsla,
+}
+
+struct Span {
+    range: Range<usize>,
+    color: Hsla,
+    background: Option<Hsla>,
+}
+
+/// The line's runs: the spans' colors, the IME's text underlined.
 fn styled_runs(
     run: &TextRun,
     len: usize,
-    faint: &[Range<usize>],
-    faint_color: Hsla,
+    spans: &[Span],
     marked: Option<Range<usize>>,
 ) -> Vec<TextRun> {
     let mut cuts = vec![0, len];
-    for range in faint.iter().chain(marked.as_ref()) {
+    for range in spans.iter().map(|span| &span.range).chain(marked.as_ref()) {
         cuts.extend([range.start.min(len), range.end.min(len)]);
     }
     cuts.sort_unstable();
@@ -211,13 +233,11 @@ fn styled_runs(
     cuts.windows(2)
         .map(|cut| {
             let inside = |range: &Range<usize>| range.start <= cut[0] && cut[1] <= range.end;
+            let span = spans.iter().find(|span| inside(&span.range));
             TextRun {
                 len: cut[1] - cut[0],
-                color: if faint.iter().any(inside) {
-                    faint_color
-                } else {
-                    run.color
-                },
+                color: span.map_or(run.color, |span| span.color),
+                background_color: span.and_then(|span| span.background),
                 underline: marked
                     .as_ref()
                     .filter(|range| inside(range))
@@ -316,11 +336,19 @@ impl Element for TextAreaElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let colors = cx.theme().colors.clone();
+        let theme_appearance = cx.theme().appearance;
         let state = display(
             self.area.read(cx),
             colors.foreground,
             colors.muted_foreground.opacity(0.7),
-            colors.muted_foreground,
+            Accents {
+                marker: colors.muted_foreground,
+                // `.composer-slash-command`: #047857, #6ee7b7 in dark.
+                command: match theme_appearance {
+                    crate::theme::Appearance::Dark => crate::theme::tailwind::EMERALD_300.hsla(),
+                    crate::theme::Appearance::Light => crate::theme::tailwind::EMERALD_700.hsla(),
+                },
+            },
             window,
             cx,
         );

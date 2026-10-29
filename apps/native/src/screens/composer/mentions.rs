@@ -101,13 +101,26 @@ impl FileList {
     }
 }
 
+/// One row of the popup: a file for `@`, a command for `/`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuItem {
+    File(String),
+    Command(super::slash::Command),
+}
+
 /// The open popup.
 #[derive(Clone, Debug, Default)]
 pub struct MentionMenu {
-    /// The typed `@query` in the field.
+    /// The typed `@query` or `/query` in the field.
     pub range: Range<usize>,
-    pub options: Vec<String>,
+    pub options: Vec<MenuItem>,
     pub selected: usize,
+}
+
+impl MentionMenu {
+    pub fn commands(&self) -> bool {
+        matches!(self.options.first(), Some(MenuItem::Command(_)))
+    }
 }
 
 impl MentionMenu {
@@ -170,7 +183,7 @@ mod tests {
     #[test]
     fn the_highlight_wraps() {
         let mut menu = MentionMenu {
-            options: vec!["a".into(), "b".into()],
+            options: vec![MenuItem::File("a".into()), MenuItem::File("b".into())],
             ..MentionMenu::default()
         };
         menu.move_by(-1);

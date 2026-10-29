@@ -5653,6 +5653,7 @@
     "alreadyAnswered": "This was already answered.",
     "sendFailed": "Couldn't send to the agent.",
     "stopFailed": "Couldn't stop the agent.",
-    "timedOut": "DCC took too long to answer. Try again."
+    "timedOut": "DCC took too long to answer. Try again.",
+    "slashCompact": "Compact the provider context in this conversation"
   }
 }

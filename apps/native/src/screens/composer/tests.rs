@@ -3,6 +3,7 @@
 
 use gpui::{TestAppContext, WindowAppearance};
 
+use super::mentions::MenuItem;
 use super::{Composer, ComposerSession, continuation_prompt};
 use crate::data::desktop_api::DesktopApi;
 use crate::test_support::{fake_desktop, fake_desktop_answers};
@@ -179,7 +180,10 @@ fn mentions_pick_files_and_attachments_become_paths(cx: &mut TestAppContext) {
         let menu = composer.mention.as_ref().expect("the popup opened");
         assert_eq!(
             menu.options,
-            vec!["src/payment.ts".to_string(), "src/app.rs".to_string()]
+            vec![
+                MenuItem::File("src/payment.ts".into()),
+                MenuItem::File("src/app.rs".into())
+            ]
         );
     });
     // ↓ then Enter picks the second file; Enter does not send while it's open.

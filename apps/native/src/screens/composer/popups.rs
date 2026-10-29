@@ -6,6 +6,7 @@
 use gpui::{AnyElement, BoxShadow, Context, FontWeight, SharedString, div, point, prelude::*, px};
 
 use super::Composer;
+use super::mentions::MenuItem as Row;
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
 use crate::ui::{Button, ButtonVariant, Icon, Menu, MenuEntry, MenuItem};
@@ -55,13 +56,9 @@ pub(super) fn mention_popup(composer: &Composer, cx: &mut Context<Composer>) -> 
         .options
         .iter()
         .enumerate()
-        .map(|(index, path)| {
+        .map(|(index, item)| {
             let selected = index == menu.selected;
-            let (directory, name) = match path.rfind('/') {
-                Some(slash) => (&path[..=slash], &path[slash + 1..]),
-                None => ("", path.as_str()),
-            };
-            div()
+            let row = div()
                 .id(SharedString::from(format!("mention-{index}")))
                 .flex()
                 .min_w_0()
@@ -84,31 +81,49 @@ pub(super) fn mention_popup(composer: &Composer, cx: &mut Context<Composer>) -> 
                 })
                 .on_click(
                     cx.listener(move |composer, _, _, cx| composer.accept_mention(Some(index), cx)),
-                )
-                .child(
-                    Icon::new("file-text")
-                        .size(14.0)
-                        .stroke(1.8)
-                        .color(colors.muted_foreground),
-                )
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .max_w(px(320.0))
-                        .truncate()
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(SharedString::from(name.to_string())),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(px(12.0))
-                        .text_color(colors.muted_foreground)
-                        .child(SharedString::from(directory.to_string())),
-                )
-                .into_any_element()
+                );
+            let (icon, name, detail): (&str, SharedString, SharedString) = match item {
+                Row::File(path) => {
+                    let (directory, name) = match path.rfind('/') {
+                        Some(slash) => (&path[..=slash], &path[slash + 1..]),
+                        None => ("", path.as_str()),
+                    };
+                    (
+                        "file-text",
+                        name.to_string().into(),
+                        directory.to_string().into(),
+                    )
+                }
+                Row::Command(command) => (
+                    command.icon(),
+                    format!("/{}", command.name()).into(),
+                    cx.t(command.description_key()),
+                ),
+            };
+            row.child(
+                Icon::new(icon)
+                    .size(14.0)
+                    .stroke(1.8)
+                    .color(colors.muted_foreground),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .max_w(px(320.0))
+                    .truncate()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(name),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(12.0))
+                    .text_color(colors.muted_foreground)
+                    .child(detail),
+            )
+            .into_any_element()
         })
         .collect();
     let list = div()
@@ -146,7 +161,11 @@ pub(super) fn mention_popup(composer: &Composer, cx: &mut Context<Composer>) -> 
                         .text_size(px(12.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(colors.muted_foreground)
-                        .child(cx.t("composer.fileMentions")),
+                        .child(if menu.commands() {
+                            cx.t("composer.commandMenu.title")
+                        } else {
+                            cx.t("composer.fileMentions")
+                        }),
                 )
                 .children(items),
         );

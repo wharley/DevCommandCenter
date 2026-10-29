@@ -226,6 +226,8 @@ pub struct TextArea {
     disabled: bool,
     /// Writes Markdown lists and emphasis (the composer's).
     lists: bool,
+    /// A leading `/command` the provider runs, drawn as recognized.
+    command: Option<Range<usize>>,
     pub(crate) layout: Option<Layout>,
     pub(crate) scroll_y: Pixels,
     /// Scroll so the caret shows at the next frame.
@@ -252,6 +254,7 @@ impl TextArea {
             max_height: None,
             disabled: false,
             lists: false,
+            command: None,
             layout: None,
             scroll_y: px(0.0),
             reveal_cursor: false,
@@ -283,6 +286,20 @@ impl TextArea {
     /// works).
     pub fn in_list(&self) -> bool {
         self.lists && lists::in_list(self.buffer.text(), self.buffer.cursor())
+    }
+
+    /// The owner's recognized `/command` at the start, if any.
+    pub fn set_command_range(&mut self, range: Option<Range<usize>>) {
+        self.command = range;
+    }
+
+    pub fn command_range(&self) -> Option<Range<usize>> {
+        self.command.clone()
+    }
+
+    /// Replaces `range` with `text`, the caret after it (a picked command).
+    pub fn replace_range(&mut self, range: Range<usize>, text: &str, cx: &mut Context<Self>) {
+        self.edit(|buffer| buffer.replace(Some(range), text), cx);
     }
 
     pub fn set_placeholder(
