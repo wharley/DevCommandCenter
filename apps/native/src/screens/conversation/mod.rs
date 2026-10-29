@@ -21,6 +21,7 @@ mod paced;
 mod permission_panel;
 mod requests;
 mod review_strip;
+mod scroll_jump;
 mod system_rows;
 #[cfg(test)]
 mod tests;
@@ -124,6 +125,8 @@ pub struct ConversationView {
     find: Option<find_bar::FindBar>,
     /// `ConversationTrail`, in the left gutter of a wide thread.
     trail: trail::TrailState,
+    /// Something arrived while the person read away from the end.
+    new_activity: bool,
     _clock: Task<()>,
 }
 
@@ -185,6 +188,7 @@ impl ConversationView {
             _call_agents: call_agent_events,
             find: None,
             trail: trail::TrailState::default(),
+            new_activity: false,
             _clock: Self::clock_loop(cx),
         }
     }
@@ -369,6 +373,9 @@ impl ConversationView {
         } else if span.start != span.end || count > 0 {
             // Items are [top spacer, rows…, bottom spacer].
             self.list.splice(span.start + 1..span.end + 1, count);
+            if self.away_from_end() {
+                self.new_activity = true;
+            }
         }
         if strips_changed {
             let end = next.rows.len() + 1;
@@ -714,6 +721,7 @@ impl Render for ConversationView {
         let trail = (!self.loading && self.viewport_width >= TRAIL_WIDTH)
             .then(|| self.trail(cx))
             .flatten();
+        let scroll_jump = (!self.loading).then(|| self.scroll_jump(cx)).flatten();
         let muted = cx.theme().colors.muted_foreground;
         let entity = cx.entity();
         let empty = self.data.as_ref().is_none_or(|data| data.rows.is_empty());
@@ -768,6 +776,7 @@ impl Render for ConversationView {
                     .min_h_0()
                     .child(body)
                     .children(trail)
+                    .children(scroll_jump)
                     .when(!self.loading && !empty, |area| {
                         area.child(ListScrollbar::new(
                             "conversation-scrollbar",

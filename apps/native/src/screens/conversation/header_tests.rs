@@ -517,3 +517,52 @@ fn a_narrow_header_shortens_the_title_instead_of_drawing_under_the_buttons(
         resume.left()
     );
 }
+
+#[gpui::test]
+fn away_from_the_end_a_button_takes_the_thread_back_down(cx: &mut TestAppContext) {
+    let (view, cx, _events, _server) = open(cx, Vec::new());
+    let prompts: Vec<String> = (0..40).map(|index| format!("Pergunta {index}")).collect();
+    let texts: Vec<&str> = prompts.iter().map(String::as_str).collect();
+    view.update(cx, |view, cx| {
+        view.apply(
+            Rc::new(Conversation {
+                rows: rows_with(&texts[..30]),
+                ..data()
+            }),
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("conversation-scroll-jump").is_none(),
+        "at the end, no button"
+    );
+    // The person scrolls up; then the agent keeps working.
+    view.update(cx, |view, cx| {
+        view.list.scroll_to(gpui::ListOffset {
+            item_ix: 0,
+            offset_in_item: gpui::px(0.0),
+        });
+        view.apply(
+            Rc::new(Conversation {
+                rows: rows_with(&texts),
+                running: true,
+                ..data()
+            }),
+            cx,
+        );
+        assert!(view.new_activity, "something new arrived out of sight");
+    });
+    cx.run_until_parked();
+    let pill = cx
+        .debug_bounds("conversation-scroll-jump")
+        .expect("the button while away");
+    assert!(pill.size.width > gpui::px(32.0), "a running turn widens it");
+    cx.simulate_click(pill.center(), Modifiers::none());
+    cx.run_until_parked();
+    view.update(cx, |view, _| {
+        assert!(view.list.is_following_tail());
+        assert!(!view.new_activity);
+    });
+    assert!(cx.debug_bounds("conversation-scroll-jump").is_none());
+}
