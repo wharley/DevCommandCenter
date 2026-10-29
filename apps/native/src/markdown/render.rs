@@ -79,32 +79,33 @@ fn inline_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
         }
         highlights.push((span.range.clone(), style));
     }
-    let text = StyledText::new(SharedString::from(inline.text.clone())).with_highlights(highlights);
+    let content = SharedString::from(inline.text.clone());
+    let text = StyledText::new(content.clone()).with_highlights(highlights);
+    let layout = text.layout().clone();
     if links.is_empty() {
-        return text.into_any_element();
+        return super::selection::wrap(content, layout, text.into_any_element());
     }
     let ranges: Vec<std::ops::Range<usize>> =
         links.iter().map(|(range, _)| range.clone()).collect();
     let targets: Vec<String> = links.into_iter().map(|(_, url)| url).collect();
-    InteractiveText::new(id, text)
-        .on_click(ranges, move |index, window, cx| {
-            let target = targets[index].clone();
-            // The app opens what it can (a task's file on the stage).
-            if let Some(handler) = cx
-                .try_global::<super::LinkHandler>()
-                .map(|global| global.0.clone())
-            {
-                handler(&target, window, cx);
-                return;
-            }
-            if target.starts_with("http://")
-                || target.starts_with("https://")
-                || target.starts_with("mailto:")
-            {
-                cx.open_url(&target);
-            }
-        })
-        .into_any_element()
+    let interactive = InteractiveText::new(id, text).on_click(ranges, move |index, window, cx| {
+        let target = targets[index].clone();
+        // The app opens what it can (a task's file on the stage).
+        if let Some(handler) = cx
+            .try_global::<super::LinkHandler>()
+            .map(|global| global.0.clone())
+        {
+            handler(&target, window, cx);
+            return;
+        }
+        if target.starts_with("http://")
+            || target.starts_with("https://")
+            || target.starts_with("mailto:")
+        {
+            cx.open_url(&target);
+        }
+    });
+    super::selection::wrap(content, layout, interactive.into_any_element())
 }
 
 /// `.assistant-markdown-scale :where(p, …):not(:first-child) { margin-top: .75rem }`;
@@ -504,12 +505,13 @@ pub fn render_markdown(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    let blocks = super::selection::message(id, || blocks(markdown, style, id, window, cx));
     div()
         .flex()
         .flex_col()
         .min_w_0()
         .text_size(px(style.size))
-        .children(blocks(markdown, style, id, window, cx))
+        .children(blocks)
         .into_any_element()
 }
 

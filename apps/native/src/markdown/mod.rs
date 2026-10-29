@@ -3,6 +3,7 @@
 
 mod parse;
 mod render;
+pub mod selection;
 
 pub use parse::{Block, Inline, ListItem, Span, SpanStyle, parse};
 pub use render::{MarkdownStyle, render_markdown};

@@ -22,6 +22,7 @@ mod permission_panel;
 mod requests;
 mod review_strip;
 mod scroll_jump;
+mod selection;
 mod system_rows;
 #[cfg(test)]
 mod tests;
@@ -37,8 +38,8 @@ use std::time::{Duration, Instant};
 
 use dcc_core::domain::timeline::{Role, TimelineMessage};
 use gpui::{
-    AnyElement, App, Context, Entity, FollowMode, ListAlignment, ListState, SharedString, Task,
-    Window, div, list, prelude::*, px,
+    AnyElement, App, Context, Entity, FollowMode, ListAlignment, ListState, MouseButton,
+    SharedString, Task, Window, div, list, prelude::*, px,
 };
 
 use crate::data::conversation::{self, Conversation, EventCache};
@@ -103,6 +104,11 @@ pub struct ConversationView {
     markdown: RefCell<HashMap<u64, Rc<Vec<Block>>>>,
     /// Streaming prose being revealed, with what was last laid out.
     paced: RefCell<HashMap<SharedString, PacedProse>>,
+    /// The thread's selected text, and the keyboard it takes for ⌘C.
+    selection: crate::markdown::selection::Selection,
+    focus: gpui::FocusHandle,
+    /// "Copiar" open at this point after a right click on the selection.
+    copy_menu: Option<gpui::Point<gpui::Pixels>>,
     /// A wake-up for the reveal's next step is already scheduled.
     paced_wake: Rc<std::cell::Cell<bool>>,
     mascot_frame: bool,
@@ -177,6 +183,9 @@ impl ConversationView {
             markdown: RefCell::new(HashMap::new()),
             paced: RefCell::new(HashMap::new()),
             paced_wake: Rc::default(),
+            selection: Default::default(),
+            focus: cx.focus_handle(),
+            copy_menu: None,
             mascot_frame: false,
             now_ms: time::now_ms(),
             viewport_width: 0.0,
@@ -722,6 +731,7 @@ fn launch_state(
 impl Render for ConversationView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport_width = f32::from(self.list.viewport_bounds().size.width);
+        self.selection.begin_frame();
         if self.prefill.is_some() && self.composer.read(cx).session.usable() {
             let text = self.prefill.take().unwrap_or_default();
             let composer = self.composer.clone();
@@ -761,14 +771,21 @@ impl Render for ConversationView {
                 .children(note)
                 .into_any_element()
         } else {
+            let selection = self.selection.clone();
             list(self.list.clone(), move |index, window, cx| {
-                entity.update(cx, |view, cx| view.render_item(index, window, cx))
+                crate::markdown::selection::within(&selection, || {
+                    entity.update(cx, |view, cx| view.render_item(index, window, cx))
+                })
             })
             .size_full()
             .into_any_element()
         };
         div()
             .id("conversation")
+            .track_focus(&self.focus)
+            .on_action(
+                cx.listener(|view, _: &crate::app::menus::EditCopy, _, cx| view.copy_selection(cx)),
+            )
             .relative()
             .flex()
             .flex_col()
@@ -787,7 +804,13 @@ impl Render for ConversationView {
                     .flex_col()
                     .flex_1()
                     .min_h_0()
+                    .on_mouse_down(MouseButton::Left, cx.listener(Self::select_press))
+                    .on_mouse_down(MouseButton::Right, cx.listener(Self::select_menu))
+                    .on_mouse_move(cx.listener(Self::select_drag))
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::select_release))
+                    .on_mouse_up_out(MouseButton::Left, cx.listener(Self::select_release))
                     .child(body)
+                    .children(self.copy_menu(cx))
                     .children(trail)
                     .children(scroll_jump)
                     .when(!self.loading && !empty, |area| {

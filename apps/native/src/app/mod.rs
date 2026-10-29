@@ -7,7 +7,7 @@ pub mod global_keys;
 pub mod menu_bar;
 #[cfg(target_os = "macos")]
 mod menu_bar_item;
-mod menus;
+pub(crate) mod menus;
 pub mod quick_composer;
 mod window;
 
