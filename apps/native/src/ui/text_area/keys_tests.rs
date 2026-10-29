@@ -1,0 +1,40 @@
+//! The multi-line field's line keys, pressed for real: ⇧Home/⇧End select to
+//! the line's ends, ⌃A/⌃E move there, ⌘⌦ deletes to the line's end.
+
+use gpui::{Focusable, TestAppContext, VisualTestContext, WindowAppearance};
+
+use super::TextArea;
+use crate::theme::{Theme, ThemePreference};
+
+#[gpui::test]
+fn line_keys_select_move_and_delete_within_the_line(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        super::bind_keys(cx);
+    });
+    let (area, cx) = cx.add_window_view(TextArea::new);
+    area.update_in(cx, |area, window, cx| {
+        area.set_text("primeira linha\nsegunda linha", cx);
+        window.focus(&area.focus_handle(cx), cx);
+    });
+    cx.run_until_parked();
+    let selected = |cx: &mut VisualTestContext| {
+        area.read_with(cx, |area, _| area.buffer.selected_text().to_string())
+    };
+    // The caret ends the text, on the second line.
+    cx.simulate_keystrokes("cmd-down shift-home");
+    assert_eq!(selected(cx), "segunda linha");
+    cx.simulate_keystrokes("ctrl-a shift-end");
+    assert_eq!(selected(cx), "segunda linha");
+    // ⌃A then ⌥→ past "segunda", then ⌘⌦ drops the rest of that line only.
+    cx.simulate_keystrokes("ctrl-a alt-right cmd-delete");
+    assert_eq!(
+        area.read_with(cx, |area, _| area.text().to_string()),
+        "primeira linha\nsegunda"
+    );
+    cx.simulate_keystrokes("ctrl-e");
+    assert_eq!(
+        area.read_with(cx, |area, _| area.cursor()),
+        "primeira linha\nsegunda".len()
+    );
+}

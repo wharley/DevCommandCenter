@@ -7,6 +7,8 @@ mod buffer;
 pub mod chip;
 mod element;
 mod handler;
+#[cfg(test)]
+mod keys_tests;
 mod lists;
 
 use std::ops::Range;
@@ -40,6 +42,7 @@ actions!(
         DeleteWordLeft,
         DeleteWordRight,
         DeleteToLineStart,
+        DeleteToLineEnd,
         Left,
         Right,
         Up,
@@ -91,6 +94,11 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-backspace", DeleteWordLeft, Some(CONTEXT)),
         KeyBinding::new("alt-delete", DeleteWordRight, Some(CONTEXT)),
         KeyBinding::new("cmd-backspace", DeleteToLineStart, Some(CONTEXT)),
+        KeyBinding::new("cmd-delete", DeleteToLineEnd, Some(CONTEXT)),
+        KeyBinding::new("shift-home", SelectLineStart, Some(CONTEXT)),
+        KeyBinding::new("shift-end", SelectLineEnd, Some(CONTEXT)),
+        KeyBinding::new("ctrl-a", LineStart, Some(CONTEXT)),
+        KeyBinding::new("ctrl-e", LineEnd, Some(CONTEXT)),
         KeyBinding::new("left", Left, Some(CONTEXT)),
         KeyBinding::new("right", Right, Some(CONTEXT)),
         KeyBinding::new("up", Up, Some(CONTEXT)),
@@ -600,6 +608,13 @@ impl TextArea {
         );
     }
 
+    fn delete_to_line_end(&mut self, _: &DeleteToLineEnd, _: &mut Window, cx: &mut Context<Self>) {
+        self.edit(
+            |buffer| buffer.delete_to(buffer.line_end(buffer.cursor())),
+            cx,
+        );
+    }
+
     fn delete_to_line_start(
         &mut self,
         _: &DeleteToLineStart,
@@ -796,6 +811,7 @@ impl Render for TextArea {
             .on_action(cx.listener(Self::delete_word_left))
             .on_action(cx.listener(Self::delete_word_right))
             .on_action(cx.listener(Self::delete_to_line_start))
+            .on_action(cx.listener(Self::delete_to_line_end))
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))
             .on_action(cx.listener(Self::up))
