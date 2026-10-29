@@ -316,6 +316,7 @@ impl ProjectAutomation {
             .gap(px(8.0))
             .border_t_1()
             .border_color(colors.border.opacity(0.6))
+            .rounded_b(crate::ui::inner_radius(cx.theme().radius.dialog, false))
             .bg(colors.muted.opacity(0.5))
             .px(px(20.0))
             .py(px(12.0))

@@ -1,14 +1,16 @@
 //! Radix-style tooltip (`components/ui/tooltip.tsx`): shown next to its
 //! trigger on one side, after a delay (none by default), hidden on press.
 //! GPUI's own tooltip follows the mouse after a fixed delay, so this one
-//! keeps its open state per element instead.
+//! keeps its open state per element instead. Like Radix's `avoidCollisions`,
+//! a bubble that would leave the window on its side opens on the other one
+//! (the header's labels go under their icons instead of over them).
 
 use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    Anchor, AnyElement, App, BoxShadow, ElementId, Hsla, Task, Window, anchored, deferred, div,
-    point, prelude::*, px, relative,
+    Anchor, AnyElement, App, Bounds, BoxShadow, ElementId, Hsla, Pixels, Size, Task, Window,
+    anchored, canvas, deferred, div, point, prelude::*, px, relative, size,
 };
 
 use crate::theme::ActiveTheme;
@@ -43,6 +45,38 @@ type Content = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 struct TooltipState {
     visible: bool,
     pending: Option<Task<()>>,
+    /// Where the trigger was last painted, in window coordinates.
+    trigger: Option<Bounds<Pixels>>,
+    /// The bubble's size once painted; a label's height is known before.
+    bubble: Option<Size<Pixels>>,
+}
+
+/// The space kept between a bubble and the window's edge.
+const EDGE: f32 = 12.0;
+/// A one-line label: `py-1.5` around a 16px line.
+const LABEL_HEIGHT: f32 = 28.0;
+
+/// The side the bubble opens on: the one asked for, unless the bubble would
+/// leave the window there and fits on the opposite side.
+fn fitting_side(
+    side: Side,
+    trigger: Bounds<Pixels>,
+    bubble: Size<Pixels>,
+    offset: f32,
+    window: Size<Pixels>,
+) -> Side {
+    let (offset, edge) = (px(offset), px(EDGE));
+    let above = trigger.top() - offset - bubble.height >= edge;
+    let below = trigger.bottom() + offset + bubble.height <= window.height - edge;
+    let before = trigger.left() - offset - bubble.width >= edge;
+    let after = trigger.right() + offset + bubble.width <= window.width - edge;
+    match side {
+        Side::Top if !above && below => Side::Bottom,
+        Side::Bottom if !below && above => Side::Top,
+        Side::Left if !before && after => Side::Right,
+        Side::Right if !after && before => Side::Left,
+        side => side,
+    }
 }
 
 #[derive(IntoElement)]
@@ -157,6 +191,7 @@ impl RenderOnce for Tooltip {
         let delay = self.delay;
         let hover_state = state.clone();
         let press_state = state.clone();
+        let trigger_state = state.clone();
 
         let bubble = visible.then(|| {
             let content = (self.content)(window, cx);
@@ -183,7 +218,35 @@ impl RenderOnce for Tooltip {
                 }
             };
             let offset = self.offset;
-            let (spot, anchor, shift) = match (self.side, self.align) {
+            let measured = state.read(cx).bubble.unwrap_or(match self.surface {
+                Surface::Label => size(px(0.0), px(LABEL_HEIGHT)),
+                Surface::Card => Size::default(),
+            });
+            let side = match state.read(cx).trigger {
+                Some(trigger) => {
+                    fitting_side(self.side, trigger, measured, offset, window.viewport_size())
+                }
+                None => self.side,
+            };
+            let measure_state = state.clone();
+            let bubble = bubble.relative().child(
+                canvas(
+                    move |bounds, _, cx| {
+                        measure_state.update(cx, |state, cx| {
+                            if state.bubble != Some(bounds.size) {
+                                state.bubble = Some(bounds.size);
+                                cx.notify();
+                            }
+                        });
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            );
+            let (spot, anchor, shift) = match (side, self.align) {
                 (Side::Top, Align::End) => (
                     div().top_0().right_0(),
                     Anchor::BottomRight,
@@ -267,6 +330,66 @@ impl RenderOnce for Tooltip {
                 });
             })
             .child(self.trigger)
+            .child(
+                canvas(
+                    move |bounds, _, cx| {
+                        trigger_state.update(cx, |state, _| state.trigger = Some(bounds));
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
             .children(bubble)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(x: f32, y: f32) -> Bounds<Pixels> {
+        Bounds::new(point(px(x), px(y)), size(px(28.0), px(28.0)))
+    }
+
+    fn window() -> Size<Pixels> {
+        size(px(1400.0), px(900.0))
+    }
+
+    #[test]
+    fn a_header_label_opens_under_its_icon() {
+        let label = size(px(140.0), px(LABEL_HEIGHT));
+        assert_eq!(
+            fitting_side(Side::Top, at(900.0, 10.0), label, 4.0, window()),
+            Side::Bottom
+        );
+        assert_eq!(
+            fitting_side(Side::Top, at(900.0, 400.0), label, 4.0, window()),
+            Side::Top
+        );
+    }
+
+    #[test]
+    fn each_side_flips_only_when_the_other_one_fits() {
+        let label = size(px(140.0), px(LABEL_HEIGHT));
+        assert_eq!(
+            fitting_side(Side::Bottom, at(400.0, 860.0), label, 4.0, window()),
+            Side::Top
+        );
+        assert_eq!(
+            fitting_side(Side::Right, at(1360.0, 400.0), label, 4.0, window()),
+            Side::Left
+        );
+        assert_eq!(
+            fitting_side(Side::Left, at(10.0, 400.0), label, 4.0, window()),
+            Side::Right
+        );
+        let tall = size(px(140.0), px(2000.0));
+        assert_eq!(
+            fitting_side(Side::Top, at(400.0, 10.0), tall, 4.0, window()),
+            Side::Top
+        );
     }
 }

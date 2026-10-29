@@ -5651,6 +5651,7 @@
     "desktopClosed": "O agente roda no DCC: abra o DCC para continuar.",
     "alreadyAnswered": "Isso já foi respondido.",
     "sendFailed": "Não foi possível enviar ao agente.",
-    "stopFailed": "Não foi possível interromper o agente."
+    "stopFailed": "Não foi possível interromper o agente.",
+    "timedOut": "O DCC demorou demais para responder. Tente de novo."
   }
 }

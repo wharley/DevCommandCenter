@@ -148,6 +148,7 @@ impl Help {
             .overflow_hidden()
             .border_r_1()
             .border_color(colors.sidebar_border)
+            .rounded_l(crate::ui::inner_radius(cx.theme().radius.xxl, false))
             .bg(colors.sidebar)
             .py(px(20.0))
             .child(

@@ -52,6 +52,7 @@ impl Skills {
             .px(px(28.0))
             .pt(px(24.0))
             .pb(px(18.0))
+            .rounded_t(crate::ui::inner_radius(cx.theme().radius.dialog, true))
             .bg(linear_gradient(
                 125.0,
                 linear_color_stop(mix_srgb(colors.accent_calm, 0.06, colors.popover), 0.0),

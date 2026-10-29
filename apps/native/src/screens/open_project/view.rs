@@ -1099,6 +1099,7 @@ impl Render for OpenProjectDialog {
             .p(px(24.0))
             .border_b_1()
             .border_color(edge(cx))
+            .rounded_t(crate::ui::inner_radius(cx.theme().radius.dialog, false))
             .bg(mix_oklab(calm, 0.07, colors.popover))
             .child(
                 div()
@@ -1205,6 +1206,7 @@ impl Render for OpenProjectDialog {
             .py(px(14.0))
             .border_t_1()
             .border_color(edge(cx))
+            .rounded_b(crate::ui::inner_radius(cx.theme().radius.dialog, false))
             .bg(mix_oklab(colors.muted, 0.25, colors.popover))
             .child(
                 Button::new("open-project-cancel")

@@ -104,10 +104,7 @@ impl Connectors {
 }
 
 fn message(error: ApiError, cx: &gpui::App) -> String {
-    match error {
-        ApiError::DesktopClosed => cx.t("native.desktopClosed").to_string(),
-        error => error.to_string(),
-    }
+    error.text(cx)
 }
 
 impl Settings {

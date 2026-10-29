@@ -56,7 +56,31 @@ pub enum ApiError {
         /// The outcome's `target` (`behind_remote`: the branch that moved).
         target: Option<String>,
     },
+    /// The answer did not come within the wait (macOS reports it as
+    /// "Resource temporarily unavailable").
+    TimedOut,
     Failed(String),
+}
+
+impl ApiError {
+    /// What the person reads: the cases with a sentence of their own, the
+    /// server's message otherwise.
+    pub fn text(&self, cx: &gpui::App) -> String {
+        use crate::i18n::Translate;
+        match self {
+            Self::DesktopClosed => cx.t("native.desktopClosed").to_string(),
+            Self::TimedOut => cx.t("native.timedOut").to_string(),
+            error => error.to_string(),
+        }
+    }
+}
+
+/// A read past its timeout is `WouldBlock` on macOS, `TimedOut` elsewhere.
+fn read_error(error: std::io::Error) -> ApiError {
+    match error.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => ApiError::TimedOut,
+        _ => ApiError::Failed(error.to_string()),
+    }
 }
 
 impl std::fmt::Display for ApiError {
@@ -66,6 +90,7 @@ impl std::fmt::Display for ApiError {
             Self::AlreadyAnswered => write!(f, "already answered"),
             Self::Unauthorized => write!(f, "the desktop refused the local key"),
             Self::Refused { message, .. } => write!(f, "{message}"),
+            Self::TimedOut => write!(f, "the request took too long"),
             Self::Failed(message) => write!(f, "{message}"),
         }
     }
@@ -270,9 +295,7 @@ impl DesktopApi {
             .write_all(request.as_bytes())
             .map_err(|error| ApiError::Failed(error.to_string()))?;
         let mut raw = Vec::new();
-        stream
-            .read_to_end(&mut raw)
-            .map_err(|error| ApiError::Failed(error.to_string()))?;
+        stream.read_to_end(&mut raw).map_err(read_error)?;
         let (status, body) =
             parse_response(&raw).ok_or_else(|| ApiError::Failed("invalid response".into()))?;
         let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);

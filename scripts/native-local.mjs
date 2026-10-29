@@ -366,6 +366,19 @@ function rollback({ withDb }) {
 }
 
 const [command, ...flags] = process.argv.slice(2);
+// An unknown word must not fall through to installing: `yarn native:local
+// build` is `install build` and would quit the running app.
+const KNOWN_FLAGS = {
+  install: ['--skip-build', '--skip-sidecars', '--version'],
+  build: ['--skip-sidecars', '--version'],
+  rollback: ['--with-db'],
+};
+const unknown = flags.filter(
+  (flag, index) => flags[index - 1] !== '--version' && !(KNOWN_FLAGS[command] ?? []).includes(flag),
+);
+if (unknown.length > 0) {
+  fail(`unknown argument(s) for ${command}: ${unknown.join(' ')}. To only build, run: node scripts/native-local.mjs build`);
+}
 if (command === 'install') {
   const versionFlag = flags.indexOf('--version');
   install({

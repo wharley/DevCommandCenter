@@ -166,7 +166,6 @@ impl Settings {
             .or_else(|| root.clone())
             .unwrap_or_else(|| cx.t("settings.git.noWorkspace").to_string());
         let ring = colors.ring;
-        let background = colors.background;
         div()
             .flex()
             .flex_col()
@@ -176,6 +175,7 @@ impl Settings {
             .pt(px(24.0))
             .px(px(14.0))
             .pb(px(16.0))
+            .rounded_l(crate::ui::inner_radius(theme.radius.dialog, true))
             .bg(mix_oklab(colors.sidebar, 0.97, colors.accent_calm))
             .border_r_1()
             .border_color(edge)
@@ -220,38 +220,21 @@ impl Settings {
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .h(px(34.0))
-                            .px(px(9.0))
-                            .rounded(px(9.0))
+                            .h(px(32.0))
+                            .px(px(10.0))
+                            .rounded(px(10.0))
                             .border_1()
-                            .border_color(edge)
+                            // Like the help's search: the ring is the border's
+                            // colour (a drawn outline was clipped by the list).
+                            .border_color(if focused { ring } else { colors.input })
                             .bg(colors.background)
                             .text_color(colors.muted_foreground)
-                            // `outline: 2px solid var(--ring); outline-offset: 2px`
-                            .when(focused, |field| {
-                                field.shadow(vec![
-                                    BoxShadow {
-                                        color: background,
-                                        offset: point(px(0.0), px(0.0)),
-                                        blur_radius: px(0.0),
-                                        spread_radius: px(3.0),
-                                        inset: false,
-                                    },
-                                    BoxShadow {
-                                        color: ring,
-                                        offset: point(px(0.0), px(0.0)),
-                                        blur_radius: px(0.0),
-                                        spread_radius: px(5.0),
-                                        inset: false,
-                                    },
-                                ])
-                            })
-                            .child(Icon::new("search").size(14.0))
+                            .child(Icon::new("search").size(14.0).stroke(1.9))
                             .child(
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .text_size(px(11.0))
+                                    .text_size(px(13.0))
                                     .text_color(colors.foreground)
                                     .child(self.search.clone()),
                             )

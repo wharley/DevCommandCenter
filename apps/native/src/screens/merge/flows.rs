@@ -16,10 +16,7 @@ use crate::i18n::{Args, Translate};
 use crate::ui::Toaster;
 
 fn message(error: ApiError, cx: &gpui::App) -> String {
-    match error {
-        ApiError::DesktopClosed => cx.t("native.desktopClosed").to_string(),
-        error => error.to_string(),
-    }
+    error.text(cx)
 }
 
 impl MergeResolver {

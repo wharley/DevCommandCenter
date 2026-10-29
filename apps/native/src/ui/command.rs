@@ -49,6 +49,7 @@ pub fn command_banner(
     div()
         .border_b_1()
         .border_color(colors.border.opacity(0.6))
+        .rounded_t(super::inner_radius(cx.theme().radius.xxl, true))
         .bg(colors.muted.opacity(0.2))
         .px(px(16.0))
         .py(px(12.0))

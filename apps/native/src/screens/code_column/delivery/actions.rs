@@ -507,10 +507,7 @@ impl CodeColumn {
 }
 
 pub(crate) fn message_of(error: ApiError, cx: &App) -> String {
-    match error {
-        ApiError::DesktopClosed => cx.t("native.desktopClosed").to_string(),
-        error => error.to_string(),
-    }
+    error.text(cx)
 }
 
 /// `inspector.gitAction.failed`: "{action} falhou: {message}".

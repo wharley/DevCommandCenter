@@ -63,10 +63,7 @@ impl Accounts {
 }
 
 fn message(error: ApiError, cx: &gpui::App) -> String {
-    match error {
-        ApiError::DesktopClosed => cx.t("native.desktopClosed").to_string(),
-        error => error.to_string(),
-    }
+    error.text(cx)
 }
 
 impl Settings {
@@ -240,10 +237,7 @@ impl Settings {
                         settings.reload_accounts(cx);
                     }
                     Err(error) => {
-                        let text = match error {
-                            ApiError::DesktopClosed => cx.t("native.desktopClosed").to_string(),
-                            error => error.to_string(),
-                        };
+                        let text = error.text(cx);
                         Toaster::error(text, cx);
                     }
                 }

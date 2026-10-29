@@ -554,6 +554,7 @@ impl Render for ConnectorConnect {
                         .px(px(24.0))
                         .pt(px(32.0))
                         .pb(px(20.0))
+                        .rounded_t(crate::ui::inner_radius(cx.theme().radius.dialog, false))
                         .when_some(glow, |header, glow| {
                             // `radial-gradient(ellipse at top, glow 22%, transparent)`
                             header.bg(linear_gradient(

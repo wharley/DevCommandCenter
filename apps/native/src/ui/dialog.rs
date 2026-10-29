@@ -5,8 +5,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, BoxShadow, ElementId, FocusHandle, Hsla, KeyDownEvent, SharedString, Window,
-    anchored, deferred, div, point, prelude::*, px,
+    AnyElement, App, BoxShadow, ElementId, FocusHandle, Hsla, KeyDownEvent, Pixels, SharedString,
+    Window, anchored, deferred, div, point, prelude::*, px,
 };
 use smallvec::SmallVec;
 
@@ -258,6 +258,18 @@ impl RenderOnce for Dialog {
 }
 
 /// `DialogHeader` with `DialogTitle` and `DialogDescription`.
+/// The radius a section takes on the corners it shares with its card: GPUI
+/// clips children to rectangles, so a background of their own would paint
+/// square corners over the card's round ones. Inside a 1px border the curve
+/// is that much tighter.
+pub fn inner_radius(radius: Pixels, bordered: bool) -> Pixels {
+    if bordered {
+        (radius - px(1.0)).max(px(0.0))
+    } else {
+        radius
+    }
+}
+
 pub fn dialog_header(
     title: impl Into<SharedString>,
     description: Option<SharedString>,

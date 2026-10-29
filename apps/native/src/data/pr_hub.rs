@@ -223,6 +223,10 @@ pub fn merge_toast(status: &str) -> &'static str {
     }
 }
 
+/// The list asks every project's forge and the detail reads the patches:
+/// both wait on the network past the usual 20s.
+const FORGE_WAIT: std::time::Duration = std::time::Duration::from_secs(90);
+
 fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
     serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
 }
@@ -230,19 +234,26 @@ fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
 impl DesktopApi {
     /// `pullRequestHubList`
     pub fn pr_hub_list(&self) -> Result<List, ApiError> {
-        decode(self.post("/api/v1/pull-request-hub/list", &json!({}))?)
+        decode(self.request_waiting(
+            "POST",
+            "/api/v1/pull-request-hub/list",
+            Some(&json!({})),
+            FORGE_WAIT,
+        )?)
     }
 
     /// `pullRequestHubDetail`; `include_code` reads the patches too.
     pub fn pr_hub_detail(&self, item: &Item, include_code: bool) -> Result<Detail, ApiError> {
-        decode(self.post(
+        decode(self.request_waiting(
+            "POST",
             "/api/v1/pull-request-hub/detail",
-            &json!({
+            Some(&json!({
                 "repositoryRoot": item.repository_root,
                 "number": item.number,
                 "forgeLogin": item.forge_login,
                 "includeCode": include_code,
-            }),
+            })),
+            FORGE_WAIT,
         )?)
     }
 

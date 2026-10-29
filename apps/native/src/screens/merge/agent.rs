@@ -156,10 +156,7 @@ impl MergeResolver {
                 Ok(started) => started,
                 Err(error) => {
                     let _ = this.update(cx, |resolver, cx| {
-                        let message = match error {
-                            ApiError::DesktopClosed => cx.t("native.desktopClosed").to_string(),
-                            error => error.to_string(),
-                        };
+                        let message = error.text(cx);
                         resolver.finish_agent(Outcome::Failed(message), &source, cx)
                     });
                     return;

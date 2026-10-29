@@ -17,6 +17,7 @@ use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip, spinner};
 
 /// `.objective-panel`: `min(520px, 100vw - 24px)`.
 const PANEL_WIDTH: f32 = 520.0;
+const PANEL_RADIUS: f32 = 16.0;
 
 fn status_key(status: ObjectiveStatus) -> &'static str {
     match status {
@@ -279,6 +280,7 @@ fn footer(composer: &Composer, cx: &mut Context<Composer>) -> AnyElement {
         .py(px(12.0))
         .border_t_1()
         .border_color(edge(cx))
+        .rounded_b(crate::ui::inner_radius(px(PANEL_RADIUS), true))
         .bg(quiet(cx))
         .child(save)
         .children(transitions)
@@ -296,6 +298,7 @@ fn panel(composer: &Composer, window: &mut Window, cx: &mut Context<Composer>) -
         .items_start()
         .gap(px(12.0))
         .p(px(20.0))
+        .rounded_t(crate::ui::inner_radius(px(PANEL_RADIUS), true))
         .bg(mix_oklab(calm, 0.07, colors.popover))
         .border_b_1()
         .border_color(edge(cx))
@@ -441,7 +444,7 @@ fn panel(composer: &Composer, window: &mut Window, cx: &mut Context<Composer>) -
         .debug_selector(|| "objective-panel".into())
         .flex()
         .flex_col()
-        .rounded(px(16.0))
+        .rounded(px(PANEL_RADIUS))
         .overflow_hidden()
         .border_1()
         .border_color(edge(cx))
