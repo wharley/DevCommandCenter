@@ -26,6 +26,8 @@ mod grok_goal;
 #[allow(dead_code)]
 mod grok_mcp;
 pub mod headless_cli;
+mod cli_model_lists;
+pub mod model_discovery;
 #[cfg(all(test, unix))]
 mod test_cli;
 
@@ -332,7 +334,34 @@ pub async fn provider_catalog() -> ProviderCatalog {
             .unwrap_or_default(),
         None => Vec::new(),
     };
-    assemble_catalog(&health, cursor_models, antigravity_models)
+    let mut catalog = assemble_catalog(&health, cursor_models, antigravity_models);
+    // A model a CLI update brings shows up without a new DCC: each healthy
+    // CLI that lists its models is asked at once.
+    let asked: Vec<String> = catalog
+        .providers
+        .iter()
+        .filter(|descriptor| {
+            model_discovery::reads_models(&descriptor.id.0)
+                && matches!(descriptor.health, HealthStatus::Healthy)
+        })
+        .map(|descriptor| descriptor.id.0.clone())
+        .collect();
+    let answers = join_all(
+        asked
+            .iter()
+            .map(|provider_id| model_discovery::discover(provider_id, None)),
+    )
+    .await;
+    for (provider_id, discovered) in asked.iter().zip(answers) {
+        if let Some(descriptor) = catalog
+            .providers
+            .iter_mut()
+            .find(|descriptor| &descriptor.id.0 == provider_id)
+        {
+            model_discovery::apply(&mut descriptor.models, discovered);
+        }
+    }
+    catalog
 }
 
 /// The catalog without probing anything: every provider reported healthy and

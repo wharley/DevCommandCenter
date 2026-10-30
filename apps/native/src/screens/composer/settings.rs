@@ -339,6 +339,7 @@ impl Composer {
                         this.catalog_loading = false;
                         this.catalog = Some(Arc::new(providers));
                         this.catalog_at = Some(Instant::now());
+                        this.refresh_cli_models(cx);
                         cx.notify();
                     });
                     return;
@@ -369,6 +370,7 @@ impl Composer {
                     crate::data::provider_runtime::load().apply_executable_health(&mut providers);
                     this.catalog = Some(Arc::new(providers));
                     this.catalog_at = Some(Instant::now());
+                    this.refresh_cli_models(cx);
                 }
                 cx.notify();
             });

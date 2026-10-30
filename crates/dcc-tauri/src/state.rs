@@ -5584,6 +5584,7 @@ impl SessionCommandState {
             &candidate.provider_id,
             &registration,
             candidate.model.as_deref(),
+            candidate.provider_runtime.as_ref(),
         )
         .await?;
         if !candidate.additional_workspace_ids.is_empty()
@@ -6145,17 +6146,31 @@ impl SessionCommandState {
     }
 
     /// Model authority for every provider. Static catalogs are checked in the
-    /// registry; dynamic runtimes are checked against the last complete list
-    /// the runtime reported, refreshed on a miss or when stale, and a runtime
-    /// that cannot be consulted never validates a model by assumption.
+    /// registry, and a model they do not know yet passes when the account's
+    /// CLI offers it (`model_discovery`); dynamic runtimes are checked against
+    /// the last complete list the runtime reported, refreshed on a miss or
+    /// when stale, and a runtime that cannot be consulted never validates a
+    /// model by assumption.
     pub(crate) async fn validate_model_authority(
         &self,
         provider_id: &str,
         registration: &ProviderRegistration,
         model: Option<&str>,
+        runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<()> {
-        validate_provider_model(provider_id, &registration.capabilities, model)
-            .map_err(dcc_core::CoreError::InvalidInput)?;
+        if let Err(error) = validate_provider_model(provider_id, &registration.capabilities, model) {
+            let offered = match model.map(str::trim) {
+                Some(model) if dcc_providers::model_discovery::reads_models(provider_id) => {
+                    let runtime = self.provider_runtime_config(provider_id, runtime)?;
+                    dcc_providers::model_discovery::offers(provider_id, Some(&runtime), model)
+                        .await
+                }
+                _ => false,
+            };
+            if !offered {
+                return Err(dcc_core::CoreError::InvalidInput(error));
+            }
+        }
         let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) else {
             return Ok(());
         };
@@ -6208,8 +6223,13 @@ impl SessionCommandState {
 
     pub async fn validate_start_thread_scope(&self, input: &StartThreadInput) -> Result<()> {
         let registration = self.require_provider_available(&input.provider_id)?;
-        self.validate_model_authority(&input.provider_id, &registration, input.model.as_deref())
-            .await?;
+        self.validate_model_authority(
+            &input.provider_id,
+            &registration,
+            input.model.as_deref(),
+            input.provider_runtime.as_ref(),
+        )
+        .await?;
         if input.additional_workspace_ids.is_empty() {
             return Ok(());
         }

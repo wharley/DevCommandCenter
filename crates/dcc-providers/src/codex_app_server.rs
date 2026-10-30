@@ -658,12 +658,15 @@ fn validate_codex_mcp_projection(
 }
 
 fn codex_reasoning_effort(model: Option<&str>, effort: Option<&str>) -> Option<&'static str> {
+    let model = model.map(|model| dcc_core::domain::model_registry::resolve_alias("codex", model.trim()));
+    // A model the built-in catalog does not know came from the CLI's own
+    // list, and the picker offers "max" only where that list does.
     let supports_max = matches!(
-        model
-            .map(|model| dcc_core::domain::model_registry::resolve_alias("codex", model.trim()))
-            .as_deref(),
+        model.as_deref(),
         Some("gpt-6.1-sol" | "gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna")
-    );
+    ) || model.as_deref().is_some_and(|model| {
+        dcc_core::domain::model_registry::is_known_model("codex", model) == Some(false)
+    });
     match effort.map(str::trim).filter(|value| !value.is_empty()) {
         Some("none") => Some("none"),
         Some("minimal") => Some("minimal"),
@@ -954,6 +957,83 @@ async fn run_codex_account_rpc(
     let result = server.call(method, params).await;
     server.shutdown().await;
     result
+}
+
+/// Pages of `model/list` read so a list never runs on forever.
+const CODEX_MODEL_PAGES: usize = 5;
+/// How long a fresh app-server gets to refresh its catalog online.
+const CODEX_CATALOG_REFRESH: Duration = Duration::from_secs(3);
+/// A catalog fetched this recently is not waited on.
+const CODEX_CATALOG_RECENT: Duration = Duration::from_secs(5 * 60);
+
+/// When the account's `models_cache.json` was last fetched online.
+fn codex_catalog_fetched_at(home: &std::path::Path) -> Option<std::time::SystemTime> {
+    let text = std::fs::read_to_string(home.join("models_cache.json")).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    let at = chrono::DateTime::parse_from_rfc3339(value.get("fetched_at")?.as_str()?).ok()?;
+    Some(std::time::SystemTime::from(at))
+}
+
+/// Every row of the app-server's `model/list` for this account. The
+/// app-server answers from its cached catalog and refreshes it online as it
+/// starts (`models_cache.json`); a model a release just added shows up only
+/// after that, so unless the cache is recent the list is read again once
+/// the refresh lands (as T3 Code does), or kept as it was after a short wait.
+pub(crate) async fn codex_model_list(
+    runtime_config: Option<&ProviderRuntimeConfig>,
+) -> Result<Vec<Value>> {
+    let home = prepare_codex_home(runtime_config)?.unwrap_or_else(crate::common::codex_system_home);
+    let spawned = std::time::SystemTime::now();
+    let mut server = CodexAccountServer::start(runtime_config).await?;
+    let result = async {
+        let first = codex_model_pages(&mut server).await?;
+        let recent = codex_catalog_fetched_at(&home)
+            .and_then(|at| spawned.duration_since(at).ok())
+            .is_some_and(|age| age < CODEX_CATALOG_RECENT);
+        if recent {
+            return Ok(first);
+        }
+        let waited = timeout(CODEX_CATALOG_REFRESH, async {
+            while codex_catalog_fetched_at(&home).is_none_or(|at| at < spawned) {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await;
+        if waited.is_err() {
+            return Ok(first);
+        }
+        Ok(codex_model_pages(&mut server).await.unwrap_or(first))
+    }
+    .await;
+    server.shutdown().await;
+    result
+}
+
+async fn codex_model_pages(server: &mut CodexAccountServer) -> Result<Vec<Value>> {
+    let mut rows = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..CODEX_MODEL_PAGES {
+        let page = server
+            .call("model/list", json!({ "limit": 100, "cursor": cursor }))
+            .await?;
+        rows.extend(
+            page.get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        );
+        let next = page
+            .get("nextCursor")
+            .and_then(Value::as_str)
+            .filter(|next| !next.is_empty())
+            .map(str::to_string);
+        // A repeated cursor would loop: stop there (Monocode).
+        if next.is_none() || next == cursor {
+            break;
+        }
+        cursor = next;
+    }
+    Ok(rows)
 }
 
 /// How long the person has to authorize in the browser.
@@ -4451,6 +4531,14 @@ impl Provider for CodexAppServerAdapter {
         fetch_codex_account_usage(runtime).await.map(Some)
     }
 
+    async fn cli_models(
+        &self,
+        runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<Option<Vec<dcc_core::domain::provider::ProviderModelDescriptor>>> {
+        let rows = codex_model_list(runtime).await?;
+        Ok(Some(crate::model_discovery::codex_models(&rows)))
+    }
+
     async fn account_status(
         &self,
         runtime: Option<&ProviderRuntimeConfig>,
@@ -4607,6 +4695,11 @@ mod tests {
         assert_eq!(
             codex_reasoning_effort(Some("gpt-6-astra"), Some("ultrathink")),
             Some("xhigh")
+        );
+        // A model only the CLI's own list knows keeps the "max" it offered.
+        assert_eq!(
+            codex_reasoning_effort(Some("gpt-6.1-terra"), Some("max")),
+            Some("max")
         );
     }
 

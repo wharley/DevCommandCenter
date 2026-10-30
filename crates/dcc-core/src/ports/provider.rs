@@ -378,6 +378,16 @@ pub trait Provider: Send + Sync {
     async fn discover_models(&self) -> Result<Option<Vec<ProviderModelDescriptor>>> {
         Ok(None)
     }
+    /// The models the installed CLI lists for this account, for a provider
+    /// whose catalog is built in but whose CLI can say what it offers now
+    /// (a model a CLI update brings, before DCC knows it). The built-in
+    /// catalog stays the authority when this is `Ok(None)` or fails.
+    async fn cli_models(
+        &self,
+        _runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<Option<Vec<ProviderModelDescriptor>>> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

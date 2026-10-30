@@ -106,6 +106,8 @@ impl Composer {
         if self.selected_provider_id().as_deref() == Some(provider_id) {
             self.refresh_account_usage(cx);
         }
+        // The other account may have other models.
+        self.refresh_cli_models(cx);
         cx.notify();
     }
 }

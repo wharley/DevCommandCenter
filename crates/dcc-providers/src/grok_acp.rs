@@ -837,6 +837,14 @@ impl Provider for GrokAcpAdapter {
             })
     }
 
+    async fn cli_models(
+        &self,
+        runtime: Option<&dcc_core::ports::ProviderRuntimeConfig>,
+    ) -> Result<Option<Vec<dcc_core::domain::provider::ProviderModelDescriptor>>> {
+        let output = crate::cli_model_lists::grok_models_output(runtime).await?;
+        Ok(Some(crate::cli_model_lists::grok_models(&output)))
+    }
+
     async fn healthcheck(&self) -> Result<HealthStatus> {
         let mut command = Command::new("grok");
         command.arg("--version");

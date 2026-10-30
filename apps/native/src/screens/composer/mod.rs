@@ -9,6 +9,7 @@ mod accounts;
 mod annotation;
 mod appshots;
 mod attachments;
+mod cli_models;
 mod context_rail;
 mod controls;
 mod drafts;
@@ -163,6 +164,8 @@ pub struct Composer {
     pub(crate) catalog: Option<std::sync::Arc<Vec<dcc_core::domain::provider::ProviderDescriptor>>>,
     pub(crate) catalog_at: Option<std::time::Instant>,
     catalog_loading: bool,
+    /// The CLIs' own model lists, being read for the picker.
+    cli_models_read: Option<gpui::Task<()>>,
     pub(crate) settings: crate::data::composer_settings::ComposerSettings,
     pub(crate) approval_menu_open: bool,
     /// "Ativar acesso completo?" waits for an answer.
@@ -227,6 +230,7 @@ impl Composer {
             )),
             catalog_at: None,
             catalog_loading: false,
+            cli_models_read: None,
             settings: settings::load_settings(),
             approval_menu_open: false,
             confirm_full_access: false,

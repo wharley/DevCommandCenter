@@ -1411,6 +1411,15 @@ impl Provider for ClaudeSdkSidecarAdapter {
         Ok(HealthStatus::Healthy)
     }
 
+    async fn cli_models(
+        &self,
+        runtime: Option<&ProviderRuntimeConfig>,
+    ) -> Result<Option<Vec<dcc_core::domain::provider::ProviderModelDescriptor>>> {
+        let executable = self.resolve_claude_executable().await?;
+        let rows = crate::cli_model_lists::claude_model_rows(&executable.path, runtime).await?;
+        Ok(Some(crate::cli_model_lists::claude_models(&rows)))
+    }
+
     async fn account_status(
         &self,
         runtime: Option<&ProviderRuntimeConfig>,
