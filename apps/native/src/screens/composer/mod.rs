@@ -7,6 +7,7 @@
 mod account_usage;
 mod accounts;
 mod annotation;
+mod appshots;
 mod attachments;
 mod context_rail;
 mod controls;
@@ -168,6 +169,8 @@ pub struct Composer {
     pub(crate) objective: objective::ObjectiveState,
     /// A queue tray action on its way.
     pub(crate) queue_busy: Option<queue::QueueAction>,
+    /// The Appshots window picker, while open.
+    pub(crate) appshots: Option<(Entity<appshots::AppshotsDialog>, Subscription)>,
     _input_events: Subscription,
     _input_changes: Subscription,
 }
@@ -225,6 +228,7 @@ impl Composer {
             mode_open: false,
             objective: objective::ObjectiveState::new(window, cx),
             queue_busy: None,
+            appshots: None,
             _input_events: input_events,
             _input_changes: input_changes,
         }

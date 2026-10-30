@@ -303,6 +303,7 @@ pub(super) fn render(
                             style.border_color(drop_border)
                         })
                         .children(popups::mention_popup(composer, cx))
+                        .children(composer.appshots.as_ref().map(|(dialog, _)| dialog.clone()))
                         .flex()
                         .flex_col()
                         .rounded(px(18.0))

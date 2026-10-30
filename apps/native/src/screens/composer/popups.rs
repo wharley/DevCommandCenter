@@ -16,6 +16,7 @@ pub(super) fn attach_menu(composer: &Composer, cx: &mut Context<Composer>) -> An
     let muted = cx.theme().colors.muted_foreground;
     let entity = cx.entity().downgrade();
     let label = cx.t("composer.attachments.add");
+    let capture = cx.t("appshots.captureWindow");
     Menu::dropdown(
         "composer-attach",
         move |_| {
@@ -35,13 +36,25 @@ pub(super) fn attach_menu(composer: &Composer, cx: &mut Context<Composer>) -> An
                 .into_any_element()
         },
         move |_, _| {
-            let entity = entity.clone();
-            vec![MenuEntry::from(
+            let picker = entity.clone();
+            let mut entries = vec![MenuEntry::from(
                 MenuItem::new(label.clone(), move |_, cx| {
-                    let _ = entity.update(cx, |composer, cx| composer.open_picker(cx));
+                    let _ = picker.update(cx, |composer, cx| composer.open_picker(cx));
                 })
                 .icon(Icon::new("paperclip").size(16.0)),
-            )]
+            )];
+            // Appshots capture other apps' windows (macOS 14 or later).
+            if cfg!(target_os = "macos") {
+                let appshots = entity.clone();
+                entries.push(MenuEntry::from(
+                    MenuItem::new(capture.clone(), move |window, cx| {
+                        let _ =
+                            appshots.update(cx, |composer, cx| composer.open_appshots(window, cx));
+                    })
+                    .icon(Icon::new("camera").size(16.0)),
+                ));
+            }
+            entries
         },
     )
     .into_any_element()

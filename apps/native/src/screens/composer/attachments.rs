@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use gpui::{ClipboardEntry, Context, ImageFormat, PathPromptOptions};
+use gpui::{AppContext, ClipboardEntry, Context, ImageFormat, PathPromptOptions, Window};
 
 use super::Composer;
 use super::mentions::{self, FileList, MentionMenu, MenuItem};
@@ -51,6 +51,22 @@ impl Composer {
                 input.insert_chip(chip, None, cx);
             }
         });
+    }
+
+    /// "Capturar janela de aplicativo" (the + menu): the chosen windows
+    /// come in as images, in the order picked.
+    pub(crate) fn open_appshots(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let source = super::appshots::Source::system();
+        let dialog = cx.new(|cx| super::appshots::AppshotsDialog::new(source, window, cx));
+        let events = cx.subscribe(&dialog, |composer, _, event, cx| {
+            if let super::appshots::AppshotsEvent::Attach(paths) = event {
+                composer.add_paths(paths.clone(), cx);
+            }
+            composer.appshots = None;
+            cx.notify();
+        });
+        self.appshots = Some((dialog, events));
+        cx.notify();
     }
 
     /// "Adicionar anexo": the system's file picker, several at once.
