@@ -2,19 +2,23 @@
 //! has a newer release (`dcc_providers::cli_updates`), with "Atualizar" on
 //! each (and "Atualizar tudo"), as MonoCode shows it. Checked shortly after
 //! launch and twice a day; the X hides what it shows until a newer release.
-//! A CLI DCC cannot tell how it was installed says to update it by hand.
+//! "Abrir no terminal" runs the update where the person watches and answers
+//! it (a sudo password), as "Conectar GitHub" does: for a CLI DCC cannot
+//! tell how it was installed, and after an update that failed.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use dcc_providers::cli_updates::{self, CliUpdate};
 use gpui::{
-    Anchor, AnyElement, BoxShadow, Context, FontWeight, Hsla, Task, Window, anchored, deferred,
-    div, point, prelude::*, px,
+    Anchor, AnyElement, AppContext, BoxShadow, Context, Entity, FontWeight, Hsla, Subscription,
+    Task, Window, anchored, deferred, div, point, prelude::*, px,
 };
 
+use crate::data::desktop_api::DesktopApi;
 use crate::i18n::{Args, Translate};
 use crate::project::ProviderIcon;
+use crate::screens::terminal::command_dialog::{CommandDialog, CommandDialogEvent, Leading};
 use crate::theme::ActiveTheme;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, spinner};
 
@@ -36,6 +40,9 @@ pub struct CliUpdates {
     closed: HashSet<(String, String)>,
     _checks: Option<Task<()>>,
     runs: HashMap<String, Task<()>>,
+    api: Option<DesktopApi>,
+    /// The update running where the person watches it.
+    terminal: Option<(Entity<CommandDialog>, Subscription)>,
 }
 
 /// Runs a provider future on a thread of its own (the CLIs need tokio).
@@ -51,6 +58,7 @@ impl CliUpdates {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let mut this = Self::default();
         if !cfg!(test) {
+            this.api = DesktopApi::load();
             this._checks = Some(cx.spawn(async move |this, cx| {
                 let mut wait = FIRST_CHECK;
                 loop {
@@ -114,6 +122,11 @@ impl CliUpdates {
     }
 
     fn start(&mut self, update: CliUpdate, cx: &mut Context<Self>) {
+        self.follow(update, true, cx);
+    }
+
+    /// Runs the update here (`run`), or checks one the terminal ran (`verify`).
+    fn follow(&mut self, update: CliUpdate, run: bool, cx: &mut Context<Self>) {
         let id = update.provider_id.clone();
         let key = id.clone();
         self.rows.insert(id.clone(), Row::Updating);
@@ -121,8 +134,12 @@ impl CliUpdates {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    blocking(cli_updates::run(&update))
-                        .unwrap_or_else(|| Err(dcc_core::CoreError::Provider("no runtime".into())))
+                    let done = if run {
+                        blocking(cli_updates::run(&update))
+                    } else {
+                        blocking(cli_updates::verify(&update))
+                    };
+                    done.unwrap_or_else(|| Err(dcc_core::CoreError::Provider("no runtime".into())))
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -137,6 +154,65 @@ impl CliUpdates {
         });
         self.runs.insert(key, task);
         cx.notify();
+    }
+
+    /// The update in a terminal the person watches; when it ends well its
+    /// version is checked, when it fails the terminal stays to be read.
+    fn open_terminal(&mut self, update: CliUpdate, window: &mut Window, cx: &mut Context<Self>) {
+        let title = cx.t_with(
+            "cliUpdates.terminalTitle",
+            &Args::default().with("agent", Self::label(&update.provider_id)),
+        );
+        let (owner, command, api) = (
+            format!("cli-update:{}", update.provider_id),
+            update.terminal_command.clone(),
+            self.api.clone(),
+        );
+        let leading = Leading::Provider(update.provider_id.clone());
+        let terminal = cx.new(|cx| {
+            CommandDialog::new(
+                "cli-update-terminal",
+                owner,
+                command,
+                title,
+                None,
+                leading,
+                api,
+                window,
+                cx,
+            )
+        });
+        let events = cx.subscribe(&terminal, move |this, terminal, event, cx| match event {
+            CommandDialogEvent::Exited(Some(0)) => {
+                terminal.update(cx, |terminal, cx| terminal.close(cx));
+                this.follow(update.clone(), false, cx);
+            }
+            CommandDialogEvent::Exited(_) => {
+                let failed = cx.t("cliUpdates.terminalFailed").to_string();
+                this.rows
+                    .insert(update.provider_id.clone(), Row::Failed(failed));
+                cx.notify();
+            }
+            CommandDialogEvent::Closed => {
+                this.terminal = None;
+                cx.notify();
+            }
+        });
+        self.terminal = Some((terminal, events));
+        cx.notify();
+    }
+
+    fn terminal_button(&self, update: &CliUpdate, cx: &mut Context<Self>) -> AnyElement {
+        let target = update.clone();
+        Button::new(("cli-update-terminal-open", hash(&update.provider_id)))
+            .variant(ButtonVariant::Secondary)
+            .size(ButtonSize::Xs)
+            .text_size(11.0)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_terminal(target.clone(), window, cx)
+            }))
+            .child(cx.t("cliUpdates.openTerminal"))
+            .into_any_element()
     }
 
     fn label(id: &str) -> String {
@@ -164,12 +240,7 @@ impl CliUpdates {
                     &Args::default().with("version", version.clone()),
                 ))
                 .into_any_element(),
-            (_, None) => div()
-                .text_size(px(11.0))
-                .text_color(colors.muted_foreground)
-                .child(cx.t("cliUpdates.manual"))
-                .into_any_element(),
-            (Some(Row::Updating), Some(_)) => div()
+            (Some(Row::Updating), _) => div()
                 .flex()
                 .items_center()
                 .gap(px(6.0))
@@ -178,6 +249,7 @@ impl CliUpdates {
                 .child(spinner(("cli-update-spinner", hash(&id)), 12.0))
                 .child(cx.t("cliUpdates.updating"))
                 .into_any_element(),
+            (_, None) => self.terminal_button(update, cx),
             (_, Some(_)) => {
                 let target = update.clone();
                 let label = if matches!(state, Some(Row::Failed(_))) {
@@ -230,12 +302,24 @@ impl CliUpdates {
                     _ => None,
                 },
                 |row, error| {
+                    // Failed: the reason, and the same update where it can be watched.
                     row.child(
                         div()
                             .mt(px(4.0))
-                            .text_size(px(11.0))
-                            .text_color(colors.destructive)
-                            .child(error),
+                            .flex()
+                            .items_start()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(px(11.0))
+                                    .text_color(colors.destructive)
+                                    .child(error),
+                            )
+                            .when(update.action.is_some(), |line| {
+                                line.child(self.terminal_button(update, cx))
+                            }),
                     )
                 },
             )
@@ -341,15 +425,19 @@ impl Render for CliUpdates {
                     .text_color(colors.muted_foreground)
                     .child(hint),
             );
-        deferred(
-            anchored()
-                .position_mode(gpui::AnchoredPositionMode::Window)
-                .position(point(viewport.width - px(16.0), px(52.0)))
-                .anchor(Anchor::TopRight)
-                .child(card),
-        )
-        .priority(crate::ui::layer::TOAST)
-        .into_any_element()
+        div()
+            .child(
+                deferred(
+                    anchored()
+                        .position_mode(gpui::AnchoredPositionMode::Window)
+                        .position(point(viewport.width - px(16.0), px(52.0)))
+                        .anchor(Anchor::TopRight)
+                        .child(card),
+                )
+                .priority(crate::ui::layer::TOAST),
+            )
+            .children(self.terminal.as_ref().map(|(terminal, _)| terminal.clone()))
+            .into_any_element()
     }
 }
 
@@ -371,6 +459,7 @@ mod tests {
             provider_id: id.into(),
             installed: "1.0.0".into(),
             latest: latest.into(),
+            terminal_command: format!("{id} update"),
             action: program.map(|program| UpdateAction {
                 program: program.into(),
                 args: vec!["update".into()],
@@ -414,6 +503,27 @@ mod tests {
         cx.run_until_parked();
         let row = card.read_with(cx, |card, _| card.rows.get("codex").cloned());
         assert!(matches!(row, Some(Row::Failed(_))), "{row:?}");
+        // The one DCC cannot update opens in a terminal the person watches;
+        // a command that fails keeps it open and says so.
+        let cursor = card.read_with(cx, |card, _| card.updates[1].clone());
+        cx.update(|window, cx| card.update(cx, |card, cx| card.open_terminal(cursor, window, cx)));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("cli-update-terminal").is_some());
+        let terminal = card.read_with(cx, |card, _| card.terminal.as_ref().unwrap().0.clone());
+        terminal.update(cx, |_, cx| cx.emit(CommandDialogEvent::Exited(Some(1))));
+        cx.run_until_parked();
+        let row = card.read_with(cx, |card, _| card.rows.get("cursor").cloned());
+        assert_eq!(
+            row,
+            Some(Row::Failed(
+                "O comando terminou com erro; veja no terminal.".into()
+            ))
+        );
+        assert!(cx.debug_bounds("cli-update-terminal").is_some());
+        terminal.update(cx, |terminal, cx| terminal.close(cx));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("cli-update-terminal").is_none());
+        assert!(card.read_with(cx, |card, _| card.terminal.is_none()));
         // Closed: the same releases stay hidden, a newer one shows again.
         card.update(cx, |card, cx| card.close(cx));
         cx.run_until_parked();

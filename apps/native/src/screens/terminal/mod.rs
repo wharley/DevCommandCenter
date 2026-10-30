@@ -3,6 +3,7 @@
 //! screen and its scrollback are emulated here with `alacritty_terminal`.
 
 pub mod agent;
+pub mod command_dialog;
 pub mod dev_server;
 pub mod dock;
 mod dock_actions;

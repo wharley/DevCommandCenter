@@ -1,5 +1,5 @@
 //! "Conectar GitHub/GitLab" (`ForgeConnectDialog`): `gh auth login` or
-//! `glab auth login` in a terminal of the desktop's, drawn here. The dialog
+//! `glab auth login` in a `CommandDialog` (a terminal of the desktop's). The dialog
 //! closes when the command ends well (or on Esc / ✕); then the new login is
 //! looked for for up to 8s, the repositories without one get it, and it is
 //! said.
@@ -7,19 +7,14 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use futures::StreamExt;
 use gpui::{
-    AppContext, Context, Entity, EventEmitter, FontWeight, Render, Task, Window, div, prelude::*,
-    px,
+    AppContext, Context, Entity, EventEmitter, Render, Subscription, Task, Window, prelude::*,
 };
 
 use crate::data::desktop_api::DesktopApi;
 use crate::data::forge_cli::Forge;
-use crate::data::terminal_api::{ShellSpec, TerminalEvent};
-use crate::screens::terminal::{ShellContext, TerminalSession};
-use crate::theme::ActiveTheme;
+use crate::screens::terminal::command_dialog::{CommandDialog, CommandDialogEvent, Leading};
 use crate::theme::color::hex;
-use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog, Icon, shortcut_keys};
 
 /// `NEW_LOGIN_POLL_TIMEOUT_MS` / `NEW_LOGIN_POLL_INTERVAL_MS`
 const PROBE_FOR: Duration = Duration::from_secs(8);
@@ -35,12 +30,12 @@ pub enum ConnectEvent {
 pub struct ForgeConnect {
     pub forge: Forge,
     pub host: String,
-    pub session: Entity<TerminalSession>,
+    terminal: Entity<CommandDialog>,
     api: Option<DesktopApi>,
     /// The logins before signing in.
     baseline: HashSet<String>,
     pub closing: bool,
-    _stream: Option<Task<()>>,
+    _terminal: Subscription,
     _probe: Option<Task<()>>,
 }
 
@@ -55,36 +50,42 @@ impl ForgeConnect {
         cx: &mut Context<Self>,
     ) -> Self {
         let host = forge.host(&host);
-        let shell = std::env::var("SHELL")
-            .ok()
-            .filter(|shell| !shell.trim().is_empty())
-            .unwrap_or_else(|| "/bin/zsh".into());
-        let spec = ShellSpec {
-            cwd: "/".into(),
-            command: shell,
-            args: vec!["-lc".into(), forge.shell_command(&host)],
-            cols: 96,
-            rows: 24,
-        };
         let owner = format!("forge-connect:{}:{host}", forge.key());
-        let session_api = api.clone();
-        let session = cx.new(|cx| {
-            TerminalSession::new(owner, spec, ShellContext::default(), session_api, cx)
-                .without_banner()
+        let leading = Leading::Dot(match forge {
+            Forge::Gitlab => Some(hex(0xFC6D26)),
+            Forge::Github => None,
         });
-        window.focus(&session.read(cx).focus_handle(), cx);
+        let (command, detail) = (forge.shell_command(&host), format!("· {host}"));
+        let terminal_api = api.clone();
+        let terminal = cx.new(|cx| {
+            CommandDialog::new(
+                "forge-connect",
+                owner,
+                command,
+                format!("Conectar {}", forge.label()),
+                Some(detail.into()),
+                leading,
+                terminal_api,
+                window,
+                cx,
+            )
+        });
+        // Ending well or closed: the login is looked for.
+        let events = cx.subscribe(&terminal, |connect, _, event, cx| match event {
+            CommandDialogEvent::Exited(Some(0)) | CommandDialogEvent::Closed => connect.close(cx),
+            CommandDialogEvent::Exited(_) => {}
+        });
         let mut connect = Self {
             forge,
             host,
-            session,
+            terminal,
             api,
             baseline: HashSet::new(),
             closing: false,
-            _stream: None,
+            _terminal: events,
             _probe: None,
         };
         connect.read_baseline(cx);
-        connect.follow(cx);
         connect
     }
 
@@ -105,60 +106,6 @@ impl ForgeConnect {
         .detach();
     }
 
-    /// What the shell prints, from the desktop's stream (ours alone).
-    fn follow(&mut self, cx: &mut Context<Self>) {
-        let Some(api) = self.api.clone() else {
-            return;
-        };
-        let (sender, mut receiver) = futures::channel::mpsc::unbounded::<TerminalEvent>();
-        std::thread::spawn(move || {
-            let mut first = true;
-            while !sender.is_closed() {
-                if let Ok(events) = api.terminal_events() {
-                    if !first && sender.unbounded_send(TerminalEvent::Lagged).is_err() {
-                        return;
-                    }
-                    first = false;
-                    for event in events {
-                        if sender.unbounded_send(event).is_err() {
-                            return;
-                        }
-                    }
-                }
-                std::thread::sleep(Duration::from_secs(1));
-            }
-        });
-        self._stream = Some(cx.spawn(async move |this, cx| {
-            while let Some(event) = receiver.next().await {
-                if this
-                    .update(cx, |connect, cx| connect.dispatch(event, cx))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        }));
-    }
-
-    fn dispatch(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
-        let ours = |pty: &str, cx: &Context<Self>| self.session.read(cx).pty_id() == Some(pty);
-        match event {
-            TerminalEvent::Output { pty_id, data } if ours(&pty_id, cx) => {
-                self.session
-                    .update(cx, |session, cx| session.output(&data, cx));
-            }
-            TerminalEvent::Exit { pty_id, code } if ours(&pty_id, cx) => {
-                self.session
-                    .update(cx, |session, cx| session.exited(code, cx));
-                if code == Some(0) {
-                    self.close(cx);
-                }
-            }
-            TerminalEvent::Lagged => self.session.update(cx, |session, cx| session.resync(cx)),
-            _ => {}
-        }
-    }
-
     /// `handleClose`: the shell ends, the dialog goes, the new login is
     /// looked for and the repositories get it.
     pub fn close(&mut self, cx: &mut Context<Self>) {
@@ -166,8 +113,7 @@ impl ForgeConnect {
             return;
         }
         self.closing = true;
-        self._stream = None;
-        self.session.update(cx, |session, _| session.kill());
+        self.terminal.update(cx, |terminal, cx| terminal.close(cx));
         cx.emit(ConnectEvent::Hidden);
         cx.notify();
         let Some(api) = self.api.clone() else {
@@ -212,86 +158,11 @@ impl ForgeConnect {
 }
 
 impl Render for ForgeConnect {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         if self.closing {
-            return div().into_any_element();
+            return gpui::div().into_any_element();
         }
-        let colors = cx.theme().colors.clone();
-        let dot = match self.forge {
-            Forge::Gitlab => hex(0xFC6D26),
-            Forge::Github => colors.foreground,
-        };
-        let close = cx.entity().downgrade();
-        let focus = self.session.read(cx).focus_handle();
-        Dialog::new("forge-connect", move |_, cx| {
-            let _ = close.update(cx, |connect, cx| connect.close(cx));
-        })
-        .max_width(640.0)
-        .padding(0.0)
-        .gap(0.0)
-        .close_button(false)
-        .initial_focus(focus)
-        .child(
-            div()
-                .debug_selector(|| "forge-connect".into())
-                .w_full()
-                .flex()
-                .flex_col()
-                .overflow_hidden()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .h(px(40.0))
-                        .px(px(12.0))
-                        .border_b_1()
-                        .border_color(colors.border.opacity(0.55))
-                        .child(
-                            div()
-                                .flex()
-                                .min_w_0()
-                                .items_center()
-                                .gap(px(6.0))
-                                .text_size(px(12.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(colors.foreground)
-                                .child(div().flex_none().size(px(8.0)).rounded_full().bg(dot))
-                                .child(format!("Conectar {}", self.forge.label()))
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_color(colors.muted_foreground.opacity(0.8))
-                                        .child(format!("· {}", self.host)),
-                                ),
-                        )
-                        .child(
-                            div().ml_auto().child(
-                                Button::new("forge-connect-close")
-                                    .variant(ButtonVariant::Ghost)
-                                    .size(ButtonSize::Sm)
-                                    .padding_x(8.0)
-                                    .muted()
-                                    .on_click(cx.listener(|connect, _, _, cx| connect.close(cx)))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(6.0))
-                                            .child(shortcut_keys(&["Esc"], cx))
-                                            .child(Icon::new("x").size(14.0).stroke(1.8)),
-                                    ),
-                            ),
-                        ),
-                )
-                .child(
-                    div()
-                        .h(px(360.0))
-                        .bg(colors.card)
-                        .child(self.session.clone()),
-                ),
-        )
-        .into_any_element()
+        self.terminal.clone().into_any_element()
     }
 }
 

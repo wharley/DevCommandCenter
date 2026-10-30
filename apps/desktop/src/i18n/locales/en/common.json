@@ -7,9 +7,11 @@
     "updating": "Updating",
     "retry": "Retry",
     "updated": "Updated to {{version}}",
-    "manual": "Update it from the terminal",
     "hint": "New models often need the latest version.",
-    "hintUpdated": "New conversations use the new version, and the picker reads its models."
+    "hintUpdated": "New conversations use the new version, and the picker reads its models.",
+    "openTerminal": "Open in terminal",
+    "terminalTitle": "Update {{agent}}",
+    "terminalFailed": "The command failed; see the terminal."
   },
   "localBranch": {
     "choose": "Choose branch",

@@ -7,9 +7,11 @@
     "updating": "Atualizando",
     "retry": "Tentar de novo",
     "updated": "Atualizado para {{version}}",
-    "manual": "Atualize pelo terminal",
     "hint": "Modelos novos costumam pedir a versão mais nova.",
-    "hintUpdated": "As próximas conversas já usam a versão nova, e o seletor lê os modelos dela."
+    "hintUpdated": "As próximas conversas já usam a versão nova, e o seletor lê os modelos dela.",
+    "openTerminal": "Abrir no terminal",
+    "terminalTitle": "Atualizar {{agent}}",
+    "terminalFailed": "O comando terminou com erro; veja no terminal."
   },
   "localBranch": {
     "choose": "Escolher branch",

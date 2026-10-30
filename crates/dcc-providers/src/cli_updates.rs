@@ -37,9 +37,10 @@ struct Cli {
     npm: Option<&'static str>,
     /// Formula or cask name, and whether it is a cask.
     homebrew: Option<(&'static str, bool)>,
-    /// A path fragment of its own installer, the feed it follows, and the
-    /// arguments of its own updater.
-    native: Option<(&'static str, Feed, &'static [&'static str])>,
+    /// A path fragment of its own installer, and the feed it follows.
+    native: Option<(&'static str, Feed)>,
+    /// Its own updater's arguments, when it has one.
+    self_update: Option<&'static [&'static str]>,
 }
 
 const CLIS: &[Cli] = &[
@@ -49,6 +50,7 @@ const CLIS: &[Cli] = &[
         npm: Some("@openai/codex"),
         homebrew: Some(("codex", true)),
         native: None,
+        self_update: Some(&["update"]),
     },
     Cli {
         provider_id: "claude_code",
@@ -58,26 +60,24 @@ const CLIS: &[Cli] = &[
         native: Some((
             "/.local/share/claude/",
             Feed::Npm("@anthropic-ai/claude-code"),
-            &["update"],
         )),
+        self_update: Some(&["update"]),
     },
     Cli {
         provider_id: "cursor",
         binary: "cursor-agent",
         npm: None,
         homebrew: None,
-        native: Some((
-            "/.local/share/cursor-agent/",
-            Feed::CursorInstaller,
-            &["update"],
-        )),
+        native: Some(("/.local/share/cursor-agent/", Feed::CursorInstaller)),
+        self_update: Some(&["update"]),
     },
     Cli {
         provider_id: "grok",
         binary: "grok",
         npm: None,
         homebrew: None,
-        native: Some(("/.grok/", Feed::GrokCheck, &["update"])),
+        native: Some(("/.grok/", Feed::GrokCheck)),
+        self_update: Some(&["update"]),
     },
     Cli {
         provider_id: "gemini",
@@ -85,6 +85,7 @@ const CLIS: &[Cli] = &[
         npm: Some("@google/gemini-cli"),
         homebrew: Some(("gemini-cli", false)),
         native: None,
+        self_update: None,
     },
 ];
 
@@ -98,13 +99,55 @@ pub struct UpdateAction {
 }
 
 /// A CLI with a newer release. Without an action DCC cannot tell how it
-/// was installed: the person updates it the way they installed it.
+/// was installed, and only offers the terminal.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CliUpdate {
     pub provider_id: String,
     pub installed: String,
     pub latest: String,
     pub action: Option<UpdateAction>,
+    /// What runs in a terminal the person watches: the action, else the
+    /// CLI's own updater, else npm.
+    pub terminal_command: String,
+}
+
+/// A word as the shell reads it, quoted.
+fn quoted(word: &str) -> String {
+    if !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-@=:+".contains(c))
+    {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', "'\\''"))
+}
+
+fn terminal_command(cli: &Cli, action: Option<&UpdateAction>, found: &Path) -> String {
+    let words = |program: &Path, args: &[String]| {
+        std::iter::once(quoted(&program.to_string_lossy()))
+            .chain(args.iter().map(|arg| quoted(arg)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    if let Some(action) = action {
+        let command = words(&action.program, &action.args);
+        return match &action.path_prepend {
+            Some(first) => format!(
+                "PATH={}:\"$PATH\" {command}",
+                quoted(&first.to_string_lossy())
+            ),
+            None => command,
+        };
+    }
+    match (cli.self_update, cli.npm) {
+        (Some(args), _) => words(
+            found,
+            &args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>(),
+        ),
+        (None, Some(package)) => format!("npm install -g {package}@latest"),
+        (None, None) => format!("{} --version", quoted(&found.to_string_lossy())),
+    }
 }
 
 /// How a CLI was installed, read from where its executable really lives.
@@ -118,7 +161,7 @@ enum Source {
 
 fn source_of(cli: &Cli, found: &Path, real: &Path) -> Source {
     let paths = [real.to_string_lossy(), found.to_string_lossy()];
-    if let Some((marker, _, _)) = cli.native {
+    if let Some((marker, _)) = cli.native {
         if paths.iter().any(|path| path.contains(marker)) {
             return Source::Native;
         }
@@ -216,7 +259,7 @@ fn action(cli: &Cli, source: &Source, found: &Path) -> Option<UpdateAction> {
     match source {
         Source::Native => Some(UpdateAction {
             program: found.to_path_buf(),
-            args: cli.native?.2.iter().map(|arg| arg.to_string()).collect(),
+            args: cli.self_update?.iter().map(|arg| arg.to_string()).collect(),
             path_prepend: None,
         }),
         Source::Npm { prefix } => {
@@ -343,11 +386,13 @@ async fn check(cli: &Cli) -> Option<CliUpdate> {
     let source = source_of(cli, &found, &real);
     let installed = installed(&found).await?;
     let latest = latest(cli, &source, &found).await?;
+    let action = action(cli, &source, &found);
     newer(&latest, &installed).then(|| CliUpdate {
         provider_id: cli.provider_id.to_string(),
         installed,
         latest,
-        action: action(cli, &source, &found),
+        terminal_command: terminal_command(cli, action.as_ref(), &found),
+        action,
     })
 }
 
@@ -377,8 +422,7 @@ fn reason(output: &std::process::Output) -> String {
         .unwrap_or_else(|| format!("exited with {}", output.status))
 }
 
-/// Runs the update, then checks the CLI really is on the new version and
-/// forgets its model list so the picker reads the new one. The new version.
+/// Runs the update, then `verify`.
 pub async fn run(update: &CliUpdate) -> Result<String> {
     let action = update
         .action
@@ -402,6 +446,13 @@ pub async fn run(update: &CliUpdate) -> Result<String> {
     if !output.status.success() {
         return Err(CoreError::Provider(reason(&output)));
     }
+    verify(update).await
+}
+
+/// After an update (here or in the person's terminal): the CLI really is on
+/// the new version, and its model list is forgotten so the picker reads the
+/// new one. The version it is on.
+pub async fn verify(update: &CliUpdate) -> Result<String> {
     let cli = CLIS
         .iter()
         .find(|cli| cli.provider_id == update.provider_id)
@@ -516,6 +567,29 @@ mod tests {
             action(cli("cursor"), &Source::Unknown, Path::new("/x")),
             None
         );
+    }
+
+    #[test]
+    fn the_terminal_runs_the_action_or_the_clis_own_updater() {
+        let npm = UpdateAction {
+            program: PathBuf::from("/Users/w/.nvm/versions/node/v22.21.1/bin/npm"),
+            args: vec!["install".into(), "-g".into(), "@openai/codex@latest".into()],
+            path_prepend: Some(PathBuf::from("/Users/w/.nvm/versions/node/v22.21.1/bin")),
+        };
+        assert_eq!(
+            terminal_command(cli("codex"), Some(&npm), Path::new("/x/codex")),
+            "PATH=/Users/w/.nvm/versions/node/v22.21.1/bin:\"$PATH\" /Users/w/.nvm/versions/node/v22.21.1/bin/npm install -g @openai/codex@latest"
+        );
+        // Installed somewhere DCC does not know: the CLI's own updater, else npm.
+        assert_eq!(
+            terminal_command(cli("codex"), None, Path::new("/My Apps/codex")),
+            "'/My Apps/codex' update"
+        );
+        assert_eq!(
+            terminal_command(cli("gemini"), None, Path::new("/x/gemini")),
+            "npm install -g @google/gemini-cli@latest"
+        );
+        assert_eq!(quoted("it's"), "'it'\\''s'");
     }
 
     #[test]
