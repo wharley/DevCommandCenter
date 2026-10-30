@@ -85,6 +85,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "WKWebsiteDataRecord", "WKHTTPCookieStore", "WKSnapshotConfiguration"] }
 # Completion blocks for the Browser's cookie store and snapshots.
 block2 = "0.6"
+# Voice notes in the person's message: CoreAudio reads Ogg Opus (WhatsApp).
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioPlayer", "AVAudioFile", "AVAudioBuffer", "AVAudioFormat", "AVAudioTypes", "AVAudioSettings"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
 
 [dev-dependencies]

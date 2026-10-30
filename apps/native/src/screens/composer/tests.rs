@@ -204,7 +204,7 @@ fn mentions_pick_files_and_attachments_become_paths(cx: &mut TestAppContext) {
     composer.read_with(cx, |composer, cx| {
         assert_eq!(
             composer.prompt(cx),
-            "ver @src/app.rs @docs/shot.png @/tmp/notes.txtfim"
+            "ver @src/app.rs @docs/shot.png @/tmp/notes.txt fim"
         );
         let chips = composer.input.read(cx).chips();
         assert!(matches!(chips[1].1, crate::ui::text_area::Chip::Image(_)));

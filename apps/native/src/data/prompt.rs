@@ -189,8 +189,14 @@ pub fn is_image_path(path: &str) -> bool {
     )
 }
 
+/// `isAudioFilePath`: what the person's message plays in place.
 pub fn is_audio_path(path: &str) -> bool {
-    has_extension(path, &["mp3", "wav", "m4a", "ogg", "webm", "flac", "aac"])
+    has_extension(
+        path,
+        &[
+            "mp3", "m4a", "mp4a", "aac", "wav", "ogg", "oga", "opus", "flac", "aif", "aiff", "caf",
+        ],
+    )
 }
 
 fn has_extension(path: &str, extensions: &[&str]) -> bool {

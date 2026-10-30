@@ -1,6 +1,6 @@
 //! The prompt the composer sends, from the field's text and chips
 //! (`$extractComposerPrompt`): an attached or mentioned file and an image
-//! become `@path` with a space before, a long paste its full text on its own
+//! become `@path` with a space before (and after, when text follows at once), a long paste its full text on its own
 //! line. Drafts are kept the same way and read back with `promptParts`.
 
 use std::path::Path;
@@ -20,6 +20,14 @@ pub fn serialize(text: &str, chips: &[(usize, Chip)]) -> String {
                 }
                 out.push('@');
                 out.push_str(path);
+                // Text typed right after the chip must not run into the path.
+                if text[offset + CHIP.len_utf8()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|next| !next.is_whitespace() && next != CHIP)
+                {
+                    out.push(' ');
+                }
             }
             Chip::Snippet(body) => {
                 if !out.is_empty() && !out.ends_with('\n') {
@@ -100,9 +108,37 @@ mod tests {
         ];
         assert_eq!(
             serialize(&text, &chips),
-            "ver @src/app.rse @/tmp/dcc_img_1.png agora\nlinha 1\nlinha 2fim"
+            "ver @src/app.rs e @/tmp/dcc_img_1.png agora\nlinha 1\nlinha 2fim"
         );
         assert_eq!(serialize("a\n\n\n\nb", &[]), "a\n\nb");
+    }
+
+    /// Text typed right after a chip stays out of its path.
+    #[test]
+    fn text_right_after_a_chip_keeps_its_own_word() {
+        let text = format!("{CHIP}Nesse aqui{CHIP}{CHIP}");
+        let second = CHIP.len_utf8() + "Nesse aqui".len();
+        let chips = vec![
+            (0, Chip::Image("/tmp/dcc_img_1.png".into())),
+            (second, Chip::File("/tmp/a.opus".into())),
+            (second + CHIP.len_utf8(), Chip::File("/tmp/b.opus".into())),
+        ];
+        let prompt = serialize(&text, &chips);
+        assert_eq!(
+            prompt,
+            "@/tmp/dcc_img_1.png Nesse aqui @/tmp/a.opus @/tmp/b.opus"
+        );
+        let attachments: Vec<_> = prompt_parts(&prompt)
+            .into_iter()
+            .filter_map(|part| match part {
+                PromptPart::Attachment(path) => Some(path),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            attachments,
+            ["/tmp/dcc_img_1.png", "/tmp/a.opus", "/tmp/b.opus"]
+        );
     }
 
     #[test]

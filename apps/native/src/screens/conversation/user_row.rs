@@ -1,6 +1,7 @@
 //! `UserMessage`: the prompt in a bubble on the right (`max-w-[75%]`,
 //! `rounded-xl border-border/45 bg-accent/35 px-3.5 py-3`), its attachments
-//! as chips above the text, and the time under it.
+//! as chips above the text (an audio file as a player, `audio`), and the
+//! time under it.
 
 use dcc_core::domain::timeline::TimelineMessage;
 use gpui::{AnyElement, Context, SharedString, Window, div, prelude::*, px, relative};
@@ -25,7 +26,7 @@ fn mention_markdown(path: &str) -> String {
     format!("[@{name}](<./{path}>)")
 }
 
-fn attachment_chip(path: &str, cx: &gpui::App) -> AnyElement {
+pub(super) fn attachment_chip(path: &str, cx: &gpui::App) -> AnyElement {
     let colors = &cx.theme().colors;
     let icon = if is_image_path(path) {
         "file-image"
@@ -112,7 +113,13 @@ pub(super) fn user_row(
             .items_end()
             .gap(px(6.0))
             .mb(px(8.0))
-            .children(attachments.iter().map(|path| attachment_chip(path, cx)))
+            .children(attachments.iter().map(|path| {
+                if is_audio_path(path) {
+                    super::audio::card(path, cx).into_any_element()
+                } else {
+                    attachment_chip(path, cx)
+                }
+            }))
     });
     let retry = message.retry_of_turn_id.as_ref().map(|_| {
         div()

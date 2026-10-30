@@ -6,6 +6,7 @@
 
 mod activity;
 mod assistant_row;
+mod audio;
 mod cards;
 mod delegation_card;
 pub(crate) mod find;

@@ -168,3 +168,39 @@ fn answers_wait_for_the_desktop_and_options_fill_the_field(cx: &mut TestAppConte
     // The desktop isn't there in tests: the request comes back to waiting.
     view.read_with(cx, |view, _| assert_eq!(view.sending("p1"), None));
 }
+
+/// An attached audio file plays in place; one that is gone stays a chip.
+#[gpui::test]
+fn an_attached_voice_note_shows_as_a_player(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let wav = crate::data::audio_clip::tests::wav(dir.path());
+    let (view, cx) = open_view(cx);
+    let show = |turn: &str, prompt: String, cx: &mut gpui::VisualTestContext| {
+        let events = records(vec![
+            json!({ "type": "turn_started", "turnId": turn, "prompt": prompt }),
+            json!({ "type": "turn_completed", "turnId": turn }),
+        ]);
+        let conversation = Conversation {
+            task_id: "task".into(),
+            session_id: Some("s1".into()),
+            rows: Arc::new(project_session(&events, "s1")),
+            // A later load reads as news.
+            last_sequence: if turn == "t1" { 2 } else { 4 },
+            ..Conversation::default()
+        };
+        view.update(cx, |view, cx| {
+            view.task_id = Some("task".into());
+            view.loading = false;
+            view.apply(Rc::new(conversation), cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    };
+    show("t1", format!("Ouça @{} por favor", wav.display()), cx);
+    let card = cx.debug_bounds("user-message-audio").expect("the player");
+    assert!(card.size.width > gpui::px(200.0), "{card:?}");
+    let gone = dir.path().join("sumiu.opus");
+    show("t2", format!("Ouça @{} por favor", gone.display()), cx);
+    assert!(cx.debug_bounds("user-message-audio").is_none());
+}

@@ -7,6 +7,7 @@ pub mod activity;
 pub mod agents;
 pub mod ai_memory;
 pub mod ai_memory_settings;
+pub mod audio_clip;
 pub mod automation;
 pub mod avatar;
 pub mod browser_bridge;
