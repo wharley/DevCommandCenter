@@ -186,7 +186,7 @@ impl RenderOnce for Popover {
                         .snap_to_window_with_margin(px(8.0))
                         .child(card),
                 )
-                .priority(2),
+                .priority(super::layer::POPUP),
             )
         });
         div()

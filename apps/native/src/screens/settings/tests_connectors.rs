@@ -428,3 +428,38 @@ fn manage_sets_tool_policies_and_projects_and_the_import_offer_is_dismissed(
     assert!(seen[2].1.contains(r#""decision":"allow""#), "{}", seen[2].1);
     assert!(seen[4].1.contains(r#""enabled":false"#), "{}", seen[4].1);
 }
+
+/// The "…" of a connected one opens over the settings dialog, and its
+/// items take the click (a menu inside a dialog once painted under it).
+#[gpui::test]
+fn the_more_button_opens_its_menu_over_the_dialog(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    let (settings, cx, _) = open(Some(SectionId::Integrations), cx);
+    let linear = record(
+        "linear-1",
+        "Linear",
+        "https://mcp.linear.app/mcp",
+        true,
+        &["dcc"],
+        json!({ "state": "connected", "tools": [{}, {}], "message": null }),
+    );
+    let (port, _server) =
+        fake_desktop_routes(vec![("/api/v1/mcp/integrations", 200, list(vec![linear]))]);
+    attach(&settings, port, cx);
+    click(cx, "settings-connector-menu-linear-1");
+    assert!(cx.debug_bounds("menu-panel").is_some());
+    click(cx, "menu-item-0");
+    let managed = cx.update(|_, cx| {
+        settings
+            .read(cx)
+            .connectors
+            .managed
+            .as_ref()
+            .map(|managed| managed.id.clone())
+    });
+    assert_eq!(
+        managed.as_deref(),
+        Some("linear-1"),
+        "\"Gerenciar\" took the click"
+    );
+}

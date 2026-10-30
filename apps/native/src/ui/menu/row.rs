@@ -37,6 +37,7 @@ pub(super) fn row(
     let click_root = root.clone();
     div()
         .id(ElementId::NamedInteger("menu-item".into(), index as u64))
+        .debug_selector(move || format!("menu-item-{index}"))
         .flex()
         .items_center()
         .gap(px(style.gap))

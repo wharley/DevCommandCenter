@@ -367,7 +367,7 @@ impl Render for Toaster {
                         .children(items),
                 ),
         )
-        .priority(20)
+        .priority(super::layer::TOAST)
         .into_any_element()
     }
 }

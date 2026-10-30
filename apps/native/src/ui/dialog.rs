@@ -253,7 +253,7 @@ impl RenderOnce for Dialog {
                         .child(card),
                 ),
         )
-        .priority(10)
+        .priority(super::layer::DIALOG)
     }
 }
 

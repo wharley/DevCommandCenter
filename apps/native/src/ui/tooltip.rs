@@ -296,7 +296,7 @@ impl RenderOnce for Tooltip {
                         .snap_to_window_with_margin(px(12.0))
                         .child(bubble.child(content)),
                 )
-                .priority(3),
+                .priority(super::layer::TOOLTIP),
             )
         });
 

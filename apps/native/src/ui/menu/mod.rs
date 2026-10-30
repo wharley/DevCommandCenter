@@ -287,7 +287,8 @@ impl RenderOnce for Menu {
                 MenuAlign::End => div().right_0().bottom_0(),
             };
             spot.absolute().size_0().child(
-                deferred(anchored.snap_to_window_with_margin(px(8.0)).child(panel)).priority(2),
+                deferred(anchored.snap_to_window_with_margin(px(8.0)).child(panel))
+                    .priority(super::layer::POPUP),
             )
         });
 
@@ -465,7 +466,7 @@ fn panel(
                                 .snap_to_window_with_margin(px(8.0))
                                 .child(sub_panel),
                         )
-                        .priority(3),
+                        .priority(super::layer::SUBMENU),
                     )
                 });
                 div()
@@ -478,6 +479,7 @@ fn panel(
     }
     div()
         .id("menu-panel")
+        .debug_selector(|| "menu-panel".into())
         .relative()
         .when_some(focus, |panel, focus| panel.track_focus(&focus))
         .min_w(px(min_width))
