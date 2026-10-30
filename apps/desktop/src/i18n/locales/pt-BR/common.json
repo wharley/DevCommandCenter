@@ -1,7 +1,7 @@
 {
   "cliUpdates": {
-    "title_one": "Atualização do agente disponível",
-    "title_other": "Atualizações dos agentes disponíveis",
+    "title_one": "Atualização disponível",
+    "title_other": "Atualizações disponíveis",
     "updateAll": "Atualizar tudo",
     "update": "Atualizar",
     "updating": "Atualizando",

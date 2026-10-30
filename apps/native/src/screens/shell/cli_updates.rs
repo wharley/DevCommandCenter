@@ -237,7 +237,7 @@ impl CliUpdates {
                 .child(Icon::new("check").size(12.0))
                 .child(cx.t_with(
                     "cliUpdates.updated",
-                    &Args::default().with("version", version.clone()),
+                    &Args::default().with("version", cli_updates::short_version(version)),
                 ))
                 .into_any_element(),
             (Some(Row::Updating), _) => div()
@@ -268,11 +268,16 @@ impl CliUpdates {
         };
         let versions = (!matches!(state, Some(Row::Updated(_)))).then(|| {
             div()
-                .flex_none()
+                .truncate()
                 .font_family("Menlo")
                 .text_size(px(11.0))
+                .line_height(px(16.0))
                 .text_color(colors.muted_foreground)
-                .child(format!("{} → {}", update.installed, update.latest))
+                .child(format!(
+                    "{} → {}",
+                    cli_updates::short_version(&update.installed),
+                    cli_updates::short_version(&update.latest)
+                ))
         });
         div()
             .debug_selector(move || format!("cli-update-{id}"))
@@ -284,17 +289,24 @@ impl CliUpdates {
                     .items_center()
                     .gap(px(8.0))
                     .child(ProviderIcon::new(&update.provider_id).size(16.0))
+                    // The name over its versions: a long one never pushes the button out.
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .text_size(px(13.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(Self::label(&update.provider_id)),
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(13.0))
+                                    .line_height(px(18.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(Self::label(&update.provider_id)),
+                            )
+                            .children(versions),
                     )
-                    .children(versions)
-                    .child(trailing),
+                    .child(div().flex_none().child(trailing)),
             )
             .when_some(
                 match &state {

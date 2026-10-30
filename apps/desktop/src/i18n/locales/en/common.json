@@ -1,7 +1,7 @@
 {
   "cliUpdates": {
-    "title_one": "Agent update available",
-    "title_other": "Agent updates available",
+    "title_one": "Update available",
+    "title_other": "Updates available",
     "updateAll": "Update all",
     "update": "Update",
     "updating": "Updating",

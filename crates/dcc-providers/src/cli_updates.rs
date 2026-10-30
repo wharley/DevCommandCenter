@@ -205,6 +205,20 @@ fn version_in(output: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// A version as the person reads it: its numbers, without a build's hash
+/// (`2026.10.22-27dcf5f` reads 2026.10.22).
+pub fn short_version(version: &str) -> String {
+    let numbers = numbers(version);
+    if numbers.is_empty() {
+        return version.to_string();
+    }
+    numbers
+        .iter()
+        .map(u64::to_string)
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 /// Whether `latest` is a newer release than `installed` (by its numbers:
 /// two builds of the same day are the same release).
 fn newer(latest: &str, installed: &str) -> bool {
@@ -507,6 +521,9 @@ mod tests {
             "same day's build"
         );
         assert!(!newer("", "1.0.0"));
+        assert_eq!(short_version("2026.10.22-27dcf5f"), "2026.10.22");
+        assert_eq!(short_version("0.166.0"), "0.166.0");
+        assert_eq!(short_version("beta"), "beta");
     }
 
     #[test]
