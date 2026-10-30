@@ -85,7 +85,6 @@ impl PrHub {
             .min_h_0()
             .overflow_hidden()
             .bg(colors.background)
-            .pt(px(36.0))
             // The container query: the width as it paints.
             .child(
                 canvas(

@@ -468,7 +468,6 @@ fn also_in_task(
         .flex()
         .flex_col()
         .gap(px(8.0))
-        .min_w_0()
         .child(
             div()
                 .flex()
@@ -479,7 +478,9 @@ fn also_in_task(
                     div()
                         .flex()
                         .flex_col()
+                        .flex_1()
                         .min_w_0()
+                        .debug_selector(|| "open-project-also-in-task".into())
                         .child(label(cx.t("workspaceDialog.alsoInTask")))
                         .child(hint(cx.t("workspaceDialog.alsoInTaskDescription"), cx)),
                 )

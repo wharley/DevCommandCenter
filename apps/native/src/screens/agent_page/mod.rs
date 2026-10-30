@@ -343,7 +343,6 @@ impl Render for AgentPage {
                 .items_center()
                 .justify_center()
                 .bg(colors.background)
-                .pt(px(36.0))
                 .text_size(px(13.0))
                 .text_color(colors.muted_foreground)
                 .child(cx.t("agents.page.missing"))
@@ -496,7 +495,6 @@ impl Render for AgentPage {
             .min_h_0()
             .overflow_y_scroll()
             .bg(colors.background)
-            .pt(px(36.0))
             .child(
                 div()
                     .mx_auto()

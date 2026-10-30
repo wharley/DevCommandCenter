@@ -279,3 +279,22 @@ fn a_project_opens_an_existing_branch_but_not_a_pr(cx: &mut TestAppContext) {
     assert_eq!(body["url"], url);
     assert_eq!(body["name"], "Feature X");
 }
+
+/// "Também nesta tarefa" keeps its width beside "Adicionar projeto" (it
+/// once collapsed to a sliver, one letter per line).
+#[gpui::test]
+fn the_also_in_task_title_keeps_its_width(cx: &mut TestAppContext) {
+    let repo = checkout();
+    let root = repo.path().to_string_lossy().into_owned();
+    let mut projects = vec![project(&root, "rosa-app", "main")];
+    for name in ["meu-lme-app", "checkout", "cmdori", "lme", "painel"] {
+        projects.push(project(&format!("/code/{name}"), name, "main"));
+    }
+    let (_dialog, cx) = open(cx, projects, HashMap::new(), OpenRequest::default());
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let title = cx.debug_bounds("open-project-also-in-task").unwrap();
+    assert!(title.size.width > gpui::px(200.0), "{title:?}");
+    assert!(title.size.height < gpui::px(40.0), "{title:?}");
+}
