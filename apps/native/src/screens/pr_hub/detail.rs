@@ -1,8 +1,9 @@
 //! The chosen pull request (`dcc-pr-detail`): "Voltar" when narrow, the
 //! Resumo | Código tabs, "Abrir tarefa" or "Trabalhar nisto", open on the forge, the
 //! title and who opened it; then the summary — branch → base, reviewers,
-//! comments and checks, the description, the checks one by one, the
-//! activity in markdown — and the comment box at the foot.
+//! comments and checks, the description and the activity in markdown (bot
+//! HTML kept to its text and links), the checks one by one — and the
+//! comment box at the foot.
 
 use gpui::{AnyElement, Context, FontWeight, SharedString, Window, div, prelude::*, px};
 
@@ -309,13 +310,23 @@ impl PrHub {
                 cx.t("pullRequests.checks"),
                 check_label(&item.checks_state, cx),
             ));
-        let description = detail
+        let description: AnyElement = match detail
             .as_ref()
             .and_then(|detail| detail.as_ref().ok())
             .and_then(|detail| detail.body.clone())
-            .filter(|body| !body.is_empty())
-            .or_else(|| item.body.clone().filter(|body| !body.is_empty()))
-            .unwrap_or_else(|| cx.t("pullRequests.noDescription").to_string());
+            .filter(|body| !body.trim().is_empty())
+            .or_else(|| item.body.clone().filter(|body| !body.trim().is_empty()))
+        {
+            // GitHub shows the body as markdown, its bots' HTML included.
+            Some(body) => render_markdown(
+                &parse(&body),
+                MarkdownStyle::card(),
+                &format!("pr-description-{}-{}", item.repository_name, item.number),
+                window,
+                cx,
+            ),
+            None => cx.t("pullRequests.noDescription").into_any_element(),
+        };
         let checks: AnyElement = match &detail {
             None => spinner("pr-checks-loading", 16.0).into_any_element(),
             Some(Ok(detail)) if !detail.checks.is_empty() => div()
@@ -412,7 +423,7 @@ impl PrHub {
                                 .child(div().mt(px(8.0)).min_w_0().overflow_hidden().child(
                                     render_markdown(
                                         &blocks,
-                                        MarkdownStyle::reply(),
+                                        MarkdownStyle::card(),
                                         &format!("pr-comment-{}", entry.id),
                                         window,
                                         cx,
@@ -457,8 +468,9 @@ impl PrHub {
                     .child(summary_card(
                         cx.t("pullRequests.description"),
                         div()
+                            .min_w_0()
+                            .overflow_hidden()
                             .text_size(px(12.0))
-                            .line_height(px(20.0))
                             .text_color(colors.foreground.opacity(0.85))
                             .child(description)
                             .into_any_element(),

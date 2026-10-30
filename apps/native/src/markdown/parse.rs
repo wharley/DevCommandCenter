@@ -1,6 +1,7 @@
 //! Markdown to a small block model (GitHub flavour, like Streamdown):
 //! paragraphs, headings, lists, code, quotes, rules and tables, with inline
-//! bold/italic/strike/code/links as styled ranges of plain text.
+//! bold/italic/strike/code/links as styled ranges of plain text. HTML in it
+//! keeps its text and links (`super::html`).
 
 use std::ops::Range;
 
@@ -67,14 +68,14 @@ pub struct ListItem {
 }
 
 #[derive(Default)]
-struct InlineBuilder {
-    inline: Inline,
-    style: SpanStyle,
-    link: Option<String>,
+pub(super) struct InlineBuilder {
+    pub(super) inline: Inline,
+    pub(super) style: SpanStyle,
+    pub(super) link: Option<String>,
 }
 
 impl InlineBuilder {
-    fn push(&mut self, text: &str, code: bool) {
+    pub(super) fn push(&mut self, text: &str, code: bool) {
         if text.is_empty() {
             return;
         }
@@ -135,6 +136,7 @@ struct Builder {
     code: Option<(Option<String>, String)>,
     heading: Option<u8>,
     table: Option<TableFrame>,
+    html: super::html::Html,
 }
 
 impl Builder {
@@ -165,11 +167,12 @@ pub fn parse(markdown: &str) -> Vec<Block> {
         code: None,
         heading: None,
         table: None,
+        html: Default::default(),
     };
     for event in Parser::new_ext(markdown, options) {
         match event {
             Event::Start(tag) => match tag {
-                Tag::Paragraph => builder.flush_loose_text(),
+                Tag::Paragraph | Tag::HtmlBlock => builder.flush_loose_text(),
                 Tag::Heading { level, .. } => {
                     builder.flush_loose_text();
                     builder.heading = Some(match level {
@@ -225,6 +228,10 @@ pub fn parse(markdown: &str) -> Vec<Block> {
                 _ => {}
             },
             Event::End(tag) => match tag {
+                TagEnd::HtmlBlock => {
+                    builder.flush_loose_text();
+                    builder.html.end_block(&mut builder.inline);
+                }
                 TagEnd::Paragraph => {
                     let inline = builder.inline.take();
                     builder.push_block(Block::Paragraph(inline));
@@ -310,7 +317,9 @@ pub fn parse(markdown: &str) -> Vec<Block> {
                     *task = Some(done);
                 }
             }
-            Event::Html(html) | Event::InlineHtml(html) => builder.inline.push(&html, false),
+            Event::Html(html) | Event::InlineHtml(html) => {
+                super::html::push(&html, &mut builder.html, &mut builder.inline)
+            }
             _ => {}
         }
     }

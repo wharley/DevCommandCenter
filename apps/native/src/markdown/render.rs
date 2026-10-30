@@ -35,6 +35,14 @@ impl MarkdownStyle {
         }
     }
 
+    /// A pull request's description and comments (`text-[12px]`).
+    pub fn card() -> Self {
+        Self {
+            size: 12.0,
+            collapsed_lines: Some(16),
+        }
+    }
+
     pub fn prompt() -> Self {
         Self {
             size: 13.0,
