@@ -1,13 +1,11 @@
-//! The reviewer in the hub against a fake desktop: its offer on a pull
-//! request waiting for the person, the whole review it runs after "Sim"
-//! (on its own provider, with its effort), the drafts it leaves, and
-//! "Preparar com agente" for a line and a reply.
+//! The reviewer in the hub against a fake desktop: the whole review it runs
+//! from its panel on the code tab (on its own provider, with its effort),
+//! the drafts it leaves, and "Preparar com agente" for a line and a reply.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use dcc_core::domain::provider::ProviderDescriptor;
-use gpui::{Modifiers, TestAppContext, VisualTestContext, WindowAppearance, px, size};
+use gpui::{Modifiers, TestAppContext, WindowAppearance, px, size};
 use serde_json::json;
 
 use crate::data::agents::AgentRecord;
@@ -53,16 +51,8 @@ fn provider(id: &str, read_only: bool) -> ProviderDescriptor {
     .unwrap()
 }
 
-/// Lets the offer think and write its question.
-fn let_it_type(cx: &mut VisualTestContext) {
-    for _ in 0..80 {
-        cx.executor().advance_clock(Duration::from_millis(50));
-        cx.run_until_parked();
-    }
-}
-
 #[gpui::test]
-fn the_reviewer_offers_reviews_and_prepares(cx: &mut TestAppContext) {
+fn the_reviewer_reviews_from_its_panel_and_prepares(cx: &mut TestAppContext) {
     use crate::test_support::fake_desktop_routes;
     cx.update(|cx| {
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
@@ -118,18 +108,15 @@ fn the_reviewer_offers_reviews_and_prepares(cx: &mut TestAppContext) {
         hub.refresh(cx);
     });
     cx.run_until_parked();
-    // Waiting for the person's review: the offer thinks, then asks.
-    assert!(cx.debug_bounds("pr-reviewer-offer").is_some());
-    assert!(
-        cx.debug_bounds("pr-reviewer-offer-accept").is_none(),
-        "still thinking"
-    );
-    let_it_type(cx);
-    let bounds = cx.debug_bounds("pr-reviewer-offer-accept").unwrap();
-    cx.simulate_click(bounds.center(), Modifiers::none());
+    // Nothing floats over the pull request: the review starts from the
+    // reviewer's button on the code tab.
+    hub.update(cx, |hub, cx| hub.set_tab(Tab::Code, cx));
     cx.run_until_parked();
-    assert!(cx.debug_bounds("pr-reviewer-offer").is_none(), "answered");
-    assert_eq!(hub.read_with(cx, |hub, _| hub.tab), Tab::Code);
+    for id in ["pr-review-agent", "pr-review-generate"] {
+        let bounds = cx.debug_bounds(id).unwrap();
+        cx.simulate_click(bounds.center(), Modifiers::none());
+        cx.run_until_parked();
+    }
     // The review ran and left its draft (the line outside the patch dropped).
     let job = cx.update(|_, cx| PrReviewJobs::job(cx, "pr-1")).unwrap();
     assert_eq!((job.status, job.seen), (JobStatus::Done, true));

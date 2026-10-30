@@ -5,7 +5,7 @@
 //! activity) with a comment box. Under 780px only one side shows, with
 //! "Voltar". A GitHub pull request merges from here, after a confirmation;
 //! its code tab reads the patches and sends a review, with the built-in
-//! reviewer's help when the person asks or accepts its offer.
+//! reviewer's help when the person asks for it.
 
 mod code;
 mod detail;
@@ -71,9 +71,6 @@ pub struct PrHub {
     pub(crate) review_pick: crate::data::pr_review_pick::ReviewPick,
     /// The accounts picked for new conversations, read as the panel opens.
     pub(crate) account_picks: crate::data::account_selection::Selection,
-    pub(crate) offer: Option<reviewer::Offer>,
-    /// The pull request whose accepted offer starts the review.
-    pub(crate) auto_start_for: Option<String>,
     /// A pull request asked to open, waiting for the list.
     pub(crate) requested: Option<String>,
     /// The hub's width, measured as it paints.
@@ -112,7 +109,6 @@ impl PrHub {
         inputs.push(
             cx.observe_global::<crate::data::pr_review_jobs::PrReviewJobs>(|hub, cx| {
                 hub.apply_review_job(cx);
-                hub.sync_offer(cx);
                 cx.notify();
             }),
         );
@@ -138,8 +134,6 @@ impl PrHub {
             sources: reviewer::ReviewerSources::default(),
             review_pick: crate::data::pr_review_pick::load(),
             account_picks: crate::data::account_selection::load(),
-            offer: None,
-            auto_start_for: None,
             requested: None,
             width: Rc::new(Cell::new(1200.0)),
             _inputs: inputs,
@@ -226,7 +220,6 @@ impl PrHub {
     /// The selected one's detail, read again after 20s.
     pub(crate) fn ensure_detail(&mut self, cx: &mut Context<Self>) {
         self.sync_review(cx);
-        self.sync_offer(cx);
         self.ensure_code_detail(cx);
         let Some(item) = self.selected_item(cx) else {
             return;

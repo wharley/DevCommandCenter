@@ -1,26 +1,21 @@
 //! The built-in reviewer in the hub: who it is and what it can run on (the
 //! shell hands over the sidebar's agents and the composer's providers and
-//! pick), "Posso revisar este PR?" on a pull request waiting for the
-//! person's review, and a pull request asked to open from the agent's page.
+//! pick, and the panel's own pick), and a pull request asked to open from
+//! the agent's page.
 
 use std::sync::Arc;
 
 use dcc_core::domain::provider::{ProviderDescriptor, ProviderModelDescriptor};
-use gpui::{AnyElement, AppContext, Context, Entity, Subscription, div, prelude::*, px};
+use gpui::Context;
 
 use super::PrHub;
 use super::code::Tab;
-use crate::agent::{OfferEvent, OfferThought};
 use crate::data::account_selection;
 use crate::data::agents::AgentRecord;
 use crate::data::composer_settings::clamp_effort;
 use crate::data::pr_review::AgentRun;
 use crate::data::pr_review_jobs::PrReviewJobs;
 use crate::data::pr_review_pick::ReviewPick;
-use crate::i18n::Translate;
-
-/// The offer shown for a pull request.
-pub(crate) type Offer = (String, Entity<OfferThought>, Subscription);
 
 /// What the reviewer runs on (`reviewProvider`, `reviewModel`), with the
 /// panel's effort and account.
@@ -57,7 +52,6 @@ impl PrHub {
             providers,
             pick,
         };
-        self.sync_offer(cx);
         cx.notify();
     }
 
@@ -180,67 +174,6 @@ impl PrHub {
         crate::data::pr_review_pick::save(&pick);
         self.review_pick = pick;
         cx.notify();
-    }
-
-    /// `showReviewOffer`: waiting for the person's review, not answered, no
-    /// review of it yet, and something to run it on.
-    fn offer_for(&self, cx: &gpui::App) -> Option<String> {
-        self.sources.reviewer.as_ref()?;
-        let item = self.selected_item(cx)?;
-        let show = item.review_requested_for_viewer
-            && !PrReviewJobs::is_answered(cx, &item.id)
-            && PrReviewJobs::job(cx, &item.id).is_none()
-            && !self.review_providers().is_empty();
-        show.then_some(item.id)
-    }
-
-    /// Keeps the offer in step with the chosen pull request.
-    pub(crate) fn sync_offer(&mut self, cx: &mut Context<Self>) {
-        let wanted = self.offer_for(cx);
-        if self.offer.as_ref().map(|(id, _, _)| id) == wanted.as_ref() {
-            return;
-        }
-        self.offer = None;
-        let (Some(id), Some(reviewer)) = (wanted, self.sources.reviewer.clone()) else {
-            return;
-        };
-        let question = cx.t("pullRequests.reviewerOffer").to_string();
-        let accept = cx.t("agents.offer.accept");
-        let thought = cx.new(|cx| {
-            OfferThought::new(
-                "pr-reviewer-offer",
-                reviewer.name.clone(),
-                reviewer.avatar.clone(),
-                question,
-                accept,
-                cx,
-            )
-        });
-        let answered = id.clone();
-        let events = cx.subscribe(&thought, move |hub, _, event, cx| {
-            PrReviewJobs::answer(cx, &answered);
-            if matches!(event, OfferEvent::Accept) {
-                hub.auto_start_for = Some(answered.clone());
-                hub.set_tab(Tab::Code, cx);
-                hub.start_auto_review(cx);
-            }
-            hub.sync_offer(cx);
-            cx.notify();
-        });
-        self.offer = Some((id, thought, events));
-    }
-
-    /// Bottom right of the detail, over the content.
-    pub(super) fn offer_element(&self) -> Option<AnyElement> {
-        let (_, thought, _) = self.offer.as_ref()?;
-        Some(
-            div()
-                .absolute()
-                .bottom(px(20.0))
-                .right(px(24.0))
-                .child(thought.clone())
-                .into_any_element(),
-        )
     }
 
     /// `requestOpenPullRequest`: the hub on that pull request's code tab,

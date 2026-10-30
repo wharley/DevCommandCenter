@@ -118,22 +118,6 @@ impl PrHub {
         cx.notify();
     }
 
-    /// The person accepted the offer: start once the patches are in, once.
-    pub(crate) fn start_auto_review(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.auto_start_for.clone() else {
-            return;
-        };
-        if self.selected.as_deref() != Some(id.as_str())
-            || !matches!(self.code_read(&id), Some(Ok(_)))
-        {
-            return;
-        }
-        self.auto_start_for = None;
-        if self.review_job(cx).is_none() {
-            self.start_full_review(cx);
-        }
-    }
-
     /// A finished review lands once per visit: its drafts, its summary as
     /// the review's text when that is empty, the first file it commented on.
     pub(crate) fn apply_review_job(&mut self, cx: &mut Context<Self>) {

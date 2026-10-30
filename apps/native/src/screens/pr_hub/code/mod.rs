@@ -235,7 +235,6 @@ impl PrHub {
                 {
                     *result = Some(read.map_err(|error| message(error, cx)));
                     hub.apply_review_job(cx);
-                    hub.start_auto_review(cx);
                     cx.notify();
                 }
             });

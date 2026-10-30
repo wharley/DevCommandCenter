@@ -550,7 +550,6 @@ impl PrHub {
                         .child(self.code_tab(&item, window, cx)),
                 ),
             })
-            .children(self.offer_element())
             .children(self.merge_dialog(cx))
             .into_any_element()
     }

@@ -2,10 +2,8 @@
 //! (`pr-review-jobs.ts`). Someone else's pull request has no task or
 //! session to hold the work, so the job lives here, outside any screen: it
 //! keeps running and keeps its answer when the person leaves the pull
-//! request. In memory only; quitting the app drops it. Also the offers the
-//! person answered, and a pull request asked to open from elsewhere.
-
-use std::collections::HashSet;
+//! request. In memory only; quitting the app drops it. Also a pull request asked
+//! to open from elsewhere.
 
 use gpui::{App, Global};
 
@@ -44,8 +42,6 @@ impl PrReviewJob {
 pub struct PrReviewJobs {
     pub jobs: Vec<PrReviewJob>,
     finishes: u64,
-    /// Offers the person answered, kept while the app runs.
-    answered: HashSet<String>,
     /// `requestOpenPullRequest`, taken by the hub once it shows.
     pending_open: Option<String>,
 }
@@ -141,16 +137,6 @@ impl PrReviewJobs {
         }
     }
 
-    pub fn is_answered(cx: &App, pr_id: &str) -> bool {
-        Self::get(cx).is_some_and(|jobs| jobs.answered.contains(pr_id))
-    }
-
-    pub fn answer(cx: &mut App, pr_id: &str) {
-        cx.default_global::<Self>()
-            .answered
-            .insert(pr_id.to_string());
-    }
-
     pub fn request_open(cx: &mut App, pr_id: &str) {
         cx.default_global::<Self>().pending_open = Some(pr_id.to_string());
     }
@@ -199,9 +185,6 @@ mod tests {
             assert_eq!(PrReviewJobs::job(cx, "pr-1").unwrap().finished, Some(2));
             PrReviewJobs::dismiss(cx, "pr-1");
             assert!(PrReviewJobs::job(cx, "pr-1").is_none());
-            assert!(!PrReviewJobs::is_answered(cx, "pr-2"));
-            PrReviewJobs::answer(cx, "pr-2");
-            assert!(PrReviewJobs::is_answered(cx, "pr-2"));
             PrReviewJobs::request_open(cx, "pr-3");
             assert_eq!(PrReviewJobs::take_pending_open(cx).as_deref(), Some("pr-3"));
             assert_eq!(PrReviewJobs::take_pending_open(cx), None);
