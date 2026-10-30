@@ -44,8 +44,39 @@ fn linked_badge(count: usize, cx: &Context<NewTaskView>) -> AnyElement {
         .into_any_element()
 }
 
+/// The ✕ that removes a project from DCC: shown on hover, always on a
+/// project whose folder is gone.
+fn remove_button(index: usize, project: &Project, cx: &mut Context<NewTaskView>) -> AnyElement {
+    let colors = cx.theme().colors.clone();
+    let target = project.clone();
+    let (hover, foreground) = (colors.accent, colors.foreground);
+    div()
+        .id(("new-task-remove-project", index))
+        .debug_selector(move || format!("new-task-remove-project-{index}"))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(22.0))
+        .rounded(px(4.0))
+        .text_color(colors.muted_foreground)
+        .opacity(if project.missing { 1.0 } else { 0.0 })
+        .group_hover(MENU_ROW, |style| style.opacity(1.0))
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover).text_color(foreground))
+        .on_click(cx.listener(move |view, _, _, cx| {
+            cx.stop_propagation();
+            view.remove_project(&target, cx);
+        }))
+        .child(Icon::new("x").size(12.0))
+        .into_any_element()
+}
+
+const MENU_ROW: &str = "new-task-project-row";
+
 /// One project in the menu: glyph, name over its branch, "+N", a spinner
-/// while its task is created.
+/// while its task is created; a folder that is gone reads "Pasta não
+/// encontrada" and starts nothing.
 fn menu_row(
     view: &NewTaskView,
     index: usize,
@@ -57,8 +88,15 @@ fn menu_row(
     let pending = view.pending.as_deref() == Some(project.id.as_str());
     let hover = colors.accent;
     let chosen = project.clone();
+    let missing = project.missing;
+    let subtitle = if missing {
+        cx.t("newTask.missingFolder")
+    } else {
+        SharedString::from(project.base_branch.clone())
+    };
     div()
         .id(("new-task-project", index))
+        .group(MENU_ROW)
         .flex()
         .items_center()
         .gap(px(10.0))
@@ -66,7 +104,10 @@ fn menu_row(
         .px(px(8.0))
         .py(px(8.0))
         .when(busy, |row| row.opacity(0.5))
-        .when(!busy, |row| {
+        .when(!busy && missing, |row| {
+            row.hover(move |style| style.bg(hover))
+        })
+        .when(!busy && !missing, |row| {
             row.cursor_pointer()
                 .hover(move |style| style.bg(hover))
                 .on_click(cx.listener(move |view, _, _, cx| view.select_project(&chosen, cx)))
@@ -91,6 +132,7 @@ fn menu_row(
                         .text_size(px(12.0))
                         .line_height(px(16.0))
                         .font_weight(FontWeight::MEDIUM)
+                        .when(missing, |name| name.text_color(colors.muted_foreground))
                         .child(SharedString::from(project.display_name.clone())),
                 )
                 .child(
@@ -98,8 +140,12 @@ fn menu_row(
                         .truncate()
                         .text_size(px(10.0))
                         .line_height(px(14.0))
-                        .text_color(colors.muted_foreground)
-                        .child(SharedString::from(project.base_branch.clone())),
+                        .text_color(if missing {
+                            crate::theme::tailwind::AMBER_500.hsla()
+                        } else {
+                            colors.muted_foreground
+                        })
+                        .child(subtitle),
                 ),
         )
         .children(
@@ -108,6 +154,9 @@ fn menu_row(
         )
         .when(pending, |row| {
             row.child(spinner(("new-task-menu-busy", index), 14.0))
+        })
+        .when(!busy && !pending, |row| {
+            row.child(remove_button(index, project, cx))
         })
         .into_any_element()
 }
@@ -465,6 +514,7 @@ impl Render for NewTaskView {
         let shortcuts: Vec<AnyElement> = self
             .projects()
             .iter()
+            .filter(|project| !project.missing)
             .take(4)
             .enumerate()
             .map(|(index, project)| shortcut(self, index, project, cx))

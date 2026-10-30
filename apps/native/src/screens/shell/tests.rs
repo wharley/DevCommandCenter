@@ -132,6 +132,43 @@ fn several_projects_opens_the_open_project_dialog(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn removing_a_project_from_new_task_asks_the_sidebar_to_confirm(cx: &mut TestAppContext) {
+    use crate::screens::new_task::NewTaskEvent;
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    let (sidebar, new_task) = shell.read_with(cx, |shell, _| {
+        (shell.sidebar.clone(), shell.new_task.clone())
+    });
+    let project = crate::data::tasks::Project {
+        id: "/code/gone".into(),
+        root_path: "/code/gone".into(),
+        display_name: "Apagado".into(),
+        icon: None,
+        color: None,
+        pinned_at: None,
+        project_id: "gone".into(),
+        name: "gone".into(),
+        base_branch: "main".into(),
+        missing: true,
+    };
+    sidebar.update(cx, |sidebar, cx| {
+        sidebar.apply_for_tests(
+            crate::data::loader::SidebarData {
+                projects: vec![project],
+                ..Default::default()
+            },
+            cx,
+        )
+    });
+    new_task.update(cx, |_, cx| {
+        cx.emit(NewTaskEvent::RemoveProject("/code/gone".into()))
+    });
+    cx.run_until_parked();
+    sidebar.read_with(cx, |sidebar, _| {
+        assert_eq!(sidebar.removing_project(), Some("/code/gone"))
+    });
+}
+
+#[gpui::test]
 fn the_sidebar_opens_clone_and_open_branch(cx: &mut TestAppContext) {
     use crate::screens::open_project::DialogMode;
     use crate::screens::sidebar::SidebarEvent;

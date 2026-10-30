@@ -21,6 +21,7 @@ fn project(id: &str, name: &str) -> Project {
         project_id: id.into(),
         name: id.into(),
         base_branch: "main".into(),
+        missing: false,
     }
 }
 
@@ -89,4 +90,38 @@ fn the_screen_lays_out_with_its_shortcuts(cx: &mut TestAppContext) {
     cx.update(|window, _| window.refresh());
     cx.run_until_parked();
     assert!(cx.debug_bounds("new-task").is_some());
+}
+
+#[gpui::test]
+fn a_gone_folder_starts_nothing_and_offers_its_removal(cx: &mut TestAppContext) {
+    use gpui::Modifiers;
+    let (view, cx) = open(cx);
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = events.clone();
+    let gone = Project {
+        missing: true,
+        ..project("gone", "Apagado")
+    };
+    view.update(cx, |view, cx| {
+        cx.subscribe_self(move |_, event: &NewTaskEvent, _| seen.borrow_mut().push(event.clone()))
+            .detach();
+        view.set_projects(&[gone.clone(), project("app", "App")], &HashMap::new(), cx);
+        // No task starts in a folder that is gone.
+        view.select_project(&gone, cx);
+        assert!(!view.busy());
+        view.menu_open = true;
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    // Its ✕ is there without hovering; it asks the shell to confirm.
+    let bounds = cx
+        .debug_bounds("new-task-remove-project-0")
+        .expect("the gone folder's ✕");
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(
+        *events.borrow(),
+        vec![NewTaskEvent::RemoveProject("/code/gone".into())]
+    );
+    view.read_with(cx, |view, _| assert!(!view.menu_open));
 }

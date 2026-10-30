@@ -1794,7 +1794,8 @@
       "local": "Local direct",
       "localDescription": "Uses the current checkout",
       "fixedAfterCreation": "The execution mode is chosen when the task is created."
-    }
+    },
+    "missingFolder": "Folder not found"
   },
   "composer": {
     "fileMentions": "Files",

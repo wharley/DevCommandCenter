@@ -100,7 +100,10 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
     let projects: Vec<Project> = block_on(workspaces.list_repositories())?
         .iter()
         .filter(|repository| !ideas.contains(&repository.root_path))
-        .map(Project::from_repository)
+        .map(|repository| Project {
+            missing: !std::path::Path::new(&repository.root_path).is_dir(),
+            ..Project::from_repository(repository)
+        })
         .collect();
     let mut context_folders: HashMap<String, Vec<String>> = workspaces
         .list_workspace_context_folders()?

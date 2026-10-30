@@ -26,6 +26,8 @@ pub enum NewTaskEvent {
     /// "Abrir outro projeto…" (straight to the folder picker) or
     /// "Selecionar vários projetos…", in the screen's worktree choice.
     OpenProject { multi: bool, worktree: bool },
+    /// The ✕ on a project: "Remover projeto" for this repository id.
+    RemoveProject(String),
 }
 
 pub struct NewTaskView {
@@ -72,6 +74,13 @@ impl NewTaskView {
         cx.notify();
     }
 
+    /// The ✕: the menu closes and the sidebar asks to confirm.
+    pub(crate) fn remove_project(&mut self, project: &Project, cx: &mut Context<Self>) {
+        self.menu_open = false;
+        cx.emit(NewTaskEvent::RemoveProject(project.id.clone()));
+        cx.notify();
+    }
+
     pub(crate) fn projects(&self) -> &[Project] {
         &self.projects
     }
@@ -109,6 +118,10 @@ impl NewTaskView {
 
     /// Starts a task in `project` with the screen's choices.
     pub fn select_project(&mut self, project: &Project, cx: &mut Context<Self>) {
+        // No task starts in a folder that is gone.
+        if project.missing {
+            return;
+        }
         let (worktree, include_linked) = (self.worktree, self.include_linked);
         self.create(project, worktree, include_linked, cx);
     }

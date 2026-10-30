@@ -1794,7 +1794,8 @@
       "local": "Local direto",
       "localDescription": "Usa o checkout atual",
       "fixedAfterCreation": "O modo de execução é definido ao criar a tarefa."
-    }
+    },
+    "missingFolder": "Pasta não encontrada"
   },
   "composer": {
     "fileMentions": "Arquivos",

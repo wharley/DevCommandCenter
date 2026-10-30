@@ -606,6 +606,9 @@ impl Shell {
     ) {
         match event {
             NewTaskEvent::Created(task_id) => self.open_created(task_id.clone(), cx),
+            NewTaskEvent::RemoveProject(id) => self
+                .sidebar
+                .update(cx, |sidebar, cx| sidebar.open_remove_project_by_id(id, cx)),
             NewTaskEvent::OpenProject { multi, worktree } => {
                 // `setGlobalSurface(null)` first, as the desktop.
                 self.show(Surface::Conversation, cx);

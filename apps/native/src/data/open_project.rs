@@ -443,6 +443,7 @@ mod tests {
             project_id: id.into(),
             name: id.into(),
             base_branch: branch.into(),
+            missing: false,
         }
     }
 

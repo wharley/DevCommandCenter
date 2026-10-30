@@ -200,6 +200,9 @@ pub struct Project {
     pub project_id: String,
     pub name: String,
     pub base_branch: String,
+    /// Its folder is gone from disk (deleted or moved in Finder): no task
+    /// starts there, and removing it from DCC is offered.
+    pub missing: bool,
 }
 
 impl Project {
@@ -218,6 +221,7 @@ impl Project {
             project_id: repository.project_id.0.clone(),
             name: repository.name.clone(),
             base_branch: repository.base_branch.clone(),
+            missing: false,
         }
     }
 }

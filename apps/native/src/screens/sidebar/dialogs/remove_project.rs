@@ -47,6 +47,28 @@ impl Sidebar {
         cx.notify();
     }
 
+    /// The ✕ on a project in "Nova tarefa".
+    pub fn open_remove_project_by_id(&mut self, repository_id: &str, cx: &mut Context<Self>) {
+        let project = self
+            .state
+            .data
+            .projects
+            .iter()
+            .find(|project| project.id == repository_id)
+            .cloned();
+        if let Some(project) = project {
+            self.open_remove_project(&project, cx);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn removing_project(&self) -> Option<&str> {
+        match self.dialog.as_ref()? {
+            SidebarDialog::RemoveProject(dialog) => Some(dialog.repository_id.as_str()),
+            _ => None,
+        }
+    }
+
     fn remove_project_dialog(&mut self) -> Option<&mut RemoveProjectDialog> {
         match self.dialog.as_mut()? {
             SidebarDialog::RemoveProject(dialog) => Some(dialog),
