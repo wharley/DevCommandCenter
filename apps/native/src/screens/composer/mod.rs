@@ -30,6 +30,8 @@ mod slash_tests;
 mod strips;
 mod surface;
 #[cfg(test)]
+mod switch_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::HashMap;
@@ -102,6 +104,12 @@ impl ComposerSession {
                 .map(|start| format!("task:{}", start.workspace_id))
         })
     }
+}
+
+/// What the field held when it was sent, and whose it was.
+pub(crate) struct Sent {
+    key: Option<String>,
+    text: String,
 }
 
 /// Something the conversation should do after the composer acted.
@@ -506,6 +514,8 @@ impl Composer {
         } else {
             cx.t("native.sendFailed")
         };
+        let sent = from_field.then(|| self.take_field(cx));
+        let key = self.session.draft_key();
         self.busy = Some(Busy::Sending);
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -532,14 +542,18 @@ impl Composer {
                 match result {
                     Ok(()) => {
                         crate::data::ux_metrics::record("first_prompt");
-                        if from_field {
-                            this.clear_field(cx);
-                        }
                         // The turn is on its way: the stop button shows until
                         // the history says otherwise.
-                        this.session.running = true;
+                        if this.still_on(&key) {
+                            this.session.running = true;
+                        }
                     }
-                    Err(error) => report(error, failure, cx),
+                    Err(error) => {
+                        if let Some(sent) = sent {
+                            this.restore_field(sent, cx);
+                        }
+                        report(error, failure, cx);
+                    }
                 }
                 cx.emit(ComposerEvent::Refresh);
                 cx.notify();
@@ -552,6 +566,43 @@ impl Composer {
     pub fn clear_quick(&mut self, cx: &mut Context<Self>) {
         self.clear_field(cx);
         cx.notify();
+    }
+
+    /// The field and its draft go the moment a prompt is sent
+    /// (`submitComposerDraftOptimistically`), so a task opened before the
+    /// desktop answers neither loses its own draft nor brings the sent
+    /// prompt back.
+    pub(crate) fn take_field(&mut self, cx: &mut Context<Self>) -> Sent {
+        let sent = Sent {
+            key: self.session.draft_key(),
+            text: self.prompt(cx),
+        };
+        self.clear_field(cx);
+        sent
+    }
+
+    /// A send that failed puts its prompt back where it came from: in the
+    /// field when it is still that conversation's and empty, else in that
+    /// conversation's draft when it has none.
+    pub(crate) fn restore_field(&mut self, sent: Sent, cx: &mut Context<Self>) {
+        let Some(key) = sent.key else {
+            return;
+        };
+        if self.session.draft_key().as_ref() == Some(&key) {
+            if self.prompt(cx).trim().is_empty() {
+                let parts = prompt::parts_of(&sent.text);
+                self.input
+                    .update(cx, |input, cx| input.set_parts(parts, cx));
+            }
+        } else if let std::collections::hash_map::Entry::Vacant(draft) = self.drafts.entry(key) {
+            draft.insert(sent.text);
+            drafts::save_later(self.drafts.clone(), cx);
+        }
+    }
+
+    /// Whether the field still belongs to the conversation a send left.
+    pub(crate) fn still_on(&self, key: &Option<String>) -> bool {
+        key.is_some() && self.session.draft_key() == *key
     }
 
     fn clear_field(&mut self, cx: &mut Context<Self>) {

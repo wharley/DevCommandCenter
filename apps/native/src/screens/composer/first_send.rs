@@ -37,6 +37,8 @@ impl Composer {
         };
         let endpoint = self.endpoint.clone();
         let failure = cx.t("native.sendFailed");
+        let sent = from_field.then(|| self.take_field(cx));
+        let key = self.session.draft_key();
         self.busy = Some(Busy::Sending);
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -66,12 +68,16 @@ impl Composer {
                 match result {
                     Ok(_) => {
                         crate::data::ux_metrics::record("first_prompt");
-                        if from_field {
-                            this.clear_field(cx);
+                        if this.still_on(&key) {
+                            this.session.running = true;
                         }
-                        this.session.running = true;
                     }
-                    Err(error) => report(error, failure, cx),
+                    Err(error) => {
+                        if let Some(sent) = sent {
+                            this.restore_field(sent, cx);
+                        }
+                        report(error, failure, cx);
+                    }
                 }
                 cx.emit(ComposerEvent::Refresh);
                 cx.notify();

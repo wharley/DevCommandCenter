@@ -62,6 +62,7 @@ impl Composer {
             FollowUp::Queue => cx.t("composer.followUp.queueFailed"),
             FollowUp::Steer => cx.t("composer.followUp.steerFailed"),
         };
+        let sent = self.take_field(cx);
         self.busy = Some(match kind {
             FollowUp::Queue => Busy::Queueing,
             FollowUp::Steer => Busy::Steering,
@@ -86,12 +87,14 @@ impl Composer {
                 this.busy = None;
                 match result {
                     Ok(fell_back) => {
-                        this.clear_field(cx);
                         if fell_back {
                             Toaster::info(cx.t("composer.followUp.steerQueued"), cx);
                         }
                     }
-                    Err(error) => report(error, failure, cx),
+                    Err(error) => {
+                        this.restore_field(sent, cx);
+                        report(error, failure, cx);
+                    }
                 }
                 cx.emit(ComposerEvent::Refresh);
                 cx.notify();
