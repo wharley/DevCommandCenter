@@ -5,18 +5,20 @@
 //! A chip is one character in the text; on screen it needs its own width.
 //! The text is laid out from a display copy where each chip's character is
 //! replaced by enough narrow no-break spaces (U+202F, which never wrap) to
-//! hold it, and `DisplayMap` turns offsets between the two.
+//! hold it, and `DisplayMap` turns offsets between the two. A link's icon
+//! is held the same way before the link, with no character in the text.
 
 use std::ops::Range;
 
 use gpui::{
-    App, AvailableSpace, Bounds, ElementId, ElementInputHandler, Entity, GlobalElementId, Hsla,
-    LayoutId, PaintQuad, Pixels, SharedString, Size, Style, TextRun, UnderlineStyle, Window,
-    WrappedLine, fill, point, prelude::*, px, relative, size,
+    AnyElement, App, AvailableSpace, Bounds, ElementId, ElementInputHandler, Entity,
+    GlobalElementId, Hsla, LayoutId, PaintQuad, Pixels, SharedString, Size, Style, TextRun,
+    UnderlineStyle, Window, WrappedLine, fill, point, prelude::*, px, relative, size,
 };
 
 use super::buffer::CHIP;
 use super::chip::{self, ChipLayout};
+use super::links;
 use super::{Layout, TextArea};
 use crate::theme::ActiveTheme;
 
@@ -37,19 +39,19 @@ impl TextAreaElement {
 /// Offsets between the text and its display copy.
 #[derive(Clone, Debug, Default)]
 pub struct DisplayMap {
-    /// Each chip: its offset in the text, in the display copy, and its
-    /// length there.
-    chips: Vec<(usize, usize, usize)>,
+    /// Each chip or link icon: its offset and length in the text (none for
+    /// an icon), its offset and length in the display copy.
+    inserts: Vec<(usize, usize, usize, usize)>,
 }
 
 impl DisplayMap {
     pub fn to_display(&self, offset: usize) -> usize {
         let mut shift: isize = 0;
-        for &(text, display, len) in &self.chips {
+        for &(text, text_len, display, len) in &self.inserts {
             if offset <= text {
                 break;
             }
-            shift = (display + len) as isize - (text + CHIP.len_utf8()) as isize;
+            shift = (display + len) as isize - (text + text_len) as isize;
         }
         (offset as isize + shift).max(0) as usize
     }
@@ -57,7 +59,7 @@ impl DisplayMap {
     /// The text offset for a display offset; inside a chip, its nearer edge.
     pub fn to_text(&self, offset: usize) -> usize {
         let mut shift: isize = 0;
-        for &(text, display, len) in &self.chips {
+        for &(text, text_len, display, len) in &self.inserts {
             if offset <= display {
                 break;
             }
@@ -65,10 +67,10 @@ impl DisplayMap {
                 return if offset - display < len / 2 {
                     text
                 } else {
-                    text + CHIP.len_utf8()
+                    text + text_len
                 };
             }
-            shift = (display + len) as isize - (text + CHIP.len_utf8()) as isize;
+            shift = (display + len) as isize - (text + text_len) as isize;
         }
         (offset as isize - shift).max(0) as usize
     }
@@ -83,6 +85,8 @@ pub struct LayoutState {
 
 pub struct PrepaintState {
     lines: Vec<(usize, WrappedLine, Pixels)>,
+    /// Each link's icon, laid out before it.
+    icons: Vec<AnyElement>,
     selections: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     content_height: Pixels,
@@ -151,17 +155,33 @@ fn display(
     let mut map = DisplayMap::default();
     let mut chips = Vec::new();
     let mut previous = 0;
-    for (offset, data) in area.buffer.chip_offsets() {
+    // Chips and link icons in text order; an icon has no character.
+    let mut inserts: Vec<(usize, Option<&chip::Chip>)> = area
+        .buffer
+        .chip_offsets()
+        .map(|(offset, data)| (offset, Some(data)))
+        .chain(area.links.iter().map(|(link, _)| (link.range.start, None)))
+        .collect();
+    inserts.sort_by_key(|(offset, _)| *offset);
+    for (offset, data) in inserts {
         out.push_str(&text[previous..offset]);
-        let laid = chip::layout(data, window, cx);
-        let count = ((f32::from(laid.width) / f32::from(spacer)).ceil() as usize).max(1);
+        let (width, text_len) = match data {
+            Some(data) => {
+                let laid = chip::layout(data, window, cx);
+                let width = laid.width;
+                chips.push((offset, data.clone(), laid));
+                (width, CHIP.len_utf8())
+            }
+            None => (px(links::ICON + links::GAP + 2.0), 0),
+        };
+        let count = ((f32::from(width) / f32::from(spacer)).ceil() as usize).max(1);
         let display = out.len();
         for _ in 0..count {
             out.push(SPACER);
         }
-        map.chips.push((offset, display, count * SPACER.len_utf8()));
-        chips.push((offset, data.clone(), laid));
-        previous = offset + CHIP.len_utf8();
+        map.inserts
+            .push((offset, text_len, display, count * SPACER.len_utf8()));
+        previous = offset + text_len;
     }
     out.push_str(&text[previous..]);
     let run = TextRun {
@@ -189,6 +209,14 @@ fn display(
                 }),
         );
     }
+    for (link, _) in &area.links {
+        spans.push(Span {
+            // The fill takes the icon in, like `.composer-link::before`.
+            range: map.to_display(link.range.start)..map.to_display(link.range.end),
+            color: accents.link,
+            background: Some(accents.link.opacity(0.09)),
+        });
+    }
     if let Some(command) = area.command.clone().filter(|range| range.end <= text.len()) {
         spans.push(Span {
             range: map.to_display(command.start)..map.to_display(command.end),
@@ -205,10 +233,11 @@ fn display(
     }
 }
 
-/// Colors over the text: list markers, a recognized `/command`.
+/// Colors over the text: list markers, a recognized `/command`, links.
 pub(super) struct Accents {
     pub marker: Hsla,
     pub command: Hsla,
+    pub link: Hsla,
 }
 
 struct Span {
@@ -348,6 +377,7 @@ impl Element for TextAreaElement {
                     crate::theme::Appearance::Dark => crate::theme::tailwind::EMERALD_300.hsla(),
                     crate::theme::Appearance::Light => crate::theme::tailwind::EMERALD_700.hsla(),
                 },
+                link: links::color(cx),
             },
             window,
             cx,
@@ -441,6 +471,21 @@ impl Element for TextAreaElement {
                 None,
             )
         };
+        let favicons: Vec<_> = area
+            .links
+            .iter()
+            .map(|(link, favicon)| (link.range.start, favicon.clone()))
+            .collect();
+        let icons = favicons
+            .into_iter()
+            .map(|(start, favicon)| {
+                let mut icon = links::icon(favicon, cx);
+                let at = layout.position_for(start);
+                let at = point(origin.x + at.x, origin.y + at.y - scroll);
+                links::prepaint_icon(&mut icon, at, line_height, window, cx);
+                icon
+            })
+            .collect();
         let Layout { lines, .. } = layout;
         self.area.update(cx, |area, _| {
             area.scroll_y = scroll;
@@ -448,6 +493,7 @@ impl Element for TextAreaElement {
         });
         PrepaintState {
             lines,
+            icons,
             selections,
             cursor,
             content_height,
@@ -494,6 +540,9 @@ impl Element for TextAreaElement {
                 let origin = point(bounds.left(), bounds.top() + *top - scroll);
                 let _ = line.paint(origin, line_height, gpui::TextAlign::Left, None, window, cx);
             }
+            for icon in &mut prepaint.icons {
+                icon.paint(window, cx);
+            }
             for (offset, data, laid) in &state.chips {
                 let at = layout.position_for(*offset);
                 let origin = point(bounds.left() + at.x, bounds.top() + at.y - scroll);
@@ -519,7 +568,7 @@ mod tests {
     fn offsets_cross_chips_both_ways() {
         // "a" CHIP "b": the chip holds 4 spacers (12 bytes) on screen.
         let map = DisplayMap {
-            chips: vec![(1, 1, 12)],
+            inserts: vec![(1, CHIP.len_utf8(), 1, 12)],
         };
         assert_eq!(map.to_display(0), 0);
         assert_eq!(map.to_display(1), 1);
@@ -529,5 +578,26 @@ mod tests {
         assert_eq!(map.to_text(3), 1, "the chip's left half snaps before it");
         assert_eq!(map.to_text(10), 4, "its right half after it");
         assert_eq!(map.to_text(14), 5);
+    }
+
+    #[test]
+    fn a_link_icon_holds_room_without_a_character() {
+        // "ab" then a link at 2 whose icon holds 6 bytes on screen.
+        let map = DisplayMap {
+            inserts: vec![(2, 0, 2, 6)],
+        };
+        assert_eq!(
+            map.to_display(2),
+            2,
+            "the caret at the link's start is before the icon"
+        );
+        assert_eq!(map.to_display(3), 9);
+        assert_eq!(map.to_text(4), 2);
+        assert_eq!(
+            map.to_text(7),
+            2,
+            "both halves of the icon are the link's start"
+        );
+        assert_eq!(map.to_text(9), 3);
     }
 }

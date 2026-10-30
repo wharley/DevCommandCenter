@@ -1,7 +1,8 @@
-//! People's pictures from the forge (`avatarUrl`), fetched once per address
-//! with the system's `curl` (the app has no HTTP client of its own) and kept
-//! for the session. Until one arrives, or when it fails, the views draw the
-//! initials, as the desktop does on an image error.
+//! People's pictures from the forge (`avatarUrl`) and the composer's link
+//! favicons, fetched once per address with the system's `curl` (the app has
+//! no HTTP client of its own) and kept for the session. Until one arrives,
+//! or when it fails, the views draw the initials (or a globe), as the
+//! desktop does on an image error.
 
 use std::collections::HashMap;
 use std::sync::Arc;

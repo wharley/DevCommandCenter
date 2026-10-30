@@ -9,12 +9,14 @@ mod element;
 mod handler;
 #[cfg(test)]
 mod keys_tests;
+mod links;
 mod lists;
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, EventEmitter, FocusHandle, Focusable,
+    App, Bounds, ClipboardItem, Context, CursorStyle, EventEmitter, FocusHandle, Focusable, Image,
     KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
     ScrollWheelEvent, SharedString, Subscription, Window, WrappedLine, actions, div, point,
     prelude::*, px,
@@ -232,8 +234,10 @@ pub struct TextArea {
     placeholder: SharedString,
     max_height: Option<Pixels>,
     disabled: bool,
-    /// Writes Markdown lists and emphasis (the composer's).
+    /// Writes Markdown lists and emphasis and marks links (the composer's).
     lists: bool,
+    /// The links in the text and their favicons, found at each render.
+    links: Vec<(links::Link, Option<Arc<Image>>)>,
     /// A leading `/command` the provider runs, drawn as recognized.
     command: Option<Range<usize>>,
     pub(crate) layout: Option<Layout>,
@@ -262,6 +266,7 @@ impl TextArea {
             max_height: None,
             disabled: false,
             lists: false,
+            links: Vec::new(),
             command: None,
             layout: None,
             scroll_y: px(0.0),
@@ -284,7 +289,7 @@ impl TextArea {
     }
 
     /// Writes Markdown lists and emphasis: Enter continues a list, ⌘Enter
-    /// sends, Tab / Shift+Tab nest, ⌘B / ⌘I.
+    /// sends, Tab / Shift+Tab nest, ⌘B / ⌘I. Links are marked too.
     pub fn with_lists(mut self) -> Self {
         self.lists = true;
         self
@@ -729,6 +734,15 @@ impl TextArea {
             return;
         }
         let offset = self.offset_at(event.position);
+        if event.modifiers.platform
+            && let Some((link, _)) = self
+                .links
+                .iter()
+                .find(|(link, _)| link.range.start <= offset && offset < link.range.end)
+        {
+            cx.open_url(&link.url);
+            return;
+        }
         self.goal_x = None;
         if event.modifiers.shift {
             self.buffer.select_to(offset);
@@ -790,6 +804,16 @@ impl Focusable for TextArea {
 
 impl Render for TextArea {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.lists {
+            self.links = links::find(self.buffer.text())
+                .into_iter()
+                .map(|link| {
+                    let favicon = links::favicon_source(&link.url)
+                        .and_then(|source| crate::data::avatar::avatar(Some(&source), cx));
+                    (link, favicon)
+                })
+                .collect();
+        }
         div()
             .id("text-area")
             .flex()
