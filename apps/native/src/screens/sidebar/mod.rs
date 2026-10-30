@@ -20,6 +20,8 @@ pub use labels::reason_label;
 mod list;
 mod meta_chips;
 mod navigation;
+#[cfg(test)]
+mod open_tests;
 mod project_menu;
 mod repo_picker;
 mod row;
@@ -346,6 +348,10 @@ impl Sidebar {
 
     fn apply(&mut self, data: SidebarData, cx: &mut Context<Self>) {
         if data == self.state.data {
+            // A task already listed by the loop's previous read still opens.
+            if self.pending_open.is_some() {
+                self.open_listed(cx);
+            }
             return;
         }
         self.state.data = data;
@@ -390,6 +396,10 @@ impl Sidebar {
     /// desktop just created).
     pub fn open_when_listed(&mut self, task_id: String, cx: &mut Context<Self>) {
         self.pending_open = Some(task_id);
+        // The periodic read may have listed it before the desktop answered.
+        if self.opened_first {
+            self.open_listed(cx);
+        }
         self._refresh = Self::refresh_loop(cx);
     }
 
