@@ -19,6 +19,11 @@ use serde_json::{Value, json};
 const DEFAULT_PORT: u16 = 9876;
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(800);
 const IO_TIMEOUT: Duration = Duration::from_secs(20);
+/// Commits and pushes run the repository's hooks (`lint-staged`, a lint on
+/// pre-push), which outlast `IO_TIMEOUT`; the desktop bounds its own git
+/// calls, so the app waits for its answer instead of reporting a failure
+/// while the push goes on.
+const DELIVERY_WAIT: Duration = Duration::from_secs(300);
 
 /// The changes list's git actions (`workspaceGitStageFile`…), run by the
 /// desktop so they wait for an agent's edit to the same checkout.
@@ -607,12 +612,14 @@ impl DesktopApi {
 
     /// One of the task's delivery actions (`workspace_delivery`), by its id.
     fn delivery(&self, workspace_id: &str, action: &str, body: &Value) -> Result<Value, ApiError> {
-        self.post(
+        self.request_waiting(
+            "POST",
             &format!(
                 "/api/v1/workspaces/{}/delivery/{action}",
                 encode(workspace_id)
             ),
-            body,
+            Some(body),
+            DELIVERY_WAIT,
         )
     }
 
@@ -1063,14 +1070,16 @@ impl DesktopApi {
         action: &str,
         login: Option<&str>,
     ) -> Result<crate::data::forge::Recovered, ApiError> {
-        Self::decoded(self.post(
+        Self::decoded(self.request_waiting(
+            "POST",
             "/api/v1/git/delivery-recovery",
-            &json!({
+            Some(&json!({
                 "workspaceRoot": root,
                 "attemptToken": attempt_token,
                 "action": action,
                 "forgeLogin": login,
-            }),
+            })),
+            DELIVERY_WAIT,
         )?)
     }
 
