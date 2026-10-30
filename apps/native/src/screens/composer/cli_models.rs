@@ -55,12 +55,14 @@ impl Composer {
                         .enable_all()
                         .build()
                         .ok()?;
-                    Some(runtime.block_on(futures::future::join_all(asks.into_iter().map(
-                        |(id, listing)| async move {
-                            let models = model_discovery::discover(&id, Some(&listing)).await;
-                            (id, models)
-                        },
-                    ))))
+                    Some(
+                        runtime.block_on(futures::future::join_all(asks.into_iter().map(
+                            |(id, listing)| async move {
+                                let models = model_discovery::discover(&id, Some(&listing)).await;
+                                (id, models)
+                            },
+                        ))),
+                    )
                 })
                 .await;
             let Some(answers) = answers else {

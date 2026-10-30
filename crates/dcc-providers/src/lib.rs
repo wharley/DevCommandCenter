@@ -27,6 +27,7 @@ mod grok_goal;
 mod grok_mcp;
 pub mod headless_cli;
 mod cli_model_lists;
+pub mod cli_updates;
 pub mod model_discovery;
 #[cfg(all(test, unix))]
 mod test_cli;

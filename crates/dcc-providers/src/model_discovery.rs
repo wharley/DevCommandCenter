@@ -79,6 +79,15 @@ pub async fn discover(
     read
 }
 
+/// Drops every list read from this provider's CLI (it was just updated).
+pub fn forget(provider_id: &str) {
+    if let Ok(mut cache) = CACHE.lock() {
+        if let Some(cache) = cache.as_mut() {
+            cache.retain(|key, _| key.0 != provider_id);
+        }
+    }
+}
+
 /// Whether the CLI offers this model to this account (a model DCC's own
 /// catalog does not know yet).
 pub async fn offers(

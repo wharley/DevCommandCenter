@@ -1,4 +1,16 @@
 {
+  "cliUpdates": {
+    "title_one": "Atualização do agente disponível",
+    "title_other": "Atualizações dos agentes disponíveis",
+    "updateAll": "Atualizar tudo",
+    "update": "Atualizar",
+    "updating": "Atualizando",
+    "retry": "Tentar de novo",
+    "updated": "Atualizado para {{version}}",
+    "manual": "Atualize pelo terminal",
+    "hint": "Modelos novos costumam pedir a versão mais nova.",
+    "hintUpdated": "As próximas conversas já usam a versão nova, e o seletor lê os modelos dela."
+  },
   "localBranch": {
     "choose": "Escolher branch",
     "locked": "A branch não pode ser alterada após o início da conversa.",

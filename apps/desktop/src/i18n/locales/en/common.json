@@ -1,4 +1,16 @@
 {
+  "cliUpdates": {
+    "title_one": "Agent update available",
+    "title_other": "Agent updates available",
+    "updateAll": "Update all",
+    "update": "Update",
+    "updating": "Updating",
+    "retry": "Retry",
+    "updated": "Updated to {{version}}",
+    "manual": "Update it from the terminal",
+    "hint": "New models often need the latest version.",
+    "hintUpdated": "New conversations use the new version, and the picker reads its models."
+  },
   "localBranch": {
     "choose": "Choose branch",
     "locked": "The branch cannot be changed after the conversation has started.",

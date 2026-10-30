@@ -7,6 +7,7 @@ mod bootstrap;
 mod browser;
 mod browser_opens;
 mod cached;
+mod cli_updates;
 mod computer;
 mod delivery;
 mod editor;
@@ -160,6 +161,8 @@ pub struct Shell {
     browser: browser::BrowserState,
     /// The agents' requests to open it, and the card asking for them.
     browser_approvals: Entity<crate::screens::browser::approval::BrowserApprovals>,
+    /// "Atualização dos agentes", top right while a CLI has a newer release.
+    cli_updates: Entity<cli_updates::CliUpdates>,
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
@@ -300,6 +303,7 @@ impl Shell {
         });
         Self {
             onboarding: None,
+            cli_updates: cx.new(cli_updates::CliUpdates::new),
             notes,
             _notes: notes_follow,
             delivery,
@@ -909,6 +913,7 @@ impl Render for Shell {
             .child(self.browser_approvals.clone())
             .child(self.computer_approvals.clone())
             .children(self.onboarding_overlay())
+            .child(self.cli_updates.clone())
             .children(Toaster::handle(cx))
     }
 }

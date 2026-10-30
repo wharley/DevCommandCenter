@@ -114,7 +114,7 @@ fn claude_sidecar_command(
     ))
 }
 
-fn claude_command_path(existing: &str, home: Option<&str>, augmented: &str) -> String {
+pub(crate) fn claude_command_path(existing: &str, home: Option<&str>, augmented: &str) -> String {
     let mut paths = vec![existing.to_string()];
     // Preserve the user's PATH choice. GUI launches may only inherit system
     // paths, so try the native install before legacy Node-version directories.
