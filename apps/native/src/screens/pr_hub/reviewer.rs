@@ -11,22 +11,27 @@ use gpui::{AnyElement, AppContext, Context, Entity, Subscription, div, prelude::
 use super::PrHub;
 use super::code::Tab;
 use crate::agent::{OfferEvent, OfferThought};
+use crate::data::account_selection;
 use crate::data::agents::AgentRecord;
 use crate::data::composer_settings::clamp_effort;
 use crate::data::pr_review::AgentRun;
 use crate::data::pr_review_jobs::PrReviewJobs;
+use crate::data::pr_review_pick::ReviewPick;
 use crate::i18n::Translate;
 
 /// The offer shown for a pull request.
 pub(crate) type Offer = (String, Entity<OfferThought>, Subscription);
 
-/// What the reviewer runs on (`reviewProvider`, `reviewModel`).
+/// What the reviewer runs on (`reviewProvider`, `reviewModel`), with the
+/// panel's effort and account.
 #[derive(Clone, Debug)]
 pub(crate) struct ReviewTarget {
     pub provider: ProviderDescriptor,
     pub model: Option<ProviderModelDescriptor>,
-    /// The reviewer has its own provider: its model and effort win.
-    pub own: bool,
+    /// One of the model's levels; none when it has none.
+    pub effort: Option<String>,
+    /// `None`: the system login.
+    pub account: Option<String>,
 }
 
 /// What the reviewer reads from outside the hub.
@@ -65,56 +70,60 @@ impl PrHub {
             .collect()
     }
 
-    /// The provider and model chosen for a review: the panel's, else the composer's.
-    fn chosen(&self) -> (Option<String>, Option<String>) {
-        self.review_pick
-            .clone()
-            .map(|(provider, model)| (Some(provider), model))
-            .unwrap_or_else(|| self.sources.pick.clone())
-    }
-
-    /// The reviewer's own provider when it can review, else the chosen one,
-    /// else the first that can.
+    /// The panel's pick, else the reviewer's own provider, else the
+    /// composer's, else the first that can review.
     pub(crate) fn review_target(&self) -> Option<ReviewTarget> {
         let providers = self.review_providers();
         let reviewer = self.sources.reviewer.as_ref();
-        let own = providers
-            .iter()
-            .find(|provider| {
-                Some(provider.id.0.as_str()) == reviewer.and_then(|r| r.provider_id.as_deref())
-            })
-            .copied();
-        let (chosen_provider, chosen_model) = self.chosen();
-        let provider = own
-            .or_else(|| {
-                providers
-                    .iter()
-                    .find(|provider| Some(provider.id.0.as_str()) == chosen_provider.as_deref())
-                    .copied()
-            })
-            .or_else(|| providers.first().copied())?;
-        let model = if own.is_some() {
-            provider
-                .models
+        let (composer_provider, composer_model) = self.sources.pick.clone();
+        let find = |id: Option<&str>| {
+            providers
                 .iter()
-                .find(|model| Some(model.id.as_str()) == reviewer.and_then(|r| r.model.as_deref()))
-                .or_else(|| provider.models.iter().find(|model| model.recommended))
-                .or_else(|| provider.models.first())
-        } else {
-            provider
-                .models
-                .iter()
-                .find(|model| Some(model.id.as_str()) == chosen_model.as_deref())
-                .or_else(|| provider.models.first())
+                .find(|provider| Some(provider.id.0.as_str()) == id)
+                .copied()
         };
+        let provider = find(self.review_pick.provider_id.as_deref())
+            .or_else(|| find(reviewer.and_then(|r| r.provider_id.as_deref())))
+            .or_else(|| find(composer_provider.as_deref()))
+            .or_else(|| providers.first().copied())?;
+        let id = provider.id.0.as_str();
+        let picked = self.review_pick.on(id);
+        let own = reviewer.filter(|r| r.provider_id.as_deref() == Some(id));
+        let wanted = picked
+            .and_then(|pick| pick.model.as_deref())
+            .or_else(|| own.and_then(|r| r.model.as_deref()))
+            .or_else(|| {
+                (composer_provider.as_deref() == Some(id))
+                    .then_some(composer_model.as_deref())
+                    .flatten()
+            });
+        let model = provider
+            .models
+            .iter()
+            .find(|model| Some(model.id.as_str()) == wanted)
+            .or_else(|| provider.models.iter().find(|model| model.recommended))
+            .or_else(|| provider.models.first());
+        let effort = picked
+            .and_then(|pick| pick.effort.as_deref())
+            .or_else(|| own.and_then(|r| r.effort.as_deref()))
+            .and_then(|effort| {
+                let levels = &model?.effort_levels;
+                (!levels.is_empty()).then(|| clamp_effort(effort, levels))
+            });
+        let account = provider
+            .capabilities
+            .supports_accounts
+            .then(|| self.review_account(id, picked.and_then(|pick| pick.account.as_deref())))
+            .flatten();
         Some(ReviewTarget {
             provider: provider.clone(),
             model: model.cloned(),
-            own: own.is_some(),
+            effort,
+            account,
         })
     }
 
-    /// `runAgent`'s input; the reviewer's effort only on its own provider.
+    /// `runAgent`'s input; the effort only on the whole review.
     pub(crate) fn agent_run(
         &self,
         root: &str,
@@ -124,28 +133,53 @@ impl PrHub {
         let target = self.review_target()?;
         let provider_id = target.provider.id.0.clone();
         let reviewer = self.sources.reviewer.as_ref();
-        let effort = (as_reviewer && target.own)
-            .then(|| {
-                let effort = reviewer?.effort.as_deref()?;
-                let levels = &target.model.as_ref()?.effort_levels;
-                (!levels.is_empty()).then(|| clamp_effort(effort, levels))
-            })
-            .flatten();
-        let composer_provider = self.chosen().0;
+        let provider_runtime = (!cfg!(test))
+            .then(|| crate::data::provider_runtime::for_provider(&provider_id))
+            .flatten()
+            .map(|mut runtime| {
+                if target.provider.capabilities.supports_accounts {
+                    runtime.account_id = target.account.clone();
+                }
+                runtime
+            });
         Some(AgentRun {
             working_directory: root.to_string(),
-            provider_runtime: (composer_provider.as_deref() == Some(provider_id.as_str())
-                && !cfg!(test))
-            .then(|| crate::data::provider_runtime::for_provider(&provider_id))
-            .flatten(),
+            provider_runtime,
             provider_id,
             model: target.model.map(|model| model.id),
             prompt,
             agent_id: as_reviewer
                 .then(|| reviewer.map(|r| r.id.clone()))
                 .flatten(),
-            effort,
+            effort: target.effort.filter(|_| as_reviewer),
         })
+    }
+
+    /// The account a review runs as: the panel's (`""` the system login),
+    /// else the pick for new conversations; one that is gone is the system login.
+    fn review_account(&self, provider_id: &str, picked: Option<&str>) -> Option<String> {
+        let known = account_selection::known();
+        let Some(picked) = picked else {
+            return account_selection::resolve(
+                provider_id,
+                None,
+                &self.account_picks,
+                known.as_deref(),
+            );
+        };
+        let exists = known.as_deref().is_none_or(|accounts| {
+            accounts
+                .iter()
+                .any(|account| account.id == picked && account.provider_id.0 == provider_id)
+        });
+        (!picked.is_empty() && exists).then(|| picked.to_string())
+    }
+
+    /// The panel's pick, kept for the next reviews.
+    pub(crate) fn set_review_pick(&mut self, pick: ReviewPick, cx: &mut Context<Self>) {
+        crate::data::pr_review_pick::save(&pick);
+        self.review_pick = pick;
+        cx.notify();
     }
 
     /// `showReviewOffer`: waiting for the person's review, not answered, no

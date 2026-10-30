@@ -1,6 +1,5 @@
-//! The reviewer over the code tab: its panel (who reviews, on what — the
-//! reviewer's own provider, or a menu of the providers that can review —,
-//! Cancelar, "Gerar rascunhos", the guidance), the strip while it reads the
+//! The reviewer over the code tab: its panel (who reviews, on what — see
+//! `runs_on` —, Cancelar, "Gerar rascunhos", the guidance), the strip while it reads the
 //! pull request, the one with what it left, and its button in the review's
 //! foot.
 
@@ -12,9 +11,7 @@ use crate::i18n::{Args, Translate};
 use crate::screens::pr_hub::PrHub;
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
-use crate::ui::{
-    Button, ButtonSize, ButtonVariant, Icon, Menu, MenuEntry, MenuItem, Tooltip, spinner,
-};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip, spinner};
 
 impl PrHub {
     fn reviewer_name(&self) -> Option<String> {
@@ -22,98 +19,6 @@ impl PrHub {
             .reviewer
             .as_ref()
             .map(|reviewer| reviewer.name.clone())
-    }
-
-    /// "Provedor · Modelo" for the reviewer's own provider; else the menu.
-    fn review_runs_on(&self, busy: bool, cx: &mut Context<Self>) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        let target = self.review_target();
-        let label = target
-            .as_ref()
-            .map(|target| {
-                [
-                    Some(target.provider.label.clone()),
-                    target.model.as_ref().map(|model| model.label.clone()),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · ")
-            })
-            .unwrap_or_default();
-        if target.as_ref().is_some_and(|target| target.own) {
-            return div()
-                .rounded(px(6.0))
-                .bg(colors.background.opacity(0.7))
-                .px(px(8.0))
-                .py(px(4.0))
-                .text_size(px(11.0))
-                .text_color(colors.muted_foreground)
-                .child(label)
-                .into_any_element();
-        }
-        let providers: Vec<_> = self.review_providers().into_iter().cloned().collect();
-        let chosen = target.map(|target| {
-            (
-                target.provider.id.0.clone(),
-                target.model.map(|model| model.id),
-            )
-        });
-        let this = cx.entity().downgrade();
-        let trigger_colors = colors.clone();
-        Menu::dropdown(
-            "pr-review-provider",
-            move |_| {
-                div()
-                    .debug_selector(|| "pr-review-provider".into())
-                    .flex()
-                    .h(px(24.0))
-                    .items_center()
-                    .gap(px(4.0))
-                    .rounded(px(6.0))
-                    .px(px(8.0))
-                    .text_size(px(11.0))
-                    .text_color(trigger_colors.muted_foreground)
-                    .cursor_pointer()
-                    .hover(|trigger| trigger.bg(trigger_colors.accent))
-                    .when(busy, |trigger| trigger.opacity(0.5))
-                    .child(label.clone())
-                    .child(Icon::new("chevron-down").size(12.0))
-                    .into_any_element()
-            },
-            move |_, _| {
-                providers
-                    .iter()
-                    .map(|provider| {
-                        let entries = provider
-                            .models
-                            .iter()
-                            .map(|model| {
-                                let (provider_id, model_id) =
-                                    (provider.id.0.clone(), model.id.clone());
-                                let current = chosen.as_ref()
-                                    == Some(&(provider_id.clone(), Some(model_id.clone())));
-                                let this = this.clone();
-                                let item = MenuItem::new(model.label.clone(), move |_, cx| {
-                                    let pick = (provider_id.clone(), Some(model_id.clone()));
-                                    let _ = this.update(cx, |hub, cx| {
-                                        hub.review_pick = Some(pick);
-                                        cx.notify();
-                                    });
-                                });
-                                MenuEntry::Item(if current { item.trailing("✓") } else { item })
-                            })
-                            .collect();
-                        MenuEntry::Submenu {
-                            label: provider.label.clone().into(),
-                            icon: None,
-                            entries,
-                        }
-                    })
-                    .collect()
-            },
-        )
-        .into_any_element()
     }
 
     /// The panel, else the strip while it reviews, else what it left.
@@ -163,6 +68,8 @@ impl PrHub {
                     "pullRequests.code.agentReviewing",
                     &Args::default().with("agent", name.clone()),
                 )
+            } else if self.follows_up(cx) {
+                cx.t("pullRequests.code.agentFollowUpHint")
             } else {
                 cx.t("pullRequests.code.agentReviewHint")
             };

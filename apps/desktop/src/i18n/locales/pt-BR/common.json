@@ -914,6 +914,7 @@
       "reviewWithAgent": "Revisar com agente",
       "agentReviewTitle": "Revisão efêmera com agente",
       "agentReviewHint": "O agente apenas lê o PR e cria rascunhos. Nada é publicado ou vira tarefa.",
+      "agentFollowUpHint": "Acompanhamento: ele confere o que você já comentou e só aponta o que bloqueia. Nada é publicado.",
       "agentInstructionPlaceholder": "Orientação opcional: foque em segurança, regressões, testes…",
       "generateDrafts": "Gerar rascunhos",
       "noReviewProvider": "Nenhum provider configurado suporta revisão somente leitura.",

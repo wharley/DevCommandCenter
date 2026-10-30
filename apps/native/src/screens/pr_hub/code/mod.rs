@@ -10,6 +10,7 @@ mod agent_tests;
 mod footer;
 mod panel;
 mod rows;
+mod runs_on;
 #[cfg(test)]
 mod tests;
 mod thread;

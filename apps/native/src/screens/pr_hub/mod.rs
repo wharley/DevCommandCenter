@@ -67,8 +67,10 @@ pub struct PrHub {
     pub(crate) review: code::CodeReview,
     /// The reviewer, the providers and the composer's pick, from the shell.
     pub(crate) sources: reviewer::ReviewerSources,
-    /// The provider and model picked in the reviewer's panel.
-    pub(crate) review_pick: Option<(String, Option<String>)>,
+    /// What the reviewer's panel picked to run reviews on.
+    pub(crate) review_pick: crate::data::pr_review_pick::ReviewPick,
+    /// The accounts picked for new conversations, read as the panel opens.
+    pub(crate) account_picks: crate::data::account_selection::Selection,
     pub(crate) offer: Option<reviewer::Offer>,
     /// The pull request whose accepted offer starts the review.
     pub(crate) auto_start_for: Option<String>,
@@ -134,7 +136,8 @@ impl PrHub {
             code_detail: None,
             review,
             sources: reviewer::ReviewerSources::default(),
-            review_pick: None,
+            review_pick: crate::data::pr_review_pick::load(),
+            account_picks: crate::data::account_selection::load(),
             offer: None,
             auto_start_for: None,
             requested: None,

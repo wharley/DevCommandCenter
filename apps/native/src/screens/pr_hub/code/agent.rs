@@ -8,6 +8,7 @@ use crate::data::pr_review::{InlineComment, PatchRow};
 use crate::data::pr_review_agent::{
     inline_prompt, parse_reply, parse_review, review_prompt, thread_reply_prompt,
 };
+use crate::data::pr_review_follow_up::drop_repeats;
 use crate::data::pr_review_jobs::{JobStatus, PrReviewJob, PrReviewJobs};
 use crate::i18n::Translate;
 use crate::screens::pr_hub::{PrHub, message};
@@ -31,12 +32,44 @@ impl PrHub {
     pub(crate) fn toggle_agent_panel(&mut self, cx: &mut Context<Self>) {
         self.review.agent_panel_open = !self.review.agent_panel_open;
         self.review.agent_error = None;
+        if self.review.agent_panel_open {
+            self.account_picks = crate::data::account_selection::load();
+            self.read_accounts(cx);
+        }
         cx.notify();
+    }
+
+    /// The accounts its menu offers (they may have changed in Settings).
+    fn read_accounts(&mut self, cx: &mut Context<Self>) {
+        let Some(api) = self.api.clone() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let read = cx
+                .background_executor()
+                .spawn(async move { api.provider_accounts() })
+                .await;
+            if read.is_ok() {
+                let _ = this.update(cx, |_, cx| cx.notify());
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn close_agent_panel(&mut self, cx: &mut Context<Self>) {
         self.review.agent_panel_open = false;
         cx.notify();
+    }
+
+    /// The person reviewed this pull request before: the next review follows up.
+    pub(crate) fn follows_up(&self, cx: &gpui::App) -> bool {
+        let Some(item) = self.selected_item(cx) else {
+            return false;
+        };
+        let (Some(login), Some(Ok(detail))) = (item.forge_login, self.code_read(&item.id)) else {
+            return false;
+        };
+        !crate::data::pr_review_follow_up::earlier_threads(detail, &login).is_empty()
     }
 
     fn instruction(&self, cx: &gpui::App) -> String {
@@ -125,8 +158,12 @@ impl PrHub {
             cx.notify();
             return;
         }
+        let login = self.selected_item(cx).and_then(|item| item.forge_login);
         match parse_review(job.response.as_deref().unwrap_or(""), &detail) {
-            Ok(review) => {
+            Ok(mut review) => {
+                if let Some(login) = login {
+                    drop_repeats(&mut review, &detail, &login);
+                }
                 self.review.agent_result = Some(review.comments.len());
                 if let Some(file) = detail.files.iter().find(|file| {
                     review

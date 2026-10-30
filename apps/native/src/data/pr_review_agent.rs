@@ -86,10 +86,16 @@ fn pull_request_context(item: &Item, detail: &Detail) -> String {
     )
 }
 
-/// `buildReviewAgentPrompt`
+/// `buildReviewAgentPrompt`; a follow-up when the person reviewed before.
 pub fn review_prompt(item: &Item, detail: &Detail, instruction: &str) -> String {
+    let follow_up = item
+        .forge_login
+        .as_deref()
+        .and_then(|login| super::pr_review_follow_up::section(detail, login))
+        .map(|section| format!("\n\n{section}"))
+        .unwrap_or_default();
     format!(
-        "{}\n\nReview this pull request for correctness, regressions, security, data loss, concurrency, and missing tests. Focus only on actionable findings introduced by the diff. {}\n\nReturn JSON only with this exact shape:\n{{\"summary\":\"editable review summary\",\"comments\":[{{\"path\":\"exact changed file path\",\"line\":123,\"side\":\"right\",\"body\":\"concise actionable finding\"}}]}}\n\nUse only lines visible in the supplied patches. If there are no findings, return an empty comments array. Do not publish or modify anything.",
+        "{}\n\nReview this pull request for correctness, regressions, security, data loss, concurrency, and missing tests. Focus only on actionable findings introduced by the diff. {}{follow_up}\n\nReturn JSON only with this exact shape:\n{{\"summary\":\"editable review summary\",\"comments\":[{{\"path\":\"exact changed file path\",\"line\":123,\"side\":\"right\",\"body\":\"concise actionable finding\"}}]}}\n\nUse only lines visible in the supplied patches. If there are no findings, return an empty comments array. Do not publish or modify anything.",
         pull_request_context(item, detail),
         instruction_text(instruction),
     )
@@ -311,5 +317,28 @@ mod tests {
         assert!(inline.ends_with("Do not publish or modify anything."));
         let long = bounded("é".repeat(10), 4);
         assert_eq!(long, "éééé\n…[truncated]");
+    }
+
+    #[test]
+    fn a_second_review_follows_up_on_the_persons_threads() {
+        let mut detail = detail();
+        detail.inline_comments = vec![InlineComment {
+            id: "c1".into(),
+            path: "src/a.rs".into(),
+            line: Some(2),
+            body: "Falta teste".into(),
+            author: Some(crate::data::pr_hub::Actor {
+                login: "wharley".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }];
+        let mut item = Item::default();
+        assert!(!review_prompt(&item, &detail, "").contains("follow-up round"));
+        item.forge_login = Some("wharley".into());
+        let prompt = review_prompt(&item, &detail, "");
+        assert!(prompt.contains("### src/a.rs:2 (open)\n@wharley: Falta teste"));
+        assert!(prompt.contains("follow-up round"));
+        assert!(prompt.ends_with("Do not publish or modify anything."));
     }
 }

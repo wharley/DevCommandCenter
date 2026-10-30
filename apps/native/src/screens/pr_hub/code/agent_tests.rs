@@ -228,9 +228,62 @@ fn the_reviewer_sits_out_without_a_read_only_provider(cx: &mut TestAppContext) {
         );
         let target = hub.review_target().unwrap();
         let run = hub.agent_run("/repo", "p".into(), true).unwrap();
-        (target.provider.id.0, target.own, run.effort, run.agent_id)
+        (target.provider.id.0, run.effort, run.agent_id)
     });
-    assert_eq!(picked, ("codex".into(), false, None, Some("rev".into())));
+    assert_eq!(picked, ("codex".into(), None, Some("rev".into())));
+}
+
+#[gpui::test]
+fn the_panels_pick_wins_over_the_reviewers_settings(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+    });
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    let run = |hub: &PrHub| {
+        let run = hub.agent_run("/repo", "p".into(), true).unwrap();
+        let line = hub.agent_run("/repo", "p".into(), false).unwrap();
+        (run.provider_id, run.effort, run.agent_id, line.effort)
+    };
+    // Its own provider, with its effort clamped to the model's levels.
+    let own = hub.update(cx, |hub, cx| {
+        hub.set_sources(
+            Some(reviewer()),
+            Arc::new(vec![provider("claude", true), provider("codex", true)]),
+            (Some("claude".into()), None),
+            cx,
+        );
+        run(hub)
+    });
+    assert_eq!(
+        own,
+        (
+            "codex".into(),
+            Some("high".into()),
+            Some("rev".into()),
+            None
+        )
+    );
+    // The panel's pick runs instead, still as the reviewer.
+    let picked = hub.update(cx, |hub, cx| {
+        let mut pick = crate::data::pr_review_pick::ReviewPick::default();
+        pick.pick_model("claude", "gpt");
+        pick.effort = Some("low".into());
+        pick.account = Some(String::new());
+        hub.set_review_pick(pick, cx);
+        run(hub)
+    });
+    assert_eq!(
+        picked,
+        (
+            "claude".into(),
+            Some("low".into()),
+            Some("rev".into()),
+            None
+        )
+    );
+    let account = hub.read_with(cx, |hub, _| hub.review_target().unwrap().account);
+    assert_eq!(account, None, "\"\" is the system login");
 }
 
 #[gpui::test]
