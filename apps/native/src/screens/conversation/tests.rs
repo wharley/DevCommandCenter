@@ -204,3 +204,44 @@ fn an_attached_voice_note_shows_as_a_player(cx: &mut TestAppContext) {
     show("t2", format!("Ouça @{} por favor", gone.display()), cx);
     assert!(cx.debug_bounds("user-message-audio").is_none());
 }
+
+/// An attached image shows as itself, opens full size on a click, and one
+/// that is gone stays a chip.
+#[gpui::test]
+fn an_attached_image_shows_as_a_thumbnail(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let tall = dir.path().join("dcc_img_tall.png");
+    image::RgbImage::new(400, 800).save(&tall).unwrap();
+    let gone = dir.path().join("dcc_img_gone.png");
+    let (view, cx) = open_view(cx);
+    let events = records(vec![
+        json!({ "type": "turn_started", "turnId": "t1", "prompt": format!("@{} @{} veja", tall.display(), gone.display()) }),
+        json!({ "type": "turn_completed", "turnId": "t1" }),
+    ]);
+    let conversation = Conversation {
+        task_id: "task".into(),
+        session_id: Some("s1".into()),
+        rows: Arc::new(project_session(&events, "s1")),
+        last_sequence: events.len() as u64,
+        ..Conversation::default()
+    };
+    view.update(cx, |view, cx| {
+        view.task_id = Some("task".into());
+        view.loading = false;
+        view.apply(Rc::new(conversation), cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let thumb = cx
+        .debug_bounds("user-message-image")
+        .expect("the thumbnail");
+    // 400×800 kept to 112 tall: 56 wide, plus the 1px border each side.
+    assert_eq!(thumb.size, gpui::size(gpui::px(58.0), gpui::px(114.0)));
+    assert!(cx.debug_bounds("conversation-image-viewer").is_none());
+    cx.simulate_click(thumb.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("conversation-image-viewer").is_some());
+    let opened = view.read_with(cx, |view, _| view.image_open.clone());
+    assert_eq!(opened.as_deref(), Some(tall.to_str().unwrap()));
+}

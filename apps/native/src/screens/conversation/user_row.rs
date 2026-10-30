@@ -1,7 +1,7 @@
 //! `UserMessage`: the prompt in a bubble on the right (`max-w-[75%]`,
 //! `rounded-xl border-border/45 bg-accent/35 px-3.5 py-3`), its attachments
-//! as chips above the text (an audio file as a player, `audio`), and the
-//! time under it.
+//! above the text (an image as itself, `image`; an audio file as a player,
+//! `audio`; anything else as a chip), and the time under it.
 
 use dcc_core::domain::timeline::TimelineMessage;
 use gpui::{AnyElement, Context, SharedString, Window, div, prelude::*, px, relative};
@@ -11,7 +11,7 @@ use super::{ConversationView, time_ago};
 use crate::data::prompt::{PromptPart, basename, is_audio_path, is_image_path, prompt_parts};
 use crate::i18n::Translate;
 use crate::markdown::{MarkdownStyle, render_markdown};
-use crate::theme::ActiveTheme;
+use crate::theme::{ActiveTheme, Theme};
 use crate::ui::Icon;
 
 /// `fileMentionMarkdown`: a mention reads as `@name`, linked to its path.
@@ -27,7 +27,13 @@ fn mention_markdown(path: &str) -> String {
 }
 
 pub(super) fn attachment_chip(path: &str, cx: &gpui::App) -> AnyElement {
-    let colors = &cx.theme().colors;
+    chip(path, cx.theme())
+}
+
+/// The file chip from a theme, for where no `App` is at hand (an image's
+/// fallback).
+pub(super) fn chip(path: &str, theme: &Theme) -> AnyElement {
+    let colors = &theme.colors;
     let icon = if is_image_path(path) {
         "file-image"
     } else if is_audio_path(path) {
@@ -41,7 +47,7 @@ pub(super) fn attachment_chip(path: &str, cx: &gpui::App) -> AnyElement {
         .gap(px(6.0))
         .max_w_full()
         .min_w_0()
-        .rounded(cx.theme().radius.lg)
+        .rounded(theme.radius.lg)
         .border_1()
         .border_color(colors.border.opacity(0.6))
         .bg(colors.background.opacity(0.7))
@@ -116,6 +122,8 @@ pub(super) fn user_row(
             .children(attachments.iter().map(|path| {
                 if is_audio_path(path) {
                     super::audio::card(path, cx).into_any_element()
+                } else if is_image_path(path) {
+                    super::image::thumbnail(path, cx).unwrap_or_else(|| attachment_chip(path, cx))
                 } else {
                     attachment_chip(path, cx)
                 }

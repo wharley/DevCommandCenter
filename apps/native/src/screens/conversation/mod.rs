@@ -18,6 +18,7 @@ pub(crate) mod header;
 #[cfg(test)]
 mod header_tests;
 mod hover_actions;
+mod image;
 mod paced;
 mod permission_panel;
 mod requests;
@@ -110,6 +111,8 @@ pub struct ConversationView {
     focus: gpui::FocusHandle,
     /// "Copiar" open at this point after a right click on the selection.
     copy_menu: Option<gpui::Point<gpui::Pixels>>,
+    /// An attached image opened full size.
+    image_open: Option<String>,
     /// Frames this view drew (the shell's cache test).
     #[cfg(test)]
     pub(crate) renders: std::cell::Cell<usize>,
@@ -192,6 +195,7 @@ impl ConversationView {
             selection: Default::default(),
             focus: cx.focus_handle(),
             copy_menu: None,
+            image_open: None,
             mascot_frame: false,
             now_ms: time::now_ms(),
             viewport_width: 0.0,
@@ -819,6 +823,7 @@ impl Render for ConversationView {
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::select_release))
                     .child(body)
                     .children(self.copy_menu(cx))
+                    .children(self.image_viewer(window, cx))
                     .children(trail)
                     .children(scroll_jump)
                     .when(!self.loading && !empty, |area| {
