@@ -16,6 +16,8 @@ pub use delta_compaction::{DeltaCompactionStep, DELTA_COMPACTION_SETTLE_MINUTES}
 use delta_compaction::DELTA_COMPACTION_TABLE_SQL;
 mod space;
 pub use space::{database_space, vacuum_into_incremental_mode, DatabaseSpace, VacuumOutcome};
+mod turn_windows;
+pub use turn_windows::TurnWindow;
 
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
@@ -1020,6 +1022,20 @@ impl SqliteWorkspaceRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute(
             "INSERT INTO dcc_local_branch_bindings (workspace_id, branch) VALUES (?1, ?2) ON CONFLICT(workspace_id) DO NOTHING",
+            params![id.0, branch],
+        )
+        .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        Ok(())
+    }
+
+    /// The conversation follows a branch its own agent switched to.
+    pub fn rebind_local_branch(&self, id: &WorkspaceId, branch: &str) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
+        conn.execute(
+            "UPDATE dcc_local_branch_bindings SET branch = ?2 WHERE workspace_id = ?1",
             params![id.0, branch],
         )
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;

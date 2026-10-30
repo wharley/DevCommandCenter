@@ -416,9 +416,24 @@ pub(crate) async fn guard_conversation_event(
                 "Choose a branch before starting a local-direct conversation (detached HEAD).",
             )?;
             if let Some(expected) = repo.local_branch_binding(&id).map_err(|e| e.to_string())? {
-                if expected != branch {
+                if expected == branch {
+                    continue;
+                }
+                // Its own agent made or took this branch during a turn: follow it.
+                if !super::local_branch_follow::agent_switched(
+                    db, session_id, &root, &expected, &branch,
+                )
+                .await
+                {
                     return Err(format!("This conversation belongs to branch `{expected}`, but the folder is now on `{branch}`. Restore `{expected}` in the terminal or start a new task before continuing."));
                 }
+                workspace.base_branch = branch;
+                workspace.updated_at = chrono::Utc::now().to_rfc3339();
+                repo.save_workspace(&workspace)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                repo.rebind_local_branch(&id, &workspace.base_branch)
+                    .map_err(|e| e.to_string())?;
             } else {
                 // First user event binds the actual branch, including legacy
                 // tasks whose base_branch was the project's configured default.
@@ -550,12 +565,22 @@ mod tests {
             sequence: u64,
             kind: SessionEventKind,
         ) -> Result<(), String> {
+            let at = self.workspace.created_at.clone();
+            self.event_at(session, sequence, kind, at).await
+        }
+        async fn event_at(
+            &self,
+            session: &SessionId,
+            sequence: u64,
+            kind: SessionEventKind,
+            occurred_at: String,
+        ) -> Result<(), String> {
             self.sessions
                 .append_event(&SessionEventRecord {
                     event_id: uuid::Uuid::new_v4().to_string(),
                     session_id: session.clone(),
                     sequence,
-                    occurred_at: self.workspace.created_at.clone(),
+                    occurred_at,
                     kind,
                 })
                 .await
@@ -964,6 +989,57 @@ mod tests {
                 .await
                 .unwrap_err()
                 .contains("conversation"));
+        });
+    }
+
+    #[test]
+    fn the_conversation_follows_a_branch_its_own_agent_made_during_a_turn() {
+        futures::executor::block_on(async {
+            let f = Fixture::new().await;
+            let session = f.session("session", &f.workspace).await;
+            let at = |seconds: i64| {
+                (chrono::Utc::now() + chrono::Duration::seconds(seconds)).to_rfc3339()
+            };
+            let completed = SessionEventKind::TurnCompleted {
+                turn_id: TurnId("turn".into()),
+            };
+            // The first message binds main; during its turn the agent makes a branch.
+            f.event_at(&session, 2, Fixture::started(), at(-60))
+                .await
+                .unwrap();
+            git(&f.root, &["switch", "-c", "dcc/fix"]).unwrap();
+            f.event_at(&session, 3, completed, at(1)).await.unwrap();
+            f.event(&session, 4, Fixture::started()).await.unwrap();
+            let repo = SqliteWorkspaceRepo::open(&f.db).unwrap();
+            assert_eq!(
+                repo.local_branch_binding(&f.workspace.id).unwrap().as_deref(),
+                Some("dcc/fix")
+            );
+            let workspace = repo.get_workspace(&f.workspace.id).await.unwrap().unwrap();
+            assert_eq!(workspace.base_branch, "dcc/fix");
+            // Another conversation on the folder is running: whose move was it?
+            let mut other = f.workspace.clone();
+            other.id = WorkspaceId("other".into());
+            repo.save_workspace(&other).await.unwrap();
+            let neighbor = f.session("neighbor", &other).await;
+            git(&f.root, &["switch", "-c", "dcc/two"]).unwrap();
+            let open = SessionEventRecord {
+                event_id: "neighbor-turn".into(),
+                session_id: neighbor,
+                sequence: 2,
+                occurred_at: at(-30),
+                kind: Fixture::started(),
+            };
+            SqliteSessionRepo::open(&f.db)
+                .unwrap()
+                .append_event(&open)
+                .await
+                .unwrap();
+            assert!(f
+                .event(&session, 5, Fixture::started())
+                .await
+                .unwrap_err()
+                .contains("belongs to branch `dcc/fix`"));
         });
     }
 }
