@@ -21,6 +21,8 @@ pub enum PageEvent {
     /// The page finished loading at this URL.
     Loaded(String),
     Title(String),
+    /// A download finished in the staging folder: where it goes is asked.
+    Downloaded(Rc<super::download::Staged>),
 }
 
 /// What the surface asks of its page.
@@ -107,7 +109,7 @@ impl WryPage {
         url: &str,
         events: UnboundedSender<PageEvent>,
     ) -> Result<Self, String> {
-        let popups = super::popup::Popups::default();
+        let popups = super::popup::Popups::new(events.clone());
         #[cfg(target_os = "macos")]
         {
             use wry::WebViewBuilderExtDarwin;
@@ -178,6 +180,7 @@ fn configure<'a>(
     popups: &super::popup::Popups,
 ) -> wry::WebViewBuilder<'a> {
     let loads = events.clone();
+    let downloads = events.clone();
     let titles = events;
     let requests = popups.clone();
     builder
@@ -188,8 +191,10 @@ fn configure<'a>(
         .with_navigation_handler(|url| validate_browser_url(&url).is_ok())
         // Sign-in windows of their own; a download only where the person picks.
         .with_new_window_req_handler(move |url, features| requests.request(url, features))
-        .with_download_started_handler(|_, destination| super::download::requested(destination))
-        .with_download_completed_handler(|_, _, _| {})
+        .with_download_started_handler(super::download::requested)
+        .with_download_completed_handler(move |url, _, success| {
+            super::download::finished(&url, success, &downloads)
+        })
         .with_on_page_load_handler(move |event, url| {
             let _ = loads.unbounded_send(match event {
                 wry::PageLoadEvent::Started => PageEvent::Loading(url),

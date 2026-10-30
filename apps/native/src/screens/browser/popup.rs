@@ -48,8 +48,11 @@ struct Popup {
 }
 
 /// The sign-in windows a page opened.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Popups {
+    /// The opener's events, where their downloads finish.
+    #[cfg_attr(windows, allow(dead_code))]
+    events: futures::channel::mpsc::UnboundedSender<super::page::PageEvent>,
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     open: Rc<RefCell<Vec<Popup>>>,
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -57,6 +60,13 @@ pub struct Popups {
 }
 
 impl Popups {
+    pub fn new(events: futures::channel::mpsc::UnboundedSender<super::page::PageEvent>) -> Self {
+        Self {
+            events,
+            open: Rc::default(),
+        }
+    }
+
     /// Every one of them closed (`close_browser_popups_for_lifecycle`).
     pub fn close_all(&self) {
         #[cfg(target_os = "macos")]
@@ -126,12 +136,15 @@ impl Popups {
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         window.add(&container);
         let blank_used = Cell::new(false);
+        let downloads = self.events.clone();
         let webview = wry::WebViewBuilder::new()
             .with_related_view(features.opener.webview)
             .with_navigation_handler(move |url| navigation_allowed(&url, &blank_used))
             .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
-            .with_download_started_handler(|_, destination| super::download::requested(destination))
-            .with_download_completed_handler(|_, _, _| {})
+            .with_download_started_handler(super::download::requested)
+            .with_download_completed_handler(move |url, _, success| {
+                super::download::finished(&url, success, &downloads)
+            })
             .build_gtk(&container)
             .ok()?;
         window.show_all();
@@ -203,12 +216,15 @@ impl Popups {
         let view = window.contentView()?;
         let handle = ContentView(std::ptr::NonNull::from(&*view).cast());
         let blank_used = Cell::new(false);
+        let downloads = self.events.clone();
         let webview = wry::WebViewBuilder::new()
             .with_webview_configuration(configuration)
             .with_navigation_handler(move |url| navigation_allowed(&url, &blank_used))
             .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
-            .with_download_started_handler(|_, destination| super::download::requested(destination))
-            .with_download_completed_handler(|_, _, _| {})
+            .with_download_started_handler(super::download::requested)
+            .with_download_completed_handler(move |url, _, success| {
+                super::download::finished(&url, success, &downloads)
+            })
             .build(&handle)
             .ok()?;
         let target: Retained<objc2_web_kit::WKWebView> = Retained::into_super(webview.webview());

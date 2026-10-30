@@ -492,3 +492,45 @@ fn the_desktops_agents_drive_this_browser_and_hear_its_page(cx: &mut TestAppCont
     });
     assert_eq!(seconds, 5);
 }
+
+/// A finished download: one save panel at a time, the file moved where the
+/// person picks, a cancelled one deleted.
+#[gpui::test]
+fn finished_downloads_ask_where_they_go_one_at_a_time(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("database.sqlite");
+    let staging = dir.path().join("staging");
+    let pages = Rc::new(Pages::default());
+    let (_surface, cx) = open(cx, &db, Some("https://example.com/"), &pages);
+    let events = pages.events.borrow().clone().expect("a page");
+    let mut files = Vec::new();
+    for name in ["cancelada.zip", "relatorio.pdf"] {
+        let mut destination = std::path::PathBuf::from(name);
+        let url = format!("https://example.com/{name}");
+        assert!(super::download::stage(
+            &staging,
+            url.clone(),
+            &mut destination
+        ));
+        std::fs::write(&destination, name).unwrap();
+        super::download::finished(&url, true, &events);
+        files.push(destination);
+    }
+    cx.run_until_parked();
+
+    cx.simulate_new_path_selection(|_| None);
+    cx.run_until_parked();
+    assert!(!files[0].exists(), "cancelled: deleted");
+    assert!(
+        cx.did_prompt_for_new_path(),
+        "the second asks after the first"
+    );
+
+    let target = dir.path().join("salvo.pdf");
+    let chosen = target.clone();
+    cx.simulate_new_path_selection(move |_| Some(chosen));
+    cx.run_until_parked();
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "relatorio.pdf");
+    assert!(!files[1].parent().unwrap().exists(), "nothing left staged");
+    assert!(!cx.did_prompt_for_new_path());
+}

@@ -310,6 +310,10 @@ impl BrowserSurface {
                 ));
                 self.title = (!title.trim().is_empty()).then_some(title);
             }
+            PageEvent::Downloaded(staged) => {
+                super::download::ask(staged, cx);
+                return;
+            }
         }
         cx.notify();
     }
