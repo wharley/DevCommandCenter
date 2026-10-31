@@ -10,6 +10,11 @@ use serde_json::{Value, json};
 use super::desktop_api::{ApiError, DesktopApi};
 use super::pr_hub::{Actor, Item};
 
+/// The desktop gives the reviewer's turn five minutes
+/// (`run_ephemeral_read_only_turn`); a little more, so its own answer — or
+/// its own "took too long" — arrives instead of the app giving up first.
+const REVIEW_WAIT: std::time::Duration = std::time::Duration::from_secs(330);
+
 /// `PullRequestHubFile`
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -281,10 +286,13 @@ impl DesktopApi {
     }
 
     /// `runPullRequestReviewAgent`: a read-only run in the repository; its answer.
+    /// `runPullRequestReviewAgent`: as long as the reviewer's turn takes (a
+    /// whole pull request can take minutes).
     pub fn pr_review_agent(&self, run: &AgentRun) -> Result<String, ApiError> {
-        let value = self.post(
+        let value = self.request_waiting(
+            "POST",
             "/api/v1/pull-request-hub/review-agent",
-            &json!({
+            Some(&json!({
                 "workingDirectory": run.working_directory,
                 "providerId": run.provider_id,
                 "model": run.model,
@@ -292,7 +300,8 @@ impl DesktopApi {
                 "prompt": run.prompt,
                 "agentId": run.agent_id,
                 "effort": run.effort,
-            }),
+            })),
+            REVIEW_WAIT,
         )?;
         Ok(value
             .get("response")
