@@ -5,8 +5,7 @@
 use std::time::Duration;
 
 use gpui::{
-    AnimationExt, FontWeight, IntoElement, ObjectFit, Render, StyledImage, Window, div, img,
-    prelude::*, px,
+    FontWeight, IntoElement, ObjectFit, Render, StyledImage, Window, div, img, prelude::*, px,
 };
 
 use super::preview::{ComputerPreview, activity_label_key};
@@ -80,18 +79,13 @@ impl Render for ComputerPreview {
             .flex_shrink_0()
             .size(px(8.0))
             .when(phase == Some("started"), |dot| {
-                dot.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .rounded_full()
-                        .bg(colors.primary)
-                        .with_animation(
-                            "computer-preview-ping",
-                            crate::ui::looping(Duration::from_secs(1)),
-                            |ping, delta| ping.opacity(0.6 * (1.0 - delta)),
-                        ),
-                )
+                dot.child(crate::ui::animated(
+                    div().absolute().inset_0().rounded_full().bg(colors.primary),
+                    "computer-preview-ping",
+                    crate::ui::looping(Duration::from_secs(1)),
+                    cx,
+                    |ping, delta| ping.opacity(0.6 * (1.0 - delta)),
+                ))
             })
             .child(div().absolute().inset_0().rounded_full().bg(dot_color));
         let title = self

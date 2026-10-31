@@ -26,10 +26,7 @@ use dcc_core::{
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 
 use crate::{
-    commands::{
-        forge_commands::{workspace_pr_status_with_state, WorkspacePrStatusInput},
-        workspace_commands::workspace_git_status_inner,
-    },
+    commands::forge_commands::{workspace_pr_status_with_state, WorkspacePrStatusInput},
     state::WorkspaceCommandState,
 };
 
@@ -137,21 +134,21 @@ pub async fn workspace_attention_blockers_with_state(
             continue;
         }
         let status_root = root.clone();
-        let Ok(Ok(status)) =
-            tokio::task::spawn_blocking(move || workspace_git_status_inner(&status_root)).await
+        let Ok(Ok((current_branch, conflict_count))) = tokio::task::spawn_blocking(move || {
+            dcc_infra::workspace_git::read_branch_and_conflicts(&status_root)
+        })
+        .await
         else {
             continue;
         };
-        let pr = match status.current_branch.as_deref() {
-            Some(branch) if status.conflict_count == 0 => {
-                cached_pr_status(state, &root, branch).await
-            }
+        let pr = match current_branch.as_deref() {
+            Some(branch) if conflict_count == 0 => cached_pr_status(state, &root, branch).await,
             _ => None,
         };
         if let Some((kind, count)) = classify_git_blockers(
-            status.conflict_count,
-            status.merge_in_progress,
-            status.current_branch.as_deref(),
+            conflict_count,
+            false,
+            current_branch.as_deref(),
             pr.as_ref(),
         ) {
             blockers.push(WorkspaceBlocker {

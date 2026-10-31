@@ -185,6 +185,9 @@ impl Shell {
         let activation = cx.observe_window_activation(window, |shell, window, cx| {
             let active = window.is_window_active();
             cx.set_global(crate::data::foreground::Foreground(active));
+            // Loops stop in the back and start again in front, cached views
+            // included.
+            window.refresh();
             if active {
                 shell
                     .code_column

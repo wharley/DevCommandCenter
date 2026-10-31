@@ -72,6 +72,13 @@ impl Paced {
         }
     }
 
+    /// Shows all of `target` at once (the window is in the back).
+    pub fn reveal_all(&mut self, target: &str) {
+        self.shown = target.len();
+        self.last_tick = None;
+        self.snapshot = target.to_string();
+    }
+
     /// Moves the reveal for this frame; `true` while more is left to show.
     pub fn advance(&mut self, target: &str, now: Instant) -> bool {
         if target != self.snapshot {
@@ -134,5 +141,20 @@ mod tests {
         // An existing long reply only replays its tail.
         let long = "x".repeat(1000);
         assert_eq!(Paced::new(&long).shown, 760);
+    }
+
+    #[test]
+    fn in_the_back_all_of_it_shows_and_no_step_is_left() {
+        let start = Instant::now();
+        let text = "palavra ".repeat(40);
+        let mut paced = Paced::new("");
+        paced.advance(&text, start);
+        paced.reveal_all(&text);
+        assert_eq!(paced.shown, text.len());
+        assert!(!paced.advance(&text, start + Duration::from_millis(50)));
+        // What arrives after it, back in front, is revealed from there.
+        let more = format!("{text}e mais um pouco de texto que chegou depois");
+        assert!(paced.advance(&more, start + Duration::from_millis(60)));
+        assert_eq!(paced.shown, text.len());
     }
 }

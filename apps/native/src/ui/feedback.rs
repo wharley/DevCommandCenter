@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, App, ClickEvent, ElementId, Transformation, Window, div, percentage,
-    prelude::*, px,
+    Animation, AnimationExt, AnyElement, App, ClickEvent, ElementId, Transformation, Window, div,
+    percentage, prelude::*, px,
 };
 
 use super::Icon;
@@ -102,6 +102,25 @@ pub fn looping(duration: Duration) -> Animation {
         .with_max_fps(LOOP_FPS)
 }
 
+/// `element` running a decorative `animation`, or held at its first frame
+/// while the window is in the back: nobody looks, and every frame would lay
+/// the whole window out (the shell redraws all on coming to the front).
+pub fn animated<E: IntoElement + 'static>(
+    element: E,
+    id: impl Into<ElementId>,
+    animation: Animation,
+    cx: &App,
+    animator: impl Fn(E, f32) -> E + 'static,
+) -> AnyElement {
+    if crate::data::foreground::is_foreground(cx) {
+        element
+            .with_animation(id, animation, animator)
+            .into_any_element()
+    } else {
+        animator(element, 0.0).into_any_element()
+    }
+}
+
 pub fn spinner(id: impl Into<ElementId>, size: f32) -> Spinner {
     Spinner {
         id: id.into(),
@@ -116,20 +135,19 @@ pub struct Spinner {
 }
 
 impl RenderOnce for Spinner {
-    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         // An svg is drawn in its own text color, not inherited (see `Icon`).
         let color = window.text_style().color;
-        div().flex_shrink_0().child(
+        div().flex_shrink_0().child(animated(
             gpui::svg()
                 .path(crate::assets::icon_path("loader-circle", 2.0))
                 .size(px(self.size))
-                .text_color(color)
-                .with_animation(
-                    self.id,
-                    crate::ui::looping(Duration::from_secs(1)),
-                    |svg, delta| svg.with_transformation(Transformation::rotate(percentage(delta))),
-                ),
-        )
+                .text_color(color),
+            self.id,
+            looping(Duration::from_secs(1)),
+            cx,
+            |svg, delta| svg.with_transformation(Transformation::rotate(percentage(delta))),
+        ))
     }
 }
 
@@ -150,6 +168,7 @@ pub struct ThinkingIndicator {
 
 impl RenderOnce for ThinkingIndicator {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let cx: &App = cx;
         let colors = &cx.theme().colors;
         let foreground = colors.foreground;
         let dots = [(0.8, 0.0, 0u64), (0.55, -5.0, 180), (0.4, 5.0, 360)];
@@ -171,26 +190,27 @@ impl RenderOnce for ThinkingIndicator {
                     .map(move |(index, (alpha, offset, delay))| {
                         let dot = 6.0;
                         let center = (self.size - dot) / 2.0;
-                        div()
-                            .absolute()
-                            .left(px(center))
-                            .top(px(center + offset))
-                            .size(px(dot))
-                            .rounded_full()
-                            .bg(foreground.opacity(alpha))
-                            .with_animation(
-                                ElementId::NamedInteger(
-                                    format!("{:?}-dot", self.id).into(),
-                                    index as u64,
-                                ),
-                                crate::ui::looping(Duration::from_millis(1200)),
-                                move |dot, delta| {
-                                    // Tailwind `pulse`: opacity 1 → .5 → 1, shifted by the delay.
-                                    let phase = (delta + delay as f32 / 1200.0).fract();
-                                    let fade = 1.0 - 0.5 * (1.0 - (2.0 * phase - 1.0).abs());
-                                    dot.opacity(fade)
-                                },
-                            )
+                        animated(
+                            div()
+                                .absolute()
+                                .left(px(center))
+                                .top(px(center + offset))
+                                .size(px(dot))
+                                .rounded_full()
+                                .bg(foreground.opacity(alpha)),
+                            ElementId::NamedInteger(
+                                format!("{:?}-dot", self.id).into(),
+                                index as u64,
+                            ),
+                            looping(Duration::from_millis(1200)),
+                            cx,
+                            move |dot, delta| {
+                                // Tailwind `pulse`: opacity 1 → .5 → 1, shifted by the delay.
+                                let phase = (delta + delay as f32 / 1200.0).fract();
+                                let fade = 1.0 - 0.5 * (1.0 - (2.0 * phase - 1.0).abs());
+                                dot.opacity(fade)
+                            },
+                        )
                     }),
             )
     }

@@ -4,9 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use gpui::{
-    AnimationExt, AnyElement, Context, FontWeight, div, img, prelude::*, pulsating_between, px,
-};
+use gpui::{AnyElement, Context, FontWeight, div, img, prelude::*, pulsating_between, px};
 
 use super::super::CodeColumn;
 use super::view::{added_color, row_button, status_color};
@@ -267,22 +265,22 @@ fn name(text: String, flashing: bool, at: usize, cx: &Context<CodeColumn>) -> An
         return label.into_any_element();
     }
     let (from, to) = (colors.foreground, colors.muted_foreground.opacity(0.8));
-    label
-        .with_animation(
-            ("changes-file-flash", at),
-            crate::ui::looping(std::time::Duration::from_secs(1))
-                .with_easing(pulsating_between(0.0, 1.0)),
-            move |label, delta| {
-                let mix = |a: f32, b: f32| a + (b - a) * delta;
-                label.text_color(gpui::Hsla {
-                    h: from.h,
-                    s: mix(from.s, to.s),
-                    l: mix(from.l, to.l),
-                    a: mix(from.a, to.a),
-                })
-            },
-        )
-        .into_any_element()
+    crate::ui::animated(
+        label,
+        ("changes-file-flash", at),
+        crate::ui::looping(std::time::Duration::from_secs(1))
+            .with_easing(pulsating_between(0.0, 1.0)),
+        cx,
+        move |label, delta| {
+            let mix = |a: f32, b: f32| a + (b - a) * delta;
+            label.text_color(gpui::Hsla {
+                h: from.h,
+                s: mix(from.s, to.s),
+                l: mix(from.l, to.l),
+                a: mix(from.a, to.a),
+            })
+        },
+    )
 }
 
 /// `ROW_ACTIONS_CLASS`: a small toolbar over the row's right edge.

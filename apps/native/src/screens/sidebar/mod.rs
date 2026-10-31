@@ -310,15 +310,18 @@ impl Sidebar {
                 cx.background_executor().timer(MASCOT_STEP).await;
                 let alive = this.update(cx, |sidebar, cx| {
                     let now = time::now_ms();
-                    let animating = !sidebar.state.running_ids().is_empty();
+                    // Mascots walk and seconds tick only in front of the person.
+                    let front = crate::data::foreground::is_foreground(cx);
+                    let animating = front && !sidebar.state.running_ids().is_empty();
                     // Seconds tick while a turn is open (running or waiting);
                     // otherwise times read in minutes and a 30s beat is enough.
-                    let open_turn = sidebar
-                        .state
-                        .data
-                        .activities
-                        .values()
-                        .any(|activity| activity.is_turn_open());
+                    let open_turn = front
+                        && sidebar
+                            .state
+                            .data
+                            .activities
+                            .values()
+                            .any(|activity| activity.is_turn_open());
                     let stale = now - sidebar.state.now_ms >= 30_000;
                     if !(animating || open_turn || stale) {
                         return;

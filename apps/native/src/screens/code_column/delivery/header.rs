@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use dcc_core::domain::commit_mode::{CommitButtonStatus, CommitMode, commit_translation_key};
 use gpui::{
-    AnimationExt, AnyElement, BoxShadow, Context, FontWeight, Hsla, SharedString, div,
-    linear_color_stop, linear_gradient, point, prelude::*, px, relative,
+    AnyElement, BoxShadow, Context, FontWeight, Hsla, SharedString, div, linear_color_stop,
+    linear_gradient, point, prelude::*, px, relative,
 };
 
 use super::super::CodeColumn;
@@ -208,24 +208,19 @@ fn shimmer(cx: &Context<CodeColumn>) -> AnyElement {
         .bottom_0()
         .h(px(1.0))
         .overflow_hidden()
-        .child(
-            div()
-                .absolute()
-                .top_0()
-                .h_full()
-                .w(relative(1.0))
-                .with_animation(
-                    "delivery-shimmer",
-                    crate::ui::looping(Duration::from_secs(2)),
-                    move |line, delta| {
-                        line.left(relative(delta * 2.0 - 1.0)).bg(linear_gradient(
-                            90.0,
-                            linear_color_stop(primary.opacity(0.0), 0.0),
-                            linear_color_stop(primary, 0.5),
-                        ))
-                    },
-                ),
-        )
+        .child(crate::ui::animated(
+            div().absolute().top_0().h_full().w(relative(1.0)),
+            "delivery-shimmer",
+            crate::ui::looping(Duration::from_secs(2)),
+            cx,
+            move |line, delta| {
+                line.left(relative(delta * 2.0 - 1.0)).bg(linear_gradient(
+                    90.0,
+                    linear_color_stop(primary.opacity(0.0), 0.0),
+                    linear_color_stop(primary, 0.5),
+                ))
+            },
+        ))
         .into_any_element()
 }
 

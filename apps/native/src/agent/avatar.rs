@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use dcc_core::domain::agent::AgentAvatar;
-use gpui::{AnimationExt, App, Image, ImageFormat, Window, div, img, prelude::*, px};
+use gpui::{App, Image, ImageFormat, Window, div, img, prelude::*, px};
 
 use crate::data::agents::AgentState;
 
@@ -139,7 +139,7 @@ impl AgentAvatarView {
 }
 
 impl RenderOnce for AgentAvatarView {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let size = self.size;
         let face = img(image(avatar_svg(&self.avatar, self.state)))
             .size(px(size))
@@ -149,16 +149,16 @@ impl RenderOnce for AgentAvatarView {
             return frame.into_any_element();
         }
         // `dcc-agent-bob`: 6% down → 8% up → 6% down, eased both ways.
-        frame
-            .with_animation(
-                self.id,
-                crate::ui::looping(Duration::from_millis(1100)),
-                move |frame, delta| {
-                    let wave = (1.0 - (delta * std::f32::consts::TAU).cos()) / 2.0;
-                    frame.top(px(size * (0.06 - 0.14 * wave)))
-                },
-            )
-            .into_any_element()
+        crate::ui::animated(
+            frame,
+            self.id,
+            crate::ui::looping(Duration::from_millis(1100)),
+            cx,
+            move |frame, delta| {
+                let wave = (1.0 - (delta * std::f32::consts::TAU).cos()) / 2.0;
+                frame.top(px(size * (0.06 - 0.14 * wave)))
+            },
+        )
     }
 }
 

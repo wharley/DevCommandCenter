@@ -4,9 +4,7 @@
 
 use std::time::Duration;
 
-use gpui::{
-    AnimationExt, AnyElement, ClickEvent, Context, SharedString, Window, div, prelude::*, px,
-};
+use gpui::{AnyElement, App, ClickEvent, Context, SharedString, Window, div, prelude::*, px};
 
 use super::{Sidebar, SidebarEvent};
 use crate::data::child_tasks::{ChildTaskState, live_state};
@@ -16,16 +14,17 @@ use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
 
 /// `animate-pulse`: opacity 1 → 0.5 → 1 every 2s.
-fn pulse(dot: gpui::Div, id: SharedString) -> AnyElement {
-    dot.with_animation(
+fn pulse(dot: gpui::Div, id: SharedString, cx: &App) -> AnyElement {
+    crate::ui::animated(
+        dot,
         id,
         crate::ui::looping(Duration::from_secs(2)),
+        cx,
         |dot, delta| {
             let wave = (delta * std::f32::consts::TAU).cos();
             dot.opacity(0.75 + 0.25 * wave)
         },
     )
-    .into_any_element()
 }
 
 pub fn render(
@@ -76,12 +75,12 @@ pub fn render(
     let dot = div().size(px(6.0)).flex_shrink_0().rounded_full();
     let dot_id = SharedString::from(format!("child-dot-{child_id}"));
     let dot = match state {
-        ChildTaskState::Working => pulse(dot.bg(tw::EMERALD_500.hsla()), dot_id),
+        ChildTaskState::Working => pulse(dot.bg(tw::EMERALD_500.hsla()), dot_id, cx),
         ChildTaskState::Idle => dot
             .bg(colors.muted_foreground.opacity(0.4))
             .into_any_element(),
         ChildTaskState::Review => dot.bg(tw::AMBER_500.hsla()).into_any_element(),
-        ChildTaskState::Waiting => pulse(dot.bg(tw::AMBER_500.hsla()), dot_id),
+        ChildTaskState::Waiting => pulse(dot.bg(tw::AMBER_500.hsla()), dot_id, cx),
         ChildTaskState::Proposed => dot
             .border_1()
             .border_color(tw::AMBER_500.hsla())

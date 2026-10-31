@@ -3,7 +3,8 @@
 //! back, like the desktop's react-query (`refetchInterval` stops with the
 //! window unfocused, `refetchOnWindowFocus` reads on return): each one
 //! starts a process, which costs the Mac more than the read is worth while
-//! nobody looks.
+//! nobody looks. Decorative loops (spinners, pulses, walking mascots, the
+//! streaming reveal) hold still too: each frame lays the whole window out.
 
 use gpui::{App, Global};
 

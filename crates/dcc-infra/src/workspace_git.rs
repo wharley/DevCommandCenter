@@ -199,6 +199,44 @@ pub fn resolve_conflict_count(root: &str) -> Result<u32, String> {
     Ok(count as u32)
 }
 
+/// The branch and how many files are in conflict: all "Needs you" reads of
+/// a checkout. One `git status` without the untracked scan, where the whole
+/// status starts about ten processes per task.
+pub fn read_branch_and_conflicts(root: &str) -> Result<(Option<String>, u32), String> {
+    let output = run_git_output(
+        root,
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=no",
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(git_output_err("git status", &output.stderr));
+    }
+    Ok(parse_branch_and_conflicts(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+/// `git status --porcelain=v2 --branch`: `# branch.head` names the branch
+/// (`HEAD` when detached, as `rev-parse --abbrev-ref` says), `u` rows are
+/// the unmerged files.
+fn parse_branch_and_conflicts(status: &str) -> (Option<String>, u32) {
+    let mut branch = None;
+    let mut conflicts = 0;
+    for line in status.lines() {
+        if let Some(head) = line.strip_prefix("# branch.head ") {
+            let head = head.trim();
+            branch = Some(if head == "(detached)" { "HEAD" } else { head }.to_string());
+        } else if line.starts_with("u ") {
+            conflicts += 1;
+        }
+    }
+    (branch, conflicts)
+}
+
 pub fn git_internal_path_exists(root: &str, name: &str) -> bool {
     let Ok(output) = run_git_output(root, &["rev-parse", "--git-path", name]) else {
         return false;
@@ -690,4 +728,26 @@ pub fn git_tracked_files(workspace_root: &str) -> Result<Vec<String>, String> {
     paths.sort();
     paths.dedup();
     Ok(paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_branch_and_the_unmerged_files_come_from_one_status() {
+        let status =
+            "# branch.oid 1234\n# branch.head feature/x\n# branch.upstream origin/feature/x\n\
+1 .M N... 100644 100644 100644 aaa bbb src/lib.rs\n\
+u UU N... 100644 100644 100644 100644 aaa bbb ccc src/a.rs\n\
+u AA N... 000000 100644 100644 100644 000 bbb ccc src/b.rs\n";
+        assert_eq!(
+            parse_branch_and_conflicts(status),
+            (Some("feature/x".into()), 2)
+        );
+        assert_eq!(
+            parse_branch_and_conflicts("# branch.oid 1234\n# branch.head (detached)\n"),
+            (Some("HEAD".into()), 0)
+        );
+    }
 }

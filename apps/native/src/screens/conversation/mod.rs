@@ -470,15 +470,17 @@ impl ConversationView {
         });
     }
 
-    /// Mascot steps and the live clock while a turn runs; otherwise the
-    /// "há 5 minutos" stamps only need a beat every 30 seconds.
+    /// Mascot steps and the live clock while a turn runs and the window is
+    /// in front; otherwise the "há 5 minutos" stamps only need a beat every
+    /// 30 seconds.
     fn clock_loop(cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(LIVE_STEP).await;
                 let alive = this.update(cx, |view, cx| {
                     let now = time::now_ms();
-                    let live = view.data.as_ref().is_some_and(|data| data.running);
+                    let live = crate::data::foreground::is_foreground(cx)
+                        && view.data.as_ref().is_some_and(|data| data.running);
                     if !live && now - view.now_ms < 30_000 {
                         return;
                     }
@@ -551,6 +553,10 @@ impl ConversationView {
         let (state, laid_out, blocks) = paced
             .entry(SharedString::from(key.to_string()))
             .or_insert_with(|| (paced::Paced::new(target), usize::MAX, Rc::new(Vec::new())));
+        // In the back nobody watches it type: all of it, no frame per step.
+        if !crate::data::foreground::is_foreground(cx) {
+            state.reveal_all(target);
+        }
         if state.advance(target, Instant::now()) && !self.paced_wake.replace(true) {
             let wake = self.paced_wake.clone();
             let view = window.current_view();
