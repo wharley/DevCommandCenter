@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 const CATCH_UP_SECONDS: f64 = 0.25;
 const MIN_CHARS_PER_SECOND: f64 = 90.0;
 const MAX_CHARS_PER_SECOND: f64 = 2400.0;
-/// The text is re-laid out at most this often.
-pub const COMMIT_INTERVAL: Duration = Duration::from_millis(40);
+/// The text is re-laid out at most this often: in step with the decorative
+/// loops, so a streaming reply and a spinner share each frame.
+pub const COMMIT_INTERVAL: Duration = crate::ui::LOOP_FRAME;
 /// A half-written word is held back at most this many bytes.
 const WORD_LOOKAHEAD: usize = 12;
 /// Text already there when the row first shows is not replayed from the start.
@@ -133,10 +134,10 @@ mod tests {
         let text = "palavra ".repeat(40);
         assert!(paced.advance(&text, start));
         assert_eq!(paced.shown, 0, "the first frame only starts the clock");
-        assert!(paced.advance(&text, start + Duration::from_millis(50)));
+        assert!(paced.advance(&text, start + COMMIT_INTERVAL));
         assert!(paced.shown > 0 && paced.shown < text.len());
         let other = "outro texto";
-        paced.advance(other, start + Duration::from_millis(60));
+        paced.advance(other, start + COMMIT_INTERVAL * 2);
         assert!(paced.shown <= other.len());
         // An existing long reply only replays its tail.
         let long = "x".repeat(1000);

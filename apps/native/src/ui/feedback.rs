@@ -88,11 +88,15 @@ impl RenderOnce for Checkbox {
     }
 }
 
-/// `Loader2` turning once a second, in the text color around it.
 /// Decorative loops (spinners, pulses, the bob) redraw this often at most:
-/// each frame of an animation lays the whole window out again, so a display
-/// link pace (up to 120 Hz) kept the app busy for as long as an agent ran.
-const LOOP_FPS: f32 = 24.0;
+/// each frame of an animation lays out the views around it again (a view's
+/// change dirties every view it sits in), so a display link pace (up to
+/// 120 Hz) kept the app busy for as long as an agent ran. 15 Hz is what the
+/// Monocode gives small loaders.
+const LOOP_FPS: f32 = 15.0;
+/// One loop frame. Other paced redraws (the streaming reveal) wait the same,
+/// so they land in the loops' frame instead of adding their own.
+pub const LOOP_FRAME: Duration = Duration::from_nanos(66_666_667);
 
 /// A repeating animation on the app's shared clock, throttled to
 /// `LOOP_FPS`: every loop on screen wakes together, one frame per tick.
@@ -121,6 +125,7 @@ pub fn animated<E: IntoElement + 'static>(
     }
 }
 
+/// `Loader2` turning once a second, in the text color around it.
 pub fn spinner(id: impl Into<ElementId>, size: f32) -> Spinner {
     Spinner {
         id: id.into(),

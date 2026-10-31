@@ -32,7 +32,8 @@ pub use branch_context::branch_context;
 pub use button::{Button, Size as ButtonSize, Variant as ButtonVariant};
 pub use dialog::{Dialog, dialog_footer, dialog_footer_split, dialog_header, inner_radius};
 pub use feedback::{
-    Checkbox, Spinner, ThinkingIndicator, animated, looping, spinner, thinking_indicator,
+    Checkbox, LOOP_FRAME, Spinner, ThinkingIndicator, animated, looping, spinner,
+    thinking_indicator,
 };
 pub use icon::Icon;
 pub use kbd::{command_key, shortcut_keys};
