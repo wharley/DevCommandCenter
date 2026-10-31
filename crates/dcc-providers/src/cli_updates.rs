@@ -421,22 +421,19 @@ pub async fn check_all() -> Vec<CliUpdate> {
 }
 
 /// The last line a failed command printed, as its reason.
-fn reason(output: &std::process::Output) -> String {
-    [&output.stderr, &output.stdout]
-        .iter()
-        .flat_map(|bytes| {
-            String::from_utf8_lossy(bytes)
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .next_back()
-        .unwrap_or_else(|| format!("exited with {}", output.status))
+fn reason(printed: &str, status: std::process::ExitStatus) -> String {
+    printed
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("exited with {status}"))
 }
 
-/// Runs the update, then `verify`.
+/// Runs the update, then `verify`. It waits for the updater itself, not
+/// for its output to close: an updater can leave a helper running that
+/// holds the output open (Grok does), so what it prints goes to a file.
+/// A run that takes too long may still have updated: the version decides.
 pub async fn run(update: &CliUpdate) -> Result<String> {
     let action = update
         .action
@@ -446,21 +443,32 @@ pub async fn run(update: &CliUpdate) -> Result<String> {
     if let Some(first) = &action.path_prepend {
         path = format!("{}:{path}", first.display());
     }
+    let failed = |error: std::io::Error| CoreError::Provider(error.to_string());
+    let log = std::env::temp_dir().join(format!("dcc-cli-update-{}.log", uuid::Uuid::new_v4()));
+    let file = std::fs::File::create(&log).map_err(failed)?;
     let mut command = Command::new(&action.program);
     command
         .args(&action.args)
         .current_dir(std::env::temp_dir())
         .env("PATH", path)
         .stdin(Stdio::null())
+        .stdout(Stdio::from(file.try_clone().map_err(failed)?))
+        .stderr(Stdio::from(file))
         .kill_on_drop(true);
-    let output = tokio::time::timeout(UPDATE_TIMEOUT, command.output())
-        .await
-        .map_err(|_| CoreError::Provider("the update took too long".into()))?
-        .map_err(|error| CoreError::Provider(error.to_string()))?;
-    if !output.status.success() {
-        return Err(CoreError::Provider(reason(&output)));
+    let waited = match command.spawn() {
+        Ok(mut child) => tokio::time::timeout(UPDATE_TIMEOUT, child.wait()).await,
+        Err(error) => Ok(Err(error)),
+    };
+    let printed = std::fs::read_to_string(&log).unwrap_or_default();
+    let _ = std::fs::remove_file(&log);
+    match waited {
+        Err(_) => verify(update)
+            .await
+            .map_err(|_| CoreError::Provider("the update took too long".into())),
+        Ok(Err(error)) => Err(failed(error)),
+        Ok(Ok(status)) if !status.success() => Err(CoreError::Provider(reason(&printed, status))),
+        Ok(Ok(_)) => verify(update).await,
     }
-    verify(update).await
 }
 
 /// After an update (here or in the person's terminal): the CLI really is on
@@ -607,6 +615,53 @@ mod tests {
             "npm install -g @google/gemini-cli@latest"
         );
         assert_eq!(quoted("it's"), "'it'\\''s'");
+    }
+
+    fn script(dir: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("updater.sh");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    fn update_with(program: PathBuf) -> CliUpdate {
+        CliUpdate {
+            // Not one DCC knows: `verify` answers at once.
+            provider_id: "test-cli".into(),
+            installed: "1.0.0".into(),
+            latest: "1.0.1".into(),
+            action: Some(UpdateAction {
+                program,
+                args: Vec::new(),
+                path_prepend: None,
+            }),
+            terminal_command: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_updater_that_leaves_a_helper_running_is_not_waited_on() {
+        let dir =
+            std::env::temp_dir().join(format!("dcc-cli-update-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Grok's case: the helper keeps the output open long after it exits.
+        let program = script(&dir, "(sleep 30 &)\necho updated");
+        let ran = tokio::time::timeout(Duration::from_secs(10), run(&update_with(program)))
+            .await
+            .expect("waited for the updater, not its helper");
+        assert_eq!(ran.unwrap_err().to_string(), "provider error: unknown CLI");
+        // A failure says the last thing it printed.
+        let program = script(
+            &dir,
+            "echo checking\necho 'Update failed: [unauthenticated]' >&2\nexit 1",
+        );
+        let failed = run(&update_with(program)).await.unwrap_err().to_string();
+        assert!(
+            failed.ends_with("Update failed: [unauthenticated]"),
+            "{failed}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

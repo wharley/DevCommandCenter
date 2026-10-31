@@ -9,9 +9,10 @@ use std::time::Duration;
 use futures::StreamExt;
 use gpui::{
     AnyElement, AppContext, Context, ElementId, Entity, EventEmitter, FontWeight, Hsla, Render,
-    SharedString, Task, Window, div, prelude::*, px,
+    SharedString, Subscription, Task, Window, div, prelude::*, px,
 };
 
+use super::session::{SessionEvent, SessionStatus};
 use super::{ShellContext, TerminalSession};
 use crate::data::desktop_api::DesktopApi;
 use crate::data::terminal_api::{ShellSpec, TerminalEvent};
@@ -41,7 +42,16 @@ pub struct CommandDialog {
     leading: Leading,
     pub session: Entity<TerminalSession>,
     closed: bool,
+    /// The desktop's stream is connected; what came before it was missed.
+    listening: bool,
+    /// The shell has its PTY.
+    opened: bool,
+    /// Read again once both, so a quick command's output and end are not lost.
+    caught_up: bool,
+    /// Its end was said (once).
+    ended: bool,
     _stream: Option<Task<()>>,
+    _session: Option<Subscription>,
 }
 
 impl EventEmitter<CommandDialogEvent> for CommandDialog {}
@@ -87,6 +97,13 @@ impl CommandDialog {
             .without_banner()
         });
         window.focus(&session.read(cx).focus_handle(), cx);
+        let opened = cx.subscribe(&session, |dialog, _, event, cx| {
+            if matches!(event, SessionEvent::Opened(_)) {
+                dialog.opened = true;
+                dialog.catch_up(cx);
+                dialog.report_end(cx);
+            }
+        });
         let mut dialog = Self {
             id: id.into(),
             title: title.into(),
@@ -94,10 +111,42 @@ impl CommandDialog {
             leading,
             session,
             closed: false,
+            listening: false,
+            opened: false,
+            caught_up: false,
+            ended: false,
             _stream: None,
+            _session: Some(opened),
         };
         dialog.follow(api, cx);
         dialog
+    }
+
+    /// The stream only carries what happens after it connects, and the shell
+    /// starts at once: once both are up, the screen is read again from the
+    /// desktop (its whole output so far, and whether it already ended).
+    fn catch_up(&mut self, cx: &mut Context<Self>) {
+        if self.listening && self.opened && !self.caught_up {
+            self.caught_up = true;
+            self.session.update(cx, |session, cx| session.resync(cx));
+        }
+    }
+
+    /// A shell found already ended (read again after it finished).
+    fn report_end(&mut self, cx: &mut Context<Self>) {
+        if let SessionStatus::Exited(code) = self.session.read(cx).status {
+            self.end(code, cx);
+        }
+    }
+
+    fn end(&mut self, code: Option<i64>, cx: &mut Context<Self>) {
+        if self.ended {
+            return;
+        }
+        self.ended = true;
+        self.session
+            .update(cx, |session, cx| session.exited(code, cx));
+        cx.emit(CommandDialogEvent::Exited(code));
     }
 
     pub fn is_closed(&self) -> bool {
@@ -111,13 +160,12 @@ impl CommandDialog {
         };
         let (sender, mut receiver) = futures::channel::mpsc::unbounded::<TerminalEvent>();
         std::thread::spawn(move || {
-            let mut first = true;
             while !sender.is_closed() {
                 if let Ok(events) = api.terminal_events() {
-                    if !first && sender.unbounded_send(TerminalEvent::Lagged).is_err() {
+                    // Connected (again): what was missed is read again.
+                    if sender.unbounded_send(TerminalEvent::Lagged).is_err() {
                         return;
                     }
-                    first = false;
                     for event in events {
                         if sender.unbounded_send(event).is_err() {
                             return;
@@ -146,10 +194,10 @@ impl CommandDialog {
                 self.session
                     .update(cx, |session, cx| session.output(&data, cx));
             }
-            TerminalEvent::Exit { pty_id, code } if ours(&pty_id, cx) => {
-                self.session
-                    .update(cx, |session, cx| session.exited(code, cx));
-                cx.emit(CommandDialogEvent::Exited(code));
+            TerminalEvent::Exit { pty_id, code } if ours(&pty_id, cx) => self.end(code, cx),
+            TerminalEvent::Lagged if !self.listening => {
+                self.listening = true;
+                self.catch_up(cx);
             }
             TerminalEvent::Lagged => self.session.update(cx, |session, cx| session.resync(cx)),
             _ => {}
@@ -262,5 +310,59 @@ impl Render for CommandDialog {
                 ),
         )
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{TestAppContext, WindowAppearance};
+
+    #[gpui::test]
+    fn a_command_that_ended_before_the_dialog_listened_still_says_so(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(crate::theme::Theme::new(
+                crate::theme::ThemePreference::Light,
+                WindowAppearance::Light,
+            ));
+            crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        });
+        let (dialog, cx) = cx.add_window_view(|window, cx| {
+            CommandDialog::new(
+                "test-command",
+                "test:owner".into(),
+                "false".into(),
+                "Teste",
+                None,
+                Leading::Dot(None),
+                None,
+                window,
+                cx,
+            )
+        });
+        let ends = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let seen = ends.clone();
+        dialog.update(cx, |_, cx| {
+            cx.subscribe_self(move |_, event: &CommandDialogEvent, _| {
+                if let CommandDialogEvent::Exited(code) = event {
+                    seen.borrow_mut().push(*code);
+                }
+            })
+            .detach();
+        });
+        cx.run_until_parked();
+        // Read again after it finished: the shell is found already ended.
+        let session = dialog.read_with(cx, |dialog, _| dialog.session.clone());
+        session.update(cx, |session, cx| {
+            session.status = SessionStatus::Exited(Some(1));
+            cx.emit(SessionEvent::Opened("pty-1".into()));
+        });
+        cx.run_until_parked();
+        assert_eq!(*ends.borrow(), vec![Some(1)]);
+        // Said once, however it is seen again.
+        dialog.update(cx, |dialog, cx| dialog.end(Some(1), cx));
+        session.update(cx, |_, cx| cx.emit(SessionEvent::Opened("pty-1".into())));
+        cx.run_until_parked();
+        assert_eq!(*ends.borrow(), vec![Some(1)]);
     }
 }
