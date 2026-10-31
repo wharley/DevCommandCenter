@@ -143,6 +143,7 @@ impl PrHub {
         let colors = &theme.colors;
         let dark = theme.appearance == Appearance::Dark;
         let current = self.current_file(detail).map(|file| file.path.clone());
+        let talks = crate::data::pr_review::conversations_by_file(&detail.inline_comments);
         let rows: Vec<AnyElement> = detail
             .files
             .iter()
@@ -181,6 +182,56 @@ impl PrHub {
                     )
                     .into_any_element()
                 });
+                // Its published conversations: blue while any is open.
+                let talk = talks.get(&file.path).copied().map(|talk| {
+                    let parts: Vec<String> = [
+                        (talk.open, "pullRequests.code.fileConversationsOpen"),
+                        (talk.resolved, "pullRequests.code.fileConversationsResolved"),
+                    ]
+                    .into_iter()
+                    .filter(|(count, _)| *count > 0)
+                    .map(|(count, key)| cx.t_with(key, &Args::count(count as i64)).to_string())
+                    .collect();
+                    let tip = parts.join(" · ");
+                    let (shown, open) = if talk.open > 0 {
+                        (talk.open, true)
+                    } else {
+                        (talk.resolved, false)
+                    };
+                    let sky = if dark {
+                        tw::SKY_300.hsla()
+                    } else {
+                        tw::SKY_700.hsla()
+                    };
+                    let muted = colors.muted_foreground;
+                    let talk_selector = format!("pr-file-talks-{index}");
+                    Tooltip::new(
+                        SharedString::from(talk_selector.clone()),
+                        div()
+                            .debug_selector(move || talk_selector)
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(3.0))
+                            .rounded_full()
+                            .px(px(6.0))
+                            .py(px(2.0))
+                            .text_size(px(10.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .font_features(crate::ui::tabular_nums())
+                            .map(|pill| {
+                                if open {
+                                    pill.bg(tw::SKY_500.hsla().opacity(0.15)).text_color(sky)
+                                } else {
+                                    pill.text_color(muted)
+                                }
+                            })
+                            .child(Icon::new("message-square").size(10.0))
+                            .child(shown.to_string()),
+                        move |_, _| div().child(tip.clone()).into_any_element(),
+                    )
+                    .into_any_element()
+                });
                 div()
                     .id(SharedString::from(selector.clone()))
                     .debug_selector(move || selector)
@@ -214,6 +265,7 @@ impl PrHub {
                             .when(chosen, |icon| icon.color(colors.accent_calm)),
                     )
                     .child(div().flex_1().min_w_0().truncate().child(file.path.clone()))
+                    .children(talk)
                     .children(pill)
                     .child(
                         div()

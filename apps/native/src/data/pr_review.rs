@@ -71,6 +71,39 @@ pub fn draft_key(path: &str, line: u32, side: &str) -> String {
     format!("{path}:{side}:{line}")
 }
 
+/// A file's published conversations: still open, and resolved.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Conversations {
+    pub open: usize,
+    pub resolved: usize,
+}
+
+/// Each file's conversations, by path (a thread counts once, where it starts).
+pub fn conversations_by_file(
+    comments: &[InlineComment],
+) -> std::collections::HashMap<String, Conversations> {
+    let mut threads: Vec<(String, &InlineComment)> = Vec::new();
+    for comment in comments {
+        let thread = comment
+            .thread_id
+            .clone()
+            .unwrap_or_else(|| comment.id.clone());
+        if !threads.iter().any(|(seen, _)| *seen == thread) {
+            threads.push((thread, comment));
+        }
+    }
+    let mut files: std::collections::HashMap<String, Conversations> = Default::default();
+    for (_, root) in threads {
+        let file = files.entry(root.path.clone()).or_default();
+        if root.resolved == Some(true) {
+            file.resolved += 1;
+        } else {
+            file.open += 1;
+        }
+    }
+    files
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowKind {
     Addition,
@@ -333,6 +366,40 @@ impl DesktopApi {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn conversations_count_once_per_thread_by_file() {
+        let comment =
+            |id: &str, thread: Option<&str>, path: &str, resolved: Option<bool>| InlineComment {
+                id: id.into(),
+                thread_id: thread.map(Into::into),
+                path: path.into(),
+                resolved,
+                ..Default::default()
+            };
+        let files = conversations_by_file(&[
+            comment("1", Some("t1"), "a.rs", Some(false)),
+            comment("2", Some("t1"), "a.rs", Some(false)),
+            comment("3", Some("t2"), "a.rs", Some(true)),
+            comment("4", None, "b.rs", None),
+        ]);
+        assert_eq!(
+            files["a.rs"],
+            Conversations {
+                open: 1,
+                resolved: 1
+            }
+        );
+        assert_eq!(
+            files["b.rs"],
+            Conversations {
+                open: 1,
+                resolved: 0
+            }
+        );
+        assert!(!files.contains_key("c.rs"));
+    }
+
     use super::*;
 
     #[test]

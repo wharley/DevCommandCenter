@@ -78,6 +78,15 @@ fn the_code_tab_drafts_replies_resolves_and_sends(cx: &mut TestAppContext) {
     assert_eq!(hub.read_with(cx, |hub, _| hub.tab), Tab::Code);
     assert!(cx.debug_bounds("pr-code-files").is_some());
     assert!(cx.debug_bounds("pr-file-1").is_some(), "both files");
+    // The list says which file holds conversations (one thread of two comments).
+    assert!(
+        cx.debug_bounds("pr-file-talks-0").is_some(),
+        "login.rs talks"
+    );
+    assert!(
+        cx.debug_bounds("pr-file-talks-1").is_none(),
+        "README has none"
+    );
     assert!(cx.debug_bounds("pr-review-footer").is_some());
     assert!(
         cx.debug_bounds("pr-thread-c-1").is_some(),
