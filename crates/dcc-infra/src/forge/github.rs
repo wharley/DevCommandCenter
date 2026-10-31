@@ -263,7 +263,14 @@ pub fn check_auth(host: &str, login: &str) -> AuthCheck {
     }
 }
 
+static AUTHENTICATED_HOSTS: crate::forge::HostsCache =
+    crate::forge::HostsCache::new(GITHUB_AUTH_STATUS_CACHE_TTL);
+
 pub fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
+    AUTHENTICATED_HOSTS.get_or(force_refresh, || read_authenticated_hosts(force_refresh))
+}
+
+fn read_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
     let gh = resolve_cli_binary("gh")?;
     let output = run_forge_cli_command(&gh, |command| {
         command.args(["auth", "status", "--json", "hosts"]);

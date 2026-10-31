@@ -67,6 +67,12 @@ mod tests {
                 .is_none()
         );
         drop(first);
-        assert!(RuntimeOwner::try_acquire(dir.path()).unwrap().is_some());
+        // A child another test is spawning may hold the lock a moment, until
+        // it execs (flock follows the open file it inherited).
+        assert!(
+            RuntimeOwner::acquire_within(dir.path(), Duration::from_secs(1))
+                .unwrap()
+                .is_some()
+        );
     }
 }

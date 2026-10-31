@@ -331,7 +331,14 @@ pub fn check_auth(host: &str, login: &str) -> AuthCheck {
     }
 }
 
+static AUTHENTICATED_HOSTS: crate::forge::HostsCache =
+    crate::forge::HostsCache::new(GITLAB_AUTH_STATUS_CACHE_TTL);
+
 pub fn list_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
+    AUTHENTICATED_HOSTS.get_or(force_refresh, || read_authenticated_hosts(force_refresh))
+}
+
+fn read_authenticated_hosts(force_refresh: bool) -> Result<Vec<String>, String> {
     let glab = resolve_cli_binary("glab")?;
     let output = run_forge_cli_command(&glab, |command| {
         command.args(["auth", "status"]);

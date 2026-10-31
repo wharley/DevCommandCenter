@@ -9101,18 +9101,31 @@ impl SessionEventRepo for SqliteSessionRepo {
                 ],
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
-        // Reindexing rereads every event of the session, so doing it per
-        // streamed chunk made each turn quadratic. Deltas reach the index with
-        // the next non-delta event, at the latest when the turn ends.
-        let streamed_chunk = matches!(
+        // Reindexing rereads every event of the session, so doing it for each
+        // step inside a turn (a chunk, a tool call, a reasoning block) made
+        // every turn quadratic in the conversation's length. Those steps reach
+        // the index when the turn ends (completed or aborted; a turn cut off by
+        // a crash is reindexed when it is recovered); the turn's prompt and
+        // everything outside a turn are indexed at once.
+        let inside_turn = matches!(
             event.kind,
             SessionEventKind::TurnDelta { .. }
+                | SessionEventKind::TurnAssistantMessageStarted { .. }
                 | SessionEventKind::TurnAssistantMessageDelta { .. }
+                | SessionEventKind::TurnAssistantMessageCompleted { .. }
+                | SessionEventKind::TurnReasoningStarted { .. }
                 | SessionEventKind::TurnReasoningDelta { .. }
+                | SessionEventKind::TurnReasoningCompleted { .. }
+                | SessionEventKind::TurnToolCallStarted { .. }
                 | SessionEventKind::TurnToolCallDelta { .. }
+                | SessionEventKind::TurnToolCallUpdated { .. }
+                | SessionEventKind::TurnToolCallCompleted { .. }
+                | SessionEventKind::TurnToolCallFailed { .. }
+                | SessionEventKind::TurnNativeSubagentActivity { .. }
+                | SessionEventKind::TurnModelEffective { .. }
                 | SessionEventKind::DelegationDelta { .. }
         );
-        if !streamed_chunk {
+        if !inside_turn {
             Self::reindex_session_sync(&transaction, &event.session_id)?;
         }
         transaction
@@ -14726,7 +14739,7 @@ mod tests {
     }
 
     #[test]
-    fn streamed_chunks_reach_the_search_index_when_the_turn_ends() {
+    fn a_turns_steps_reach_the_search_index_when_the_turn_ends() {
         let repo = SqliteSessionRepo::from_connection(in_memory_conn()).expect("create repo");
         event_session(&repo, "search-delta-session");
         futures::executor::block_on(repo.save_thread(&Thread {
@@ -14772,9 +14785,22 @@ mod tests {
         );
         assert_eq!(matches("parser"), 1);
         assert_eq!(matches("zebrafish"), 0, "a chunk alone does not reindex");
+        // A whole step inside the turn waits for its end too.
+        append(
+            "message",
+            3,
+            SessionEventKind::TurnAssistantMessageCompleted {
+                turn_id: turn_id.clone(),
+                message_id: "m-1".to_owned(),
+                phase: dcc_core::domain::session::AssistantMessagePhase::FinalAnswer,
+                content: Some("narwhal grammar".to_owned()),
+            },
+        );
+        assert_eq!(matches("narwhal"), 0, "a step inside the turn does not reindex");
 
-        append("completed", 3, SessionEventKind::TurnCompleted { turn_id });
+        append("completed", 4, SessionEventKind::TurnCompleted { turn_id });
         assert_eq!(matches("zebrafish"), 1);
+        assert_eq!(matches("narwhal"), 1);
     }
 
     #[test]
