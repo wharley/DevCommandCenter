@@ -4583,6 +4583,27 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(fake.calls.lock().unwrap().len(), 4);
+        // The app's own commands (a sign-in, a CLI update) open in the home
+        // folder; nothing else does, and they open nowhere else.
+        let home = std::env::var("HOME").unwrap();
+        let open = |owner: &'static str, cwd: String| {
+            post_json(
+                &fixture.app,
+                owner,
+                json!({ "cwd": cwd, "command": "/bin/zsh", "args": ["-lc", "true"] }),
+            )
+        };
+        let (status, _) = open("/api/v1/terminals/by-owner/cli-update%3Acodex", home.clone()).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) =
+            open("/api/v1/terminals/by-owner/forge-connect%3Agithub%3Agithub.com", home.clone())
+                .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = open("/api/v1/terminals/by-owner/terminal%3Ax", home.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = open("/api/v1/terminals/by-owner/cli-update%3Acodex", "/".into()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(fake.calls.lock().unwrap().len(), 6);
     }
     #[tokio::test(flavor = "current_thread")]
     async fn http_turn_preflight_rejects_unknown_provider_without_persisting_selection() {

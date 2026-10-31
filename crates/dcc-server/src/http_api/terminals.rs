@@ -86,13 +86,34 @@ pub(super) struct ByOwnerRequest {
     rows: Option<u16>,
 }
 
-/// The shell opens in a task's checkout (its worktree or its repository).
+/// The app's own commands with no task to hold them ("Conectar GitHub",
+/// an agent CLI's update): the only shells that may open in the person's
+/// home folder.
+const HOME_OWNERS: [&str; 2] = ["forge-connect:", "cli-update:"];
+
+/// Whether `cwd` is the person's home folder.
+fn is_home(cwd: &str) -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
+    let canonical = |path: &std::path::Path| std::fs::canonicalize(path).ok();
+    canonical(std::path::Path::new(cwd))
+        .is_some_and(|cwd| Some(cwd) == canonical(std::path::Path::new(&home)))
+}
+
+/// The shell opens in a task's checkout (its worktree or its repository),
+/// or in the home folder for one of the app's own commands (`HOME_OWNERS`).
 async fn by_owner(
     State(backend): State<Arc<HttpBackend>>,
     Path(owner_key): Path<String>,
     Json(input): Json<ByOwnerRequest>,
 ) -> Result<Json<Value>, HttpApiError> {
-    git_changes::task_checkout(&backend, &input.cwd).await?;
+    let app_command = HOME_OWNERS
+        .iter()
+        .any(|prefix| owner_key.starts_with(prefix));
+    if !(app_command && is_home(&input.cwd)) {
+        git_changes::task_checkout(&backend, &input.cwd).await?;
+    }
     let host = host(&backend)?;
     let options = json!({
         "cwd": input.cwd,

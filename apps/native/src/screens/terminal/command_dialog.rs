@@ -56,14 +56,17 @@ pub struct CommandDialog {
 
 impl EventEmitter<CommandDialogEvent> for CommandDialog {}
 
-/// The person's login shell, running `command`.
+/// The person's login shell, running `command` in their home folder (the
+/// one place besides a task's checkout where the desktop opens one of the
+/// app's own commands).
 fn spec(command: String) -> ShellSpec {
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|shell| !shell.trim().is_empty())
         .unwrap_or_else(|| "/bin/zsh".into());
+    let home = dirs::home_dir().map_or_else(|| "/".into(), |home| home.display().to_string());
     ShellSpec {
-        cwd: "/".into(),
+        cwd: home,
         command: shell,
         args: vec!["-lc".into(), command],
         cols: 96,
@@ -302,9 +305,13 @@ impl Render for CommandDialog {
                             ),
                         ),
                 )
+                // A flex column: the terminal grows to fill it.
                 .child(
                     div()
+                        .flex_none()
                         .h(px(360.0))
+                        .flex()
+                        .flex_col()
                         .bg(colors.card)
                         .child(self.session.clone()),
                 ),
@@ -350,7 +357,11 @@ mod tests {
             })
             .detach();
         });
+        cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(800.0)));
         cx.run_until_parked();
+        // The terminal fills the dialog's room, not one line of it.
+        let surface = cx.debug_bounds("terminal-surface").expect("the terminal");
+        assert!(surface.size.height > gpui::px(300.0), "{surface:?}");
         // Read again after it finished: the shell is found already ended.
         let session = dialog.read_with(cx, |dialog, _| dialog.session.clone());
         session.update(cx, |session, cx| {
