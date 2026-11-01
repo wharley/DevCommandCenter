@@ -16,6 +16,7 @@ mod drafts;
 mod first_send;
 mod handoff;
 mod images;
+mod local_branch;
 mod mentions;
 mod objective;
 mod picker;
@@ -180,6 +181,8 @@ pub struct Composer {
     pub(crate) strip_busy: Option<strips::StripAction>,
     /// The execution-mode explainer under the composer.
     pub(crate) mode_open: bool,
+    /// A local-direct task's branch, before and after it starts.
+    pub(crate) local_branch: Option<Entity<local_branch::LocalBranchPicker>>,
     pub(crate) objective: objective::ObjectiveState,
     /// A queue tray action on its way.
     pub(crate) queue_busy: Option<queue::QueueAction>,
@@ -241,6 +244,7 @@ impl Composer {
             picker: picker::PickerState::new(window, cx),
             strip_busy: None,
             mode_open: false,
+            local_branch: None,
             objective: objective::ObjectiveState::new(window, cx),
             queue_busy: None,
             appshots: None,
@@ -299,6 +303,7 @@ impl Composer {
         if !disabled {
             self.refresh_catalog(cx);
         }
+        self.sync_local_branch(cx);
         cx.notify();
     }
 

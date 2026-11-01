@@ -237,6 +237,15 @@ pub async fn workspace_local_branches(
     state: State<'_, WorkspaceCommandState>,
     input: LocalBranchesInput,
 ) -> Result<LocalBranchesOutput, String> {
+    workspace_local_branches_with_state(&state, input).await
+}
+
+/// The branches a local-direct task can start on, for the desktop's command
+/// and the native app's API alike.
+pub async fn workspace_local_branches_with_state(
+    state: &WorkspaceCommandState,
+    input: LocalBranchesInput,
+) -> Result<LocalBranchesOutput, String> {
     let workspace = local_workspace(&state.db_path, &input.workspace_id).await?;
     let db = state.db_path.clone();
     // Fetch never holds the conversation/checkout lock while waiting on network.
@@ -356,6 +365,15 @@ async fn switch_branch(
 #[tauri::command]
 pub async fn workspace_switch_local_branch(
     state: State<'_, WorkspaceCommandState>,
+    input: SwitchLocalBranchInput,
+) -> Result<LocalBranchesOutput, String> {
+    workspace_switch_local_branch_with_state(&state, input).await
+}
+
+/// Moves a local-direct task's checkout to another branch before its
+/// conversation starts, for the desktop's command and the native app's API.
+pub async fn workspace_switch_local_branch_with_state(
+    state: &WorkspaceCommandState,
     input: SwitchLocalBranchInput,
 ) -> Result<LocalBranchesOutput, String> {
     let workspace = local_workspace(&state.db_path, &input.workspace_id).await?;

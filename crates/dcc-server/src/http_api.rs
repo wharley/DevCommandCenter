@@ -73,6 +73,7 @@ mod forge;
 mod git_changes;
 mod git_conflicts;
 mod keep_awake;
+mod local_branches;
 mod mcp;
 mod menu_bar;
 mod mobile;
@@ -770,6 +771,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/workspaces/from-source-url",
             post(create_from_source_url_handler),
+        )
+        .route(
+            "/api/v1/workspaces/local-branches",
+            post(local_branches::list),
+        )
+        .route(
+            "/api/v1/workspaces/local-branches/switch",
+            post(local_branches::switch),
         )
         .route(
             "/api/v1/workspace-bundles",
@@ -1771,6 +1780,8 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/workspaces/clone",
             "POST /api/v1/workspaces/source-url/resolve",
             "POST /api/v1/workspaces/from-source-url",
+            "POST /api/v1/workspaces/local-branches",
+            "POST /api/v1/workspaces/local-branches/switch",
             "POST /api/v1/workspace-bundles",
             "POST /api/v1/git/stage-file",
             "POST /api/v1/git/unstage-file",
@@ -3990,6 +4001,24 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_local_branch_pick_refuses_a_task_that_does_not_exist() {
+        let fixture = embedded_fixture().await;
+        for (uri, body) in [
+            (
+                "/api/v1/workspaces/local-branches",
+                json!({ "workspaceId": "missing", "refresh": false }),
+            ),
+            (
+                "/api/v1/workspaces/local-branches/switch",
+                json!({ "workspaceId": "missing", "expectedBranch": "main", "reference": "refs/heads/x", "newBranch": null }),
+            ),
+        ] {
+            let (status, body) = post_json(&fixture.app, uri, body).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {body}");
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

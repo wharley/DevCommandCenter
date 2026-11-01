@@ -382,15 +382,19 @@ pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> O
                                     )
                                     .child(div().max_w(px(176.0)).truncate().child(label)),
                             )
-                            .children(branch.map(|branch| {
-                                div()
-                                    .flex()
-                                    .min_w_0()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .child(Icon::new("git-branch").size(14.0))
-                                    .child(div().min_w_0().child(SharedString::from(branch)))
-                            })),
+                            .map(|row| match composer.local_branch.clone() {
+                                // The project's own checkout: its branch is picked here.
+                                Some(picker) if !isolated => row.child(picker),
+                                _ => row.children(branch.map(|branch| {
+                                    div()
+                                        .flex()
+                                        .min_w_0()
+                                        .items_center()
+                                        .gap(px(6.0))
+                                        .child(Icon::new("git-branch").size(14.0))
+                                        .child(div().min_w_0().child(SharedString::from(branch)))
+                                })),
+                            }),
                     ),
             )
             .into_any_element(),

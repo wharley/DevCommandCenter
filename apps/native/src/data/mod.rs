@@ -47,6 +47,7 @@ pub mod host;
 pub mod host_shortcuts;
 pub mod keep_awake;
 pub mod loader;
+pub mod local_branches;
 pub mod mcp_advanced;
 pub mod menu_bar;
 pub mod model_picker;
