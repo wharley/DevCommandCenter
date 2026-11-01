@@ -2483,6 +2483,14 @@ fn require_active_scope(
     }
 }
 
+/// The same document at another fragment (`/docs#a` and `/docs#b`).
+fn same_document(previous: Option<&str>, url: &str) -> bool {
+    fn document(url: &str) -> &str {
+        url.split_once('#').map_or(url, |(document, _)| document)
+    }
+    previous.is_some_and(|previous| previous != url && document(previous) == document(url))
+}
+
 fn mark_context_loading(context: &mut BrowserContext, expected_url: String) {
     let previous_url = context.url.clone();
     context.expected_url = Some(expected_url);
@@ -3926,6 +3934,14 @@ pub async fn remote_browser_report(
                     context.ready_url = Some(url);
                     changed_page = true;
                 } else if context.ready_url.is_none() {
+                    // A navigation that only moved the fragment: WebKit starts
+                    // and finishes no load for it, so the page is already there.
+                    if !context.main_load_started
+                        && same_document(context.pending_previous_main_url.as_deref(), &url)
+                    {
+                        context.url = Some(url.clone());
+                        context.ready_url = Some(url.clone());
+                    }
                     context.expected_url = Some(url);
                 }
             }
@@ -4109,6 +4125,92 @@ mod tests {
         remote_browser_close(&state, Some(41)).await.unwrap();
         assert!(!*state.lifecycle_open.lock().unwrap());
         assert!(matches!(page_driver(&state), Err(error) if error == "browser is not open"));
+    }
+
+    /// The agent's navigate to another fragment of the open page: WebKit
+    /// starts no load, so only the native "the address moved" arrives. It
+    /// used to leave the page "loading" for good, and every context read
+    /// was refused until the Browser was opened again.
+    #[tokio::test]
+    async fn a_navigate_that_only_moves_the_fragment_leaves_the_page_ready() {
+        use super::*;
+        use dcc_http::PageReport;
+        let state = BrowserState::default();
+        let scope = scope_key("w-native", Some("s-native"));
+        *state.active_scope.lock().unwrap() = Some(scope.clone());
+        *state.lifecycle_token.lock().unwrap() = 41;
+        *state.lifecycle_open.lock().unwrap() = true;
+        *state.remote.lock().unwrap() = true;
+        async fn report(state: &BrowserState, report: PageReport) {
+            remote_browser_report(state, 41, report).await.unwrap();
+        }
+        let navigate = |url: &str| {
+            let mut contexts = state.contexts.lock().unwrap();
+            mark_context_loading(contexts.entry(scope.clone()).or_default(), url.into());
+        };
+        let ready =
+            |url: &str| context_is_ready_for_url(&state.contexts.lock().unwrap()[&scope], url);
+        let docs_a = "https://ex.com/docs?plain=1#L880";
+        let docs_b = "https://ex.com/docs?plain=1#L1040";
+        report(&state, PageReport::Loading { url: docs_a.into() }).await;
+        report(&state, PageReport::Loaded { url: docs_a.into() }).await;
+
+        navigate(docs_b);
+        assert!(!ready(docs_b), "loading until the page answers");
+        report(&state, PageReport::Url { url: docs_b.into() }).await;
+        assert!(ready(docs_b));
+
+        // Another document still waits for its own load.
+        navigate("https://ex.com/other");
+        report(
+            &state,
+            PageReport::Url {
+                url: "https://ex.com/other".into(),
+            },
+        )
+        .await;
+        assert!(!ready("https://ex.com/other"));
+        report(
+            &state,
+            PageReport::Loading {
+                url: "https://ex.com/other".into(),
+            },
+        )
+        .await;
+        report(
+            &state,
+            PageReport::Loaded {
+                url: "https://ex.com/other".into(),
+            },
+        )
+        .await;
+        assert!(ready("https://ex.com/other"));
+    }
+
+    #[test]
+    fn the_same_document_differs_only_after_the_fragment() {
+        use super::same_document;
+        assert!(same_document(
+            Some("https://ex.com/d#a"),
+            "https://ex.com/d#b"
+        ));
+        assert!(same_document(
+            Some("https://ex.com/d"),
+            "https://ex.com/d#b"
+        ));
+        assert!(!same_document(
+            Some("https://ex.com/d#a"),
+            "https://ex.com/d#a"
+        ));
+        assert!(!same_document(
+            Some("https://ex.com/d"),
+            "https://ex.com/e#b"
+        ));
+        assert!(!same_document(
+            Some("https://ex.com/d?x=1#a"),
+            "https://ex.com/d#a"
+        ));
+        assert!(!same_document(None, "https://ex.com/d#a"));
     }
 
     use std::time::{Duration as StdDuration, Instant};

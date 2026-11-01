@@ -2672,11 +2672,23 @@ fn tool_error(error: &str) -> Value {
             "The DCC Browser bridge is unavailable.",
             "Wait for the DCC session to reconnect, then call dcc_browser_context.",
         )
+    } else if error.contains("still loading") {
+        (
+            "browser_page_loading",
+            "The Browser page is still loading.",
+            "Wait a few seconds, then call dcc_browser_context again. If it is still loading after two tries, call dcc_browser_open with the page URL.",
+        )
+    } else if error.contains("timed out") {
+        (
+            "browser_page_busy",
+            "The Browser page did not answer in time.",
+            "Wait a few seconds, then call dcc_browser_context again.",
+        )
     } else {
         (
             "browser_action_rejected",
             "The Browser action was rejected.",
-            "Call dcc_browser_context and follow its current Browser state before retrying.",
+            "Call dcc_browser_status to check the Browser, then retry once. If it fails again, tell the user instead of retrying.",
         )
     };
     json!({
@@ -4045,6 +4057,20 @@ mod tests {
         let rejected = serde_json::to_string(&tool_error(secret)).unwrap();
         assert!(!rejected.contains(secret));
         assert!(rejected.contains("browser_action_rejected"));
+        // A refused read never sends the agent straight back to the same read.
+        assert!(!tool_error(secret)["structuredContent"]["nextStep"]
+            .as_str()
+            .is_some_and(|step| step.contains("dcc_browser_context")));
+
+        let loading = tool_error("browser page is still loading");
+        assert_eq!(loading["structuredContent"]["code"], "browser_page_loading");
+        assert!(loading["structuredContent"]["nextStep"]
+            .as_str()
+            .is_some_and(|step| step.contains("dcc_browser_open")));
+        assert_eq!(
+            tool_error("browser page context timed out")["structuredContent"]["code"],
+            "browser_page_busy"
+        );
     }
 
     #[test]
