@@ -174,3 +174,79 @@ fn the_code_tab_drafts_replies_resolves_and_sends(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("pr-line-plus-1").is_none());
 }
+
+/// After the author pushed a fix and answered on the pull request: the
+/// strip says so, the outdated thread stands apart with its old code (not
+/// over the new line), the untouched one keeps its line, and "Ver resposta"
+/// goes to the summary where the answer is.
+#[gpui::test]
+fn the_code_tab_says_what_changed_since_the_review(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let detail = json!({
+        "body": null, "checks": [],
+        "comments": [{ "id": "fix", "body": "Corrigi tudo.", "author": { "login": "bob" },
+            "createdAt": "2026-11-01T19:57:50Z" }],
+        "reviews": [{ "author": { "login": "ana" }, "state": "COMMENTED",
+            "submittedAt": "2026-11-01T17:51:51Z" }],
+        "commits": [
+            { "oid": "a", "headline": "feat", "committedDate": "2026-11-01T17:44:21Z" },
+            { "oid": "b", "headline": "fix", "committedDate": "2026-11-01T19:57:28Z" },
+        ],
+        "files": [{ "path": "src/login.rs", "status": "modified", "additions": 2, "deletions": 1,
+            "patch": "@@ -1,2 +1,3 @@\n fn login() {\n-    old();\n+    new();\n+    more();" }],
+        "inlineComments": [
+            { "id": "c-old", "threadId": "t-old", "path": "src/login.rs", "line": 2, "side": "right",
+              "body": "TTL renovado", "author": { "login": "ana" }, "resolved": false,
+              "createdAt": "2026-11-01T17:51:50Z", "outdated": true,
+              "diffHunk": "@@ -1 +1,2 @@\n+    saveCache();" },
+            { "id": "c-same", "threadId": "t-same", "path": "src/login.rs", "line": 3, "side": "right",
+              "body": "Faixa larga", "author": { "login": "ana" }, "resolved": false,
+              "createdAt": "2026-11-01T17:51:50Z" },
+        ],
+        "reviewCapabilities": { "inlineComments": true, "approve": true, "requestChanges": true,
+            "replyToThreads": true, "resolveThreads": true },
+        "mergeCapabilities": null,
+    })
+    .to_string();
+    let detail_route = || ("/api/v1/pull-request-hub/detail", 200, detail.clone());
+    let (port, _desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list),
+        detail_route(),
+        detail_route(),
+        detail_route(),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1400.0), px(900.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    let bounds = cx.debug_bounds("pr-tab-code").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-since-review").is_some());
+    let apart = cx.debug_bounds("pr-outdated-threads").unwrap();
+    let old = cx.debug_bounds("pr-thread-c-old").unwrap();
+    assert!(
+        apart.contains(&old.center()),
+        "the outdated thread stands apart"
+    );
+    let same = cx.debug_bounds("pr-thread-c-same").unwrap();
+    assert!(
+        !apart.contains(&same.center()),
+        "the current one stays on its line"
+    );
+    assert!(same.top() > old.top());
+    let bounds = cx.debug_bounds("pr-since-open-reply").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(hub.read_with(cx, |hub, _| hub.tab), Tab::Summary);
+}

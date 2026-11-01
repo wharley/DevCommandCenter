@@ -120,6 +120,7 @@ impl PrHub {
             .flex_col()
             .size_full()
             .min_h_0()
+            .children(self.since_strip(item, &detail, cx))
             .children(self.agent_section(cx))
             .child(body)
             .child(self.review_footer(item, &detail, narrow, cx))
@@ -389,8 +390,13 @@ impl PrHub {
                     .into_any_element(),
             ]
         } else {
-            self.patch_rows(&file, &rows, &detail.inline_comments, width, cx)
+            self.patch_rows(&file, &rows, detail, width, cx)
         };
+        let lines: Vec<AnyElement> = self
+            .outdated_block(&file, detail, width, cx)
+            .into_iter()
+            .chain(lines)
+            .collect();
         div()
             .flex()
             .flex_col()

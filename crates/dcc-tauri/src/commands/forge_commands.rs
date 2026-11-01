@@ -261,6 +261,12 @@ pub struct PullRequestHubInlineComment {
     pub created_at: Option<String>,
     pub url: Option<String>,
     pub resolved: Option<bool>,
+    /// The code under it changed since: `line` is where it was, not where it is.
+    #[serde(default)]
+    pub outdated: bool,
+    /// The code it was written on, as the forge kept it.
+    #[serde(default)]
+    pub diff_hunk: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -365,6 +371,29 @@ pub struct PullRequestHubDetailOutput {
     pub inline_comments: Vec<PullRequestHubInlineComment>,
     pub review_capabilities: PullRequestHubReviewCapabilities,
     pub merge_capabilities: Option<PullRequestHubMergeCapabilities>,
+    /// Who reviewed and when (GitHub).
+    #[serde(default)]
+    pub reviews: Vec<PullRequestHubReview>,
+    /// The commits, oldest first (GitHub).
+    #[serde(default)]
+    pub commits: Vec<PullRequestHubCommit>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubReview {
+    pub author: Option<PullRequestHubActor>,
+    /// `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`…
+    pub state: String,
+    pub submitted_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestHubCommit {
+    pub oid: String,
+    pub headline: String,
+    pub committed_date: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1748,6 +1777,52 @@ fn hub_items_for_repository(
         .collect())
 }
 
+/// `gh pr view --json reviews`: who reviewed, how and when.
+fn github_reviews(raw: &Value) -> Vec<PullRequestHubReview> {
+    raw.get("reviews")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|review| PullRequestHubReview {
+            author: review
+                .get("author")
+                .and_then(|actor| hub_actor(actor, ForgeCliProvider::Github)),
+            state: review
+                .get("state")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            submitted_at: review
+                .get("submittedAt")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+        })
+        .collect()
+}
+
+/// `gh pr view --json commits`, oldest first.
+fn github_commits(raw: &Value) -> Vec<PullRequestHubCommit> {
+    raw.get("commits")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|commit| {
+            Some(PullRequestHubCommit {
+                oid: commit.get("oid")?.as_str()?.to_string(),
+                headline: commit
+                    .get("messageHeadline")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                committed_date: commit
+                    .get("committedDate")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+            })
+        })
+        .collect()
+}
+
 fn github_comment(value: &Value) -> Option<PullRequestHubComment> {
     Some(PullRequestHubComment {
         id: value
@@ -1931,6 +2006,8 @@ fn github_inline_comment(
         created_at: comment.created_at,
         url: comment.html_url,
         resolved: None,
+        outdated: comment.line.is_none() && comment.original_line.is_some(),
+        diff_hunk: comment.diff_hunk,
     }
 }
 
@@ -1953,6 +2030,10 @@ fn github_thread_inline_comments(raw: &Value) -> Vec<PullRequestHubInlineComment
                 .and_then(Value::as_str)
                 .map(ToString::to_string);
             let resolved = thread.get("isResolved").and_then(Value::as_bool);
+            let outdated = thread
+                .get("isOutdated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let thread_side = thread
                 .get("diffSide")
                 .and_then(Value::as_str)
@@ -1963,6 +2044,7 @@ fn github_thread_inline_comments(raw: &Value) -> Vec<PullRequestHubInlineComment
                 .map(ToString::to_string);
             let thread_line = thread
                 .get("line")
+                .filter(|line| !line.is_null())
                 .or_else(|| thread.get("originalLine"))
                 .and_then(Value::as_u64)
                 .and_then(|line| u32::try_from(line).ok());
@@ -1980,6 +2062,7 @@ fn github_thread_inline_comments(raw: &Value) -> Vec<PullRequestHubInlineComment
                         .or_else(|| thread_path.clone())?;
                     let line = comment
                         .get("line")
+                        .filter(|line| !line.is_null())
                         .or_else(|| comment.get("originalLine"))
                         .and_then(Value::as_u64)
                         .and_then(|line| u32::try_from(line).ok())
@@ -2024,6 +2107,11 @@ fn github_thread_inline_comments(raw: &Value) -> Vec<PullRequestHubInlineComment
                             .and_then(Value::as_str)
                             .map(ToString::to_string),
                         resolved,
+                        outdated,
+                        diff_hunk: comment
+                            .get("diffHunk")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string),
                     })
                 })
         })
@@ -2071,6 +2159,8 @@ fn gitlab_inline_comments(
                     created_at: note.created_at,
                     url: None,
                     resolved: note.resolved,
+                    outdated: false,
+                    diff_hunk: None,
                 })
             })
         })
@@ -2181,6 +2271,8 @@ pub async fn pull_request_hub_detail_with_state(
                     resolve_threads: true,
                 },
                 merge_capabilities: Some(github_merge_capabilities(&raw, &repository)),
+                reviews: github_reviews(&raw),
+                commits: github_commits(&raw),
             })
         }
         ForgeCliProvider::Gitlab => {
@@ -2270,6 +2362,8 @@ pub async fn pull_request_hub_detail_with_state(
                     resolve_threads: true,
                 },
                 merge_capabilities: None,
+                reviews: Vec::new(),
+                commits: Vec::new(),
             })
         }
     }
@@ -4549,6 +4643,7 @@ mod tests {
         is_provisional_task_title, map_github_review_state, map_gitlab_review_comments,
         map_gitlab_review_state, preferred_change_request_title, PullRequestHubMergeMethod,
     };
+    use super::{github_commits, github_reviews};
     use super::{
         map_github_reviewer_candidates, map_gitlab_reviewer_candidates, merge_gitlab_reviewer_ids,
         normalize_reviewer_logins,
@@ -4617,6 +4712,59 @@ mod tests {
                 vec!["Outro título".to_string()],
             ),
             Some("Atualizar checkout".to_string()),
+        );
+    }
+
+    /// A thread whose code changed keeps where it was and says so, with the
+    /// code it was written on; the review and the commits come with dates.
+    #[test]
+    fn an_outdated_github_thread_keeps_its_old_line_and_its_code() {
+        let comments = github_thread_inline_comments(&json!({
+            "data": { "repository": { "pullRequest": { "reviewThreads": { "nodes": [{
+                "id": "PRRT_old",
+                "isResolved": false,
+                "isOutdated": true,
+                "path": "src/log.ts",
+                "line": null,
+                "originalLine": 69,
+                "comments": { "nodes": [{
+                    "databaseId": 7,
+                    "body": "saveCache renova o TTL",
+                    "diffHunk": "@@ -60,3 +60,4 @@\n+  await saveCache(chave);",
+                    "author": { "login": "wharley" },
+                    "line": null,
+                    "originalLine": 69
+                }] }
+            }] } } } }
+        }));
+        assert_eq!(comments[0].line, Some(69));
+        assert!(comments[0].outdated);
+        assert!(comments[0]
+            .diff_hunk
+            .as_deref()
+            .is_some_and(|hunk| hunk.contains("saveCache")));
+
+        let raw = json!({
+            "reviews": [{ "author": { "login": "wharley" }, "state": "COMMENTED", "submittedAt": "2026-11-01T17:51:51Z" }],
+            "commits": [
+                { "oid": "d521d5c", "messageHeadline": "feat", "committedDate": "2026-11-01T17:44:21Z" },
+                { "oid": "7788a5a", "messageHeadline": "fix", "committedDate": "2026-11-01T19:57:28Z" }
+            ]
+        });
+        let reviews = github_reviews(&raw);
+        assert_eq!(
+            reviews[0].author.as_ref().map(|a| a.login.as_str()),
+            Some("wharley")
+        );
+        assert_eq!(
+            reviews[0].submitted_at.as_deref(),
+            Some("2026-11-01T17:51:51Z")
+        );
+        let commits = github_commits(&raw);
+        assert_eq!(commits.len(), 2);
+        assert_eq!(
+            commits[1].committed_date.as_deref(),
+            Some("2026-11-01T19:57:28Z")
         );
     }
 

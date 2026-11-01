@@ -54,6 +54,10 @@ pub fn section(detail: &Detail, login: &str) -> Option<String> {
             .map_or_else(|| "?".to_string(), |line| line.to_string());
         let state = if root.resolved == Some(true) {
             "resolved"
+        } else if root.outdated {
+            "open, its code changed since"
+        } else if super::pr_since_review::line_unchanged(root, detail) {
+            "open, its line is unchanged since"
         } else {
             "open"
         };
@@ -66,18 +70,52 @@ pub fn section(detail: &Detail, login: &str) -> Option<String> {
             text.push_str(&format!("\n@{author}: {}", comment.body.trim()));
         }
     }
+    // What others wrote on the pull request after the review: an author
+    // often answers every thread at once there.
+    if let Some(reviewed) = super::pr_since_review::last_review(detail, login) {
+        let replies: Vec<_> = detail
+            .comments
+            .iter()
+            .filter(|comment| {
+                comment
+                    .created_at
+                    .as_deref()
+                    .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+                    .is_some_and(|at| at > reviewed)
+            })
+            .filter(|comment| {
+                !comment
+                    .author
+                    .as_ref()
+                    .is_some_and(|actor| actor.login.eq_ignore_ascii_case(login))
+            })
+            .collect();
+        if !replies.is_empty() {
+            text.push_str("\n\nReplies on the pull request since that review:");
+            for comment in replies {
+                let author = comment
+                    .author
+                    .as_ref()
+                    .map_or("unknown", |actor| actor.login.as_str());
+                text.push_str(&format!("\n\n@{author}: {}", comment.body.trim()));
+            }
+        }
+    }
     if text.chars().count() > BOUND {
         text = text.chars().take(BOUND).collect::<String>() + "\n…[truncated]";
     }
     Some(format!(
-        "{text}\n\nThis is a follow-up round: the author changed the pull request since that review. Do not repeat, rephrase or extend points already raised, resolved or not. In the summary, say for each open thread whether the current diff addresses it. Add a new comment only for a blocking problem (a bug, regression, security issue or data loss) in the current diff; never style, naming, refactors or nice-to-have suggestions. An empty comments array is the expected answer when nothing blocks."
+        "{text}\n\nThis is a follow-up round: the author changed the pull request since that review. Do not repeat, rephrase or extend points already raised, resolved or not. In the summary, say for each open thread whether the current diff addresses it; when a reply says a thread is fixed, check that against the current diff and say plainly when it does not hold. Add a new comment only for a blocking problem (a bug, regression, security issue or data loss) in the current diff; never style, naming, refactors or nice-to-have suggestions. An empty comments array is the expected answer when nothing blocks."
     ))
 }
 
 /// Drops comments on a line an earlier thread already holds.
 pub fn drop_repeats(review: &mut AgentReview, detail: &Detail, login: &str) {
+    // An outdated thread's line is where its code was, not a line of the
+    // current diff: a new comment there is about other code.
     let held: HashSet<(String, u32)> = earlier_threads(detail, login)
         .iter()
+        .filter(|thread| !thread[0].outdated)
         .filter_map(|thread| Some((thread[0].path.clone(), thread[0].line?)))
         .collect();
     review
@@ -104,6 +142,7 @@ mod tests {
                 ..Default::default()
             }),
             resolved: Some(resolved),
+            ..Default::default()
         }
     }
 
@@ -136,6 +175,58 @@ mod tests {
         assert_eq!(section(&detail, "someone"), None);
     }
 
+    /// The author answered every thread at once on the pull request: the
+    /// follow-up reads that answer and which threads' code moved.
+    #[test]
+    fn the_follow_up_reads_the_authors_reply_and_which_code_moved() {
+        use crate::data::pr_hub::{Comment, Commit, Review};
+        let mut detail = detail();
+        detail.inline_comments[0].created_at = Some("2026-11-01T17:51:50Z".into());
+        detail.inline_comments[0].outdated = true;
+        detail.reviews = vec![Review {
+            author: Some(Actor {
+                login: "wharley".into(),
+                ..Default::default()
+            }),
+            state: "COMMENTED".into(),
+            submitted_at: Some("2026-11-01T17:51:51Z".into()),
+        }];
+        detail.commits = vec![Commit {
+            oid: "7788a5a".into(),
+            committed_date: Some("2026-11-01T19:57:28Z".into()),
+            ..Default::default()
+        }];
+        detail.comments = vec![
+            Comment {
+                id: "old".into(),
+                body: "before the review".into(),
+                author: Some(Actor {
+                    login: "dev".into(),
+                    ..Default::default()
+                }),
+                created_at: Some("2026-11-01T17:00:00Z".into()),
+            },
+            Comment {
+                id: "fix".into(),
+                body: "Os cinco procedem, corrigidos.".into(),
+                author: Some(Actor {
+                    login: "dev".into(),
+                    ..Default::default()
+                }),
+                created_at: Some("2026-11-01T19:57:50Z".into()),
+            },
+        ];
+        let text = section(&detail, "wharley").unwrap();
+        assert!(text.contains("### src/a.rs:3 (open, its code changed since)"));
+        assert!(
+            text.contains(
+                "Replies on the pull request since that review:\n\n@dev: Os cinco procedem"
+            )
+        );
+        assert!(!text.contains("before the review"));
+        assert!(text.contains("say plainly when it does not hold"));
+    }
+
     #[test]
     fn a_second_round_never_comments_where_the_first_did() {
         let draft = |line: u32| DraftComment {
@@ -151,5 +242,16 @@ mod tests {
         drop_repeats(&mut review, &detail(), "wharley");
         let lines: Vec<u32> = review.comments.iter().map(|c| c.line).collect();
         assert_eq!(lines, [5, 9]);
+
+        // Line 3's thread is outdated: its code is gone, line 3 is new code.
+        let mut moved = detail();
+        moved.inline_comments[0].outdated = true;
+        let mut review = AgentReview {
+            summary: String::new(),
+            comments: vec![draft(3), draft(8)],
+        };
+        drop_repeats(&mut review, &moved, "wharley");
+        let lines: Vec<u32> = review.comments.iter().map(|c| c.line).collect();
+        assert_eq!(lines, [3]);
     }
 }

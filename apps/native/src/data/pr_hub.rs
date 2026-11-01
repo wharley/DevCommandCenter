@@ -107,6 +107,28 @@ pub struct Detail {
     pub files: Vec<File>,
     pub inline_comments: Vec<InlineComment>,
     pub review_capabilities: Option<ReviewCapabilities>,
+    /// GitHub only: who reviewed, and when.
+    pub reviews: Vec<Review>,
+    /// GitHub only: the commits, oldest first.
+    pub commits: Vec<Commit>,
+}
+
+/// `PullRequestHubReview`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Review {
+    pub author: Option<Actor>,
+    pub state: String,
+    pub submitted_at: Option<String>,
+}
+
+/// `PullRequestHubCommit`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Commit {
+    pub oid: String,
+    pub headline: String,
+    pub committed_date: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

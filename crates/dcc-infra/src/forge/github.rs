@@ -1110,7 +1110,7 @@ pub fn pull_request_detail_json(
             "view",
             &number.to_string(),
             "--json",
-            "body,comments,statusCheckRollup,state,isDraft,mergeable,mergeStateStatus,headRefOid,url",
+            "body,comments,statusCheckRollup,state,isDraft,mergeable,mergeStateStatus,headRefOid,url,reviews,commits",
         ],
     )
 }

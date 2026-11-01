@@ -11,6 +11,7 @@ mod footer;
 mod panel;
 mod rows;
 mod runs_on;
+mod since;
 #[cfg(test)]
 mod tests;
 mod thread;

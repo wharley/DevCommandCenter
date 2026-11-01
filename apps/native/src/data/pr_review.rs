@@ -38,6 +38,11 @@ pub struct InlineComment {
     pub body: String,
     pub author: Option<Actor>,
     pub resolved: Option<bool>,
+    pub created_at: Option<String>,
+    /// The code under it changed since: `line` is where it was.
+    pub outdated: bool,
+    /// The code it was written on, as the forge kept it.
+    pub diff_hunk: Option<String>,
 }
 
 /// `PullRequestHubReviewCapabilities`

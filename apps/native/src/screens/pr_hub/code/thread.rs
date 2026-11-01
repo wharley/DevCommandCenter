@@ -17,6 +17,7 @@ impl PrHub {
     pub(super) fn thread(
         &self,
         comment: &InlineComment,
+        mark: super::since::ThreadMark,
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -171,6 +172,7 @@ impl PrHub {
                             .text_color(colors.foreground)
                             .child(format!("@{login}")),
                     )
+                    .children(mark.badge(cx))
                     .when(comment.resolved == Some(true), |header| {
                         header.child(
                             div()

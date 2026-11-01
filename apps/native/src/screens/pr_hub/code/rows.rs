@@ -6,7 +6,7 @@
 
 use gpui::{AnyElement, BoxShadow, Context, FontWeight, Hsla, div, point, prelude::*, px};
 
-use crate::data::pr_review::{DraftComment, File, InlineComment, PatchRow, RowKind, draft_key};
+use crate::data::pr_review::{DraftComment, File, PatchRow, RowKind, draft_key};
 use crate::i18n::{Args, Translate};
 use crate::screens::pr_hub::PrHub;
 use crate::theme::color::mix_lab;
@@ -73,7 +73,7 @@ impl PrHub {
         &self,
         file: &File,
         rows: &[PatchRow],
-        comments: &[InlineComment],
+        detail: &crate::data::pr_hub::Detail,
         width: f32,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
@@ -130,12 +130,15 @@ impl PrHub {
                 continue;
             };
             let key = draft_key(&file.path, line, side);
-            for comment in comments.iter().filter(|comment| {
+            // An outdated thread's line is where it was: it shows apart.
+            for comment in detail.inline_comments.iter().filter(|comment| {
                 comment.path == file.path
+                    && !comment.outdated
                     && comment.line == Some(line)
                     && comment.side.as_deref() == Some(side)
             }) {
-                out.push(self.thread(comment, width, cx));
+                let mark = super::since::ThreadMark::of(comment, detail);
+                out.push(self.thread(comment, mark, width, cx));
             }
             if let Some(draft) = self.review.drafts.iter().find(|draft| draft.key() == key) {
                 out.push(self.draft_card(draft, width, cx));

@@ -62,6 +62,7 @@ pub mod pr_review_agent;
 pub mod pr_review_follow_up;
 pub mod pr_review_jobs;
 pub mod pr_review_pick;
+pub mod pr_since_review;
 pub mod project_logo;
 pub mod prompt;
 pub mod provider_accounts;
