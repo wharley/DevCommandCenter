@@ -10,7 +10,7 @@ use dcc_core::domain::attention::{
 };
 use dcc_core::domain::workspace_git::{WorkspaceGitStatusOutput, WorkspacePrStatusOutput};
 use dcc_infra::workspace_git::{
-    read_workspace_git_status, workspace_git_branch_diff, workspace_pr_status,
+    read_rail_git_status, workspace_git_branch_diff, workspace_pr_status,
 };
 
 const GIT_EVERY_MS: i64 = 30_000;
@@ -79,7 +79,7 @@ fn run_blocking<F: std::future::Future>(future: F) -> F::Output {
 
 fn refresh_one(db_path: &Path, task: &Watched, mut snapshot: GitSnapshot, now: i64) -> GitSnapshot {
     if due(snapshot.git_at, GIT_EVERY_MS, now) {
-        if let Ok(git) = read_workspace_git_status(&task.root) {
+        if let Ok(git) = read_rail_git_status(&task.root) {
             snapshot.git = Some(git);
         }
         snapshot.git_at = Some(now);

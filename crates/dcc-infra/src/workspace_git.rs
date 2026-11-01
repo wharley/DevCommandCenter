@@ -36,6 +36,32 @@ pub fn read_workspace_git_status(workspace_root: &str) -> Result<WorkspaceGitSta
         });
     }
 
+    let (staged, unstaged) = read_changes(root)?;
+    let current_branch = resolve_current_branch_name(root).ok();
+    let (ahead_of_remote_count, behind_of_remote_count) =
+        resolve_upstream_branch_counts(root).unwrap_or((0, 0));
+    let conflict_count = resolve_conflict_count(root).unwrap_or(0);
+    let merge_in_progress = git_internal_path_exists(root, "MERGE_HEAD");
+    let has_remote = resolve_has_remote(root);
+
+    Ok(WorkspaceGitStatusOutput {
+        staged,
+        unstaged,
+        staged_fingerprint: staged_snapshot_fingerprint(root)?,
+        current_branch,
+        ahead_of_remote_count,
+        behind_of_remote_count,
+        conflict_count,
+        merge_in_progress,
+        has_remote,
+    })
+}
+
+/// The staged and unstaged files with their line counts, untracked ones
+/// among the unstaged.
+fn read_changes(
+    root: &str,
+) -> Result<(Vec<WorkspaceGitChangeEntry>, Vec<WorkspaceGitChangeEntry>), String> {
     let cached_stats = parse_git_numstat_maps(root, true)?;
     let unstaged_stats = parse_git_numstat_maps(root, false)?;
 
@@ -105,24 +131,31 @@ pub fn read_workspace_git_status(workspace_root: &str) -> Result<WorkspaceGitSta
 
     staged.sort_by(|a, b| a.path.cmp(&b.path));
     unstaged.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok((staged, unstaged))
+}
 
-    let current_branch = resolve_current_branch_name(root).ok();
-    let (ahead_of_remote_count, behind_of_remote_count) =
-        resolve_upstream_branch_counts(root).unwrap_or((0, 0));
-    let conflict_count = resolve_conflict_count(root).unwrap_or(0);
-    let merge_in_progress = git_internal_path_exists(root, "MERGE_HEAD");
-    let has_remote = resolve_has_remote(root);
-
+/// The status a task's row shows: the same files, branch and counts as
+/// `read_workspace_git_status`, with one `git status` for the branch, its
+/// distance to the upstream and the conflicts, and without the staged
+/// fingerprint (only the commit flow compares it; it diffs the whole staged
+/// patch). About eight processes instead of twelve, every 30s per open task.
+pub fn read_rail_git_status(workspace_root: &str) -> Result<WorkspaceGitStatusOutput, String> {
+    let root = workspace_root.trim();
+    if root.is_empty() {
+        return read_workspace_git_status(root);
+    }
+    let (staged, unstaged) = read_changes(root)?;
+    let branch = read_branch_line(root)?;
     Ok(WorkspaceGitStatusOutput {
         staged,
         unstaged,
-        staged_fingerprint: staged_snapshot_fingerprint(root)?,
-        current_branch,
-        ahead_of_remote_count,
-        behind_of_remote_count,
-        conflict_count,
-        merge_in_progress,
-        has_remote,
+        staged_fingerprint: String::new(),
+        current_branch: branch.branch,
+        ahead_of_remote_count: branch.ahead,
+        behind_of_remote_count: branch.behind,
+        conflict_count: branch.conflicts,
+        merge_in_progress: git_internal_path_exists(root, "MERGE_HEAD"),
+        has_remote: resolve_has_remote(root),
     })
 }
 
@@ -203,6 +236,20 @@ pub fn resolve_conflict_count(root: &str) -> Result<u32, String> {
 /// a checkout. One `git status` without the untracked scan, where the whole
 /// status starts about ten processes per task.
 pub fn read_branch_and_conflicts(root: &str) -> Result<(Option<String>, u32), String> {
+    let branch = read_branch_line(root)?;
+    Ok((branch.branch, branch.conflicts))
+}
+
+/// What `git status --porcelain=v2 --branch` says about the branch.
+#[derive(Debug, Default, PartialEq)]
+struct BranchLine {
+    branch: Option<String>,
+    ahead: u32,
+    behind: u32,
+    conflicts: u32,
+}
+
+fn read_branch_line(root: &str) -> Result<BranchLine, String> {
     let output = run_git_output(
         root,
         &[
@@ -215,26 +262,35 @@ pub fn read_branch_and_conflicts(root: &str) -> Result<(Option<String>, u32), St
     if !output.status.success() {
         return Err(git_output_err("git status", &output.stderr));
     }
-    Ok(parse_branch_and_conflicts(&String::from_utf8_lossy(
-        &output.stdout,
-    )))
+    Ok(parse_branch_line(&String::from_utf8_lossy(&output.stdout)))
 }
 
-/// `git status --porcelain=v2 --branch`: `# branch.head` names the branch
-/// (`HEAD` when detached, as `rev-parse --abbrev-ref` says), `u` rows are
-/// the unmerged files.
-fn parse_branch_and_conflicts(status: &str) -> (Option<String>, u32) {
-    let mut branch = None;
-    let mut conflicts = 0;
-    for line in status.lines() {
-        if let Some(head) = line.strip_prefix("# branch.head ") {
+/// `# branch.head` names the branch (`HEAD` when detached, as `rev-parse
+/// --abbrev-ref` says), `# branch.ab +ahead -behind` comes with an upstream
+/// (none reads as 0 and 0, like a failed `rev-list`), `u` rows are the
+/// unmerged files.
+fn parse_branch_line(status: &str) -> BranchLine {
+    let mut line = BranchLine::default();
+    for row in status.lines() {
+        if let Some(head) = row.strip_prefix("# branch.head ") {
             let head = head.trim();
-            branch = Some(if head == "(detached)" { "HEAD" } else { head }.to_string());
-        } else if line.starts_with("u ") {
-            conflicts += 1;
+            line.branch = Some(if head == "(detached)" { "HEAD" } else { head }.to_string());
+        } else if let Some(counts) = row.strip_prefix("# branch.ab ") {
+            let mut counts = counts.split_whitespace();
+            let mut count = |sign: char| {
+                counts
+                    .next()
+                    .and_then(|count| count.strip_prefix(sign))
+                    .and_then(|count| count.parse().ok())
+                    .unwrap_or(0)
+            };
+            line.ahead = count('+');
+            line.behind = count('-');
+        } else if row.starts_with("u ") {
+            line.conflicts += 1;
         }
     }
-    (branch, conflicts)
+    line
 }
 
 pub fn git_internal_path_exists(root: &str, name: &str) -> bool {
@@ -735,19 +791,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_branch_and_the_unmerged_files_come_from_one_status() {
-        let status =
-            "# branch.oid 1234\n# branch.head feature/x\n# branch.upstream origin/feature/x\n\
+    fn the_branch_its_distance_and_the_unmerged_files_come_from_one_status() {
+        let status = "# branch.oid 1234\n# branch.head feature/x\n\
+# branch.upstream origin/feature/x\n# branch.ab +3 -1\n\
 1 .M N... 100644 100644 100644 aaa bbb src/lib.rs\n\
 u UU N... 100644 100644 100644 100644 aaa bbb ccc src/a.rs\n\
 u AA N... 000000 100644 100644 100644 000 bbb ccc src/b.rs\n";
         assert_eq!(
-            parse_branch_and_conflicts(status),
-            (Some("feature/x".into()), 2)
+            parse_branch_line(status),
+            BranchLine {
+                branch: Some("feature/x".into()),
+                ahead: 3,
+                behind: 1,
+                conflicts: 2,
+            }
         );
         assert_eq!(
-            parse_branch_and_conflicts("# branch.oid 1234\n# branch.head (detached)\n"),
-            (Some("HEAD".into()), 0)
+            parse_branch_line("# branch.oid 1234\n# branch.head (detached)\n"),
+            BranchLine {
+                branch: Some("HEAD".into()),
+                ..BranchLine::default()
+            }
+        );
+    }
+
+    fn git(root: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn a_row_reads_what_the_whole_status_reads_but_the_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        let (remote, root) = (dir.path().join("remote.git"), dir.path().join("work"));
+        git(
+            dir.path(),
+            &["init", "-q", "--bare", remote.to_str().unwrap()],
+        );
+        git(
+            dir.path(),
+            &["init", "-q", "-b", "main", root.to_str().unwrap()],
+        );
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-qm", "first"]);
+        git(
+            &root,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        git(&root, &["push", "-qu", "origin", "main"]);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        git(&root, &["commit", "-qam", "ahead"]);
+        std::fs::write(root.join("b.txt"), "staged\n").unwrap();
+        git(&root, &["add", "b.txt"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("c.txt"), "untracked\n").unwrap();
+
+        let root = root.to_str().unwrap();
+        let whole = read_workspace_git_status(root).unwrap();
+        let rail = read_rail_git_status(root).unwrap();
+        assert_eq!(rail.ahead_of_remote_count, 1);
+        assert!(!whole.staged_fingerprint.is_empty());
+        assert_eq!(
+            rail,
+            WorkspaceGitStatusOutput {
+                staged_fingerprint: String::new(),
+                ..whole
+            }
         );
     }
 }
