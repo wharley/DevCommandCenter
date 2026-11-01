@@ -1,8 +1,13 @@
-//! The heavy views (sidebar, conversation, code column) drawn from their
-//! last frame until they, or an entity they read, change: a running agent's
-//! pulse in the sidebar or a terminal printing no longer lays out the
-//! conversation and the diff again. A cached view is not measured, so each
-//! gets the size its own root would take.
+//! The heavy views (conversation, code column) drawn from their last frame
+//! until they, or an entity they read, change: a running agent's pulse in the
+//! sidebar or a terminal printing no longer lays out the conversation and the
+//! diff again. A cached view is not measured, so each gets the size its own
+//! root would take.
+//!
+//! The sidebar is not one of them: a cached view that redraws draws everything
+//! inside it fresh, so its own cached rows (`sidebar::piece`) would all redraw
+//! whenever one of them moved. Drawn each frame, it lays out only its frame
+//! and reuses the rows that did not change.
 //!
 //! While the Browser's page is up they are drawn fresh: an overlay marks
 //! itself for the page as it prepaints (`ui::occlusion`), which a reused
@@ -19,11 +24,6 @@ impl Shell {
         } else {
             view.clone().cached(style).into_any_element()
         }
-    }
-
-    /// The sidebar fills its region.
-    pub(super) fn sidebar_view(&self) -> AnyElement {
-        self.cached(&self.sidebar, StyleRefinement::default().size_full())
     }
 
     /// `flex-1 min-h-0 min-w-0 size-full`, like the conversation's root.

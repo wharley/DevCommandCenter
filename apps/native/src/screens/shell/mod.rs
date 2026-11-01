@@ -859,7 +859,7 @@ impl Render for Shell {
                     this.resize_browser(f32::from(event.event.position.x), window, cx)
                 },
             ))
-            .child(SidebarRegion::new(self.layout.sidebar_rail_width()).child(self.sidebar_view()))
+            .child(SidebarRegion::new(self.layout.sidebar_rail_width()).child(self.sidebar.clone()))
             .child(
                 ResizeHandle::new("sidebar-resize", SidebarResize)
                     .left(px(self.layout.separator_left()))

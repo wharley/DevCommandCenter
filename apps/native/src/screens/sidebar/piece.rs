@@ -6,7 +6,8 @@
 //! other rows are reused (the Monocode's session marks do the same).
 //!
 //! A piece reads the sidebar as it draws and redraws whenever the sidebar is
-//! notified. While the Browser's page is up they are drawn fresh, like the
+//! notified. The shell draws the sidebar itself uncached (`shell::cached`): a
+//! cached view that redraws ignores the caches inside it. While the Browser's page is up they are drawn fresh, like the
 //! shell's cached views (`ui::occlusion`).
 
 use std::cell::RefCell;
