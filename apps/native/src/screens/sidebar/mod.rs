@@ -22,6 +22,7 @@ mod meta_chips;
 mod navigation;
 #[cfg(test)]
 mod open_tests;
+mod piece;
 mod project_menu;
 mod repo_picker;
 mod row;
@@ -107,6 +108,8 @@ pub struct Sidebar {
     collapsed: bool,
     list: ListState,
     items: Vec<RailItem>,
+    /// Rows, the running pulse and agents' faces, each redrawn on its own.
+    pieces: piece::Pieces,
     mascot_frame: bool,
     /// The page on screen a navigation row stands for.
     current_page: Option<NavPage>,
@@ -179,6 +182,7 @@ impl Sidebar {
             collapsed,
             list,
             items,
+            pieces: piece::Pieces::default(),
             mascot_frame: false,
             current_page: None,
             pending_open: None,
@@ -333,8 +337,14 @@ impl Sidebar {
                         sidebar.refresh_skill_count(cx);
                     }
                     sidebar.mascot_frame = animating && !sidebar.mascot_frame;
-                    sidebar.sync_items();
-                    cx.notify();
+                    let moved = sidebar.sync_items();
+                    if stale || moved || sidebar.collapsed {
+                        cx.notify();
+                    } else {
+                        // A step or a second: only the rows that walk or tick.
+                        let live = sidebar.state.live_ids();
+                        sidebar.pieces.notify_rows(&live, cx);
+                    }
                 });
                 if alive.is_err() {
                     return;
@@ -451,14 +461,18 @@ impl Sidebar {
 
     /// Updates the list in place: only the changed span is spliced, so live
     /// updates never move the scroll position.
-    fn sync_items(&mut self) {
+    /// Whether the list changed.
+    fn sync_items(&mut self) -> bool {
         let next = self.state.items();
         if next == self.items {
-            return;
+            return false;
         }
         let (range, count) = list::changed_span(&self.items, &next);
         self.list.splice(range, count);
         self.items = next;
+        let listed = self.items.iter().filter_map(list::row_piece).collect();
+        self.pieces.retain_rows(&listed);
+        true
     }
 
     /// What runs in the desktop's shells, as the terminal dock last read it.

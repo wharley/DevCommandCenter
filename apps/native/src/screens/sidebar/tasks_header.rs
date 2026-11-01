@@ -3,9 +3,10 @@
 
 use std::time::Duration;
 
-use gpui::{ClickEvent, Context, Window, div, prelude::*, px};
+use gpui::{AnyElement, App, ClickEvent, Context, StyleRefinement, Window, div, prelude::*, px};
 
 use super::labels::emerald_text;
+use super::piece::Piece;
 use super::{Sidebar, SidebarEvent};
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
@@ -52,7 +53,15 @@ fn open_project_menu(cx: &mut Context<Sidebar>) -> Menu {
 
 pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
     let running = sidebar.state.running_ids().len();
+    let pulse = (running > 0).then(|| {
+        sidebar.pieces.element(
+            Piece::RunningPulse,
+            StyleRefinement::default().size(px(6.0)).flex_shrink_0(),
+            cx,
+        )
+    });
     let theme = cx.theme();
+    let radius = theme.radius.md;
     let muted = theme.colors.muted_foreground;
     let running_text = emerald_text(cx);
     let running_hover = tw::EMERALD_500.alpha(0.1);
@@ -87,29 +96,14 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
                             .gap(px(4.0))
                             .px(px(4.0))
                             .py(px(2.0))
-                            .rounded(theme.radius.md)
+                            .rounded(radius)
                             .cursor_pointer()
                             .text_color(running_text)
                             .hover(move |style| style.bg(running_hover))
                             .on_click(cx.listener(|this, _: &ClickEvent, _: &mut Window, cx| {
                                 this.jump_to_running(cx)
                             }))
-                            .child(
-                                // `animate-pulse`: opacity 1 → 0.5 → 1 every 2s.
-                                crate::ui::animated(
-                                    div()
-                                        .size(px(6.0))
-                                        .rounded_full()
-                                        .bg(tw::EMERALD_500.hsla()),
-                                    "running-pulse",
-                                    crate::ui::looping(Duration::from_secs(2)),
-                                    cx,
-                                    |dot, delta| {
-                                        let wave = (delta * std::f32::consts::TAU).cos();
-                                        dot.opacity(0.75 + 0.25 * wave)
-                                    },
-                                ),
-                            )
+                            .children(pulse)
                             .child(
                                 div()
                                     .text_size(px(10.5))
@@ -132,4 +126,21 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
                     cx,
                 )),
         )
+}
+
+/// `animate-pulse`: opacity 1 → 0.5 → 1 every 2s, in its own piece.
+pub(super) fn running_pulse(cx: &App) -> AnyElement {
+    crate::ui::animated(
+        div()
+            .size(px(6.0))
+            .rounded_full()
+            .bg(tw::EMERALD_500.hsla()),
+        "running-pulse",
+        crate::ui::looping(Duration::from_secs(2)),
+        cx,
+        |dot, delta| {
+            let wave = (delta * std::f32::consts::TAU).cos();
+            dot.opacity(0.75 + 0.25 * wave)
+        },
+    )
 }

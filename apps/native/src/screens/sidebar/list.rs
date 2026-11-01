@@ -3,10 +3,11 @@
 
 use std::ops::Range;
 
-use gpui::{AnyElement, Context, div, list, prelude::*, px};
+use gpui::{AnyElement, Context, StyleRefinement, div, list, prelude::*, px};
 
+use super::piece::Piece;
 use super::state::RailItem;
-use super::{Sidebar, child_task_row, row, sections};
+use super::{Sidebar, sections};
 use crate::ui::ListScrollbar;
 
 /// The span to replace so `old` becomes `new`: unchanged items at both ends
@@ -61,18 +62,37 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
 fn item_element(sidebar: &Sidebar, item: &RailItem, cx: &mut Context<Sidebar>) -> AnyElement {
     match item {
         RailItem::DayLabel(section) => sections::day_label(*section, cx),
-        RailItem::Row { task_id, compact } => row::render(sidebar, task_id, *compact, cx),
+        RailItem::Row { .. } | RailItem::ChildTask { .. } => {
+            let piece = row_piece(item).expect("a row");
+            let style = StyleRefinement::default().size_full();
+            sidebar.pieces.element(piece, style, cx)
+        }
         RailItem::Header {
             section,
             count,
             open,
         } => sections::hold_header(sidebar, *section, *count, *open, cx),
+        RailItem::Gap(_) | RailItem::BottomPadding => div().into_any_element(),
+    }
+}
+
+/// The piece a task's or a child task's row is drawn in.
+pub fn row_piece(item: &RailItem) -> Option<Piece> {
+    match item {
+        RailItem::Row { task_id, compact } => Some(Piece::Row {
+            task_id: task_id.clone(),
+            compact: *compact,
+        }),
         RailItem::ChildTask {
             task_id,
             child_id,
             last,
-        } => child_task_row::render(sidebar, task_id, child_id, *last, cx),
-        RailItem::Gap(_) | RailItem::BottomPadding => div().into_any_element(),
+        } => Some(Piece::Child {
+            task_id: task_id.clone(),
+            child_id: child_id.clone(),
+            last: *last,
+        }),
+        _ => None,
     }
 }
 

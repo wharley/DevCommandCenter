@@ -218,6 +218,17 @@ impl SidebarState {
     }
 
     /// Agents at work; one waiting on the person is under "Needs you".
+    /// Tasks whose row moves on its own: a mascot walking, seconds ticking.
+    pub fn live_ids(&self) -> HashSet<String> {
+        self.data
+            .activities
+            .iter()
+            .filter(|(_, activity)| activity.is_turn_open())
+            .map(|(id, _)| id.clone())
+            .chain(self.running_ids())
+            .collect()
+    }
+
     pub fn running_ids(&self) -> HashSet<String> {
         self.data
             .tasks

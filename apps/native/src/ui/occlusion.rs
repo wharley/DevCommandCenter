@@ -56,6 +56,13 @@ pub fn page_covered(page: Bounds<Pixels>, cx: &mut App) -> bool {
     covered
 }
 
+/// Whether the Browser's page is up: cached views draw fresh meanwhile, so
+/// their overlays keep saying where they are.
+pub fn page_open(cx: &App) -> bool {
+    cx.try_global::<Overlays>()
+        .is_some_and(|overlays| overlays.page.is_some())
+}
+
 /// The page is gone.
 pub fn page_closed(cx: &mut App) {
     let overlays = cx.default_global::<Overlays>();

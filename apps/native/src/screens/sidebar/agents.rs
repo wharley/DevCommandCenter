@@ -266,12 +266,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> Option<AnyElement
             .when(active, |button| button.bg(colors.accent))
             .when(!active, |button| button.hover(move |style| style.bg(hover)))
             .on_click(open(agent.id.clone(), cx))
-            .child(AgentAvatarView::new(
-                SharedString::from(format!("agent-face-{}", agent.id)),
-                &agent.avatar,
-                Some(view.state),
-                22.0,
-            ))
+            .child(face_piece(sidebar, &agent.id, false, cx))
             .when_some(dot_color(view.state), |button, dot| {
                 button.child(
                     div()
@@ -345,12 +340,7 @@ pub fn rail_buttons(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> Vec<AnyElem
             .variant(ButtonVariant::Ghost)
             .size(ButtonSize::IconXs)
             .current(active)
-            .child(AgentAvatarView::new(
-                SharedString::from(format!("rail-agent-face-{}", agent.id)),
-                &agent.avatar,
-                Some(view.state),
-                20.0,
-            ))
+            .child(face_piece(sidebar, &agent.id, true, cx))
             .on_click(open(agent.id.clone(), cx));
         buttons.push(
             Tooltip::text(
@@ -363,4 +353,46 @@ pub fn rail_buttons(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> Vec<AnyElem
         );
     }
     buttons
+}
+
+fn face_size(rail: bool) -> f32 {
+    if rail { 20.0 } else { 22.0 }
+}
+
+/// The agent's face in its own piece: its bob while it works repaints only it.
+fn face_piece(
+    sidebar: &Sidebar,
+    agent_id: &str,
+    rail: bool,
+    cx: &mut Context<Sidebar>,
+) -> AnyElement {
+    let side = px(face_size(rail));
+    sidebar.pieces.element(
+        super::piece::Piece::AgentFace {
+            agent_id: agent_id.to_string(),
+            rail,
+        },
+        gpui::StyleRefinement::default().size(side).flex_shrink_0(),
+        cx,
+    )
+}
+
+/// The agent's face, as its piece draws it.
+pub(super) fn face(sidebar: &Sidebar, agent_id: &str, rail: bool) -> AnyElement {
+    let views = sidebar.agent_views();
+    let Some(view) = views.iter().find(|view| view.agent.id == agent_id) else {
+        return div().into_any_element();
+    };
+    let prefix = if rail {
+        "rail-agent-face"
+    } else {
+        "agent-face"
+    };
+    AgentAvatarView::new(
+        SharedString::from(format!("{prefix}-{agent_id}")),
+        &view.agent.avatar,
+        Some(view.state),
+        face_size(rail),
+    )
+    .into_any_element()
 }
