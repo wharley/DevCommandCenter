@@ -7,7 +7,9 @@ use gpui::{
     div, point, prelude::*, px,
 };
 
-use super::{Busy, Composer, context_rail, controls, objective, picker, popups, queue, strips};
+use super::{
+    Busy, Composer, context_rail, controls, images, objective, picker, popups, queue, strips,
+};
 use crate::i18n::Translate;
 use crate::project::ProviderIcon;
 use crate::theme::ActiveTheme;
@@ -317,6 +319,7 @@ pub(super) fn render(
                         .children(strips::usage_limit_strip(composer, cx))
                         .children(strips::goal_strip(composer, cx))
                         .children(queue::queue_tray(composer, cx))
+                        .children(images::image_strip(composer, cx))
                         .child(
                             div()
                                 .id("composer-input")

@@ -38,3 +38,28 @@ fn line_keys_select_move_and_delete_within_the_line(cx: &mut TestAppContext) {
         "primeira linha\nsegunda".len()
     );
 }
+
+#[gpui::test]
+fn a_paste_goes_in_at_the_caret(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        super::bind_keys(cx);
+        cx.bind_keys([gpui::KeyBinding::new(
+            "cmd-v",
+            crate::app::menus::EditPaste,
+            None,
+        )]);
+    });
+    let (area, cx) = cx.add_window_view(TextArea::new);
+    area.update_in(cx, |area, window, cx| {
+        area.set_text("abcdef", cx);
+        window.focus(&area.focus_handle(cx), cx);
+    });
+    cx.run_until_parked();
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string("XYZ".into()));
+    cx.simulate_keystrokes("cmd-left right right right cmd-v");
+    assert_eq!(
+        area.read_with(cx, |area, _| area.text().to_string()),
+        "abcXYZdef"
+    );
+}

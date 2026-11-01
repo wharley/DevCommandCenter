@@ -162,6 +162,10 @@ impl ConversationView {
                     ComposerEvent::Refresh => view.refresh_now(cx),
                     ComposerEvent::OpenSession(session) => view.open_session(session.clone(), cx),
                     ComposerEvent::OpenTerminal => cx.emit(ConversationEvent::OpenTerminal),
+                    ComposerEvent::OpenImage(path) => {
+                        view.image_open = Some(path.clone());
+                        cx.notify();
+                    }
                     // Only the quick composer sends this way.
                     ComposerEvent::QuickSubmit(_) => {}
                 },

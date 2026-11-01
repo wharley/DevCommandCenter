@@ -385,13 +385,10 @@ impl TextArea {
         self.after_edit(cx);
     }
 
-    /// Adds a chip at the very end (a pasted image), keeping the caret.
-    pub fn append_chip(&mut self, chip: Chip, cx: &mut Context<Self>) {
-        let cursor = self.buffer.cursor();
-        let end = self.buffer.text().len();
-        self.buffer.move_to(end);
-        self.buffer.insert_chip(chip);
-        self.buffer.move_to(cursor);
+    /// Takes out the chip that starts at `offset` (its close button, or a
+    /// thumbnail's above the field).
+    pub fn remove_chip(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.buffer.remove_chip_at(offset);
         self.after_edit(cx);
     }
 
@@ -729,8 +726,7 @@ impl TextArea {
                 .find(|(close, _)| close.contains(&event.position))
                 .map(|(_, offset)| *offset)
         }) {
-            self.buffer.remove_chip_at(chip);
-            self.after_edit(cx);
+            self.remove_chip(chip, cx);
             return;
         }
         let offset = self.offset_at(event.position);

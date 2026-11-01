@@ -125,7 +125,7 @@ impl Composer {
                         Ok(path) => {
                             let chip = this.chip_for(&path);
                             this.input
-                                .update(cx, |input, cx| input.append_chip(chip, cx));
+                                .update(cx, |input, cx| input.insert_chip(chip, None, cx));
                         }
                         Err(error) => Toaster::error_with(failure.clone(), error.to_string(), cx),
                     }

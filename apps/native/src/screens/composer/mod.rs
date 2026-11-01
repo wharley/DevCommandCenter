@@ -15,6 +15,7 @@ mod controls;
 mod drafts;
 mod first_send;
 mod handoff;
+mod images;
 mod mentions;
 mod objective;
 mod picker;
@@ -122,6 +123,8 @@ pub enum ComposerEvent {
     OpenSession(String),
     /// "Abrir terminal" on the setup warning.
     OpenTerminal,
+    /// A thumbnail above the field: the image full size.
+    OpenImage(String),
     /// The quick composer's send: the host creates the task, starts the
     /// conversation and sends this.
     QuickSubmit(Box<QuickTurn>),
