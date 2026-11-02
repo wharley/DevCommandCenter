@@ -122,3 +122,25 @@ fn real_simulator_streams_through_the_helper() {
     let tree = futures::executor::block_on(link.request(serde_json::json!({"op": "describe"})));
     assert!(tree.is_ok(), "{tree:?}");
 }
+
+/// Only a simulator the panel booted goes down when the panel leaves it.
+#[gpui::test]
+fn the_panel_shuts_down_only_what_it_booted(cx: &mut TestAppContext) {
+    let (panel, cx) = open(cx);
+    let sim = |udid: &str| Simulator {
+        udid: udid.into(),
+        name: "iPhone 16 Pro".into(),
+        runtime: "iOS 18.3".into(),
+        booted: true,
+        ipad: false,
+        last_booted: None,
+    };
+    panel.update(cx, |panel, _| {
+        panel.current = Some(sim("XCODE"));
+        assert_eq!(panel.leave(), None, "Xcode's stays running");
+        panel.current = Some(sim("OURS"));
+        panel.started.insert("OURS".into());
+        assert_eq!(panel.leave().as_deref(), Some("OURS"));
+        assert_eq!(panel.leave(), None, "once");
+    });
+}

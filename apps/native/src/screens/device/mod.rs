@@ -2,8 +2,9 @@
 //! the app (its H.264 decoded by VideoToolbox into GPUI's `surface`) and
 //! used with the mouse and keyboard like the Simulator app — no Simulator
 //! window. The simulator is chosen from the ones Xcode has; one not running
-//! is booted without its window. Closing the panel ends the helper and
-//! leaves the simulator running (a click on the power mark shuts it down).
+//! is booted without its window. A simulator the panel booted is shut down
+//! when the panel closes or another one is chosen; one that was running
+//! already (Xcode's) is left as it was. The power mark shuts one down.
 
 mod keys;
 mod view;
@@ -25,6 +26,9 @@ use crate::i18n::Translate;
 impl Drop for DevicePanel {
     fn drop(&mut self) {
         self.release();
+        if let Some(udid) = self.leave() {
+            device::shutdown_detached(&udid);
+        }
     }
 }
 
@@ -71,6 +75,8 @@ pub struct DevicePanel {
     pub(crate) screen: Rc<Cell<Bounds<Pixels>>>,
     /// A finger is down on the screen.
     pressed: bool,
+    /// The simulators this panel booted (it shuts them down on leaving).
+    pub(crate) started: std::collections::HashSet<String>,
     _list: Option<Task<()>>,
     _start: Option<Task<()>>,
     _frames: Option<Task<()>>,
@@ -90,6 +96,7 @@ impl DevicePanel {
             focus: cx.focus_handle(),
             screen: Rc::default(),
             pressed: false,
+            started: Default::default(),
             _list: None,
             _start: None,
             _frames: None,
@@ -137,9 +144,24 @@ impl DevicePanel {
         }
     }
 
-    /// Boots `sim` if needed and shows it.
+    /// The open simulator, when the panel booted it: it goes down on leaving.
+    pub(crate) fn leave(&mut self) -> Option<String> {
+        let udid = self.current.as_ref()?.udid.clone();
+        self.started.remove(&udid).then_some(udid)
+    }
+
+    /// Boots `sim` if needed and shows it; the one before goes down if the
+    /// panel booted it.
     pub(crate) fn open(&mut self, sim: Simulator, cx: &mut Context<Self>) {
         self.release();
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.udid != sim.udid)
+            && let Some(previous) = self.leave()
+        {
+            device::shutdown_detached(&previous);
+        }
         self._frames = None;
         self.picture = None;
         self.current = Some(sim.clone());
@@ -152,26 +174,42 @@ impl DevicePanel {
         cx.notify();
         self._start = Some(cx.spawn(async move |this, cx| {
             let udid = sim.udid.clone();
-            let started = cx
+            let (booted, started) = cx
                 .background_executor()
                 .spawn(async move {
-                    device::boot(&udid)?;
-                    DeviceLink::open(&helper, &udid)
+                    match device::boot(&udid) {
+                        Ok(booted) => (booted, DeviceLink::open(&helper, &udid)),
+                        Err(error) => (false, Err(error)),
+                    }
                 })
                 .await;
-            let _ = this.update(cx, |panel, cx| match started {
-                Ok((link, events)) => {
-                    panel.link = Some(Arc::new(link));
-                    panel.phase = Phase::Live;
-                    panel.follow(events, cx);
-                    cx.notify();
+            let _ = this.update(cx, |panel, cx| {
+                if booted {
+                    panel.started.insert(sim.udid.clone());
                 }
-                Err(error) => {
-                    panel.phase = Phase::Failed(error);
-                    cx.notify();
-                }
+                panel.started_link(started, cx);
             });
         }));
+    }
+
+    fn started_link(
+        &mut self,
+        started: Result<(DeviceLink, mpsc::UnboundedReceiver<LinkEvent>), String>,
+        cx: &mut Context<Self>,
+    ) {
+        let panel = self;
+        match started {
+            Ok((link, events)) => {
+                panel.link = Some(Arc::new(link));
+                panel.phase = Phase::Live;
+                panel.follow(events, cx);
+                cx.notify();
+            }
+            Err(error) => {
+                panel.phase = Phase::Failed(error);
+                cx.notify();
+            }
+        }
     }
 
     /// Decodes off the main thread; the screen shows the newest picture.
@@ -208,6 +246,9 @@ impl DevicePanel {
 
     pub(crate) fn close(&mut self, cx: &mut Context<Self>) {
         self.release();
+        if let Some(udid) = self.leave() {
+            device::shutdown_detached(&udid);
+        }
         cx.emit(DeviceEvent::Closed);
     }
 
@@ -216,6 +257,7 @@ impl DevicePanel {
         let Some(sim) = self.current.take() else {
             return;
         };
+        self.started.remove(&sim.udid);
         self.release();
         self._frames = None;
         self.picture = None;

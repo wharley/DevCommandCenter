@@ -133,19 +133,33 @@ pub fn list() -> Result<Vec<Simulator>, String> {
     simctl(&["list", "devices", "available", "-j"]).map(|json| parse_list(&json))
 }
 
-/// Boots `udid` without the Simulator window and waits until it is up.
-pub fn boot(udid: &str) -> Result<(), String> {
-    if let Err(error) = simctl(&["boot", udid]) {
-        // Already booted is fine.
-        if !error.contains("current state: Booted") {
-            return Err(error);
-        }
-    }
-    simctl(&["bootstatus", udid, "-b"]).map(|_| ())
+/// Boots `udid` without the Simulator window and waits until it is up;
+/// `true` when this call booted it (not when it was running already).
+pub fn boot(udid: &str) -> Result<bool, String> {
+    let booted = match simctl(&["boot", udid]) {
+        Ok(_) => true,
+        // Already running (the person's, from Xcode or an earlier panel).
+        Err(error) if error.contains("current state: Booted") => false,
+        Err(error) => return Err(error),
+    };
+    simctl(&["bootstatus", udid, "-b"]).map(|_| booted)
 }
 
 pub fn shutdown(udid: &str) -> Result<(), String> {
     simctl(&["shutdown", udid]).map(|_| ())
+}
+
+/// Shuts `udid` down without waiting, even while the app quits.
+pub fn shutdown_detached(udid: &str) {
+    if cfg!(test) {
+        return;
+    }
+    let _ = Command::new("xcrun")
+        .args(["simctl", "shutdown", udid])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 /// The Claude helper that runs the simulator's capture (`device`): this

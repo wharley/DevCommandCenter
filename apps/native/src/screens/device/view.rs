@@ -16,8 +16,12 @@ use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip};
 
 /// The panel's width beside the conversation.
 pub const WIDTH: f32 = 400.0;
+/// Room around the screen; the corner mask reaches into it.
+const MARGIN: f32 = 24.0;
 /// The bar and the margins around the screen.
-const CHROME: f32 = 56.0 + 32.0;
+const CHROME: f32 = 56.0 + 2.0 * MARGIN;
+/// An iPhone's display corners: ~55pt on a 402pt wide screen.
+const CORNER: f32 = 0.135;
 
 fn icon_button(id: &'static str, icon: &'static str) -> Button {
     Button::new(id)
@@ -25,6 +29,44 @@ fn icon_button(id: &'static str, icon: &'static str) -> Button {
         .size(ButtonSize::IconSm)
         .muted()
         .child(Icon::new(icon).size(15.0))
+}
+
+/// GPUI clips a video surface only to a rectangle, so the display's rounded
+/// corners are painted over it: a ring in the panel's color whose inner edge
+/// is the rounded screen (a border's inner radius is its outer radius less
+/// its width, as in CSS), and a hairline on that edge.
+fn corner_mask(radius: f32, background: gpui::Hsla, line: gpui::Hsla) -> AnyElement {
+    // Reaching √2−1 of the radius past the screen covers its corners.
+    let reach = (radius * 0.42).ceil() + 1.0;
+    let ring = px(reach);
+    let mut mask = div()
+        .absolute()
+        .top(-ring)
+        .left(-ring)
+        .right(-ring)
+        .bottom(-ring)
+        .rounded(px(radius + reach))
+        .border_color(background);
+    let width: gpui::AbsoluteLength = ring.into();
+    mask.style().border_widths = gpui::EdgesRefinement {
+        top: Some(width),
+        right: Some(width),
+        bottom: Some(width),
+        left: Some(width),
+    };
+    div()
+        .absolute()
+        .size_full()
+        .child(mask)
+        .child(
+            div()
+                .absolute()
+                .size_full()
+                .rounded(px(radius))
+                .border_1()
+                .border_color(line),
+        )
+        .into_any_element()
 }
 
 impl DevicePanel {
@@ -144,22 +186,19 @@ impl DevicePanel {
             (0, _) | (_, 0) => (1179.0, 2556.0),
             (width, height) => (width as f32, height as f32),
         };
-        let room_width = WIDTH - 32.0;
+        let room_width = WIDTH - 2.0 * MARGIN;
         let room_height = (f32::from(window.viewport_size().height) - CHROME - 48.0).max(200.0);
         let scale = (room_width / width).min(room_height / height);
         let (shown_width, shown_height) = (width * scale, height * scale);
         let bounds = self.screen.clone();
         let picture = self.picture.clone();
+        let radius = shown_width * CORNER;
         div()
             .id("device-screen")
             .debug_selector(|| "device-screen".into())
             .relative()
             .w(px(shown_width))
             .h(px(shown_height))
-            .rounded(px(shown_width * 0.12))
-            .overflow_hidden()
-            .border_1()
-            .border_color(colors.border)
             .bg(gpui::black())
             .cursor_pointer()
             .track_focus(&self.focus)
@@ -199,6 +238,7 @@ impl DevicePanel {
                 }
             }))
             .children(picture.map(|picture| surface(picture).size_full()))
+            .child(corner_mask(radius, colors.background, colors.border))
             .child(
                 canvas(move |painted, _, _| bounds.set(painted), |_, _, _, _| {})
                     .absolute()
@@ -333,7 +373,7 @@ impl Render for DevicePanel {
             Phase::Live => div()
                 .flex()
                 .justify_center()
-                .pt(px(16.0))
+                .pt(px(MARGIN))
                 .child(self.screen(window, cx))
                 .into_any_element(),
             Phase::Failed(reason) => {
