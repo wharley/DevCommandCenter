@@ -76,7 +76,10 @@ fn inline_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
 }
 
 fn styled_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
+    let (shown, sites) = super::site_links::with_room(inline);
+    let inline = &shown;
     let colors = &cx.theme().colors;
+    let site = crate::ui::text_area::links::color(cx);
     let mono = cx.theme().fonts.mono.clone();
     let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
     let mut links: Vec<(std::ops::Range<usize>, String)> = Vec::new();
@@ -99,7 +102,12 @@ fn styled_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
             style.background_color = Some(colors.muted);
             let _ = &mono;
         }
-        if let Some(link) = &span.link {
+        if let (true, Some(link)) = (span.style.site, &span.link) {
+            // `.composer-link`: the address itself, on a faint fill.
+            style.color = Some(site);
+            style.background_color = Some(site.opacity(0.09));
+            links.push((span.range.clone(), link.clone()));
+        } else if let Some(link) = &span.link {
             style.color = Some(colors.primary);
             style.font_weight = Some(FontWeight::MEDIUM);
             style.underline = Some(UnderlineStyle {
@@ -117,6 +125,7 @@ fn styled_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
     if links.is_empty() {
         return super::selection::wrap(content, layout, text.into_any_element());
     }
+    let icon_layout = layout.clone();
     let ranges: Vec<std::ops::Range<usize>> =
         links.iter().map(|(range, _)| range.clone()).collect();
     let targets: Vec<String> = links.into_iter().map(|(_, url)| url).collect();
@@ -137,7 +146,8 @@ fn styled_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
             cx.open_url(&target);
         }
     });
-    super::selection::wrap(content, layout, interactive.into_any_element())
+    let text = super::selection::wrap(content, layout, interactive.into_any_element());
+    super::site_links::with_icons(text, icon_layout, sites, cx)
 }
 
 /// `.assistant-markdown-scale :where(p, …):not(:first-child) { margin-top: .75rem }`;

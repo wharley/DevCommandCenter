@@ -13,6 +13,9 @@ pub struct SpanStyle {
     pub italic: bool,
     pub strike: bool,
     pub code: bool,
+    /// An address written as itself (`https://…`, `www.…`), drawn like the
+    /// composer draws it: blue on a faint fill, the site's icon before it.
+    pub site: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -138,8 +141,37 @@ impl InlineBuilder {
     }
 
     fn take(&mut self) -> Inline {
-        std::mem::take(&mut self.inline)
+        let mut inline = std::mem::take(&mut self.inline);
+        linkify(&mut inline);
+        inline
     }
+}
+
+/// Bare addresses in plain text become links (GitHub's autolinks); text
+/// that is code, a link already or styled stays as it is.
+fn linkify(inline: &mut Inline) {
+    let found = crate::ui::text_area::links::find(&inline.text);
+    if found.is_empty() {
+        return;
+    }
+    for link in found {
+        let taken = inline
+            .spans
+            .iter()
+            .any(|span| span.range.start < link.range.end && link.range.start < span.range.end);
+        if taken {
+            continue;
+        }
+        inline.spans.push(Span {
+            range: link.range,
+            style: SpanStyle {
+                site: true,
+                ..SpanStyle::default()
+            },
+            link: Some(link.url),
+        });
+    }
+    inline.spans.sort_by_key(|span| span.range.start);
 }
 
 /// A container being filled while the parser walks the events.

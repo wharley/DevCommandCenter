@@ -9,7 +9,7 @@ mod element;
 mod handler;
 #[cfg(test)]
 mod keys_tests;
-mod links;
+pub(crate) mod links;
 mod lists;
 
 use std::ops::Range;

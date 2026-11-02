@@ -156,7 +156,8 @@ impl Selection {
                 (!range.is_empty()).then(|| &fragment.text[range])
             })
             .collect();
-        (!text.is_empty()).then(|| text.join("\n"))
+        // The room before an address holds its icon, not text.
+        (!text.is_empty()).then(|| text.join("\n").replace(super::site_links::SPACER, ""))
     }
 
     fn register(&self, fragment: Fragment) {

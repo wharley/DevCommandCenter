@@ -6,6 +6,7 @@ mod image;
 mod parse;
 mod render;
 pub mod selection;
+mod site_links;
 
 pub use image::InlineImage;
 pub use parse::{Block, Inline, ListItem, Span, SpanStyle, parse};
