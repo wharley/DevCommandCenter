@@ -55,6 +55,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         };
         tools.push(tool_button(id, icon, event, size, Side::Right, sidebar, cx));
     }
+    tools.extend(super::footer::update_button(24.0, Side::Right, cx));
     let code_column =
         has_selection.then(|| code_column_toggle("rail-code-column", Side::Right, cx));
     let project_buttons = has_tasks.then(|| {

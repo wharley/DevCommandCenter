@@ -41,7 +41,7 @@ pub(super) struct General {
 }
 
 /// `rounded-xl border border-border/60 bg-muted/15 p-4`
-fn card(cx: &Context<Settings>) -> gpui::Div {
+pub(super) fn card(cx: &Context<Settings>) -> gpui::Div {
     let colors = &cx.theme().colors;
     div()
         .rounded(px(14.0))
@@ -52,7 +52,11 @@ fn card(cx: &Context<Settings>) -> gpui::Div {
 }
 
 /// The title (14px medium) and its line.
-fn heading(title: SharedString, body: SharedString, cx: &Context<Settings>) -> gpui::Div {
+pub(super) fn heading(
+    title: SharedString,
+    body: SharedString,
+    cx: &Context<Settings>,
+) -> gpui::Div {
     let colors = &cx.theme().colors;
     div()
         .min_w_0()
@@ -256,30 +260,6 @@ impl Settings {
                         .child(cx.t("frontendRecovery.copied")),
                 )
             })
-            .into_any_element()
-    }
-
-    fn version_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let version = crate::data::feedback::version();
-        let shown = if version.is_empty() {
-            cx.t("settings.general.appVersionUnknown").to_string()
-        } else {
-            version
-        };
-        // Checking for and installing updates come with the native updater.
-        card(cx)
-            .child(heading(
-                cx.t("settings.general.appVersionTitle"),
-                cx.t("settings.general.appVersionBody"),
-                cx,
-            ))
-            .child(
-                div()
-                    .mt(px(12.0))
-                    .font_family(fonts::MONO)
-                    .text_size(px(13.0))
-                    .child(shown),
-            )
             .into_any_element()
     }
 

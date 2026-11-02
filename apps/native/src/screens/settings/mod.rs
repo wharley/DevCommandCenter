@@ -18,7 +18,7 @@ mod preview;
 mod providers;
 mod shortcuts;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 mod tests_account;
 #[cfg(test)]
@@ -31,6 +31,7 @@ mod tests_connectors;
 mod tests_mcp_advanced;
 #[cfg(test)]
 mod tests_providers;
+mod version;
 mod view;
 
 use gpui::{AppContext, Context, Entity, EventEmitter, ScrollHandle, Subscription, Window};
@@ -249,6 +250,9 @@ impl Settings {
             _search_events: events,
         };
         settings.load_general(cx);
+        if let Some(updater) = crate::app::updater::updater(cx) {
+            cx.observe(&updater, |_, _, cx| cx.notify()).detach();
+        }
         settings.load_shortcuts(cx);
         settings.load_providers(cx);
         settings.load_decision(cx);

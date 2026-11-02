@@ -92,5 +92,6 @@ pub mod tasks;
 pub mod terminal_api;
 pub mod text_match;
 pub mod time;
+pub mod updater;
 pub mod usage;
 pub mod ux_metrics;

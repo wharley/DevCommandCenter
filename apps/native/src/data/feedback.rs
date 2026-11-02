@@ -14,13 +14,25 @@ use serde::{Deserialize, Serialize};
 /// `FEEDBACK_REPOSITORY`
 pub const REPOSITORY: &str = "wharley/DevCommandCenter";
 
-/// The DCC version the diagnostics name: the desktop's, the same release.
+/// The DCC version Settings and the diagnostics name: the installed app's
+/// own (`0.3.0-local.g…` for a local build), else this crate's.
 pub fn version() -> String {
-    const CONFIG: &str = include_str!("../../../../src-tauri/tauri.conf.json");
-    serde_json::from_str::<serde_json::Value>(CONFIG)
-        .ok()
-        .and_then(|config| config["version"].as_str().map(str::to_string))
-        .unwrap_or_default()
+    bundle_version().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
+/// `CFBundleShortVersionString`; nothing outside a bundle (`cargo run`).
+#[cfg(target_os = "macos")]
+fn bundle_version() -> Option<String> {
+    use objc2_foundation::{NSBundle, NSString, ns_string};
+    let value = NSBundle::mainBundle()
+        .objectForInfoDictionaryKey(ns_string!("CFBundleShortVersionString"))?;
+    let version = value.downcast::<NSString>().ok()?.to_string();
+    (!version.trim().is_empty()).then_some(version)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn bundle_version() -> Option<String> {
+    None
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

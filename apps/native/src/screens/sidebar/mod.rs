@@ -177,6 +177,10 @@ impl Sidebar {
         list.set_scroll_handler(move |_, _, cx| {
             let _ = weak.update(cx, |sidebar: &mut Sidebar, cx| sidebar.list_scrolled(cx));
         });
+        // The update button in the footer and the rail.
+        if let Some(updater) = crate::app::updater::updater(cx) {
+            cx.observe(&updater, |_, _, cx| cx.notify()).detach();
+        }
         Self {
             state,
             collapsed,

@@ -13,7 +13,7 @@ use crate::theme::{Density, Theme, ThemePreference};
 
 type Events = Rc<RefCell<Vec<String>>>;
 
-pub(super) fn open(
+pub(crate) fn open(
     section: Option<SectionId>,
     cx: &mut TestAppContext,
 ) -> (Entity<Settings>, &mut VisualTestContext, Events) {

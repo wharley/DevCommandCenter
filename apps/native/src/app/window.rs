@@ -42,8 +42,12 @@ pub fn open_main(prefs: Prefs, prefs_path: PathBuf, cx: &mut App) -> anyhow::Res
             });
             cx.new(|cx| {
                 // The relay skips phone pushes while the person looks here.
-                cx.observe_window_activation(window, |_, window, _| {
-                    crate::data::host::set_focused(window.is_window_active());
+                cx.observe_window_activation(window, |_, window, cx| {
+                    let active = window.is_window_active();
+                    crate::data::host::set_focused(active);
+                    if active {
+                        super::updater::window_active(cx);
+                    }
                 })
                 .detach();
                 Shell::new(prefs, prefs_path, window, cx)

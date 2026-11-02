@@ -1,6 +1,6 @@
 [package]
 name = "dcc-native"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -28,6 +28,9 @@ chrono = "0.4"
 futures = "0.3"
 # The markdown's remote images (`app::image_http`), the backend's same version.
 reqwest = { version = "0.11", features = ["blocking"] }
+# The updater (`data::updater`): the release's minisign signature and versions.
+minisign-verify = "0.2"
+semver = "1"
 base64 = "0.22"
 # The relay pairing QR in Settings → Conexões (encoded only; drawn by GPUI).
 qrcode = { version = "0.14", default-features = false }
@@ -92,6 +95,7 @@ objc2-avf-audio = { version = "0.3", default-features = false, features = ["std"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
 
 [dev-dependencies]
+minisign = "0.7"
 gpui = { package = "gpui-pre", version = "=0.3.9", default-features = false, features = ["test-support"] }
 tempfile = "3"
 

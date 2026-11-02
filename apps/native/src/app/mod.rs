@@ -11,6 +11,7 @@ pub mod menu_bar;
 mod menu_bar_item;
 pub(crate) mod menus;
 pub mod quick_composer;
+pub mod updater;
 mod window;
 
 use crate::assets::Assets;
@@ -73,6 +74,8 @@ pub fn run() {
 
         // Remote images in markdown (a bot's badge, a PR's screenshot).
         cx.set_http_client(std::sync::Arc::new(image_http::ImageHttp::new()));
+        // Before the window: the sidebar and Settings read it.
+        updater::start(cx);
         if let Err(error) = window::open_main(prefs, prefs_path, cx) {
             eprintln!("[dcc-native] could not open the window: {error:#}");
             cx.quit();
