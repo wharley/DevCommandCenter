@@ -552,13 +552,28 @@ impl ConversationView {
 
     /// Parsed once per distinct text; rows re-render every frame they show.
     pub(crate) fn markdown(&self, text: &str) -> Rc<Vec<Block>> {
+        self.cached_markdown(text, false)
+    }
+
+    /// The person's own message, its line breaks kept.
+    pub(crate) fn prompt_markdown(&self, text: &str) -> Rc<Vec<Block>> {
+        self.cached_markdown(text, true)
+    }
+
+    fn cached_markdown(&self, text: &str, prompt: bool) -> Rc<Vec<Block>> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        text.hash(&mut hasher);
+        (prompt, text).hash(&mut hasher);
         let key = hasher.finish();
         self.markdown
             .borrow_mut()
             .entry(key)
-            .or_insert_with(|| Rc::new(parse(text)))
+            .or_insert_with(|| {
+                Rc::new(if prompt {
+                    crate::markdown::parse_prompt(text)
+                } else {
+                    parse(text)
+                })
+            })
             .clone()
     }
 

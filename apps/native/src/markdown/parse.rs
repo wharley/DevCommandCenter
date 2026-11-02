@@ -237,6 +237,17 @@ impl Builder {
 }
 
 pub fn parse(markdown: &str) -> Vec<Block> {
+    parse_with(markdown, false)
+}
+
+/// A message the person wrote: each line they broke stays a line, as chat
+/// apps and GitHub comments show it (`remark-breaks`), not joined with the
+/// next as CommonMark would.
+pub fn parse_prompt(markdown: &str) -> Vec<Block> {
+    parse_with(markdown, true)
+}
+
+fn parse_with(markdown: &str, keep_lines: bool) -> Vec<Block> {
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let mut builder = Builder {
@@ -385,7 +396,9 @@ pub fn parse(markdown: &str) -> Vec<Block> {
                 None => builder.inline.push(&text, false),
             },
             Event::Code(text) => builder.inline.push(&text, true),
-            Event::SoftBreak => builder.inline.push(" ", false),
+            Event::SoftBreak => builder
+                .inline
+                .push(if keep_lines { "\n" } else { " " }, false),
             Event::HardBreak => builder.inline.push("\n", false),
             Event::Rule => {
                 builder.flush_loose_text();
@@ -481,6 +494,29 @@ mod tests {
                 .blocks
                 .iter()
                 .any(|block| matches!(block, Block::List { .. }))
+        );
+    }
+
+    #[test]
+    fn a_prompt_keeps_its_lines_and_a_reply_joins_them() {
+        let text = "[12:10] Giovanni: sem TID?\n[12:11] Giovanni: e o loop?\n\n- um\n- dois";
+        let Block::Paragraph(prompt) = &parse_prompt(text)[0] else {
+            panic!("paragraph");
+        };
+        assert_eq!(
+            prompt.text,
+            "[12:10] Giovanni: sem TID?\n[12:11] Giovanni: e o loop?"
+        );
+        let Block::Paragraph(reply) = &parse(text)[0] else {
+            panic!("paragraph");
+        };
+        assert_eq!(
+            reply.text,
+            "[12:10] Giovanni: sem TID? [12:11] Giovanni: e o loop?"
+        );
+        assert!(
+            matches!(&parse_prompt(text)[1], Block::List { .. }),
+            "markdown still works"
         );
     }
 }

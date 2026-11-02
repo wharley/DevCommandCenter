@@ -9,7 +9,7 @@ pub mod selection;
 mod site_links;
 
 pub use image::InlineImage;
-pub use parse::{Block, Inline, ListItem, Span, SpanStyle, parse};
+pub use parse::{Block, Inline, ListItem, Span, SpanStyle, parse, parse_prompt};
 pub use render::{MarkdownStyle, render_markdown};
 
 /// What the app does with a clicked link (a task's file opens on the

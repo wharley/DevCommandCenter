@@ -100,7 +100,7 @@ pub(super) fn user_row(
     let colors = theme.colors.clone();
     let radius = theme.radius;
     let text = (!markdown.is_empty()).then(|| {
-        let blocks = view.markdown(&markdown);
+        let blocks = view.prompt_markdown(&markdown);
         div()
             .w_full()
             .min_w_0()
