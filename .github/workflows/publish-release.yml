@@ -1,27 +1,21 @@
 name: Publish Release
 # Named after the release commit however the tag arrives: a tag pushed on its
 # own (the commit already on main) would otherwise show only "Publish Release".
-run-name: "${{ github.event_name == 'push' && format('chore(release): {0}', github.ref_name) || format('Publish Release ({0})', inputs.target) }}"
+run-name: "${{ github.event_name == 'push' && format('chore(release): {0}', github.ref_name) || 'Build and verify the release (no publish)' }}"
 
+# The native app (apps/native): macOS Apple silicon and Intel (.app.tar.gz for
+# the updater, notarized DMG) and Linux x86_64 (.deb), each archive signed with
+# the updater key, and the latest.json both the native app and a v0.2.0 Tauri
+# desktop read. A tag publishes a draft release; a manual run only builds and
+# verifies.
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: "Platform target to publish"
-        required: true
-        default: "all"
-        type: choice
-        options:
-          - all
-          - linux-x64
-          - macos-arm64
-          - macos-intel
   push:
     tags:
       - "v*"
 
 concurrency:
-  group: publish-release-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.target || 'tag' }}
+  group: publish-release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -31,76 +25,55 @@ env:
   CI: true
 
 jobs:
-  define-matrix:
-    name: Select release targets
+  version:
+    name: Release version
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Build matrix
-        id: set-matrix
+      - uses: actions/checkout@v4
+      - name: Read and check the version
+        id: version
         shell: bash
         run: |
           set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            case "${{ inputs.target }}" in
-              linux-x64)
-                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"}]}' >> "$GITHUB_OUTPUT"
-                ;;
-              macos-arm64)
-                echo 'matrix={"include":[{"name":"macos-arm64","platform":"macos-latest","args":"--target aarch64-apple-darwin --bundles app,dmg","rust_target":"aarch64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
-                ;;
-              macos-intel)
-                echo 'matrix={"include":[{"name":"macos-intel","platform":"macos-15-intel","args":"--target x86_64-apple-darwin --bundles app,dmg","rust_target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
-                ;;
-              all)
-                echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"},{"name":"macos-arm64","platform":"macos-latest","args":"--target aarch64-apple-darwin --bundles app,dmg","rust_target":"aarch64-apple-darwin"},{"name":"macos-intel","platform":"macos-15-intel","args":"--target x86_64-apple-darwin --bundles app,dmg","rust_target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
-                ;;
-              *)
-                echo "Unsupported workflow_dispatch target: ${{ inputs.target }}"
-                exit 1
-                ;;
-            esac
-          else
-            echo 'matrix={"include":[{"name":"linux-x64","platform":"ubuntu-24.04","args":"--bundles deb"},{"name":"macos-arm64","platform":"macos-latest","args":"--target aarch64-apple-darwin --bundles app,dmg","rust_target":"aarch64-apple-darwin"},{"name":"macos-intel","platform":"macos-15-intel","args":"--target x86_64-apple-darwin --bundles app,dmg","rust_target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+          version="$(sed -n 's/^version = "\([0-9.]*\)"$/\1/p' apps/native/Cargo.toml | head -1)"
+          if [[ -z "${version}" ]]; then
+            echo "No version in apps/native/Cargo.toml"
+            exit 1
           fi
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match apps/native/Cargo.toml (${version})"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
-  publish-tauri:
-    needs: define-matrix
-    name: Publish (${{ matrix.name }})
-    runs-on: ${{ matrix.platform }}
+  macos:
+    needs: version
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     environment:
       name: release
       url: https://github.com/wharley/DevCommandCenter/releases
     strategy:
       fail-fast: false
-      # tauri-action updates a shared draft release (including latest.json).
-      # Serialize every matrix entry so its list/delete/upload sequence cannot
-      # race another platform job.
-      max-parallel: 1
-      matrix: ${{ fromJSON(needs.define-matrix.outputs.matrix) }}
-
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: aarch64
+          - runner: macos-15-intel
+            arch: x64
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      APP: apps/native/target/release/bundle/Dev Command Center.app
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Validate updater signing key
+      - name: Validate required secrets
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]]; then
-            echo "Missing required secret: TAURI_SIGNING_PRIVATE_KEY"
-            exit 1
-          fi
-
-      - name: Validate required Apple secrets
-        if: startsWith(matrix.platform, 'macos')
-        shell: bash
-        env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -109,42 +82,15 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
         run: |
           set -euo pipefail
-
           missing=0
-          for var in \
-            APPLE_CERTIFICATE \
-            APPLE_CERTIFICATE_PASSWORD \
-            APPLE_SIGNING_IDENTITY \
-            APPLE_TEAM_ID \
-            APPLE_ID \
-            APPLE_PASSWORD; do
+          for var in TAURI_SIGNING_PRIVATE_KEY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY APPLE_TEAM_ID APPLE_ID APPLE_PASSWORD; do
             if [[ -z "${!var}" ]]; then
               echo "Missing required secret: ${var}"
               missing=1
             fi
           done
-
-          if [[ "${missing}" -ne 0 ]]; then
-            exit 1
-          fi
-
-      - name: Install Linux system deps
-        if: matrix.platform == 'ubuntu-24.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libssl-dev \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            squashfs-tools \
-            fuse
+          exit "${missing}"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -157,11 +103,6 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target || '' }}
-
-      - name: Install OJ
-        uses: ./.github/actions/setup-oj
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -171,172 +112,212 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
+          workspaces: |
+            . -> target
+            apps/native -> target
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile --ignore-engines
 
-      - name: Load release notes
-        id: release-notes
+      - name: Import the Developer ID certificate
         shell: bash
-        run: |
-          set -euo pipefail
-
-          notes_file="docs/releases/${GITHUB_REF_NAME}.md"
-          if [[ -f "${notes_file}" ]]; then
-            {
-              echo "body<<DCC_RELEASE_NOTES_EOF"
-              cat "${notes_file}"
-              echo "DCC_RELEASE_NOTES_EOF"
-            } >> "${GITHUB_OUTPUT}"
-          else
-            echo "body=See the release assets to download and install this version." >> "${GITHUB_OUTPUT}"
-          fi
-
-      - name: Publish release assets
-        id: publish-release-assets
-        uses: tauri-apps/tauri-action@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="${RUNNER_TEMP}/dcc-signing.keychain-db"
+          password="$(uuidgen)"
+          certificate="${RUNNER_TEMP}/certificate.p12"
+          echo "${APPLE_CERTIFICATE}" | base64 --decode > "${certificate}"
+          security create-keychain -p "${password}" "${keychain}"
+          security set-keychain-settings -lut 21600 "${keychain}"
+          security unlock-keychain -p "${password}" "${keychain}"
+          security import "${certificate}" -P "${APPLE_CERTIFICATE_PASSWORD}" -A -t cert -f pkcs12 -k "${keychain}"
+          security set-key-partition-list -S apple-tool:,apple: -k "${password}" "${keychain}" >/dev/null
+          security list-keychains -d user -s "${keychain}" $(security list-keychains -d user | tr -d '"')
+          rm -f "${certificate}"
+
+      - name: Build and sign the app
+        env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node scripts/native-local.mjs build --release "${VERSION}"
+
+      - name: Notarize the app
+        env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: scripts/notarize-macos.sh "${APP}"
+
+      - name: Verify the bundle and launch it
+        run: python3 scripts/verify-macos-bundle.py "${APP}" --smoke-test
+
+      - name: Updater archive and DMG
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/dist"
+          mkdir -p "${out}"
+          bundle="$(dirname "${APP}")"
+
+          # One "Dev Command Center.app" at the top: what both updaters unpack.
+          archive="${out}/Dev.Command.Center_${VERSION}_${ARCH}.app.tar.gz"
+          tar -czf "${archive}" -C "${bundle}" "Dev Command Center.app"
+          npx --yes @tauri-apps/cli@2.11.0 signer sign "${archive}"
+          test -s "${archive}.sig"
+
+          staging="${RUNNER_TEMP}/dmg"
+          rm -rf "${staging}" && mkdir -p "${staging}"
+          ditto "${APP}" "${staging}/Dev Command Center.app"
+          ln -s /Applications "${staging}/Applications"
+          dmg="${out}/Dev.Command.Center_${VERSION}_${ARCH}.dmg"
+          hdiutil create -volname "Dev Command Center" -srcfolder "${staging}" -ov -format UDZO "${dmg}"
+          codesign --force --timestamp --sign "${APPLE_SIGNING_IDENTITY}" "${dmg}"
+          scripts/notarize-macos.sh "${dmg}"
+          # The landing page links releases/latest/download/Dev.Command.Center_<arch>.dmg.
+          cp "${dmg}" "${out}/Dev.Command.Center_${ARCH}.dmg"
+
+          # The archive holds the stapled, notarized app.
+          check="$(mktemp -d)"
+          tar -xzf "${archive}" -C "${check}"
+          codesign --verify --deep --strict --verbose=2 "${check}/Dev Command Center.app"
+          xcrun stapler validate "${check}/Dev Command Center.app"
+          ls -la "${out}"
+
+      - uses: actions/upload-artifact@v4
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
-          releaseName: ${{ github.ref_type == 'tag' && format('Dev Command Center {0}', github.ref_name) || 'Dev Command Center v__VERSION__' }}
-          releaseBody: ${{ steps.release-notes.outputs.body }}
-          releaseDraft: true
-          prerelease: false
-          # A partial manual dispatch is diagnostic only: it must never replace
-          # the full-release latest.json with metadata for one platform.
-          uploadUpdaterJson: ${{ github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.target == 'all') }}
-          # Keep updater archive signatures next to the DMG, which is the
-          # direct-download installer.
-          uploadUpdaterSignatures: true
-          args: ${{ matrix.args }}
+          name: release-macos-${{ matrix.arch }}
+          path: ${{ runner.temp }}/dist/*
+          if-no-files-found: error
 
-      # Tauri notarizes and staples only the .app. The DMG it uploaded is
-      # signed but has no ticket, so notarize and staple it here and replace
-      # the draft's asset with the stapled file.
-      - name: Notarize, staple and re-upload the macOS DMG
-        if: startsWith(matrix.platform, 'macos')
+  linux:
+    needs: version
+    name: Linux (x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment:
+      name: release
+      url: https://github.com/wharley/DevCommandCenter/releases
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate the updater key
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUST_TARGET: ${{ matrix.rust_target }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APP_VERSION: ${{ steps.publish-release-assets.outputs.appVersion }}
-          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.publish-release-assets.outputs.appVersion) }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          set -euo pipefail
-
-          DMG_PATH="$(find "target/${RUST_TARGET}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
-          if [[ -z "${DMG_PATH}" ]]; then
-            echo "Missing DMG under target/${RUST_TARGET}/release/bundle/dmg."
+          if [[ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]]; then
+            echo "Missing required secret: TAURI_SIGNING_PRIVATE_KEY"
             exit 1
           fi
 
-          scripts/notarize-macos-dmg.sh "${DMG_PATH}"
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl file \
+            libssl-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
+            libxcb1-dev libvulkan-dev libfontconfig-dev libfreetype-dev \
+            libasound2-dev libzstd-dev
 
-          # tauri-action stores "Dev Command Center_x.dmg" as asset
-          # "Dev.Command.Center_x.dmg" labelled with the original file name.
-          # Upload under that exact name so --clobber replaces the unstapled
-          # one, and keep the same label.
-          DMG_FILE_NAME="$(basename "${DMG_PATH}")"
-          ASSET_NAME="$(tr ' ' '.' <<<"${DMG_FILE_NAME}")"
-          UPLOAD_DIR="$(mktemp -d "${RUNNER_TEMP}/dcc-dmg-upload.XXXXXX")"
-          cp "${DMG_PATH}" "${UPLOAD_DIR}/${ASSET_NAME}"
-          # Same stapled file again without the version, so the landing page
-          # can link to releases/latest/download/Dev.Command.Center_aarch64.dmg
-          # (or _x64.dmg) and never go stale.
-          STABLE_NAME="${ASSET_NAME/_${APP_VERSION}_/_}"
-          cp "${DMG_PATH}" "${UPLOAD_DIR}/${STABLE_NAME}"
-          gh release upload "${RELEASE_TAG}" \
-            "${UPLOAD_DIR}/${ASSET_NAME}#${DMG_FILE_NAME}" \
-            "${UPLOAD_DIR}/${STABLE_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --clobber
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: yarn
 
-      - name: Upload the Linux package under a version-free name
-        if: matrix.platform == 'ubuntu-24.04'
+      - name: Enable Corepack (Yarn)
+        run: corepack enable
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            apps/native -> target
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --ignore-engines
+
+      - name: Build the package
+        run: node scripts/package-linux.mjs --release "${VERSION}"
+
+      - name: Sign the package
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APP_VERSION: ${{ steps.publish-release-assets.outputs.appVersion }}
-          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.publish-release-assets.outputs.appVersion) }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-
-          DEB_PATH="$(find target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' -print -quit)"
-          if [[ -z "${DEB_PATH}" ]]; then
-            echo "Missing .deb under target/release/bundle/deb."
-            exit 1
-          fi
-
+          out="${RUNNER_TEMP}/dist"
+          mkdir -p "${out}"
+          deb="${out}/Dev.Command.Center_${VERSION}_amd64.deb"
+          cp "target/release/bundle/deb/Dev Command Center_${VERSION}_amd64.deb" "${deb}"
+          dpkg-deb --info "${deb}"
+          npx --yes @tauri-apps/cli@2.11.0 signer sign "${deb}"
+          test -s "${deb}.sig"
           # releases/latest/download/Dev.Command.Center_amd64.deb for the landing page.
-          ASSET_NAME="$(basename "${DEB_PATH}" | tr ' ' '.')"
-          STABLE_NAME="${ASSET_NAME/_${APP_VERSION}_/_}"
-          UPLOAD_DIR="$(mktemp -d "${RUNNER_TEMP}/dcc-deb-upload.XXXXXX")"
-          cp "${DEB_PATH}" "${UPLOAD_DIR}/${STABLE_NAME}"
-          gh release upload "${RELEASE_TAG}" "${UPLOAD_DIR}/${STABLE_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --clobber
+          cp "${deb}" "${out}/Dev.Command.Center_amd64.deb"
 
-      # tauri-action sends assets to a draft before these local checks. Any
-      # failure makes the workflow fail; discard that draft and re-run rather
-      # than publishing it.
-      - name: Verify signed and notarized macOS release artifacts
-        if: startsWith(matrix.platform, 'macos')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: ${{ runner.temp }}/dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [version, macos, linux]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    name: Draft release
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+
+      - name: latest.json
+        run: |
+          node scripts/release-latest-json.mjs --version "${VERSION}" --dir dist \
+            --repo "${GITHUB_REPOSITORY}" --notes "docs/releases/v${VERSION}.md"
+
+      - name: Create the draft release
         shell: bash
-        env:
-          RUST_TARGET: ${{ matrix.rust_target }}
         run: |
           set -euo pipefail
-
-          BUNDLE_DIR="target/${RUST_TARGET}/release/bundle"
-          APP_PATH="$(find "${BUNDLE_DIR}/macos" -maxdepth 1 -type d -name '*.app' -print -quit)"
-          DMG_PATH="$(find "${BUNDLE_DIR}/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
-          UPDATER_ARCHIVE="$(find "${BUNDLE_DIR}/macos" -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"
-
-          for required_path in "${APP_PATH}" "${DMG_PATH}" "${UPDATER_ARCHIVE}"; do
-            if [[ -z "${required_path}" || ! -e "${required_path}" ]]; then
-              echo "Missing expected macOS release artifact under ${BUNDLE_DIR}."
-              find "${BUNDLE_DIR}" -maxdepth 3 -print || true
-              exit 1
-            fi
-          done
-
-          if [[ ! -f "${UPDATER_ARCHIVE}.sig" ]]; then
-            echo "Missing Tauri updater signature: ${UPDATER_ARCHIVE}.sig"
-            exit 1
+          notes="docs/releases/v${VERSION}.md"
+          if [[ ! -f "${notes}" ]]; then
+            notes="${RUNNER_TEMP}/notes.md"
+            echo "See the release assets to download and install this version." > "${notes}"
           fi
-
-          echo "Verifying Developer ID signatures..."
-          codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
-          codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | tee /tmp/dcc-app-codesign.txt
-          grep -q '^Authority=Developer ID Application:' /tmp/dcc-app-codesign.txt
-
-          echo "Verifying the stapled app and DMG notarization tickets..."
-          xcrun stapler validate "${APP_PATH}"
-          xcrun stapler validate "${DMG_PATH}"
-          spctl -a -vv -t open --context context:primary-signature "${DMG_PATH}"
-
-          echo "Verifying the exact updater archive and signed app startup..."
-          EXTRACT_DIR="$(mktemp -d "${RUNNER_TEMP}/dcc-release-check.XXXXXX")"
-          tar -xzf "${UPDATER_ARCHIVE}" -C "${EXTRACT_DIR}"
-          EXTRACTED_APP="$(find "${EXTRACT_DIR}" -maxdepth 1 -type d -name '*.app' -print -quit)"
-          if [[ -z "${EXTRACTED_APP}" ]]; then
-            echo "Updater archive does not contain an app bundle."
-            exit 1
-          fi
-          codesign --verify --deep --strict --verbose=2 "${EXTRACTED_APP}"
-          xcrun stapler validate "${EXTRACTED_APP}"
-          python3 scripts/verify-macos-bundle.py "${EXTRACTED_APP}" --smoke-test
-          echo "Updater archive size (bytes): $(wc -c < "${UPDATER_ARCHIVE}")"
+          gh release create "v${VERSION}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft \
+            --title "Dev Command Center v${VERSION}" \
+            --notes-file "${notes}"

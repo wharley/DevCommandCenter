@@ -10,6 +10,9 @@
  *   yarn native:local --skip-build     install the last build again
  *   yarn native:local --skip-sidecars  rebuild the app, reuse the built helpers
  *   yarn native:local --version 0.3.0  build as 0.3.0-local.g<commit>
+ *   node scripts/native-local.mjs build --release 0.3.0
+ *                                      the published build (CI): exactly 0.3.0,
+ *                                      signed with a secure timestamp for notarization
  *   yarn native:rollback               put back the native build the last install replaced
  *   yarn native:rollback --with-db     ...and the database as it was at that moment
  *
@@ -129,8 +132,12 @@ function toolchainPath() {
   return `${join(nvmVersionsDir, candidates[0].name, 'bin')}:${process.env.PATH}`;
 }
 
-/** The Developer ID identity, so macOS keeps granted permissions across builds. */
+/** The Developer ID identity, so macOS keeps granted permissions across builds
+ * (the CI names it in APPLE_SIGNING_IDENTITY). */
 function signingIdentity() {
+  if (process.env.APPLE_SIGNING_IDENTITY) {
+    return process.env.APPLE_SIGNING_IDENTITY;
+  }
   const identities = capture('security', ['find-identity', '-v', '-p', 'codesigning']);
   const developerId = /"(Developer ID Application: [^"]+)"/.exec(identities);
   if (developerId) {
@@ -163,7 +170,7 @@ function infoPlist(version) {
 `;
 }
 
-function build(version, { skipSidecars }) {
+function build(version, { skipSidecars, release = false }) {
   const env = { ...process.env, PATH: toolchainPath() };
   if (!skipSidecars) {
     // The same helpers the desktop ships: the CLI, the daemon, the headless
@@ -196,10 +203,12 @@ function build(version, { skipSidecars }) {
   log(`signing as "${identity}"`);
   // Helpers first, then the bundle (which seals them); hardened runtime like
   // the desktop's build.
+  // Notarization wants Apple's secure timestamp; local builds skip the round trip.
+  const timestampFlag = release ? '--timestamp' : '--timestamp=none';
   for (const name of readdirSync(macos).filter((name) => name !== EXECUTABLE)) {
-    run('codesign', ['--force', '--options', 'runtime', '--timestamp=none', '--sign', identity, join(macos, name)]);
+    run('codesign', ['--force', '--options', 'runtime', timestampFlag, '--sign', identity, join(macos, name)]);
   }
-  run('codesign', ['--force', '--options', 'runtime', '--timestamp=none', '--sign', identity, BUILT_APP_PATH]);
+  run('codesign', ['--force', '--options', 'runtime', timestampFlag, '--sign', identity, BUILT_APP_PATH]);
   run('codesign', ['--verify', '--strict', BUILT_APP_PATH]);
 }
 
@@ -393,11 +402,12 @@ const [command, ...flags] = process.argv.slice(2);
 // build` is `install build` and would quit the running app.
 const KNOWN_FLAGS = {
   install: ['--skip-build', '--skip-sidecars', '--version'],
-  build: ['--skip-sidecars', '--version'],
+  build: ['--skip-sidecars', '--version', '--release'],
   rollback: ['--with-db'],
 };
 const unknown = flags.filter(
-  (flag, index) => flags[index - 1] !== '--version' && !(KNOWN_FLAGS[command] ?? []).includes(flag),
+  (flag, index) =>
+    !['--version', '--release'].includes(flags[index - 1]) && !(KNOWN_FLAGS[command] ?? []).includes(flag),
 );
 if (unknown.length > 0) {
   fail(`unknown argument(s) for ${command}: ${unknown.join(' ')}. To only build, run: node scripts/native-local.mjs build`);
@@ -410,12 +420,17 @@ if (command === 'install') {
     baseVersion: versionFlag >= 0 ? flags[versionFlag + 1] : undefined,
   });
 } else if (command === 'build') {
+  const releaseFlag = flags.indexOf('--release');
   const versionFlag = flags.indexOf('--version');
-  const version = nativeVersion(versionFlag >= 0 ? flags[versionFlag + 1] : undefined);
-  build(version, { skipSidecars: flags.includes('--skip-sidecars') });
+  const release = releaseFlag >= 0 ? flags[releaseFlag + 1] : undefined;
+  if (release !== undefined && !/^\d+\.\d+\.\d+$/.test(release)) {
+    fail(`--release must look like 0.3.0, got ${release}`);
+  }
+  const version = release ?? nativeVersion(versionFlag >= 0 ? flags[versionFlag + 1] : undefined);
+  build(version, { skipSidecars: flags.includes('--skip-sidecars'), release: release !== undefined });
   log(`built ${version} at ${BUILT_APP_PATH}`);
 } else if (command === 'rollback') {
   rollback({ withDb: flags.includes('--with-db') });
 } else {
-  fail('usage: node scripts/native-local.mjs install [--skip-build] [--skip-sidecars] [--version X.Y.Z] | build [--skip-sidecars] [--version X.Y.Z] | rollback [--with-db]');
+  fail('usage: node scripts/native-local.mjs install [--skip-build] [--skip-sidecars] [--version X.Y.Z] | build [--skip-sidecars] [--version X.Y.Z | --release X.Y.Z] | rollback [--with-db]');
 }

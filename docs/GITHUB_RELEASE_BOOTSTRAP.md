@@ -4,10 +4,10 @@ This guide is the operational checklist for turning on signed public releases fr
 
 ## 1. Create the updater signing key
 
-Tauri requires signed updater artifacts. Generate the key pair locally and keep the private key outside the repository.
+The updater requires signed archives (minisign, generated and applied with the Tauri CLI's `signer`; the app itself no longer uses Tauri). Generate the key pair locally and keep the private key outside the repository.
 
 ```bash
-yarn tauri signer generate -w ~/.tauri/dev-command-center.key
+npx @tauri-apps/cli@2.11.0 signer generate -w ~/.tauri/dev-command-center.key
 ```
 
 According to the Tauri updater documentation, the private key must be provided at build time through environment variables and `.env` files do not work for this flow.
@@ -22,7 +22,7 @@ Check the public key:
 cat ~/.tauri/dev-command-center.key.pub
 ```
 
-Confirm that the value in [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) matches that public key exactly.
+Confirm that `PUBLIC_KEY` in [`apps/native/src/data/updater.rs`](../apps/native/src/data/updater.rs) matches that public key exactly.
 
 ## 3. Create the `release` environment on GitHub
 
@@ -74,7 +74,7 @@ Notes:
 
 ## 6. First release test
 
-1. Confirm the version in [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) and package metadata is the version you want to release.
+1. Confirm the version in [`apps/native/Cargo.toml`](../apps/native/Cargo.toml) and package metadata is the version you want to release.
 2. Commit and push `main`.
 3. Recommended first pass: trigger `.github/workflows/publish-release.yml` with `workflow_dispatch`, choose the platform you want to validate first, and confirm the draft release looks correct.
 4. After that, create a tag:
