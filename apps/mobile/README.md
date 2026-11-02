@@ -61,7 +61,7 @@ token to the desktop only over the encrypted channel
 (`PUT /api/v1/remote/push-token`) and renews it on every connection (48 h
 lease). The text is generic ("DCC" · "<project> precisa de você"); the payload
 carries only the session id that the tap opens. Code:
-`src/notifications/` here, `src-tauri/src/remote_push.rs` on the desktop.
+`src/notifications/` here, `crates/dcc-server/src/remote_push.rs` on the Mac.
 
 Expo issues push tokens only to an app tied to an EAS project, so until the
 steps below are done the app shows "Este build não tem o projectId do EAS" in

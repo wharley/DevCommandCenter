@@ -1,30 +1,17 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { classifyToolAction, DESKTOP_PT_BR, t, toolStepParts } from "./labels.ts";
-
-const desktopRoot = new URL("../../../apps/desktop/src/", import.meta.url);
+import { DESKTOP_PT_BR, t, toolStepParts } from "./labels.ts";
 
 function lookup(tree: unknown, key: string): unknown {
 	return key.split(".").reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], tree);
 }
 
 describe("labels", () => {
-	it("match the desktop's pt-BR texts key by key", () => {
+	it("match the app's pt-BR texts key by key", () => {
 		const desktop = JSON.parse(readFileSync(new URL("../../../apps/native/locales/pt-BR/common.json", import.meta.url), "utf8"));
 		for (const [key, text] of Object.entries(DESKTOP_PT_BR)) {
 			expect(lookup(desktop, key), key).toBe(text);
 		}
-	});
-
-	it("classify tools exactly like the desktop", async () => {
-		const path = new URL("features/panel/message-components/turn-activity.logic.ts", desktopRoot).href;
-		const desktop = (await import(/* @vite-ignore */ path)) as { classifyToolAction(action: string): string };
-		const actions = [
-			"Bash", "shell", "commandExecution", "Edit", "MultiEdit", "Write", "apply_patch", "fileChange",
-			"Read", "view", "Grep", "Glob", "LS", "WebSearch", "WebFetch", "TodoWrite", "update_plan",
-			"Task", "dcc_delegate_task", "mcp__dcc__dcc_delegate_task", "mcp__github__create_issue", "Weird",
-		];
-		for (const action of actions) expect(classifyToolAction(action), action).toBe(desktop.classifyToolAction(action));
 	});
 
 	it("interpolates and picks plurals", () => {

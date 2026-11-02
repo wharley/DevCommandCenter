@@ -49,7 +49,7 @@ dcc-providers = { path = "../../crates/dcc-providers" }
 # The whole backend, hosted here when no desktop serves the port
 # (`dcc_server::host`): sessions, terminals, the agents' MCP, the API.
 dcc-server = { path = "../../crates/dcc-server" }
-dcc-tauri = { path = "../../crates/dcc-tauri", default-features = false }
+dcc-tauri = { path = "../../crates/dcc-tauri" }
 # Diffs (`@pierre/diffs` on the desktop): line and word changes, and
 # TextMate-grammar highlighting like its Shiki, with the Pierre themes.
 similar = { version = "2", features = ["inline"] }

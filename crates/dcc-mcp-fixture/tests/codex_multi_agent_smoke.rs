@@ -26,10 +26,9 @@ const INTERRUPTED_PARENT_SENTINEL: &str = "DCC_SOL_CONFIRMED_TERRA_INTERRUPTED";
 const TEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 const ORCHESTRATION_SKILL: &str =
-    include_str!("../../../apps/desktop/src/features/skills/presets/dcc-orchestration/SKILL.md");
-const ORCHESTRATION_OPENAI_CONFIG: &str = include_str!(
-    "../../../apps/desktop/src/features/skills/presets/dcc-orchestration/agents/openai.yaml"
-);
+    include_str!("../../../apps/native/assets/skills/dcc-orchestration/SKILL.md");
+const ORCHESTRATION_OPENAI_CONFIG: &str =
+    include_str!("../../../apps/native/assets/skills/dcc-orchestration/agents/openai.yaml");
 
 type ProviderStream = BoxStream<'static, dcc_core::Result<ProviderEvent>>;
 

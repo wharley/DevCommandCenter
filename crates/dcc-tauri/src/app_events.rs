@@ -26,24 +26,9 @@ impl AppEvents {
         Self { bus, emitter }
     }
 
-    /// The desktop's webview, through the Tauri app.
-    #[cfg(feature = "tauri")]
-    pub fn tauri(app: tauri::AppHandle) -> Self {
-        Self::new(
-            Arc::new(crate::events::TauriEventBus::new(app.clone())),
-            Arc::new(TauriEmitter(app)),
-        )
-    }
-
     /// Nowhere: a host whose windows read the API instead of events.
     pub fn silent() -> Self {
         Self::new(Arc::new(Silent), Arc::new(Silent))
-    }
-
-    /// Events by name to the desktop's webview, alone.
-    #[cfg(feature = "tauri")]
-    pub fn tauri_emitter(app: tauri::AppHandle) -> Arc<dyn AppEmitter> {
-        Arc::new(TauriEmitter(app))
     }
 
     pub fn emit<T: Serialize>(&self, event: &str, payload: T) -> Result<(), String> {
@@ -68,19 +53,6 @@ impl EventBus for AppEvents {
 
     async fn publish_session_live(&self, event: SessionLiveEventEnvelope) -> dcc_core::Result<()> {
         self.bus.publish_session_live(event).await
-    }
-}
-
-#[cfg(feature = "tauri")]
-struct TauriEmitter(tauri::AppHandle);
-
-#[cfg(feature = "tauri")]
-impl AppEmitter for TauriEmitter {
-    fn emit(&self, event: &str, payload: serde_json::Value) -> Result<(), String> {
-        use tauri::Emitter;
-        self.0
-            .emit(event, payload)
-            .map_err(|error| error.to_string())
     }
 }
 

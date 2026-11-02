@@ -8,36 +8,26 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-#[cfg(feature = "tauri")]
-use tauri::{AppHandle, State};
 use tokio::time::sleep;
 
 use dcc_core::domain::model_registry;
 use dcc_core::domain::objective::{ObjectiveTransition, SessionObjective, SessionObjectiveDraft};
 use dcc_core::{
     application::{
-        abort_run as run_abort_run, active_turn_for_steer, approve_plan as run_approve_plan,
-        close_session as run_close_session, list_turn_queue as run_list_turn_queue,
-        plan_conversation_rewind, queue_turn as run_queue_turn,
-        record_plan_handoff as run_record_plan_handoff, record_turn_steer,
-        remove_queued_turn as run_remove_queued_turn, reorder_turn_queue as run_reorder_turn_queue,
-        restore_session as run_restore_session, resume_session as run_resume_session,
+        abort_run as run_abort_run, active_turn_for_steer,
+        plan_conversation_rewind, queue_turn as run_queue_turn, record_turn_steer,
         send_turn as run_send_turn, start_thread as run_start_thread, AbortRunInput,
-        AbortRunOutput, ApprovePlanInput, ApprovePlanOutput, CloseSessionInput, CloseSessionOutput,
-        ConversationRewindBlock, ConversationRewindPlan, QueueTurnInput, RecordPlanHandoffInput,
-        RecordPlanHandoffOutput, RemoveQueuedTurnInput, ReorderTurnQueueInput, RestoreSessionInput,
-        RestoreSessionOutput, ResumeSessionInput, ResumeSessionOutput, SendTurnInput,
+        AbortRunOutput,
+        ConversationRewindBlock, ConversationRewindPlan, QueueTurnInput, SendTurnInput,
         SendTurnOutput, StartThreadInput, StartThreadOutput, SteerTurnInput, SteerTurnOutput,
     },
     domain::{
         mcp::{McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
         provider::McpOauthSupport,
         session::{
-            QueuedTurn, SessionEventKind, SessionEventRecord, SessionId, SessionProjection,
-            SessionSearchResult, TurnId, WorkspaceSessionSummary,
+            QueuedTurn, SessionEventKind, SessionEventRecord, SessionId, SessionProjection, TurnId,
         },
         thread::Thread,
-        usage::{SessionTurnUsage, UsageDashboard, UsageDashboardInput},
         workspace::{Workspace, WorkspaceId},
     },
     ports::{
@@ -59,7 +49,7 @@ use dcc_infra::decision_provider::{
 };
 
 use crate::conversation_rewind::{
-    plan_files, restore_files, RewindFileRestorer, RewindFilesPlan, RewindFilesStopped,
+    RewindFileRestorer, RewindFilesPlan, RewindFilesStopped,
     RewindProviderPlan, TurnFileFacts,
 };
 use crate::guarded_undo_runtime::{
@@ -292,90 +282,6 @@ fn ai_memory_config(
     Ok(config)
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn sync_session_to_ai_memory(
-    state: State<'_, SessionCommandState>,
-    input: AiMemorySyncInput,
-) -> Result<AiMemorySyncOutput, String> {
-    let session_id = input.session_id.trim();
-    if session_id.is_empty() || session_id.len() > 200 {
-        return Err("sessionId is required".to_string());
-    }
-    let events =
-        SessionEventRepo::list_events_by_session(&*state, &SessionId(session_id.to_string()))
-            .await
-            .map_err(|error| error.to_string())?;
-    let session = SessionRepo::get_session(&*state, &SessionId(session_id.to_string()))
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "session not found".to_string())?;
-    let config = ai_memory_config(
-        input.connection,
-        &format!("dcc-workspace-{}", session.workspace_id.0),
-        &format!("dcc-project-{}", session.project_id.0),
-    )?;
-    let scope_workspace = config.workspace.clone();
-    let scope_project = config.project.clone();
-    let attempted = dcc_infra::ai_memory::build_hook_batch(&session, &events).len();
-    let ack = state
-        .export_session_to_ai_memory(&SessionId(session_id.to_string()), config)
-        .await
-        .map_err(|error| error.to_string())?;
-    if ack.failed_index.is_none() {
-        state
-            .complete_ai_memory_export(&SessionId(session_id.to_string()))
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(AiMemorySyncOutput {
-        attempted,
-        accepted: ack.accepted,
-        accepted_indices: ack.accepted_indices,
-        failed_index: ack.failed_index,
-        workspace: scope_workspace,
-        project: scope_project,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn query_ai_memory(
-    state: State<'_, SessionCommandState>,
-    input: AiMemoryQueryInput,
-) -> Result<Vec<AiMemoryQueryHit>, String> {
-    let query = input.query.trim();
-    if query.is_empty() || query.chars().count() > 2_000 {
-        return Err("memory query is empty or too large".to_string());
-    }
-    let config = ai_memory_config(input.connection, "dcc-workspace", "dcc-project")?;
-    state
-        .query_ai_memory(config, query, input.limit)
-        .await
-        .map(|hits| {
-            hits.into_iter()
-                .map(|hit| AiMemoryQueryHit {
-                    path: hit.path,
-                    title: hit.title,
-                    snippet: hit.snippet,
-                    rank: hit.rank,
-                    created_at: hit.created_at,
-                    session_id: hit.session_id,
-                    kind: hit.kind,
-                })
-                .collect()
-        })
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub fn ai_memory_recovered_sources(
-    state: State<'_, SessionCommandState>,
-    session_id: String,
-) -> Result<Vec<AiMemoryQueryHit>, String> {
-    ai_memory_recovered_sources_with_state(&state, session_id)
-}
-
 /// `ai_memory_recovered_sources` for callers without a Tauri `State` (the HTTP API).
 pub fn ai_memory_recovered_sources_with_state(
     state: &SessionCommandState,
@@ -400,15 +306,6 @@ pub fn ai_memory_recovered_sources_with_state(
         .collect())
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub fn ai_memory_source_actions(
-    state: State<'_, SessionCommandState>,
-    limit: Option<usize>,
-) -> Result<Vec<AiMemorySourceActionOutput>, String> {
-    ai_memory_source_actions_with_state(&state, limit)
-}
-
 /// `ai_memory_source_actions` for callers without a Tauri `State` (the HTTP API).
 pub fn ai_memory_source_actions_with_state(
     state: &SessionCommandState,
@@ -428,15 +325,6 @@ pub fn ai_memory_source_actions_with_state(
                 .collect()
         })
         .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub fn ai_memory_source_action_save(
-    state: State<'_, SessionCommandState>,
-    input: AiMemorySourceActionInput,
-) -> Result<AiMemorySourceActionOutput, String> {
-    ai_memory_source_action_save_with_state(&state, input)
 }
 
 /// `ai_memory_source_action_save` for callers without a Tauri `State` (the HTTP API).
@@ -478,17 +366,6 @@ pub fn ai_memory_source_action_save_with_state(
     })
 }
 
-/// Returns the durable export status for a session. `None` means there is no
-/// pending export, which is also the steady state after a successful sync.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub fn ai_memory_export_status(
-    state: State<'_, SessionCommandState>,
-    session_id: String,
-) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
-    ai_memory_export_status_with_state(&state, session_id)
-}
-
 /// `ai_memory_export_status` for callers without a Tauri `State` (the HTTP API).
 pub fn ai_memory_export_status_with_state(
     state: &SessionCommandState,
@@ -510,65 +387,6 @@ pub fn ai_memory_export_status_with_state(
             })
         })
         .map_err(|error| error.to_string())
-}
-
-/// Queues a session checkpoint before the renderer starts another session.
-/// The export is deliberately best effort: the durable outbox keeps the
-/// session pending when ai-memory is unavailable, so changing sessions never
-/// depends on the sidecar being reachable at that exact moment.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn ai_memory_checkpoint(
-    state: State<'_, SessionCommandState>,
-    session_id: String,
-) -> Result<Option<AiMemoryOutboxStatusOutput>, String> {
-    let session_id = session_id.trim();
-    if session_id.is_empty() || session_id.len() > 200 {
-        return Err("sessionId is required".to_string());
-    }
-    let session_id = SessionId(session_id.to_string());
-    let Some(session) = state
-        .peek_session(&session_id)
-        .await
-        .map_err(|error| error.to_string())?
-    else {
-        return Err("session not found".to_string());
-    };
-
-    // A disabled memory configuration should remain a true no-op. In
-    // particular, don't create rows that can never be drained later.
-    if AiMemoryConfig::from_env_for_project(&session.project_id.0).is_none() {
-        return Ok(None);
-    }
-
-    state
-        .enqueue_ai_memory_export(&session_id)
-        .map_err(|error| error.to_string())?;
-    if let Err(error) = state.drain_ai_memory_outbox(1).await {
-        eprintln!("[DCC] ai-memory automatic checkpoint failed: {error}");
-    }
-
-    state
-        .ai_memory_export_status(&session_id)
-        .map(|status| {
-            status.map(|entry| AiMemoryOutboxStatusOutput {
-                session_id: entry.session_id.0,
-                attempts: entry.attempts,
-                next_attempt_at: entry.next_attempt_at,
-                last_error: entry.last_error,
-                event_count: 0,
-            })
-        })
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub fn ai_memory_export_history(
-    state: State<'_, SessionCommandState>,
-    limit: Option<usize>,
-) -> Result<Vec<AiMemoryExportHistoryOutput>, String> {
-    ai_memory_export_history_for_state(&state, limit)
 }
 
 /// The sessions waiting to be exported, with their events counted.
@@ -771,15 +589,6 @@ fn session_live_snapshot_from_records(
     }
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn run_pull_request_review_agent(
-    state: State<'_, SessionCommandState>,
-    input: RunPullRequestReviewAgentInput,
-) -> Result<RunPullRequestReviewAgentOutput, String> {
-    run_pull_request_review_agent_with_state(&state, input).await
-}
-
 /// `run_pull_request_review_agent` for callers without a Tauri `State` (the HTTP API).
 pub async fn run_pull_request_review_agent_with_state(
     state: &SessionCommandState,
@@ -917,15 +726,6 @@ pub struct ExecuteGuardedUndoInput {
     pub confirmed: bool,
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn prepare_guarded_undo(
-    state: State<'_, SessionCommandState>,
-    input: PrepareGuardedUndoInput,
-) -> Result<PrepareGuardedUndoOutput, String> {
-    prepare_guarded_undo_with_state(&state, input).await
-}
-
 /// `prepare_guarded_undo` for callers without a Tauri `State` (the HTTP API).
 pub async fn prepare_guarded_undo_with_state(
     state: &SessionCommandState,
@@ -980,15 +780,6 @@ pub async fn prepare_guarded_undo_with_state(
             reason_code,
         },
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn execute_guarded_undo(
-    state: State<'_, SessionCommandState>,
-    input: ExecuteGuardedUndoInput,
-) -> Result<ExecuteGuardedUndoOutput, String> {
-    execute_guarded_undo_with_state(&state, input).await
 }
 
 /// `execute_guarded_undo` for callers without a Tauri `State` (the HTTP API).
@@ -1214,102 +1005,6 @@ async fn load_rewind_scope(
     Ok((session, plan_conversation_rewind(&history, &anchor_turn_id)))
 }
 
-/// Read-only: what "edit from here" on `anchor_turn_id` would remove, how
-/// the provider follows, and whether the removed turns' files can be
-/// restored. Nothing on disk or in the provider changes.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn prepare_conversation_rewind(
-    state: State<'_, SessionCommandState>,
-    input: PrepareConversationRewindInput,
-) -> Result<PrepareConversationRewindOutput, String> {
-    let (session, plan) =
-        load_rewind_scope(&state, &input.session_id, &input.anchor_turn_id).await?;
-    let plan = match plan {
-        Ok(plan) => plan,
-        Err(reason) => return Ok(PrepareConversationRewindOutput::Blocked { reason }),
-    };
-    let (provider, _) = state.plan_rewind_provider_context(&session, &plan);
-    let facts = rewind_file_facts(&state, &session, &plan.removed_turn_ids).await?;
-    let files = plan_files(&GuardedUndoRewindRestorer(&state), &facts).await;
-    Ok(PrepareConversationRewindOutput::Ready {
-        anchor_turn_id: plan.anchor_turn_id.0,
-        removed_turn_ids: plan.removed_turn_ids.into_iter().map(|id| id.0).collect(),
-        kept_turn_count: plan.kept_turn_count,
-        anchor_prompt: plan.anchor_prompt,
-        provider,
-        files,
-    })
-}
-
-/// Carries out a prepared "edit from here". Files are restored first, only
-/// when the person chose it; the conversation is cut only after they are.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn execute_conversation_rewind(
-    state: State<'_, SessionCommandState>,
-    input: ExecuteConversationRewindInput,
-) -> Result<ExecuteConversationRewindOutput, String> {
-    let refused = |reason: &str| {
-        Ok(ExecuteConversationRewindOutput::Refused {
-            reason: reason.to_string(),
-        })
-    };
-    let session_id = SessionId(input.session_id.trim().to_string());
-    // Holding the provider transition keeps a new turn from starting while
-    // files are restored and the conversation is cut.
-    let transition = state
-        .acquire_provider_transition(&session_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    let (session, plan) =
-        load_rewind_scope(&state, &input.session_id, &input.anchor_turn_id).await?;
-    let plan = match plan {
-        Ok(plan) => plan,
-        Err(_) => return refused("plan_changed"),
-    };
-    if plan
-        .removed_turn_ids
-        .iter()
-        .map(|turn_id| turn_id.0.as_str())
-        .ne(input.removed_turn_ids.iter().map(String::as_str))
-    {
-        return refused("plan_changed");
-    }
-    let (provider, target) = state.plan_rewind_provider_context(&session, &plan);
-    let new_thread = matches!(provider, RewindProviderPlan::NewThread { .. });
-    if new_thread != input.continue_in_new_thread {
-        return refused("provider_changed");
-    }
-
-    let restored = if input.restore_files {
-        let facts = rewind_file_facts(&state, &session, &plan.removed_turn_ids).await?;
-        match restore_files(&GuardedUndoRewindRestorer(&state), &facts).await {
-            Ok(restored) => restored,
-            Err(stopped) => return Ok(ExecuteConversationRewindOutput::FilesStopped { stopped }),
-        }
-    } else {
-        Vec::new()
-    };
-    let restored_turn_ids: Vec<String> = restored.iter().map(|id| id.0.clone()).collect();
-
-    if new_thread {
-        return Ok(ExecuteConversationRewindOutput::ContinueInNewThread {
-            restored_turn_ids,
-            anchor_prompt: plan.anchor_prompt,
-        });
-    }
-    state
-        .commit_conversation_rewind(&transition, &session, &plan, &provider, target, restored)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(ExecuteConversationRewindOutput::Rewound {
-        provider,
-        restored_turn_ids,
-        anchor_prompt: plan.anchor_prompt,
-    })
-}
-
 fn capture_summary(value: InfraGuardedUndoCaptureSummary) -> GuardedUndoCaptureSummary {
     GuardedUndoCaptureSummary {
         state: value.state,
@@ -1326,15 +1021,6 @@ fn capture_summary(value: InfraGuardedUndoCaptureSummary) -> GuardedUndoCaptureS
 pub struct TurnReviewFileDiffInput {
     pub snapshot_id: String,
     pub path: String,
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn last_turn_review(
-    state: State<'_, SessionCommandState>,
-    input: LastTurnReviewInput,
-) -> Result<Option<TurnReviewSummary>, String> {
-    last_turn_review_with_state(&state, input).await
 }
 
 /// `last_turn_review` for callers without a Tauri `State` (the HTTP API).
@@ -1397,15 +1083,6 @@ pub async fn last_turn_review_with_state(
         guarded_undo,
         active_undo,
     }))
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn turn_review_file_diff(
-    state: State<'_, SessionCommandState>,
-    input: TurnReviewFileDiffInput,
-) -> Result<TurnReviewFileDiffOutput, String> {
-    turn_review_file_diff_with_state(&state, input).await
 }
 
 /// `turn_review_file_diff` for callers without a Tauri `State` (the HTTP API).
@@ -2437,16 +2114,6 @@ async fn apply_decision_provider_memory_filter(
     }
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn start_thread(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: StartThreadInput,
-) -> Result<StartThreadOutput, String> {
-    start_thread_with_state(&state, input).await
-}
-
 /// Starting a session without Tauri `State`, shared with the HTTP API so a
 /// session started from the phone follows the desktop's rules.
 pub async fn start_thread_with_state(
@@ -2467,16 +2134,6 @@ pub async fn start_thread_with_state(
         eprintln!("[DCC] provider did not start with the thread: {error}");
     }
     Ok(output)
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn send_turn(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: SendTurnInput,
-) -> Result<SendTurnOutput, String> {
-    send_turn_with_state(&state, input).await
 }
 
 /// The full send pipeline (attach, MCP preflight, instructions, durable turn,
@@ -2648,15 +2305,6 @@ async fn record_provider_start_failure(
     Ok(output)
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn steer_turn(
-    state: State<'_, SessionCommandState>,
-    input: SteerTurnInput,
-) -> Result<SteerTurnOutput, String> {
-    steer_turn_with_state(&state, input).await
-}
-
 /// Guidance into the running turn without Tauri `State`, shared with the
 /// HTTP API. A turn already wrapping up fails with `STEER_WINDOW_CLOSED`.
 pub async fn steer_turn_with_state(
@@ -2673,57 +2321,6 @@ pub async fn steer_turn_with_state(
     record_turn_steer(state, state, state, input, turn_id)
         .await
         .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn steer_native_subagent(
-    state: State<'_, SessionCommandState>,
-    input: SteerNativeSubagentInput,
-) -> Result<NativeSubagentControlOutput, String> {
-    let session_id = input.session_id.trim();
-    let agent_thread_id = input.agent_thread_id.trim();
-    let prompt = input.prompt.trim();
-    if session_id.is_empty() || agent_thread_id.is_empty() {
-        return Err("Session and native subagent IDs are required".to_string());
-    }
-    if prompt.is_empty() || prompt.chars().count() > 32_000 {
-        return Err(
-            "Native subagent instruction must contain between 1 and 32000 characters".to_string(),
-        );
-    }
-    state
-        .steer_native_subagent(&SessionId(session_id.to_string()), agent_thread_id, prompt)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(NativeSubagentControlOutput { ok: true })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn interrupt_native_subagent(
-    state: State<'_, SessionCommandState>,
-    input: InterruptNativeSubagentInput,
-) -> Result<NativeSubagentControlOutput, String> {
-    let session_id = input.session_id.trim();
-    let agent_thread_id = input.agent_thread_id.trim();
-    if session_id.is_empty() || agent_thread_id.is_empty() {
-        return Err("Session and native subagent IDs are required".to_string());
-    }
-    state
-        .interrupt_native_subagent(&SessionId(session_id.to_string()), agent_thread_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(NativeSubagentControlOutput { ok: true })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn queue_turn(
-    state: State<'_, SessionCommandState>,
-    input: QueueTurnInput,
-) -> Result<QueuedTurn, String> {
-    queue_turn_with_state(&state, input).await
 }
 
 /// A follow-up for after the running turn, without Tauri `State`, shared
@@ -2773,140 +2370,11 @@ pub struct SessionObjectiveOutput {
     pub objective: Option<SessionObjective>,
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn get_session_objective(
-    state: State<'_, SessionCommandState>,
-    session_id: String,
-) -> Result<SessionObjectiveOutput, String> {
-    Ok(SessionObjectiveOutput {
-        objective: state
-            .session_objective(&SessionId(session_id))
-            .map_err(|error| error.to_string())?,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn set_session_objective(
-    state: State<'_, SessionCommandState>,
-    input: SetSessionObjectiveInput,
-) -> Result<SessionObjectiveOutput, String> {
-    let objective = state
-        .set_session_objective(&input.session_id, input.draft, input.expected_generation)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(SessionObjectiveOutput {
-        objective: Some(objective),
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn transition_session_objective(
-    state: State<'_, SessionCommandState>,
-    input: TransitionSessionObjectiveInput,
-) -> Result<SessionObjectiveOutput, String> {
-    let objective = state
-        .transition_session_objective(
-            &input.session_id,
-            input.transition,
-            input.expected_generation,
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(SessionObjectiveOutput {
-        objective: Some(objective),
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn clear_session_objective(
-    state: State<'_, SessionCommandState>,
-    session_id: String,
-) -> Result<SessionObjectiveOutput, String> {
-    state
-        .clear_session_objective(&SessionId(session_id))
-        .map_err(|error| error.to_string())?;
-    Ok(SessionObjectiveOutput { objective: None })
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct InheritSessionObjectiveInput {
     pub parent_session_id: SessionId,
     pub child_session_id: SessionId,
-}
-
-/// Used by fork-by-message: the new thread keeps working toward the source
-/// thread's objective with its own counters. Idempotent, done objectives are
-/// not propagated, and the response is the child's current record.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn inherit_session_objective(
-    state: State<'_, SessionCommandState>,
-    input: InheritSessionObjectiveInput,
-) -> Result<SessionObjectiveOutput, String> {
-    Ok(SessionObjectiveOutput {
-        objective: state
-            .inherit_session_objective(&input.parent_session_id, &input.child_session_id)
-            .map_err(|error| error.to_string())?,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_turn_queue(
-    state: State<'_, SessionCommandState>,
-    session_id: String,
-) -> Result<Vec<QueuedTurn>, String> {
-    run_list_turn_queue(&*state, &SessionId(session_id))
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn remove_queued_turn(
-    state: State<'_, SessionCommandState>,
-    input: RemoveQueuedTurnInput,
-) -> Result<Vec<QueuedTurn>, String> {
-    run_remove_queued_turn(&*state, &*state, input)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn reorder_turn_queue(
-    state: State<'_, SessionCommandState>,
-    input: ReorderTurnQueueInput,
-) -> Result<Vec<QueuedTurn>, String> {
-    run_reorder_turn_queue(&*state, &*state, input)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn dispatch_next_queued_turn(
-    state: State<'_, SessionCommandState>,
-    session_id: String,
-) -> Result<bool, String> {
-    state
-        .dispatch_next_queued_turn(&SessionId(session_id))
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn abort_run(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: AbortRunInput,
-) -> Result<AbortRunOutput, String> {
-    abort_run_with_state(&state, input).await
 }
 
 /// Stopping a run without Tauri `State`, shared with the HTTP API.
@@ -2931,132 +2399,6 @@ pub async fn abort_run_with_state(
         .await
         .map_err(|error| error.to_string())?;
     Ok(output)
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn resume_session(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: ResumeSessionInput,
-) -> Result<ResumeSessionOutput, String> {
-    let transition = state
-        .acquire_provider_transition(&input.session_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    state
-        .validate_provider_resume_preflight_under_transition(&transition, &input.session_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    let output = run_resume_session(&*state, &*state, &*state, input)
-        .await
-        .map_err(|error| error.to_string())?;
-    // An explicit resume attaches a fresh runtime; give it a bounded snapshot
-    // of the durable exchange on its first turn.
-    state
-        .mark_cold_attach_if_needed(&output.session.id)
-        .await
-        .map_err(|error| error.to_string())?;
-    state
-        .attach_current_provider_session_under_transition(&transition, &output.session)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(output)
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn close_session(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: CloseSessionInput,
-) -> Result<CloseSessionOutput, String> {
-    // The pilot can opt into automatic export without changing the normal
-    // close semantics. A delete-history close never exports the deleted data.
-    let auto_memory_export = if !input.delete_history {
-        match state.peek_session(&input.session_id).await {
-            Ok(Some(session)) => {
-                AiMemoryConfig::from_env_for_project(&session.project_id.0).map(|_| session.id)
-            }
-            _ => None,
-        }
-    } else {
-        None
-    };
-    let transition = state
-        .acquire_provider_transition(&input.session_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    state
-        .cancel_provider_session_if_attached_under_transition(&transition, &input.session_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    let output = run_close_session(&*state, &*state, &*state, input)
-        .await
-        .map_err(|error| error.to_string())?;
-    if let Some(session_id) = auto_memory_export {
-        if let Err(error) = state.enqueue_ai_memory_export(&session_id) {
-            eprintln!("[DCC] ai-memory outbox enqueue failed: {error}");
-        } else if let Err(error) = state.drain_ai_memory_outbox(1).await {
-            eprintln!("[DCC] ai-memory automatic export failed: {error}");
-        }
-    }
-    Ok(output)
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn restore_session(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: RestoreSessionInput,
-) -> Result<RestoreSessionOutput, String> {
-    run_restore_session(&*state, &*state, input)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_thread_events(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    session_id: String,
-) -> Result<Vec<SessionEventRecord>, String> {
-    let session_id = dcc_core::domain::session::SessionId(session_id);
-    SessionEventRepo::list_events_by_session(&*state, &session_id)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn session_live_snapshot(
-    state: State<'_, SessionCommandState>,
-    session_id: String,
-) -> Result<SessionLiveSnapshot, String> {
-    let session_id = session_id.trim().to_string();
-    if session_id.is_empty() {
-        return Err("sessionId is required".to_string());
-    }
-    let session_id = SessionId(session_id);
-    let events = SessionEventRepo::list_events_by_session_limited(
-        &*state,
-        &session_id,
-        SESSION_LIVE_SNAPSHOT_MAX_EVENTS + 1,
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    session_live_snapshot_from_bounded_records(&session_id, events, state.runtime_generation())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_mcp_runtime_statuses(
-    state: State<'_, SessionCommandState>,
-    input: ListMcpRuntimeStatusesInput,
-) -> Result<ListMcpRuntimeStatusesOutput, String> {
-    list_mcp_runtime_statuses_with(&state, input).await
 }
 
 /// `list_mcp_runtime_statuses` for the HTTP API (no Tauri `State`).
@@ -3131,66 +2473,6 @@ async fn record_mcp_needs_auth(state: &SessionCommandState, definition_id: &McpD
         .await;
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn approve_plan(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: ApprovePlanInput,
-) -> Result<ApprovePlanOutput, String> {
-    run_approve_plan(&*state, &*state, input)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn record_plan_handoff(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: RecordPlanHandoffInput,
-) -> Result<RecordPlanHandoffOutput, String> {
-    run_record_plan_handoff(&*state, &*state, input)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_workspace_sessions(
-    state: State<'_, SessionCommandState>,
-    _workspace_id: String,
-) -> Result<Vec<WorkspaceSessionSummary>, String> {
-    let workspace_id = dcc_core::domain::workspace::WorkspaceId(_workspace_id);
-    state
-        .list_workspace_sessions(&workspace_id)
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn usage_dashboard(
-    state: State<'_, SessionCommandState>,
-    input: UsageDashboardInput,
-) -> Result<UsageDashboard, String> {
-    state
-        .usage_dashboard(&input)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn session_turn_usage(
-    state: State<'_, SessionCommandState>,
-    session_id: String,
-) -> Result<Vec<SessionTurnUsage>, String> {
-    state
-        .session_turn_usage(&SessionId(session_id))
-        .await
-        .map_err(|error| error.to_string())
-}
-
 fn normalize_task_title(title: &str) -> Result<String, String> {
     let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
     if title.is_empty() {
@@ -3213,15 +2495,6 @@ fn is_automatic_task_name(name: Option<&str>) -> bool {
 
 fn workspace_accepts_automatic_title(workspace: &Workspace) -> bool {
     is_automatic_task_name(workspace.name.as_deref())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn apply_task_title(
-    state: State<'_, SessionCommandState>,
-    input: ApplyTaskTitleInput,
-) -> Result<ApplyTaskTitleOutput, String> {
-    apply_task_title_to_state(&state, input).await
 }
 
 /// Names an automatically named task (and its first thread) without Tauri
@@ -3301,17 +2574,6 @@ pub async fn apply_task_title_to_state(
         workspace,
         thread,
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn search_sessions(
-    state: State<'_, SessionCommandState>,
-    input: SearchSessionsInput,
-) -> Result<Vec<SessionSearchResult>, String> {
-    state
-        .search_sessions(&input.query, input.limit)
-        .map_err(|error| error.to_string())
 }
 
 /// Why answering a provider request did not go through.
@@ -3396,18 +2658,6 @@ async fn forward_claimed_answer(
     Ok(())
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn respond_to_user_input(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: RespondToUserInputInput,
-) -> Result<RespondToUserInputOutput, String> {
-    respond_to_user_input_with_state(&state, input)
-        .await
-        .map_err(|error| error.to_string())
-}
-
 /// Answers a provider question once, from the desktop or the HTTP API.
 pub async fn respond_to_user_input_with_state(
     state: &SessionCommandState,
@@ -3434,18 +2684,6 @@ pub async fn respond_to_user_input_with_state(
     )
     .await?;
     Ok(RespondToUserInputOutput { ok: true })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn respond_to_permission_request(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: RespondToPermissionRequestInput,
-) -> Result<RespondToPermissionRequestOutput, String> {
-    respond_to_permission_request_with_state(&state, input)
-        .await
-        .map_err(|error| error.to_string())
 }
 
 /// Answers a provider permission request once, from the desktop or the HTTP

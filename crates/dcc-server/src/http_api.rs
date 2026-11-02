@@ -3713,7 +3713,7 @@ mod tests {
         let root_path = std::fs::canonicalize(root.path()).unwrap();
         let db_path = root_path.join("state.sqlite");
         let conn = rusqlite::Connection::open(&db_path).unwrap();
-        conn.execute_batch(include_str!("../../../src-tauri/sql/schema.sql"))
+        conn.execute_batch(include_str!("../sql/schema.sql"))
             .unwrap();
         crate::pairing::ensure_pairing_schema(&conn).unwrap();
         let config = Arc::new(RwLock::new(HttpConfig {

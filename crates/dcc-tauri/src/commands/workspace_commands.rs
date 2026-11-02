@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use specta::Type;
-#[cfg(feature = "tauri")]
-use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use dcc_core::{
@@ -38,11 +36,11 @@ use dcc_core::{
             WorkspaceSetupStatus, WorkspaceSetupStepReport, WorkspaceSource, WorkspaceSourceKind,
             WorkspaceState,
         },
-        workspace_bundle::{WorkspaceBundleId, WorkspaceBundleState, WorkspaceBundleSummary},
+        workspace_bundle::{WorkspaceBundleId, WorkspaceBundleSummary},
     },
     ports::{
         DelegationApplyTransactionRepo, DelegationRepo, DelegationWorktreeOperationRepo,
-        ProviderRuntimeConfig, RepositoryRepo, SessionRepo, WorkspaceBundleRepo, WorkspaceRepo,
+        ProviderRuntimeConfig, RepositoryRepo, SessionRepo, WorkspaceRepo,
     },
 };
 #[cfg(test)]
@@ -87,8 +85,7 @@ use dcc_infra::workspace_git::{
 use dcc_infra::{
     db::{SqliteSessionRepo, SqliteWorkspaceRepo},
     git::{
-        create_worktree_branch_from_ref, detect_workspace_setup_suggestions,
-        list_local_branch_names, read_workspace_automation_config,
+        create_worktree_branch_from_ref, detect_workspace_setup_suggestions, read_workspace_automation_config,
         validate_workspace_automation_config, CommandGitOps, RepoAutomationConfig,
         RepoAutomationTask, RepoDeliveryPolicy, RepoTaskKind,
     },
@@ -110,11 +107,9 @@ use crate::{
         },
     },
     commands::workspace_support::{
-        broken_workspace_message, broken_workspace_reason_by_root,
         ensure_pushable_branch, find_workspace_by_root,
         next_available_branch_name, preferred_workspace_branch_name, preflight_workspace_root, resolve_current_branch_name, resolve_current_commit_sha,
-        resolve_default_remote_name, resolve_workspace_active_root,
-        resolve_workspace_broken_reason, resolve_workspace_setup_root,
+        resolve_default_remote_name, resolve_workspace_active_root, resolve_workspace_setup_root,
         resolve_workspace_target_branch, run_git_network_output_with_workspace_auth,
     },
     delegation_apply::{
@@ -155,12 +150,11 @@ pub(crate) use dcc_infra::workspace_deletion::delegation::{
 };
 pub(crate) use dcc_infra::workspace_deletion::remote_branch::{
     cleanup_unused_workspace_push_target,
-    redact_push_route_credentials, resolve_commitish_sha, workspace_remote_branch_deletion_target,
+    redact_push_route_credentials, resolve_commitish_sha,
 };
-pub(crate) use dcc_infra::workspace_deletion::{
-    cleanup_workspace_files,
-    delete_repository_with_workspaces,
-};
+pub(crate) use dcc_infra::workspace_deletion::cleanup_workspace_files;
+#[cfg(test)]
+use dcc_infra::workspace_deletion::delete_repository_with_workspaces;
 
 pub(crate) fn workspace_mutation_error(error: WorkspaceMutationRequestError<String>) -> String {
     match error {
@@ -297,7 +291,6 @@ pub struct WorkspaceSetupHint {
     pub command: String,
     pub source_path: String,
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -612,10 +605,6 @@ pub struct WorkspaceGitStatusInput {
     pub workspace_root: String,
 }
 
-
-
-
-
 /// The only input accepted by the commit-message suggestion operation is the
 /// repository's staged Git state. In particular, this contract intentionally
 /// has no task, workspace name, branch, chat, or prompt fields.
@@ -873,7 +862,6 @@ pub struct WorkspaceGitMarkConflictResolvedInput {
     pub delete: bool,
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceGitFilePreviewInput {
@@ -910,8 +898,6 @@ pub struct WorkspaceContinueFromBaseBranchOutput {
     pub previous_workspace_root: String,
     pub workspace: Workspace,
 }
-
-
 
 fn collect_workspace_setup_hints(workspace: &Workspace) -> Vec<WorkspaceSetupHint> {
     if workspace.worktree_path.is_none() {
@@ -1155,7 +1141,6 @@ fn recompute_workspace_setup_status(report: &mut WorkspaceSetupReport) {
     };
 }
 
-
 fn resolve_default_branch_name(root: &str) -> Result<String, String> {
     let output = run_git_output(
         root,
@@ -1176,12 +1161,6 @@ fn resolve_default_branch_name(root: &str) -> Result<String, String> {
     }
     Ok("main".to_string())
 }
-
-
-
-
-
-
 
 const MAX_CONFLICT_TEXT_BYTES: usize = 2 * 1024 * 1024;
 
@@ -1353,8 +1332,6 @@ fn read_conflict_result(
     Ok(conflict_content(Some(bytes), None))
 }
 
-
-
 fn resolve_conflict_operation(root: &str, has_conflicts: bool) -> WorkspaceGitConflictOperation {
     if git_internal_path_exists(root, "MERGE_HEAD") {
         WorkspaceGitConflictOperation::Merge
@@ -1439,15 +1416,6 @@ fn workspace_git_conflict_state_inner(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_conflict_state(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitConflictStateInput,
-) -> Result<WorkspaceGitConflictStateOutput, String> {
-    workspace_git_conflict_state_with_state(&state, input).await
-}
-
 /// `workspace_git_conflict_state` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_git_conflict_state_with_state(
     state: &WorkspaceCommandState,
@@ -1477,15 +1445,6 @@ fn require_merge_conflict_entry(root: &str, path: &str) -> Result<UnmergedIndexE
         .into_iter()
         .find(|entry| entry.path == path)
         .ok_or_else(|| format!("path is not an unresolved merge conflict: {path}"))
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_accept_conflict(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitAcceptConflictInput,
-) -> Result<(), String> {
-    workspace_git_accept_conflict_with_state(&state, input).await
 }
 
 /// `workspace_git_accept_conflict` for callers without a Tauri `State` (the HTTP API).
@@ -1547,15 +1506,6 @@ fn workspace_git_accept_conflict_inner(
     }
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_mark_conflict_resolved(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitMarkConflictResolvedInput,
-) -> Result<(), String> {
-    workspace_git_mark_conflict_resolved_with_state(&state, input).await
-}
-
 /// `workspace_git_mark_conflict_resolved` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_git_mark_conflict_resolved_with_state(
     state: &WorkspaceCommandState,
@@ -1605,15 +1555,6 @@ fn workspace_git_mark_conflict_resolved_inner(
     }
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_abort_merge(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitConflictStateInput,
-) -> Result<(), String> {
-    workspace_git_abort_merge_with_state(&state, input).await
-}
-
 /// `workspace_git_abort_merge` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_git_abort_merge_with_state(
     state: &WorkspaceCommandState,
@@ -1646,15 +1587,6 @@ fn workspace_git_abort_merge_inner(root: &str) -> Result<(), String> {
     } else {
         Err(git_output_err("git merge --abort", &output.stderr))
     }
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_validation_config(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitConflictStateInput,
-) -> Result<WorkspaceGitValidationConfigOutput, String> {
-    workspace_git_validation_config_with_state(&state, input).await
 }
 
 /// `workspace_git_validation_config` for callers without a Tauri `State` (the HTTP API).
@@ -1828,15 +1760,6 @@ fn write_delivery_policy(document: &mut TomlDocument, policy: &RepoDeliveryPolic
     }
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_project_automation_config(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitConflictStateInput,
-) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
-    workspace_project_automation_config_with_state(&state, input).await
-}
-
 /// `workspace_project_automation_config` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_project_automation_config_with_state(
     state: &WorkspaceCommandState,
@@ -1885,15 +1808,6 @@ fn workspace_automation_config_is_tracked(root: &str) -> bool {
     run_git_output(root, &["ls-files", "--error-unmatch", "--", ".dcc.toml"])
         .map(|output| output.status.success())
         .unwrap_or(false)
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_save_project_automation(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceSaveProjectAutomationInput,
-) -> Result<WorkspaceProjectAutomationConfigOutput, String> {
-    workspace_save_project_automation_with_state(&state, input).await
 }
 
 /// `workspace_save_project_automation` for the HTTP API.
@@ -2037,15 +1951,6 @@ fn resolve_task_execution_root(root: &str, task: &RepoAutomationTask) -> Result<
     Ok(execution_path.to_string_lossy().to_string())
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_run_project_tasks(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceRunProjectTasksInput,
-) -> Result<WorkspaceRunProjectTasksOutput, String> {
-    workspace_run_project_tasks_with_state(&state, input).await
-}
-
 /// `workspace_run_project_tasks` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_run_project_tasks_with_state(
     state: &WorkspaceCommandState,
@@ -2167,15 +2072,6 @@ fn run_workspace_project_tasks_inner(
         },
         changed_files,
     ))
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_complete_merge(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitCompleteMergeInput,
-) -> Result<WorkspaceGitCompleteMergeOutput, String> {
-    workspace_git_complete_merge_with_state(&state, input).await
 }
 
 /// `workspace_git_complete_merge` for callers without a Tauri `State` (the HTTP API).
@@ -2778,7 +2674,6 @@ struct PushRoute {
     url: Option<String>,
 }
 
-
 fn observed_push_route_url(root: &str, remote: &str, configured: Option<String>) -> Option<String> {
     configured
         .map(|url| redact_push_route_credentials(url.trim()))
@@ -3111,15 +3006,6 @@ fn path_is_tracked(root: &str, rel: &str) -> bool {
     git_command_succeeds(root, &["ls-files", "--error-unmatch", "--", rel])
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_stage_all(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPathInput,
-) -> Result<(), String> {
-    workspace_git_stage_all_with_state(&state, input).await
-}
-
 /// `workspace_git_stage_all` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_git_stage_all_with_state(
     state: &WorkspaceCommandState,
@@ -3159,10 +3045,6 @@ fn run_git_diff_text(root: &str, args: &[&str], command: &str) -> Result<String,
     git_diff_output_text(output, command)
 }
 
-
-
-
-
 fn resolve_worktree_write_path(root: &str, rel: &str) -> Result<PathBuf, String> {
     let root_canonical = PathBuf::from(root)
         .canonicalize()
@@ -3201,17 +3083,6 @@ fn resolve_worktree_write_path(root: &str, rel: &str) -> Result<PathBuf, String>
     }
 }
 
-
-/// `git add -- path`.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_stage_file(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPathInput,
-) -> Result<(), String> {
-    workspace_git_stage_file_with_state(&state, input).await
-}
-
 /// `workspace_git_stage_file` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_git_stage_file_with_state(
     state: &WorkspaceCommandState,
@@ -3236,16 +3107,6 @@ pub async fn workspace_git_stage_file_with_state(
         return Ok(());
     }
     Err(git_output_err("git add", &output.stderr))
-}
-
-/// `git restore --staged` with `git reset HEAD --` fallback.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_unstage_file(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPathInput,
-) -> Result<(), String> {
-    workspace_git_unstage_file_with_state(&state, input).await
 }
 
 /// `workspace_git_unstage_file` for callers without a Tauri `State` (the HTTP API).
@@ -3276,16 +3137,6 @@ pub async fn workspace_git_unstage_file_with_state(
         return Ok(());
     }
     Err(git_output_err("git reset", &output.stderr))
-}
-
-/// Tracked: `git checkout HEAD -- path`; untracked file: remove.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_discard_file(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPathInput,
-) -> Result<(), String> {
-    workspace_git_discard_file_with_state(&state, input).await
 }
 
 /// `workspace_git_discard_file` for callers without a Tauri `State` (the HTTP API).
@@ -3323,10 +3174,6 @@ pub async fn workspace_git_discard_file_with_state(
     Ok(())
 }
 
-
-
-
-
 /// `git diff --cached --quiet` → `true` if there is at least one staged change.
 fn git_has_staged_changes(root: &str) -> Result<bool, String> {
     let output = run_git_output(root, &["diff", "--cached", "--quiet"])?;
@@ -3342,12 +3189,6 @@ fn git_has_staged_changes(root: &str) -> Result<bool, String> {
         String::from_utf8_lossy(&output.stderr).trim()
     ))
 }
-
-
-
-
-
-
 
 fn staged_snapshot_changes(root: &str, snapshot: &StagedSnapshot) -> Vec<WorkspaceGitChangeEntry> {
     parse_name_status_z(&snapshot.name_status)
@@ -3680,22 +3521,6 @@ pub(crate) fn derive_staged_commit_subject(staged: &[WorkspaceGitChangeEntry]) -
     sanitize_commit_subject(&subject)
 }
 
-/// Reads the staged name-status list and staged patch once immediately before
-/// asking an isolated read-only provider for a message. The provider receives
-/// only the fixed prompt and this snapshot, and runs in an empty temporary
-/// directory rather than the repository. Session history and UI context are
-/// never consulted. If no provider was selected or the response is unusable,
-/// the deterministic staged-Git heuristic is returned.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_commit_suggestion(
-    state: State<'_, WorkspaceCommandState>,
-    session_state: State<'_, SessionCommandState>,
-    input: WorkspaceGitCommitSuggestionInput,
-) -> Result<WorkspaceGitCommitSuggestionOutput, String> {
-    workspace_git_commit_suggestion_with_state(&state, &session_state, input).await
-}
-
 /// `workspace_git_commit_suggestion` for callers without a Tauri `State`.
 pub async fn workspace_git_commit_suggestion_with_state(
     state: &WorkspaceCommandState,
@@ -3755,17 +3580,6 @@ pub async fn workspace_git_commit_suggestion_with_state(
     })
 }
 
-/// Commit staged changes without pushing. This is deliberately separate from
-/// the commit-and-push action exposed by the Inspector.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_commit(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitCommitInput,
-) -> Result<(), String> {
-    workspace_git_commit_with_state(&state, input).await
-}
-
 /// `workspace_git_commit` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_git_commit_with_state(
     state: &WorkspaceCommandState,
@@ -3788,16 +3602,6 @@ pub async fn workspace_git_commit_with_state(
         })
         .await
         .map_err(workspace_mutation_error)
-}
-
-/// Commit staged changes and push (requires at least one staged path).
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_commit_push(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitCommitPushInput,
-) -> Result<(), String> {
-    workspace_git_commit_push_with_state(&state, input).await
 }
 
 /// `workspace_git_commit_push` for callers without a Tauri `State` (the HTTP API).
@@ -3874,15 +3678,6 @@ enum CommitPushFailure {
     Push(String),
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_push(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    workspace_git_push_with_state(&state, input).await
-}
-
 /// `workspace_git_push` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_git_push_with_state(
     state: &WorkspaceCommandState,
@@ -3926,7 +3721,6 @@ fn normalize_base_branch_for_sync(value: &str, remote: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-
 fn remote_tracking_ref(remote: &str, branch: &str) -> String {
     format!("refs/remotes/{remote}/{branch}")
 }
@@ -3952,15 +3746,6 @@ async fn persist_workspace_base_branch(
     }
     repo.update_workspace_base_branch(&workspace.id, base_branch, &Utc::now().to_rfc3339())
         .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_sync_base(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitSyncBaseInput,
-) -> Result<WorkspaceGitSyncBaseOutput, String> {
-    workspace_git_sync_base_with_state(&state, input).await
 }
 
 /// `workspace_git_sync_base` for callers without a Tauri `State`.
@@ -4350,15 +4135,6 @@ fn sync_workspace_branch_inner(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_delivery_recovery_execute(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceDeliveryRecoveryInput,
-) -> Result<WorkspaceDeliveryRecoveryOutput, String> {
-    workspace_delivery_recovery_execute_with_state(&state, input).await
-}
-
 /// `workspace_delivery_recovery_execute` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_delivery_recovery_execute_with_state(
     state: &WorkspaceCommandState,
@@ -4502,19 +4278,6 @@ pub async fn workspace_delivery_recovery_execute_with_state(
     })
 }
 
-
-
-
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_status(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitStatusInput,
-) -> Result<WorkspaceGitStatusOutput, String> {
-    workspace_git_status_with_state(&state, input).await
-}
-
 /// `workspace_git_status` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_git_status_with_state(
     state: &WorkspaceCommandState,
@@ -4523,7 +4286,6 @@ pub async fn workspace_git_status_with_state(
     preflight_workspace_root(&state, &input.workspace_root).await?;
     workspace_git_status_inner(&input.workspace_root)
 }
-
 
 fn delegation_key_suffix(key: Option<&str>) -> String {
     let suffix: String = key
@@ -4537,16 +4299,6 @@ fn delegation_key_suffix(key: Option<&str>) -> String {
     } else {
         suffix
     }
-}
-
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_prepare_delegation_worktree(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspacePrepareDelegationWorktreeInput,
-) -> Result<WorkspacePrepareDelegationWorktreeOutput, String> {
-    workspace_prepare_delegation_worktree_with_state(&state, input).await
 }
 
 pub async fn workspace_prepare_delegation_worktree_with_state(
@@ -4703,15 +4455,6 @@ pub async fn workspace_prepare_delegation_worktree_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_remove_delegation_worktree(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceRemoveDelegationWorktreeInput,
-) -> Result<(), String> {
-    workspace_remove_delegation_worktree_with_state(&state, input).await
-}
-
 pub async fn workspace_remove_delegation_worktree_with_state(
     state: &WorkspaceCommandState,
     input: WorkspaceRemoveDelegationWorktreeInput,
@@ -4752,15 +4495,6 @@ pub async fn workspace_remove_delegation_worktree_with_state(
     )
     .await
 }
-
-
-
-
-
-
-
-
-
 
 #[cfg(test)]
 fn remove_delegation_worktree_inner(
@@ -4811,15 +4545,6 @@ fn remove_delegation_worktree_inner(
         }
     }
     Ok(())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_apply_delegation_worktree(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceApplyDelegationWorktreeInput,
-) -> Result<WorkspaceApplyDelegationWorktreeOutput, String> {
-    workspace_apply_delegation_worktree_with_state(&state, input).await
 }
 
 /// `workspace_apply_delegation_worktree` for callers without a Tauri `State`.
@@ -5160,162 +4885,6 @@ async fn cleanup_terminal_delegation_apply_transaction(
     Ok(())
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_continue_from_base_branch(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceContinueFromBaseBranchInput,
-) -> Result<WorkspaceContinueFromBaseBranchOutput, String> {
-    let root = input.workspace_root.trim().to_string();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    if let Some(reason) = broken_workspace_reason_by_root(&repo, &root).await? {
-        return Err(broken_workspace_message(&reason));
-    }
-    let Some(mut workspace) = find_workspace_by_root(&repo, &root).await? else {
-        return Err(format!("workspace not found for path: {root}"));
-    };
-    drop(repo);
-
-    let active_root = resolve_workspace_active_root(&workspace).to_string();
-    let requested_target_branch = input
-        .target_branch
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            input
-                .base_branch
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-        })
-        .map(str::to_string);
-    let preferred_new_branch = input
-        .new_branch_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(|v| sanitize_branch_name(v))
-        .unwrap_or_else(|| {
-            workspace
-                .name
-                .as_deref()
-                .map(sanitize_branch_name)
-                .or_else(|| {
-                    std::path::Path::new(active_root.as_str())
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .map(sanitize_branch_name)
-                })
-                .unwrap_or_else(|| "workspace".to_string())
-        });
-    let mutation = state
-        .run_git_workspace_mutation_blocking(&active_root, move |root| {
-            let root = root.to_str().ok_or_else(|| {
-                ContinueBranchFailure::Other("workspace path is not valid UTF-8".to_string())
-            })?;
-            continue_from_base_branch_inner(
-                root,
-                requested_target_branch.as_deref(),
-                &preferred_new_branch,
-            )
-        })
-        .await;
-    let mutation = match mutation {
-        Ok(mutation) => {
-            clear_workspace_delivery_failure(
-                &state,
-                &active_root,
-                WorkspaceDeliveryFailureOperation::Fetch,
-            );
-            mutation
-        }
-        Err(WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
-            ContinueBranchFailure::Fetch { detail, target },
-        ))) => {
-            capture_workspace_delivery_failure(
-                &state,
-                &active_root,
-                WorkspaceDeliveryFailureOperation::Fetch,
-                &detail,
-                CaptureDeliveryFailureOptions {
-                    remote: Some("origin".to_string()),
-                    operation_target: Some(target),
-                    external_url: None,
-                },
-            )
-            .await;
-            return Err(detail);
-        }
-        Err(WorkspaceMutationRequestError::Runtime(WorkspaceMutationRunError::Operation(
-            ContinueBranchFailure::Other(error),
-        ))) => return Err(error),
-        Err(_) => return Err("workspace mutation is unavailable".to_string()),
-    };
-
-    // `base_branch` must stay the PR/diff target branch (e.g. `main`), not the
-    // working branch. Storing `new_branch` here corrupts it: `gh pr create`
-    // then uses the working branch as the PR base, and `ensure_pushable_branch`
-    // sees the current branch as "protected" and materializes a spurious branch.
-    let update_repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string());
-    let update_result = update_repo
-        .as_ref()
-        .map_err(ToString::to_string)
-        .and_then(|repo| {
-            repo.update_workspace_base_branch(
-                &workspace.id,
-                &mutation.target_branch,
-                &Utc::now().to_rfc3339(),
-            )
-            .map_err(|error| error.to_string())
-        });
-    if let Err(error) = update_result {
-        let old_branch = mutation.old_branch.clone();
-        let old_head = mutation.old_head.clone();
-        let new_branch = mutation.new_branch.clone();
-        let new_head = mutation.new_head.clone();
-        let rollback = state
-            .run_git_workspace_mutation_blocking(&active_root, move |root| {
-                let root = root
-                    .to_str()
-                    .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
-                rollback_continue_branch_guarded(
-                    root,
-                    &old_branch,
-                    &old_head,
-                    &new_branch,
-                    &new_head,
-                )
-            })
-            .await
-            .map_err(workspace_mutation_error);
-        return match rollback {
-            Ok(()) => Err(error),
-            Err(_) => Err(format!(
-                "{error}; automatic branch rollback was skipped because the workspace changed"
-            )),
-        };
-    }
-    let update_repo = update_repo.expect("workspace repo was validated before partial update");
-    workspace = update_repo
-        .get_workspace(&workspace.id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "workspace disappeared after branch update".to_string())?;
-
-    Ok(WorkspaceContinueFromBaseBranchOutput {
-        success: true,
-        branch: mutation.new_branch,
-        workspace_root: active_root.clone(),
-        previous_workspace_root: active_root,
-        workspace,
-    })
-}
-
 struct ContinueBranchLocalOutcome {
     target_branch: String,
     old_branch: String,
@@ -5446,7 +5015,6 @@ fn resolve_continue_start_point(root: &str, target_branch: &str) -> Result<Strin
     ))
 }
 
-
 fn sanitize_branch_name(name: &str) -> String {
     let slug: String = name
         .chars()
@@ -5478,116 +5046,6 @@ fn sanitize_branch_name(name: &str) -> String {
     } else {
         result.chars().take(50).collect()
     }
-}
-
-/// File-level preview for staged / unstaged / committed tree rows.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_file_preview(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitFilePreviewInput,
-) -> Result<String, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-    let rel = validate_git_relative_path(&input.relative_path)?;
-    let absolute = PathBuf::from(root).join(&rel);
-    let status = input.status.trim();
-    let patch = match input.scope {
-        WorkspaceGitPreviewScope::Staged => run_git_diff_text(
-            root,
-            &[
-                "diff",
-                "--cached",
-                "--unified=80",
-                "--no-ext-diff",
-                "--",
-                &rel,
-            ],
-            "git diff --cached",
-        )?,
-        WorkspaceGitPreviewScope::Unstaged => {
-            if status == "?" {
-                if !absolute.is_file() {
-                    return Err("file not found".to_string());
-                }
-                let absolute = absolute.to_string_lossy().to_string();
-                run_git_diff_text(
-                    root,
-                    &[
-                        "diff",
-                        "--no-index",
-                        "--unified=80",
-                        "--no-ext-diff",
-                        "/dev/null",
-                        &absolute,
-                    ],
-                    "git diff --no-index",
-                )?
-            } else {
-                run_git_diff_text(
-                    root,
-                    &["diff", "--unified=80", "--no-ext-diff", "--", &rel],
-                    "git diff",
-                )?
-            }
-        }
-        WorkspaceGitPreviewScope::Committed => {
-            let base = input
-                .base_branch
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| "base_branch is required for committed previews".to_string())?;
-            let range = format!("{base}...HEAD");
-            run_git_diff_text(
-                root,
-                &["diff", "--unified=80", "--no-ext-diff", &range, "--", &rel],
-                "git diff committed",
-            )?
-        }
-    };
-
-    if patch.trim().is_empty() {
-        return Err("no diff available for this file".to_string());
-    }
-
-    Ok(patch)
-}
-
-/// File-level code snapshot used by the Monaco diff surface.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_file_preview_content(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitFilePreviewInput,
-) -> Result<WorkspaceGitFilePreviewContentOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-    let (original_text, modified_text, inline) = dcc_infra::workspace_file_preview::file_preview_content(
-        &input.workspace_root,
-        &input.relative_path,
-        &input.status,
-        &input.scope,
-        input.base_branch.as_deref(),
-    )?;
-    Ok(WorkspaceGitFilePreviewContentOutput {
-        original_text,
-        modified_text,
-        inline,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn create_workspace_for_repo(
-    state: State<'_, WorkspaceCommandState>,
-    app: AppHandle,
-    input: CreateWorkspaceForRepoInput,
-) -> Result<CreateWorkspaceForRepoOutput, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    create_workspace_for_repo_with_repo(&repo, &AppEvents::tauri(app), input).await
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -5956,27 +5414,12 @@ async fn inherit_workspace_push_target_ownership(
     Ok(())
 }
 
-
-
-
-
-
 #[cfg(test)]
 fn workspace_remote_branch_target(
     workspace: &Workspace,
 ) -> Result<Option<(String, String)>, String> {
     workspace_remote_branch_target_at_root(workspace, resolve_workspace_active_root(workspace))
 }
-
-
-
-
-
-
-
-
-
-
 
 async fn resolve_workspace_source_url_inner(
     db_path: &Path,
@@ -6232,15 +5675,6 @@ async fn resolve_workspace_source_url_inner(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn resolve_workspace_source_url(
-    state: State<'_, WorkspaceCommandState>,
-    input: ResolveWorkspaceSourceUrlInput,
-) -> Result<WorkspaceSourceUrlResolution, String> {
-    resolve_workspace_source_url_with_state(&state, input).await
-}
-
 /// A branch or PR URL read against the project, without Tauri `State`
 /// (shared with the HTTP API).
 pub async fn resolve_workspace_source_url_with_state(
@@ -6254,16 +5688,6 @@ pub async fn resolve_workspace_source_url_with_state(
             .await?
             .public,
     )
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn create_workspace_from_source_url(
-    state: State<'_, WorkspaceCommandState>,
-    app: AppHandle,
-    input: CreateWorkspaceFromSourceUrlInput,
-) -> Result<CreateWorkspaceForRepoOutput, String> {
-    create_workspace_from_source_url_with_state(&state, &AppEvents::tauri(app), input).await
 }
 
 /// A task on an existing branch of the project ("Abrir branch"), without
@@ -6676,16 +6100,6 @@ async fn rollback_bundle_workspaces(
     errors
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn create_workspace_bundle_for_repos(
-    state: State<'_, WorkspaceCommandState>,
-    app: AppHandle,
-    input: CreateWorkspaceBundleForReposInput,
-) -> Result<CreateWorkspaceBundleForReposOutput, String> {
-    create_workspace_bundle_with_state(&state, &AppEvents::tauri(app), input).await
-}
-
 /// A multi-project task without Tauri `State`, shared with the HTTP API.
 /// A project that fails rolls back the ones already created.
 pub async fn create_workspace_bundle_with_state(
@@ -6791,16 +6205,6 @@ pub async fn create_workspace_bundle_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn create_workspace_from_url(
-    state: State<'_, WorkspaceCommandState>,
-    app: AppHandle,
-    input: CreateWorkspaceFromUrlInput,
-) -> Result<CreateWorkspaceFromUrlOutput, String> {
-    create_workspace_from_url_with_state(&state, &AppEvents::tauri(app), input).await
-}
-
 /// "Clonar": clones the repository and starts a task in it, without Tauri
 /// `State` (shared with the HTTP API).
 pub async fn create_workspace_from_url_with_state(
@@ -6831,388 +6235,7 @@ pub async fn create_workspace_from_url_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-pub async fn workspace_run_setup(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceRunSetupInput,
-) -> Result<WorkspaceRunSetupOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let mut workspace = find_workspace_by_root(&repo, &input.workspace_root)
-        .await?
-        .ok_or_else(|| format!("workspace not found for root {}", input.workspace_root))?;
-
-    let setup_hints = collect_workspace_setup_hints(&workspace);
-    let setup_report = execute_workspace_setup_report(&state, &workspace).await;
-    let active_root = resolve_workspace_active_root(&workspace).to_string();
-    let compile_workspace = workspace.clone();
-    let compile_warning = state
-        .run_workspace_mutation_blocking(&active_root, move |root| {
-            compile_active_mission_spec_context_for_trusted_root(&compile_workspace, root)
-        })
-        .await
-        .map_err(workspace_mutation_error)?;
-    let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
-    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
-
-    Ok(WorkspaceRunSetupOutput {
-        workspace,
-        setup_hints,
-        setup_report,
-    })
-}
-
-#[cfg(feature = "tauri")]
-pub async fn workspace_skip_setup(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceRunSetupInput,
-) -> Result<WorkspaceRunSetupOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let mut workspace = find_workspace_by_root(&repo, &input.workspace_root)
-        .await?
-        .ok_or_else(|| format!("workspace not found for root {}", input.workspace_root))?;
-    let setup_hints = collect_workspace_setup_hints(&workspace);
-    let setup_report = WorkspaceSetupReport {
-        status: WorkspaceSetupStatus::Skipped,
-        steps: Vec::new(),
-        message: Some("Workspace setup was skipped by the user.".to_string()),
-    };
-    let active_root = resolve_workspace_active_root(&workspace).to_string();
-    let compile_workspace = workspace.clone();
-    let compile_warning = state
-        .run_workspace_mutation_blocking(&active_root, move |root| {
-            compile_active_mission_spec_context_for_trusted_root(&compile_workspace, root)
-        })
-        .await
-        .map_err(workspace_mutation_error)?;
-    let setup_report = append_mission_spec_compile_warning(&setup_report, compile_warning);
-    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
-    Ok(WorkspaceRunSetupOutput {
-        workspace,
-        setup_hints,
-        setup_report,
-    })
-}
-
-#[cfg(feature = "tauri")]
-pub async fn workspace_record_setup_outcome(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceRecordSetupOutcomeInput,
-) -> Result<WorkspaceRunSetupOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let mut workspace = find_workspace_by_root(&repo, &input.workspace_root)
-        .await?
-        .ok_or_else(|| format!("workspace not found for root {}", input.workspace_root))?;
-    let setup_hints = collect_workspace_setup_hints(&workspace);
-    let step_status = if input.success {
-        WorkspaceSetupStatus::Completed
-    } else {
-        WorkspaceSetupStatus::Failed
-    };
-    let setup_report = WorkspaceSetupReport {
-        status: step_status.clone(),
-        steps: setup_hints
-            .iter()
-            .map(|hint| WorkspaceSetupStepReport {
-                label: hint.label.clone(),
-                command: hint.command.clone(),
-                source_path: hint.source_path.clone(),
-                status: step_status.clone(),
-                detail: (!input.success)
-                    .then(|| "Setup command failed in the task terminal.".to_string()),
-            })
-            .collect(),
-        message: Some(if input.success {
-            "Workspace setup completed in the task terminal.".to_string()
-        } else {
-            "Workspace setup failed in the task terminal.".to_string()
-        }),
-    };
-    persist_workspace_setup_outcome(&repo, &mut workspace, &setup_report).await?;
-    Ok(WorkspaceRunSetupOutput {
-        workspace,
-        setup_hints,
-        setup_report,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_workspaces(
-    state: State<'_, WorkspaceCommandState>,
-) -> Result<ListWorkspacesOutput, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let workspaces = repo
-        .list_workspaces()
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut healthy_workspaces = Vec::with_capacity(workspaces.len());
-    let mut broken_workspace_reasons = BTreeMap::new();
-    let mut remote_branch_deletion_targets = BTreeMap::new();
-    for workspace in workspaces {
-        if let Some(reason) = resolve_workspace_broken_reason(&workspace) {
-            // Listing is strictly read-only. A broken workspace remains visible
-            // so the user can decide whether to repair or remove it; it simply
-            // cannot offer a destructive remote-branch target.
-            broken_workspace_reasons.insert(workspace.id.0.clone(), reason);
-            healthy_workspaces.push(workspace);
-            continue;
-        }
-        if let Ok(Some(target)) = workspace_remote_branch_deletion_target(&workspace) {
-            remote_branch_deletion_targets.insert(workspace.id.0.clone(), target);
-        }
-        healthy_workspaces.push(workspace);
-    }
-
-    let context_folders = repo
-        .list_workspace_context_folders()
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(|(workspace_id, paths)| (workspace_id.0, paths))
-        .collect();
-
-    Ok(ListWorkspacesOutput {
-        workspaces: healthy_workspaces,
-        broken_workspace_reasons,
-        remote_branch_deletion_targets,
-        context_folders,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_repositories(
-    state: State<'_, WorkspaceCommandState>,
-) -> Result<ListRepositoriesOutput, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let repositories = repo
-        .list_repositories()
-        .await
-        .map_err(|error| error.to_string())?;
-
-    Ok(ListRepositoriesOutput { repositories })
-}
-
-
-
-
-
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn update_repository_identity(
-    state: State<'_, WorkspaceCommandState>,
-    input: UpdateRepositoryIdentityInput,
-) -> Result<Repository, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    dcc_infra::project_actions::update_repository_identity(
-        &repo,
-        &input.repository_id,
-        &dcc_infra::project_actions::ProjectIdentity {
-            display_name: input.display_name,
-            icon: input.icon,
-            color: input.color,
-            logo: input.logo,
-        },
-    )
-    .await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn set_repository_pinned(
-    state: State<'_, WorkspaceCommandState>,
-    input: SetRepositoryPinnedInput,
-) -> Result<Repository, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let repository_id = RepositoryId(input.repository_id.trim().to_string());
-    let pinned_at = input.pinned.then(|| Utc::now().to_rfc3339());
-    let updated = repo
-        .update_repository_pinned_at(&repository_id, pinned_at.as_deref())
-        .map_err(|error| error.to_string())?;
-    if !updated {
-        return Err("project not found".to_string());
-    }
-    repo.get_repository(&repository_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "project not found".to_string())
-}
-
-
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_repository_linked_folders(
-    state: State<'_, WorkspaceCommandState>,
-) -> Result<ListRepositoryLinkedFoldersOutput, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let entries = repo
-        .list_repository_linked_folders()
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(|(repository_id, paths)| RepositoryLinkedFolders::new(repository_id.0, paths))
-        .collect();
-    Ok(ListRepositoryLinkedFoldersOutput { entries })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn set_repository_linked_folders(
-    state: State<'_, WorkspaceCommandState>,
-    input: SetRepositoryLinkedFoldersInput,
-) -> Result<RepositoryLinkedFolders, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let paths =
-        dcc_infra::project_actions::set_repository_linked_folders(&repo, &input.repository_id, &input.paths)
-            .await?;
-    Ok(RepositoryLinkedFolders::new(input.repository_id.trim().to_string(), paths))
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_workspace_bundles(
-    state: State<'_, WorkspaceCommandState>,
-) -> Result<ListWorkspaceBundlesOutput, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let bundles = repo
-        .list_workspace_bundles()
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(ListWorkspaceBundlesOutput { bundles })
-}
-
-#[cfg(feature = "tauri")]
-async fn set_workspace_bundle_state(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceBundleIdInput,
-    bundle_state: WorkspaceBundleState,
-) -> Result<WorkspaceBundleStateOutput, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    let summary = repo
-        .set_workspace_bundle_state(
-            &input.bundle_id,
-            bundle_state.clone(),
-            Utc::now().to_rfc3339(),
-        )
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("workspace bundle not found: {}", input.bundle_id.0))?;
-    if bundle_state == WorkspaceBundleState::Completed {
-        let workspace_ids = summary
-            .members
-            .iter()
-            .map(|member| member.workspace_id.clone())
-            .collect::<Vec<_>>();
-        let memory_state = state.inner().clone();
-        tokio::spawn(async move {
-            if let Err(error) = memory_state
-                .checkpoint_ai_memory_for_workspaces(&workspace_ids, false)
-                .await
-            {
-                eprintln!("[DCC] ai-memory bundle completion checkpoint failed: {error}");
-            }
-        });
-    }
-    Ok(WorkspaceBundleStateOutput { summary })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn archive_workspace_bundle(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceBundleIdInput,
-) -> Result<WorkspaceBundleStateOutput, String> {
-    set_workspace_bundle_state(state, input, WorkspaceBundleState::Archived).await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn complete_workspace_bundle(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceBundleIdInput,
-) -> Result<WorkspaceBundleStateOutput, String> {
-    set_workspace_bundle_state(state, input, WorkspaceBundleState::Completed).await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn restore_workspace_bundle(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceBundleIdInput,
-) -> Result<WorkspaceBundleStateOutput, String> {
-    set_workspace_bundle_state(state, input, WorkspaceBundleState::Ready).await
-}
-
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_local_branches(
-    state: State<'_, WorkspaceCommandState>,
-    input: ListLocalBranchesInput,
-) -> Result<ListLocalBranchesOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-    let branches =
-        list_local_branch_names(&input.workspace_root).map_err(|error| error.to_string())?;
-    Ok(ListLocalBranchesOutput { branches })
-}
-
 pub use dcc_infra::workspace_git::{git_ignored_files, git_tracked_files};
-
-/// Paths tracked by git (`git ls-files`), repo-relative forward slashes.
-/// Empty vec if not a git worktree or git fails.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_git_tracked_files(
-    state: State<'_, WorkspaceCommandState>,
-    input: ListGitTrackedFilesInput,
-) -> Result<ListGitTrackedFilesOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    Ok(ListGitTrackedFilesOutput {
-        paths: git_tracked_files(&input.workspace_root)?,
-        ignored_paths: git_ignored_files(&input.workspace_root)?,
-    })
-}
-
-
-/// Reads the current working-tree body of an arbitrary worktree file. The path is
-/// confined to the workspace root (no `..` escapes). Used by Quick Open and the
-/// read-only file surface to open files that may not have pending changes.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn read_workspace_file(
-    state: State<'_, WorkspaceCommandState>,
-    input: ReadWorkspaceFileInput,
-) -> Result<ReadWorkspaceFileOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-
-    let rel = validate_git_relative_path(&input.relative_path)?;
-    let content =
-        read_worktree_file_text(root, &rel)?.ok_or_else(|| "file not found".to_string())?;
-
-    Ok(ReadWorkspaceFileOutput { content })
-}
-
-/// Writes `content` to an existing worktree file (path confined to the workspace
-/// root, no `..` escapes). Used by the editable file surface. The reconciliation
-/// against concurrent agent edits is handled client-side before this is called.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn write_workspace_file(
-    state: State<'_, WorkspaceCommandState>,
-    input: WriteWorkspaceFileInput,
-) -> Result<WriteWorkspaceFileOutput, String> {
-    write_workspace_file_with_state(&state, input).await
-}
 
 /// `write_workspace_file` for callers without a Tauri `State` (the HTTP API).
 pub async fn write_workspace_file_with_state(
@@ -7263,6 +6286,14 @@ pub async fn write_workspace_file_with_state(
         .await
         .map_err(workspace_mutation_error)
 }
+
+// What only the tests below reach (the commands that used them went with Tauri).
+#[cfg(test)]
+use dcc_core::{domain::workspace_bundle::WorkspaceBundleState, ports::WorkspaceBundleRepo};
+#[cfg(test)]
+use dcc_infra::git::list_local_branch_names;
+#[cfg(test)]
+use dcc_infra::workspace_deletion::remote_branch::workspace_remote_branch_deletion_target;
 
 #[cfg(test)]
 mod editor_workspace_file_tests {
@@ -10808,65 +9839,6 @@ mod editor_workspace_file_tests {
     }
 }
 
-/// Content search across tracked files via `git grep` (on demand, capped). Fixed
-/// string, case-insensitive, repo-scoped — consistent with Quick Open's ls-files.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn search_workspace(
-    state: State<'_, WorkspaceCommandState>,
-    input: SearchWorkspaceInput,
-) -> Result<SearchWorkspaceOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    let found = dcc_infra::workspace_search::search_workspace(&input.workspace_root, &input.query)?;
-    Ok(SearchWorkspaceOutput {
-        matches: found
-            .matches
-            .into_iter()
-            .map(|found| SearchWorkspaceMatch {
-                path: found.path,
-                line: found.line,
-                text: found.text,
-            })
-            .collect(),
-        truncated: found.truncated,
-    })
-}
-
-/// Mission specs are intentionally scoped to DCC-owned worktree state.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_mission_specs(
-    state: State<'_, WorkspaceCommandState>,
-    input: ListMissionSpecsInput,
-) -> Result<ListMissionSpecsOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    let Some((specs_canonical, files)) =
-        dcc_infra::mission_specs::spec_files(&input.workspace_root)?
-    else {
-        return Ok(ListMissionSpecsOutput { specs: Vec::new() });
-    };
-
-    let mut specs = Vec::new();
-    for (file_name, path) in files {
-        let file_name = file_name.as_str();
-        let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        let validation_name = file_name.replace(".spec.md", ".validation.json");
-        let validation_path = specs_canonical.join(&validation_name);
-        let validation =
-            read_mission_validation_entry(&validation_path, &validation_name, &specs_canonical)?;
-        specs.push(MissionSpecEntry {
-            relative_path: format!(".devcommandcenter/specs/{file_name}"),
-            name: file_name.to_string(),
-            content,
-            validation,
-        });
-    }
-
-    Ok(ListMissionSpecsOutput { specs })
-}
-
 fn read_mission_validation_entry(
     path: &Path,
     file_name: &str,
@@ -10910,34 +9882,6 @@ fn read_mission_validation_entry(
         content,
         history_relative_path,
     }))
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn save_mission_validation(
-    state: State<'_, WorkspaceCommandState>,
-    input: SaveMissionValidationInput,
-) -> Result<SaveMissionValidationOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-
-    let spec_relative_path = validate_mission_spec_relative_path(&input.spec_relative_path)?;
-    let report: Value =
-        serde_json::from_str(&input.report_json).map_err(|error| error.to_string())?;
-    if report.get("dccMissionValidation").and_then(Value::as_bool) != Some(true) {
-        return Err("validation report missing dccMissionValidation=true".to_string());
-    }
-
-    state
-        .run_workspace_mutation(root, move |root| {
-            save_mission_validation_inner(root, &spec_relative_path, &report)
-        })
-        .await
-        .map_err(workspace_mutation_error)
 }
 
 fn save_mission_validation_inner(
@@ -11047,30 +9991,6 @@ fn append_mission_validation_history_entry(
     writeln!(file, "{serialized}").map_err(|error| error.to_string())
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn compile_mission_spec_context(
-    state: State<'_, WorkspaceCommandState>,
-    input: CompileMissionSpecContextInput,
-) -> Result<CompileMissionSpecContextOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-    let spec_relative_path = input.spec_relative_path;
-    state
-        .run_workspace_mutation(root, move |root| {
-            let root = root
-                .to_str()
-                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
-            compile_mission_spec_context_for_path(root, &spec_relative_path)
-        })
-        .await
-        .map_err(workspace_mutation_error)
-}
-
 fn compile_mission_spec_context_for_path(
     workspace_root: &str,
     spec_relative_path: &str,
@@ -11144,85 +10064,6 @@ fn compile_mission_spec_context_for_path(
     }
 
     Ok(CompileMissionSpecContextOutput { files })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn mission_spec_context_status(
-    state: State<'_, WorkspaceCommandState>,
-    input: MissionSpecContextStatusInput,
-) -> Result<MissionSpecContextStatusOutput, String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-
-    let spec_relative_path = validate_mission_spec_relative_path(&input.spec_relative_path)?;
-    let root_canonical = PathBuf::from(root)
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    let specs_dir = root_canonical.join(".devcommandcenter").join("specs");
-    let specs_canonical = specs_dir
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    if !specs_canonical.starts_with(&root_canonical) {
-        return Err("mission specs directory must stay inside the workspace".to_string());
-    }
-
-    let spec_path = root_canonical.join(&spec_relative_path);
-    if fs::symlink_metadata(&spec_path)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        return Err("mission spec source must not be a symlink".to_string());
-    }
-    let spec_canonical = spec_path
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    if !spec_canonical.starts_with(&specs_canonical) {
-        return Err("mission spec source must stay inside .devcommandcenter/specs".to_string());
-    }
-    let spec_markdown = fs::read_to_string(&spec_path).map_err(|error| error.to_string())?;
-
-    let mut files = Vec::new();
-    for target in DCC_SPEC_CONTEXT_TARGETS {
-        let target_path = root_canonical.join(target.relative_path);
-        let symlink = fs::symlink_metadata(&target_path)
-            .map(|metadata| metadata.file_type().is_symlink())
-            .unwrap_or(false);
-        let (state, message) = if symlink {
-            (
-                MissionSpecContextFileState::Symlink,
-                Some("context file target must not be a symlink".to_string()),
-            )
-        } else if !target_path.exists() {
-            (
-                MissionSpecContextFileState::Missing,
-                Some("context file has not been generated yet".to_string()),
-            )
-        } else {
-            let current = fs::read_to_string(&target_path).map_err(|error| error.to_string())?;
-            classify_mission_spec_context_target(
-                target,
-                &spec_relative_path,
-                &spec_markdown,
-                &current,
-            )?
-        };
-        files.push(MissionSpecContextFileStatus {
-            relative_path: target.relative_path.to_string(),
-            state,
-            message,
-        });
-    }
-
-    let current = files
-        .iter()
-        .all(|file| matches!(file.state, MissionSpecContextFileState::Current));
-
-    Ok(MissionSpecContextStatusOutput { current, files })
 }
 
 fn render_mission_spec_context_target_content(
@@ -11498,19 +10339,6 @@ pub struct WorkspaceGitBranchDiffInput {
     pub workspace_root: String,
 }
 
-
-
-/// Returns files changed on HEAD vs the upstream/base branch (`git diff <base>...HEAD`).
-/// Falls back through: @{upstream} → origin/HEAD → origin/main → origin/master.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_git_branch_diff(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitBranchDiffInput,
-) -> Result<WorkspaceGitBranchDiffOutput, String> {
-    workspace_git_branch_diff_with_state(&state, input).await
-}
-
 pub async fn workspace_git_branch_diff_with_state(
     state: &WorkspaceCommandState,
     input: WorkspaceGitBranchDiffInput,
@@ -11525,10 +10353,7 @@ pub async fn workspace_git_branch_diff_with_state(
     dcc_infra::workspace_git::workspace_git_branch_diff(&state.db_path, root).await
 }
 
-
-
 /// Immediate child directories of `path` (absolute paths), sorted.
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn list_child_directories(
     input: ListChildDirectoriesInput,
 ) -> Result<ListChildDirectoriesOutput, String> {
@@ -11562,8 +10387,6 @@ pub struct RenameWorkspaceInput {
     pub name: String,
 }
 
-
-
 #[derive(Clone, Debug, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteWorkspaceInput {
@@ -11587,17 +10410,6 @@ pub struct DeleteWorkspaceBundleInput {
     pub expected_remote_targets: Vec<WorkspaceRemoteBranchDeletionTarget>,
 }
 
-
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn archive_workspace(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceIdInput,
-) -> Result<(), String> {
-    archive_workspace_with_state(&state, input).await
-}
-
 /// `archive_workspace` for callers without a Tauri `State` (the HTTP API).
 pub async fn archive_workspace_with_state(
     state: &WorkspaceCommandState,
@@ -11608,53 +10420,11 @@ pub async fn archive_workspace_with_state(
     Ok(())
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn rename_workspace(
-    state: State<'_, WorkspaceCommandState>,
-    input: RenameWorkspaceInput,
-) -> Result<Workspace, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    rename_workspace_in_repo(&repo, input).await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn set_workspace_pinned(
-    state: State<'_, WorkspaceCommandState>,
-    input: SetWorkspacePinnedInput,
-) -> Result<Workspace, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    dcc_infra::workspace_actions::set_workspace_pinned(&repo, input.workspace_id, input.pinned).await
-}
-
-/// Snoozes an active task until `until`, or wakes it (`None`).
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn set_workspace_snooze(
-    state: State<'_, WorkspaceCommandState>,
-    input: SetWorkspaceSnoozeInput,
-) -> Result<Workspace, String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
-    dcc_infra::workspace_actions::set_workspace_snooze(&repo, input.workspace_id, input.until.as_deref()).await
-}
-
-
-
 async fn rename_workspace_in_repo(
     repo: &SqliteWorkspaceRepo,
     input: RenameWorkspaceInput,
 ) -> Result<Workspace, String> {
     dcc_infra::workspace_actions::rename_workspace(repo, input.workspace_id, &input.name).await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn complete_workspace(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceIdInput,
-) -> Result<(), String> {
-    complete_workspace_with_state(&state, input).await
 }
 
 /// `complete_workspace` for callers without a Tauri `State` (the HTTP API).
@@ -11680,21 +10450,6 @@ pub async fn complete_workspace_with_state(
     });
     Ok(())
 }
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn restore_workspace(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceIdInput,
-) -> Result<(), String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-    dcc_infra::workspace_actions::restore_workspace(&repo, input.workspace_id).await?;
-    Ok(())
-}
-
-
-
-
 
 async fn reconcile_delegation_apply_transactions(
     state: &WorkspaceCommandState,
@@ -12071,61 +10826,3 @@ pub async fn reconcile_delegation_worktree_operations(
     Ok(warnings)
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn delete_repository(
-    state: State<'_, WorkspaceCommandState>,
-    input: RepositoryIdInput,
-) -> Result<(), String> {
-    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-    let session_repo = SqliteSessionRepo::open(&state.db_path).map_err(|e| e.to_string())?;
-    let id = RepositoryId(input.repository_id);
-    let removed_workspaces =
-        delete_repository_with_workspaces(state.inner(), &repo, &session_repo, &id, &state.db_path)
-            .await?;
-    for workspace in removed_workspaces {
-        state.clear_delivery_failures(&workspace.root_path);
-        if let Some(worktree_path) = workspace.worktree_path.as_deref() {
-            state.clear_delivery_failures(worktree_path);
-        }
-    }
-    Ok(())
-}
-
-
-
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn delete_workspace(
-    state: State<'_, WorkspaceCommandState>,
-    input: DeleteWorkspaceInput,
-) -> Result<(), String> {
-    dcc_infra::workspace_deletion::delete_workspace(
-        state.inner(),
-        dcc_infra::workspace_deletion::DeleteTaskRequest {
-            workspace_id: input.workspace_id,
-            delete_remote_branch: input.delete_remote_branch,
-            expected_remote_target: input.expected_remote_target,
-            discard_delegation_changes: input.discard_delegation_changes,
-        },
-    )
-    .await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn delete_workspace_bundle(
-    state: State<'_, WorkspaceCommandState>,
-    input: DeleteWorkspaceBundleInput,
-) -> Result<(), String> {
-    dcc_infra::workspace_deletion::delete_workspace_bundle(
-        state.inner(),
-        dcc_infra::workspace_deletion::DeleteBundleRequest {
-            bundle_id: input.bundle_id.0,
-            delete_remote_branches: input.delete_remote_branches,
-            expected_remote_targets: input.expected_remote_targets,
-        },
-    )
-    .await
-}

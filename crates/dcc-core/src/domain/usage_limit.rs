@@ -10,7 +10,7 @@
 //!
 //! The desktop sidebar (`apps/desktop/src/features/workspaces/usage-limit.ts`)
 //! runs the same `usage_limit_phase` rule; the shared cases live in
-//! `packages/contracts/fixtures/attention-vectors.json`.
+//! `crates/dcc-core/fixtures/attention-vectors.json`.
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};

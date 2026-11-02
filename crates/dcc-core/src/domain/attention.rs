@@ -137,7 +137,7 @@ pub fn classify_git_blockers(
 // (`apps/desktop/src/features/workspaces/use-workspace-agent-states.ts`,
 // `deriveAgentActivityFromSessions` + `attentionWorkspaceItems`). The phone
 // reads it from here (`GET /api/v1/mobile/attention`). Both run the cases in
-// `packages/contracts/fixtures/attention-vectors.json`, so a change to one
+// `crates/dcc-core/fixtures/attention-vectors.json`, so a change to one
 // rule without the other fails a test. Whether a finished result was seen is
 // each client's own store, so `completed`/`aborted` come back always and the
 // client drops the ones it has opened.
@@ -645,10 +645,9 @@ mod tests {
 
     #[test]
     fn attention_matches_the_desktop_on_the_shared_vectors() {
-        let vectors: Vectors = serde_json::from_str(include_str!(
-            "../../../../packages/contracts/fixtures/attention-vectors.json"
-        ))
-        .expect("vectors");
+        let vectors: Vectors =
+            serde_json::from_str(include_str!("../../fixtures/attention-vectors.json"))
+                .expect("vectors");
         let activities: HashMap<String, AgentActivity> = vectors
             .sessions
             .iter()

@@ -16,8 +16,6 @@ use dcc_core::{
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-#[cfg(feature = "tauri")]
-use tauri::State;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use super::workspace_support::run_git_network_output_with_workspace_auth;
@@ -231,15 +229,6 @@ async fn status(db: &Path, workspace: &Workspace) -> Result<LocalBranchesOutput,
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_local_branches(
-    state: State<'_, WorkspaceCommandState>,
-    input: LocalBranchesInput,
-) -> Result<LocalBranchesOutput, String> {
-    workspace_local_branches_with_state(&state, input).await
-}
-
 /// The branches a local-direct task can start on, for the desktop's command
 /// and the native app's API alike.
 pub async fn workspace_local_branches_with_state(
@@ -359,15 +348,6 @@ async fn switch_branch(
         .await
         .map_err(|e| e.to_string())?;
     status(db, &workspace).await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_switch_local_branch(
-    state: State<'_, WorkspaceCommandState>,
-    input: SwitchLocalBranchInput,
-) -> Result<LocalBranchesOutput, String> {
-    workspace_switch_local_branch_with_state(&state, input).await
 }
 
 /// Moves a local-direct task's checkout to another branch before its

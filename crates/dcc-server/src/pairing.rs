@@ -561,7 +561,7 @@ mod tests {
 
     fn fresh_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        let schema = include_str!("../../../src-tauri/sql/schema.sql");
+        let schema = include_str!("../sql/schema.sql");
         conn.execute_batch(schema).unwrap();
         ensure_pairing_schema(&conn).unwrap();
         conn

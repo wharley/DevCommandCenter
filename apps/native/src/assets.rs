@@ -71,12 +71,12 @@ pub fn has_icon(name: &str) -> bool {
         .any(|(candidate, _)| *candidate == name)
 }
 
-/// The desktop's own `public/dcc-glyph.svg` (gradients, so drawn as an image).
+/// The DCC glyph (`assets/dcc-glyph.svg`; gradients, so drawn as an image).
 pub fn dcc_glyph() -> std::sync::Arc<gpui::Image> {
     static GLYPH: std::sync::OnceLock<std::sync::Arc<gpui::Image>> = std::sync::OnceLock::new();
     GLYPH
         .get_or_init(|| {
-            let svg = include_bytes!("../../../public/dcc-glyph.svg");
+            let svg = include_bytes!("../assets/dcc-glyph.svg");
             std::sync::Arc::new(gpui::Image::from_bytes(
                 gpui::ImageFormat::Svg,
                 svg.to_vec(),

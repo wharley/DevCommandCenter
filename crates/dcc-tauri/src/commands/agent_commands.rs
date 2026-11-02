@@ -1,16 +1,8 @@
 //! Resident agents: person-owned identities a session can run as.
 
-use dcc_core::domain::agent::{
-    ChroniclerPresetText, ResearcherPresetText, ResidentAgent, ResidentAgentDraft,
-    ReviewerPresetText,
-};
-use dcc_core::domain::session::SessionId;
-use dcc_infra::db::{ActivityRecap, AgentSessionBinding};
+use dcc_core::domain::agent::{ResidentAgent, ResidentAgentDraft};
+use dcc_infra::db::AgentSessionBinding;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "tauri")]
-use tauri::State;
-
-use crate::state::SessionCommandState;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,30 +26,6 @@ pub struct BindSessionAgentInput {
     pub agent_id: String,
 }
 
-/// `reviewer`, `researcher` and `chronicler` carry the built-in agents' texts
-/// in the app language. An app that does not send one gets the English text.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn agents_overview(
-    state: State<'_, SessionCommandState>,
-    reviewer: ReviewerPresetText,
-    researcher: Option<ResearcherPresetText>,
-    chronicler: Option<ChroniclerPresetText>,
-) -> Result<AgentsOverview, String> {
-    Ok(AgentsOverview {
-        agents: state
-            .list_resident_agents(
-                &reviewer,
-                &researcher.unwrap_or_default(),
-                &chronicler.unwrap_or_default(),
-            )
-            .map_err(|error| error.to_string())?,
-        sessions: state
-            .list_agent_session_bindings()
-            .map_err(|error| error.to_string())?,
-    })
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityRecapInput {
@@ -74,42 +42,6 @@ fn stored_instant(value: &str) -> Result<String, String> {
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         })
         .map_err(|error| format!("invalid recap instant {value:?}: {error}"))
-}
-
-/// What moved in the person's tasks during the chronicler's recap window.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn agents_activity_recap(
-    state: State<'_, SessionCommandState>,
-    input: ActivityRecapInput,
-) -> Result<ActivityRecap, String> {
-    let from = stored_instant(&input.from)?;
-    let to = stored_instant(&input.to)?;
-    state
-        .activity_recap(&from, &to)
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn agents_save(
-    state: State<'_, SessionCommandState>,
-    input: SaveAgentInput,
-) -> Result<ResidentAgent, String> {
-    state
-        .save_resident_agent(input.id.as_deref(), input.draft)
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn agents_bind_session(
-    state: State<'_, SessionCommandState>,
-    input: BindSessionAgentInput,
-) -> Result<(), String> {
-    state
-        .bind_session_agent(&SessionId(input.session_id), &input.agent_id)
-        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

@@ -103,7 +103,7 @@ fn open_connection(db_path: &Path) -> Result<Connection, String> {
 }
 
 fn ensure_schema(conn: &Connection) -> Result<(), String> {
-    let schema = include_str!("../../../src-tauri/sql/schema.sql");
+    let schema = include_str!("../sql/schema.sql");
     conn.execute_batch(schema).map_err(|e| e.to_string())
 }
 
@@ -409,7 +409,7 @@ pub fn sidecar_command(binary: Option<PathBuf>) -> Command {
     }
     let mut cargo = Command::new("cargo");
     cargo
-        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../src-tauri"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env(
             "CARGO_TARGET_DIR",
             std::env::temp_dir().join("dcc-sidecar-target"),

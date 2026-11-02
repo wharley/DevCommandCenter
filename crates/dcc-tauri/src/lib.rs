@@ -1,6 +1,9 @@
-// Without Tauri the desktop's commands are left out, and with them the
-// helpers only they use; those go for good with the React app.
-#![cfg_attr(not(feature = "tauri"), allow(dead_code, unused_imports))]
+// The desktop's Tauri commands are gone. Some private code was reached only
+// by them: the features the native app has not ported yet (Editar a partir
+// daqui, publishing/discarding a Researcher idea, continuing from the base
+// branch, the CodeRabbit review) and the parked Mission Spec. Kept until
+// each is ported or dropped (docs/PLANO_MIGRACAO_GPUI.md, 12h).
+#![allow(dead_code)]
 
 pub(crate) mod antigravity_account_state;
 pub mod antigravity_installation;
@@ -19,7 +22,6 @@ pub mod native_connectors;
 pub mod process_runtime_registry;
 pub mod provider_delta_coalescer;
 pub mod rt;
-pub mod run;
 pub mod state;
 pub mod terminal_arbiter;
 pub mod turn_review;
@@ -38,4 +40,3 @@ fn _capture_v2_send_sync_assertions() {
     assert_send_sync::<dcc_infra::guarded_undo::macos_store::MacArtifactStore>();
 }
 
-pub const PHASE_0A_CONTRACTS_DIR: &str = "../../packages/contracts/src/generated/bindings.ts";

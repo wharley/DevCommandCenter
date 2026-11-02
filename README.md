@@ -15,7 +15,7 @@
 Dev Command Center (DCC) is a local-first desktop workbench for software
 engineering with AI agents. It connects isolated Git worktrees, multi-provider
 sessions, review and delivery workflows, terminals, usage insights, and local
-persistence in one Tauri application.
+persistence in one native application (Rust and GPUI).
 
 > [!IMPORTANT]
 > Before starting agent sessions, set up at least one provider on the computer
@@ -75,10 +75,9 @@ persistence in one Tauri application.
 
 ## Stack
 
-- Tauri 2 + Rust
-- React 19 + TypeScript + OJ
+- Rust, with GPUI for the native interface
 - SQLite for local persistence
-- xterm.js for terminal surfaces
+- Expo (React Native) for the phone companion
 
 ## Project memory
 
@@ -148,14 +147,10 @@ Missing providers do not require installing every other provider in the table.
 The following tools are needed to build DCC from source, not to install the
 desktop release. Individual provider CLIs may have their own runtime requirements.
 
-- Node.js 22 recommended
-- Yarn v1
 - Rust stable
-- OJ 0.2.2 (`cargo install oj --version 0.2.2 --locked`)
+- Node.js 22 and Yarn v1 (the Claude helper, the phone app and the tests)
+- Bun (compiles the Claude helper for a build)
 - Git
-
-OJ is the desktop and mobile build/dev tool. Vite remains only as the peer
-runtime used by Vitest 4 for the test suites.
 
 ## Development
 
@@ -169,13 +164,13 @@ Manual setup:
 
 ```bash
 yarn install
-yarn dev
+cd apps/native && cargo run
 ```
 
-Desktop-only frontend shell:
+Build and install the app on this Mac as `Dev Command Center.app`:
 
 ```bash
-yarn dev:desktop
+yarn native:local --version 0.3.0
 ```
 
 ## Worktrees and `.env`
@@ -246,4 +241,3 @@ Before starting your first agent session, complete [Provider setup](#provider-se
 - [Delivery workflows roadmap](docs/DELIVERY_WORKFLOWS_ROADMAP.md)
 - [Antigravity provider](docs/ANTIGRAVITY_PROVIDER.md)
 - [Browser workbench](docs/BROWSER_WORKBENCH.md)
-- [Monaco Editor in Tauri](docs/MONACO_TAURI.md)

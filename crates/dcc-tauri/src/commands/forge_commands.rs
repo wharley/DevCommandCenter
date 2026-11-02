@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
-#[cfg(feature = "tauri")]
-use tauri::State;
 
 use dcc_core::domain::workspace::{WorkspaceSource, WorkspaceSourceKind};
 use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
@@ -508,8 +506,6 @@ pub struct PullRequestHubSubmitReviewOutput {
     pub warning: Option<String>,
 }
 
-
-
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceReviewStateInput {
@@ -762,15 +758,6 @@ pub(crate) fn resolve_forge_cli_snapshot(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_forge_cli_status(
-    state: State<'_, WorkspaceCommandState>,
-    input: ForgeCliStatusInput,
-) -> Result<ForgeCliStatusOutput, String> {
-    workspace_forge_cli_status_with_state(&state, input)
-}
-
 /// `workspace_forge_cli_status` for the HTTP API.
 pub fn workspace_forge_cli_status_with_state(
     state: &WorkspaceCommandState,
@@ -783,15 +770,6 @@ pub fn workspace_forge_cli_status_with_state(
         &host,
         input.force_refresh.unwrap_or(false),
     )
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_forge_cli_accounts(
-    state: State<'_, WorkspaceCommandState>,
-    input: ForgeCliAccountsInput,
-) -> Result<ForgeCliAccountsOutput, String> {
-    workspace_forge_cli_accounts_with_state(&state, input).await
 }
 
 /// `workspace_forge_cli_accounts` for callers without a Tauri `State` (the HTTP API).
@@ -835,15 +813,6 @@ pub async fn workspace_forge_cli_accounts_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_forge_cli_hosts(
-    _state: State<'_, WorkspaceCommandState>,
-    input: ForgeCliHostsInput,
-) -> Result<ForgeCliHostsOutput, String> {
-    forge_cli_hosts(input)
-}
-
 /// The hosts the forge CLI is signed in to.
 pub fn forge_cli_hosts(input: ForgeCliHostsInput) -> Result<ForgeCliHostsOutput, String> {
     let backend = crate::commands::forge::accounts::backend_for(input.provider);
@@ -853,15 +822,6 @@ pub fn forge_cli_hosts(input: ForgeCliHostsInput) -> Result<ForgeCliHostsOutput,
         cli_name: backend.cli_name().to_string(),
         hosts,
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_forge_cli_select_login(
-    state: State<'_, WorkspaceCommandState>,
-    input: ForgeCliSelectLoginInput,
-) -> Result<(), String> {
-    workspace_forge_cli_select_login_with_state(&state, input)
 }
 
 /// The login DCC uses on a host (`set_forge_login_preference`).
@@ -879,14 +839,6 @@ pub fn workspace_forge_cli_select_login_with_state(
     .map_err(|error| error.to_string())
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_backfill_forge_repo_bindings(
-    state: State<'_, WorkspaceCommandState>,
-) -> Result<usize, String> {
-    workspace_backfill_forge_repo_bindings_with_state(&state)
-}
-
 /// Binds the repositories without a forge login to the one now signed in.
 pub fn workspace_backfill_forge_repo_bindings_with_state(
     state: &WorkspaceCommandState,
@@ -894,15 +846,6 @@ pub fn workspace_backfill_forge_repo_bindings_with_state(
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
     let summary = crate::commands::forge::accounts::backfill_repository_bindings(&repo)?;
     Ok(summary.bound)
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_retry_repository_forge_binding(
-    state: State<'_, WorkspaceCommandState>,
-    input: RepositoryIdInput,
-) -> Result<Option<String>, String> {
-    workspace_retry_repository_forge_binding_with_state(&state, input).await
 }
 
 /// A repository bound again to the login now signed in, if one fits.
@@ -917,33 +860,6 @@ pub async fn workspace_retry_repository_forge_binding_with_state(
         complete_repository_forge_binding_retry(&repo, &repository_id).await?;
     }
     Ok(login)
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_github_cli_status(
-    state: State<'_, WorkspaceCommandState>,
-    _input: GithubCliStatusInput,
-) -> Result<GithubCliStatusOutput, String> {
-    let output = workspace_forge_cli_status(
-        state,
-        ForgeCliStatusInput {
-            provider: ForgeCliProvider::Github,
-            host: Some("github.com".to_string()),
-            force_refresh: None,
-        },
-    )
-    .await?;
-    Ok(legacy_github_cli_status(output))
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_forge_context(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceForgeContextInput,
-) -> Result<WorkspaceForgeContextOutput, String> {
-    workspace_forge_context_with_state(&state, input).await
 }
 
 /// `workspace_forge_context` for callers without a Tauri `State` (the HTTP API).
@@ -998,45 +914,6 @@ pub async fn workspace_forge_context_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_change_request_view_web(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    preflight_workspace_root(&state, &input.workspace_root).await?;
-    let root = input.workspace_root.trim();
-    if root.is_empty() {
-        return Err("workspace_root is empty".to_string());
-    }
-    let login = forge_context::resolve_workspace_forge_context(
-        &state.db_path,
-        root,
-        input.forge_login.as_deref(),
-    )?
-    .and_then(|context| context.effective_login);
-    if let Some(source) = imported_workspace_source(&state, root).await? {
-        if source.kind == WorkspaceSourceKind::PullRequest {
-            return forge_provider::view_workspace_change_request_source(
-                root,
-                &source.url,
-                source.change_request_number,
-                login.as_deref(),
-            );
-        }
-    }
-    forge_provider::view_workspace_change_request(root, login.as_deref())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_change_request_merge(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    workspace_change_request_merge_with_state(&state, input).await
-}
-
 /// `workspace_change_request_merge` for callers without a Tauri `State`.
 pub async fn workspace_change_request_merge_with_state(
     state: &WorkspaceCommandState,
@@ -1069,15 +946,6 @@ pub async fn workspace_change_request_merge_with_state(
         }
     }
     forge_provider::merge_workspace_change_request(root, &branch, login.as_deref())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_change_request_create(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceChangeRequestCreateInput,
-) -> Result<(), String> {
-    workspace_change_request_create_with_state(&state, input).await
 }
 
 /// `workspace_change_request_create` for callers without a Tauri `State` (the HTTP API).
@@ -1147,15 +1015,6 @@ pub async fn workspace_change_request_create_with_state(
     )
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_change_request_context(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceChangeRequestContextInput,
-) -> Result<WorkspaceChangeRequestContextOutput, String> {
-    workspace_change_request_context_with_state(&state, input).await
-}
-
 /// `workspace_change_request_context` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_change_request_context_with_state(
     state: &WorkspaceCommandState,
@@ -1217,43 +1076,6 @@ pub async fn workspace_change_request_context_with_state(
         provider,
         request_label: request_label.to_string(),
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_gh_pr_view_web(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    workspace_change_request_view_web(state, input).await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_gh_pr_merge(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    workspace_change_request_merge(state, input).await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_gh_pr_create_fill(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceGitPushInput,
-) -> Result<(), String> {
-    workspace_change_request_create(
-        state,
-        WorkspaceChangeRequestCreateInput {
-            workspace_root: input.workspace_root,
-            forge_login: input.forge_login,
-            title: None,
-            body: None,
-            draft: false,
-        },
-    )
-    .await
 }
 
 fn hub_actor(value: &Value, provider: ForgeCliProvider) -> Option<PullRequestHubActor> {
@@ -1670,15 +1492,6 @@ fn gitlab_hub_item(
         linked_workspace_id,
         linked_workspace_name,
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn pull_request_hub_list(
-    state: State<'_, WorkspaceCommandState>,
-    input: PullRequestHubListInput,
-) -> Result<PullRequestHubListOutput, String> {
-    pull_request_hub_list_with_state(&state, input).await
 }
 
 /// How many repositories ask their forge at once: each is a `gh`/`glab` call
@@ -2167,15 +1980,6 @@ fn gitlab_inline_comments(
         .collect()
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn pull_request_hub_detail(
-    state: State<'_, WorkspaceCommandState>,
-    input: PullRequestHubDetailInput,
-) -> Result<PullRequestHubDetailOutput, String> {
-    pull_request_hub_detail_with_state(&state, input).await
-}
-
 /// `pull_request_hub_detail` for callers without a Tauri `State` (the HTTP API).
 pub async fn pull_request_hub_detail_with_state(
     state: &WorkspaceCommandState,
@@ -2369,15 +2173,6 @@ pub async fn pull_request_hub_detail_with_state(
     }
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn pull_request_hub_merge(
-    state: State<'_, WorkspaceCommandState>,
-    input: PullRequestHubMergeInput,
-) -> Result<PullRequestHubMergeOutput, String> {
-    pull_request_hub_merge_with_state(&state, input).await
-}
-
 /// `pull_request_hub_merge` for callers without a Tauri `State` (the HTTP API).
 pub async fn pull_request_hub_merge_with_state(
     state: &WorkspaceCommandState,
@@ -2491,15 +2286,6 @@ pub async fn pull_request_hub_merge_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn pull_request_hub_reply_thread(
-    state: State<'_, WorkspaceCommandState>,
-    input: PullRequestHubThreadReplyInput,
-) -> Result<PullRequestHubThreadReplyOutput, String> {
-    pull_request_hub_reply_thread_with_state(&state, input).await
-}
-
 /// `pull_request_hub_reply_thread` for callers without a Tauri `State` (the HTTP API).
 pub async fn pull_request_hub_reply_thread_with_state(
     state: &WorkspaceCommandState,
@@ -2554,15 +2340,6 @@ pub async fn pull_request_hub_reply_thread_with_state(
     Ok(PullRequestHubThreadReplyOutput { submitted: true })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn pull_request_hub_resolve_thread(
-    state: State<'_, WorkspaceCommandState>,
-    input: PullRequestHubThreadResolveInput,
-) -> Result<PullRequestHubThreadResolveOutput, String> {
-    pull_request_hub_resolve_thread_with_state(&state, input).await
-}
-
 /// `pull_request_hub_resolve_thread` for callers without a Tauri `State` (the HTTP API).
 pub async fn pull_request_hub_resolve_thread_with_state(
     state: &WorkspaceCommandState,
@@ -2605,15 +2382,6 @@ pub async fn pull_request_hub_resolve_thread_with_state(
     Ok(PullRequestHubThreadResolveOutput {
         resolved: input.resolved,
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn pull_request_hub_comment(
-    state: State<'_, WorkspaceCommandState>,
-    input: PullRequestHubCommentInput,
-) -> Result<PullRequestHubCommentOutput, String> {
-    pull_request_hub_comment_with_state(&state, input).await
 }
 
 /// `pull_request_hub_comment` for callers without a Tauri `State` (the HTTP API).
@@ -2659,15 +2427,6 @@ pub async fn pull_request_hub_comment_with_state(
         }
     };
     Ok(PullRequestHubCommentOutput { comment })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn pull_request_hub_submit_review(
-    state: State<'_, WorkspaceCommandState>,
-    input: PullRequestHubSubmitReviewInput,
-) -> Result<PullRequestHubSubmitReviewOutput, String> {
-    pull_request_hub_submit_review_with_state(&state, input).await
 }
 
 /// `pull_request_hub_submit_review` for callers without a Tauri `State` (the HTTP API).
@@ -2920,15 +2679,6 @@ pub async fn pull_request_hub_submit_review_with_state(
     }
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_pr_status(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspacePrStatusInput,
-) -> Result<WorkspacePrStatusOutput, String> {
-    workspace_pr_status_with_state(&state, input).await
-}
-
 pub async fn workspace_pr_status_with_state(
     state: &WorkspaceCommandState,
     input: WorkspacePrStatusInput,
@@ -2941,14 +2691,6 @@ pub async fn workspace_pr_status_with_state(
         input.forge_login.as_deref(),
     )
     .await
-}
-
-#[cfg(feature = "tauri")]
-pub async fn workspace_review_state(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceReviewStateInput,
-) -> Result<WorkspaceReviewStateOutput, String> {
-    workspace_review_state_with_state(&state, input).await
 }
 
 /// `workspace_review_state` for callers without a Tauri `State` (the HTTP API).
@@ -3071,14 +2813,6 @@ pub async fn workspace_review_state_with_state(
     }
 }
 
-#[cfg(feature = "tauri")]
-pub async fn workspace_reviewer_candidates(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceReviewerCandidatesInput,
-) -> Result<WorkspaceReviewerCandidatesOutput, String> {
-    workspace_reviewer_candidates_with_state(&state, input).await
-}
-
 /// `workspace_reviewer_candidates` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_reviewer_candidates_with_state(
     state: &WorkspaceCommandState,
@@ -3143,14 +2877,6 @@ pub async fn workspace_reviewer_candidates_with_state(
             })
         }
     }
-}
-
-#[cfg(feature = "tauri")]
-pub async fn workspace_request_reviewers(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceRequestReviewersInput,
-) -> Result<WorkspaceRequestReviewersOutput, String> {
-    workspace_request_reviewers_with_state(&state, input).await
 }
 
 /// `workspace_request_reviewers` for callers without a Tauri `State` (the HTTP API).
@@ -3748,14 +3474,6 @@ fn map_gitlab_review_state(
     }
 }
 
-#[cfg(feature = "tauri")]
-pub async fn workspace_pr_review_comments(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspacePrReviewCommentsInput,
-) -> Result<WorkspacePrReviewCommentsOutput, String> {
-    workspace_pr_review_comments_with_state(&state, input).await
-}
-
 /// `workspace_pr_review_comments` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_pr_review_comments_with_state(
     state: &WorkspaceCommandState,
@@ -4066,15 +3784,6 @@ fn lookup_github_failed_checks(
     Ok(Some(lookup))
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_pipeline_status(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspacePipelineStatusInput,
-) -> Result<WorkspacePipelineStatusOutput, String> {
-    workspace_pipeline_status_with_state(&state, input).await
-}
-
 /// `workspace_pipeline_status` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_pipeline_status_with_state(
     state: &WorkspaceCommandState,
@@ -4274,15 +3983,6 @@ pub async fn workspace_pipeline_status_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_pipeline_job_log(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspacePipelineJobInput,
-) -> Result<WorkspacePipelineJobLogOutput, String> {
-    workspace_pipeline_job_log_with_state(&state, input).await
-}
-
 /// `workspace_pipeline_job_log` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_pipeline_job_log_with_state(
     state: &WorkspaceCommandState,
@@ -4317,15 +4017,6 @@ pub async fn workspace_pipeline_job_log_with_state(
         truncated: trace.truncated,
         loaded_bytes: trace.loaded_bytes,
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_pipeline_job_retry(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspacePipelineJobInput,
-) -> Result<(), String> {
-    workspace_pipeline_job_retry_with_state(&state, input).await
 }
 
 /// `workspace_pipeline_job_retry` for callers without a Tauri `State` (the HTTP API).

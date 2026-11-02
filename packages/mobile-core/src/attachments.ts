@@ -1,10 +1,8 @@
 /**
- * Prompt attachments, serialized the way the desktop composer does: each one
- * travels in the prompt as `@/absolute/path` on the Mac
- * (`apps/desktop/src/lib/prompt-attachments.ts`), and providers with native
- * image input attach the images it references. The phone uploads the file
- * first (`POST /api/v1/mobile/attachments`) and gets that path back.
- * `attachments.test.ts` checks the parsing against the desktop's own code.
+ * Prompt attachments, serialized the way the app's composer does: each one
+ * travels in the prompt as `@/absolute/path` on the Mac, and providers with
+ * native image input attach the images it references. The phone uploads the
+ * file first (`POST /api/v1/mobile/attachments`) and gets that path back.
  */
 
 export type PromptPart = { kind: "text"; value: string } | { kind: "attachment"; path: string };

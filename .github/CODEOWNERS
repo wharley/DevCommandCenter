@@ -7,4 +7,4 @@
 docs/RELEASING.md @wharley
 docs/GITHUB_RELEASE_BOOTSTRAP.md @wharley
 SECURITY.md @wharley
-src-tauri/tauri.conf.json @wharley
+apps/native/src/data/updater.rs @wharley

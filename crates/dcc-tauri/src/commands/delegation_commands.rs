@@ -1,8 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-#[cfg(feature = "tauri")]
-use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use dcc_core::{
@@ -256,16 +254,6 @@ async fn validate_stored_delegation_target(
         validate_child_provider_target(&child_session, &delegation.target_provider_id)?;
     }
     Ok(())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn create_delegation(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: CreateDelegationInput,
-) -> Result<CreateDelegationOutput, String> {
-    create_delegation_with_state(&state, input).await
 }
 
 pub async fn create_delegation_with_state(
@@ -546,44 +534,6 @@ pub async fn create_task_proposal_with_state(
     Ok(proposal)
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_delegations(
-    state: State<'_, SessionCommandState>,
-    input: ListDelegationsInput,
-) -> Result<ListDelegationsOutput, String> {
-    let delegations = DelegationRepo::list_delegations(
-        &*state,
-        input.workspace_id.as_ref(),
-        input.parent_session_id.as_ref(),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    Ok(ListDelegationsOutput { delegations })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn get_delegation(
-    state: State<'_, SessionCommandState>,
-    input: GetDelegationInput,
-) -> Result<GetDelegationOutput, String> {
-    let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(GetDelegationOutput { delegation })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn cancel_delegation(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: CancelDelegationInput,
-) -> Result<CancelDelegationOutput, String> {
-    cancel_delegation_with_state(&state, input).await
-}
-
 pub async fn cancel_delegation_with_state(
     state: &SessionCommandState,
     input: CancelDelegationInput,
@@ -653,16 +603,6 @@ pub async fn cancel_delegation_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn start_delegation(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: StartDelegationInput,
-) -> Result<StartDelegationOutput, String> {
-    start_delegation_with_state(&state, input).await
-}
-
 pub async fn start_delegation_with_state(
     state: &SessionCommandState,
     input: StartDelegationInput,
@@ -720,16 +660,6 @@ pub async fn start_delegation_with_state(
     Ok(StartDelegationOutput {
         delegation: updated,
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn complete_delegation(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: CompleteDelegationInput,
-) -> Result<CompleteDelegationOutput, String> {
-    complete_delegation_with_state(&state, input).await
 }
 
 pub async fn complete_delegation_with_state(
@@ -839,16 +769,6 @@ pub async fn complete_delegation_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn approve_delegation(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: ApproveDelegationInput,
-) -> Result<ApproveDelegationOutput, String> {
-    approve_delegation_with_state(&state, input).await
-}
-
 pub async fn approve_delegation_with_state(
     state: &SessionCommandState,
     input: ApproveDelegationInput,
@@ -932,16 +852,6 @@ pub async fn approve_delegation_with_state(
     })
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn fail_delegation(
-    state: State<'_, SessionCommandState>,
-    _app: AppHandle,
-    input: FailDelegationInput,
-) -> Result<FailDelegationOutput, String> {
-    fail_delegation_with_state(&state, input).await
-}
-
 pub async fn fail_delegation_with_state(
     state: &SessionCommandState,
     input: FailDelegationInput,
@@ -988,17 +898,6 @@ pub async fn fail_delegation_with_state(
 
 pub use crate::delegation_runtime::{RunDelegationInput, RunDelegationOutput};
 
-/// Starts a delegation end to end in the backend (worktree, child thread,
-/// record, child turn); the result is finalized when the child's turn ends.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn run_delegation(
-    state: State<'_, SessionCommandState>,
-    input: RunDelegationInput,
-) -> Result<RunDelegationOutput, String> {
-    crate::delegation_runtime::run_delegation(&state, input).await
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct StartTaskProposalInput {
@@ -1008,34 +907,10 @@ pub struct StartTaskProposalInput {
     pub instruction: Option<String>,
 }
 
-/// The person's "Start" on a task proposal: launches the child conversation.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn start_task_proposal(
-    state: State<'_, SessionCommandState>,
-    input: StartTaskProposalInput,
-) -> Result<RunDelegationOutput, String> {
-    crate::delegation_runtime::start_task_proposal(&state, &input.delegation_id, input.instruction)
-        .await
-        .map(|delegation| RunDelegationOutput { delegation })
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CompleteTaskInput {
     pub delegation_id: DelegationId,
-}
-
-/// The person's "Close task": an open task stops; its edits go to review.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn complete_task(
-    state: State<'_, SessionCommandState>,
-    input: CompleteTaskInput,
-) -> Result<RunDelegationOutput, String> {
-    crate::delegation_runtime::complete_task(&state, &input.delegation_id)
-        .await
-        .map(|delegation| RunDelegationOutput { delegation })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1054,65 +929,12 @@ pub struct DelegationResultTurnOutput {
     pub prompt: Option<String>,
 }
 
-/// The deterministic `[DCC] …` hand-back text, for the person to send a
-/// finished delegation's result to the parent agent from the composer.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn delegation_result_turn(
-    state: State<'_, SessionCommandState>,
-    input: DelegationResultTurnInput,
-) -> Result<DelegationResultTurnOutput, String> {
-    let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
-    let prompt = matches!(
-        delegation.status,
-        DelegationStatus::Completed | DelegationStatus::ReviewPending | DelegationStatus::Failed
-    )
-    .then(|| {
-        crate::delegation_runtime::delegation_result_turn(
-            &delegation,
-            input.failure_reason.as_deref(),
-        )
-    });
-    Ok(DelegationResultTurnOutput { prompt })
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelRunningDelegationInput {
     pub delegation_id: DelegationId,
     #[serde(default)]
     pub reason: Option<String>,
-}
-
-/// Stops a running delegation from the UI: marks it cancelled, aborts the
-/// child's turn and discards an implementation worktree. Finished
-/// delegations are returned unchanged.
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn cancel_running_delegation(
-    state: State<'_, SessionCommandState>,
-    input: CancelRunningDelegationInput,
-) -> Result<CancelDelegationOutput, String> {
-    let delegation = DelegationRepo::get_delegation(&*state, &input.delegation_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("delegation not found: {}", input.delegation_id.0))?;
-    let delegation = crate::delegation_runtime::cancel_delegation_for_parent(
-        &state,
-        &delegation.parent_session_id,
-        &delegation.id.0,
-        Some(
-            input
-                .reason
-                .filter(|reason| !reason.trim().is_empty())
-                .unwrap_or_else(|| "Cancelled by the person.".to_string()),
-        ),
-    )
-    .await?;
-    Ok(CancelDelegationOutput { delegation })
 }
 
 #[cfg(test)]

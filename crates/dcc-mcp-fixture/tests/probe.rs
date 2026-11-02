@@ -60,7 +60,9 @@ fn assert_fixture_report(report: dcc_core::domain::mcp::McpProbeReport) {
             "fixture.fail",
             "fixture.malformed_result",
             "fixture.mutate",
-            "fixture.slow"
+            "fixture.slow",
+            "fixture.image",
+            "fixture.hold",
         ]
     );
 }

@@ -5,8 +5,6 @@ use dcc_core::domain::workspace::WorkspacePushTarget;
 use dcc_infra::db::SqliteWorkspaceRepo;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-#[cfg(feature = "tauri")]
-use tauri::State;
 use uuid::Uuid;
 
 use crate::{
@@ -547,15 +545,6 @@ pub(crate) fn clear_workspace_delivery_failure(
     operation: WorkspaceDeliveryFailureOperation,
 ) {
     state.clear_delivery_failure(root, operation);
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_delivery_failure_snapshot(
-    state: State<'_, WorkspaceCommandState>,
-    input: WorkspaceDeliveryFailureInput,
-) -> Result<WorkspaceDeliveryFailureOutput, String> {
-    workspace_delivery_failure_snapshot_with_state(&state, input).await
 }
 
 /// `workspace_delivery_failure_snapshot` for callers without a Tauri `State` (the HTTP API).

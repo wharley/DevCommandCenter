@@ -8,8 +8,8 @@ use std::path::Path;
 use dcc_infra::mcp_db::SqliteMcpRepo;
 use rusqlite::{params, Connection};
 
-/// `src-tauri/sql/schema.sql` (CREATE IF NOT EXISTS).
-pub const APP_SCHEMA_SQL: &str = include_str!("../../../src-tauri/sql/schema.sql");
+/// `crates/dcc-server/sql/schema.sql` (CREATE IF NOT EXISTS).
+pub const APP_SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
 
 pub fn open_app_database(db_path: &Path) -> Result<Connection, String> {
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;

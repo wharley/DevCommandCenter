@@ -1,11 +1,4 @@
-use async_trait::async_trait;
-#[cfg(feature = "tauri")]
-use tauri::{AppHandle, Emitter};
-
-use dcc_core::{
-    ports::events::{CoreEvent, SessionLiveEventEnvelope},
-    CoreError, Result,
-};
+use dcc_core::ports::events::CoreEvent;
 
 pub const PHASE_0A_EVENT_PREFIX: &str = "dcc/phase-0a";
 pub const WORKSPACE_EVENT_PREFIX: &str = "dcc/workspace";
@@ -144,44 +137,6 @@ pub(crate) fn core_event_name(event: &CoreEvent) -> String {
         CoreEvent::SessionDelegationCancelled { .. } => {
             format!("{SESSION_EVENT_PREFIX}/delegation/cancelled")
         }
-    }
-}
-
-#[cfg(feature = "tauri")]
-#[derive(Clone)]
-pub struct TauriEventBus {
-    app: AppHandle,
-}
-
-#[cfg(feature = "tauri")]
-impl TauriEventBus {
-    #[cfg(feature = "tauri")]
-    pub fn new(app: AppHandle) -> Self {
-        Self { app }
-    }
-}
-
-#[cfg(feature = "tauri")]
-#[async_trait]
-impl dcc_core::ports::EventBus for TauriEventBus {
-    async fn publish(&self, event: CoreEvent) -> Result<()> {
-        let event_name = core_event_name(&event);
-
-        self.app
-            .emit(&event_name, &event)
-            .map_err(|error| CoreError::EventBus(error.to_string()))?;
-
-        self.app
-            .emit("dcc:core-event", &event)
-            .map_err(|error| CoreError::EventBus(error.to_string()))?;
-
-        Ok(())
-    }
-
-    async fn publish_session_live(&self, event: SessionLiveEventEnvelope) -> Result<()> {
-        self.app
-            .emit(SESSION_LIVE_EVENT_NAME, &event)
-            .map_err(|error| CoreError::EventBus(error.to_string()))
     }
 }
 

@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{collections::HashSet, path::Path, time::Duration};
-#[cfg(feature = "tauri")]
-use tauri::State;
 
 use dcc_core::{
     domain::{
@@ -165,68 +163,6 @@ pub struct ProviderAccountStatusOutput {
     pub login_command: Option<String>,
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_provider_accounts(
-    state: State<'_, SessionCommandState>,
-) -> Result<ListProviderAccountsOutput, String> {
-    Ok(ListProviderAccountsOutput {
-        accounts: state
-            .list_provider_accounts()
-            .map_err(|error| error.to_string())?,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn create_provider_account(
-    state: State<'_, SessionCommandState>,
-    input: CreateProviderAccountInput,
-) -> Result<ProviderAccountOutput, String> {
-    Ok(ProviderAccountOutput {
-        account: state
-            .create_provider_account(
-                input.provider_id.trim(),
-                &input.label,
-                input.import_dir.as_deref(),
-            )
-            .map_err(|error| error.to_string())?,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn rename_provider_account(
-    state: State<'_, SessionCommandState>,
-    input: RenameProviderAccountInput,
-) -> Result<ProviderAccountOutput, String> {
-    Ok(ProviderAccountOutput {
-        account: state
-            .rename_provider_account(input.account_id.trim(), &input.label)
-            .map_err(|error| error.to_string())?,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn remove_provider_account(
-    state: State<'_, SessionCommandState>,
-    input: ProviderAccountIdInput,
-) -> Result<(), String> {
-    state
-        .remove_provider_account(input.account_id.trim())
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn provider_account_status(
-    state: State<'_, SessionCommandState>,
-    input: ProviderAccountStatusInput,
-) -> Result<ProviderAccountStatusOutput, String> {
-    provider_account_status_for_state(&state, input).await
-}
-
 /// Asks the runtime who it is signed in as, under the account's own config.
 pub async fn provider_account_status_for_state(
     state: &SessionCommandState,
@@ -284,15 +220,6 @@ fn account_sign_ins(
 ) -> &'static std::sync::Mutex<std::collections::HashMap<String, (u64, tokio::sync::oneshot::Sender<()>)>>
 {
     ACCOUNT_SIGN_INS.get_or_init(Default::default)
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn sign_in_provider_account(
-    state: State<'_, SessionCommandState>,
-    input: ProviderAccountStatusInput,
-) -> Result<ProviderAccountSignInOutput, String> {
-    sign_in_provider_account_for_state(&state, input).await
 }
 
 /// Signs an account (or the system login) in through the browser. Returns
@@ -354,7 +281,6 @@ pub async fn sign_in_provider_account_for_state(
     }
 }
 
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn cancel_provider_account_sign_in(
     input: ProviderAccountStatusInput,
 ) -> Result<(), String> {
@@ -372,14 +298,6 @@ pub fn cancel_account_sign_in(input: &ProviderAccountStatusInput) -> Result<(), 
         let _ = cancel.send(());
     }
     Ok(())
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn list_providers(
-    state: State<'_, SessionCommandState>,
-) -> Result<ListProvidersOutput, String> {
-    list_providers_for_state(&state).await
 }
 
 pub async fn list_providers_for_state(
@@ -557,50 +475,6 @@ fn is_usable_executable(path: &Path) -> bool {
     }
 }
 
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn get_provider_availability(
-    state: State<'_, SessionCommandState>,
-    input: ProviderAvailabilityInput,
-) -> Result<ProviderAvailabilityOutput, String> {
-    Ok(ProviderAvailabilityOutput {
-        availability: state
-            .provider_availability(input.provider_id.trim())
-            .map_err(|error| error.to_string())?,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn set_provider_availability(
-    state: State<'_, SessionCommandState>,
-    input: SetProviderAvailabilityInput,
-) -> Result<ProviderAvailabilityOutput, String> {
-    Ok(ProviderAvailabilityOutput {
-        availability: state
-            .set_provider_enabled(input.provider_id.trim(), input.enabled)
-            .await
-            .map_err(|error| error.to_string())?,
-    })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn provider_account_usage(
-    state: State<'_, SessionCommandState>,
-    input: ProviderAccountUsageInput,
-) -> Result<ProviderAccountUsageOutput, String> {
-    provider_account_usage_for_state(&state, input).await
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn install_antigravity(
-    state: State<'_, SessionCommandState>,
-) -> Result<InstallAntigravityOutput, String> {
-    install_antigravity_for_state(&state).await
-}
-
 /// Downloads the verified official runtime and checks it runs.
 pub async fn install_antigravity_for_state(
     state: &SessionCommandState,
@@ -629,15 +503,6 @@ pub async fn install_antigravity_for_state(
         binary_path: binary_path.display().to_string(),
         version: crate::antigravity_installation::RELEASE_VERSION.to_string(),
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn get_antigravity_status(
-    state: State<'_, SessionCommandState>,
-    input: AntigravityStatusInput,
-) -> Result<AntigravityStatusOutput, String> {
-    antigravity_status_for_state(&state, input)
 }
 
 /// Whether the managed runtime is installed and the Google login saved.
@@ -675,15 +540,6 @@ pub fn antigravity_status_for_state(
         cached_model_count,
         last_verified_at,
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn connect_antigravity(
-    state: State<'_, SessionCommandState>,
-    input: ConnectAntigravityInput,
-) -> Result<ConnectAntigravityOutput, String> {
-    connect_antigravity_for_state(&state, input).await
 }
 
 /// Signs in with Google in the browser and keeps the account's models.
@@ -780,15 +636,6 @@ pub async fn provider_account_reset_for_state(
         .await
         .map_err(|error| error.to_string())?;
     Ok(ProviderAccountResetOutput { outcome })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn provider_account_reset(
-    state: State<'_, SessionCommandState>,
-    input: ProviderAccountResetInput,
-) -> Result<ProviderAccountResetOutput, String> {
-    provider_account_reset_for_state(&state, input).await
 }
 
 #[cfg(test)]

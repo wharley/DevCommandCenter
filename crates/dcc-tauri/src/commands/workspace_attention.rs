@@ -16,8 +16,6 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-#[cfg(feature = "tauri")]
-use tauri::State;
 
 use dcc_core::{
     domain::{delegation::DelegationStatus, workspace::WorkspaceState},
@@ -38,10 +36,6 @@ pub use dcc_core::domain::attention::{
     AgentActivityState, AttentionItem, AttentionReason, AttentionWorkspace, PrSnapshot,
     SessionActivityInput, WorkspaceAttentionBlockersOutput, WorkspaceBlocker, WorkspaceBlockerKind,
 };
-
-
-
-
 
 fn blocker_first_seen() -> &'static Mutex<BlockerFirstSeen> {
     static FIRST_SEEN: OnceLock<Mutex<BlockerFirstSeen>> = OnceLock::new();
@@ -322,14 +316,6 @@ pub async fn workspace_attention_with_state(
         running,
         requests,
     })
-}
-
-#[cfg(feature = "tauri")]
-#[tauri::command]
-pub async fn workspace_attention_blockers(
-    state: State<'_, WorkspaceCommandState>,
-) -> Result<WorkspaceAttentionBlockersOutput, String> {
-    workspace_attention_blockers_with_state(&state).await
 }
 
 #[cfg(test)]

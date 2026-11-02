@@ -10,36 +10,17 @@
   "engines": {
     "node": ">=22.12.0"
   },
-  "resolutions": {
-    "vite": "^8.0.10"
-  },
   "scripts": {
-    "dev": "yarn dev:tauri",
-    "dev:tauri": "node scripts/dev-tauri.mjs",
-    "dev:desktop": "yarn workspace @dcc/desktop dev",
-    "build": "tauri build",
-    "app:local": "node scripts/app-local.mjs install",
-    "app:rollback": "node scripts/app-local.mjs rollback",
     "native:local": "node scripts/native-local.mjs install",
     "native:rollback": "node scripts/native-local.mjs rollback",
-    "build:contracts": "yarn workspace @dcc/contracts build",
-    "build:desktop": "yarn workspace @dcc/desktop build",
     "build:sidecars": "node scripts/build-sidecars.mjs",
-    "oj:dev": "node scripts/ensure-oj.mjs && oj dev --port 5173",
-    "oj:build": "node scripts/ensure-oj.mjs && oj build --emptyOutDir",
     "test:mcp:release-local": "bash scripts/validate-mcp-release-local.sh",
     "test:remote:e2e": "node scripts/e2e-remote.mjs",
-    "lint": "eslint .",
-    "preinstall": "node scripts/check-node-version.mjs",
-    "postinstall": "node scripts/patch-xterm-viewport.mjs"
+    "preinstall": "node scripts/check-node-version.mjs"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.0",
     "@types/node": "^22",
-    "esbuild": "^0.25.0",
-    "postcss": "^8.5.10",
-    "typescript": "^5",
-    "vite": "^8.0.10"
+    "typescript": "^5"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.126"

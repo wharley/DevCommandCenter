@@ -1,11 +1,9 @@
 /**
  * Delivering a task from the phone (`/api/v1/mobile/workspaces/:id/delivery…`).
  *
- * `resolveCommitMode` and `resolveExecutionDockActions` are the desktop's
- * (`features/commit/WorkspaceCommitButton.logic.ts`,
- * `features/composer/ExecutionDock.actions.ts`), copied because Metro can't
- * reach apps/desktop; `delivery.test.ts` runs both copies against the
- * desktop's on the same cases and fails when they drift.
+ * `resolveCommitMode` and `resolveExecutionDockActions` follow the app's
+ * delivery rules (once the React desktop's `WorkspaceCommitButton.logic.ts`
+ * and `ExecutionDock.actions.ts`, now the native app's `resolveCommitMode`).
  */
 import { t } from "./labels.ts";
 

@@ -3,41 +3,14 @@ import {
 	attachmentRefusal,
 	base64Size,
 	formatBytes,
-	isImagePath,
 	MAX_ATTACHMENT_BYTES,
 	MAX_ATTACHMENTS,
-	promptParts,
 	promptWithAttachments,
 	resizedDimensions,
 	splitPrompt,
 } from "./attachments.ts";
 
-const desktopRoot = new URL("../../../apps/desktop/src/", import.meta.url);
-
-const PROMPTS = [
-	"sem anexo",
-	"veja @/var/folders/T/dcc_img_1.png",
-	"@/tmp/dcc_file_x/Relatório-final.pdf e @/tmp/dcc_img_2.jpg, por favor",
-	"@/Users/me/My Shots/tela 1.png.",
-	"e-mail a@b.com não é anexo; @src/app.ts também não",
-	"C: @C:\\Users\\me\\a.txt (fim)",
-	"",
-];
-
 describe("attachments", () => {
-	it("parse prompts exactly like the desktop", async () => {
-		const prompt = (await import(/* @vite-ignore */ new URL("lib/prompt-attachments.ts", desktopRoot).href)) as {
-			promptParts(content: string): unknown;
-		};
-		const image = (await import(/* @vite-ignore */ new URL("lib/is-image-path.ts", desktopRoot).href)) as {
-			isImageFilePath(path: string): boolean;
-		};
-		for (const content of PROMPTS) expect(promptParts(content), content).toEqual(prompt.promptParts(content));
-		for (const path of ["/a/b.png", "/a/b.JPEG", "b.png", "/a/b.pdf", "C:\\x\\y.webp", "/x"]) {
-			expect(isImagePath(path), path).toBe(image.isImageFilePath(path));
-		}
-	});
-
 	it("serialize what the phone attaches so the desktop reads it back", () => {
 		const paths = ["/tmp/dcc_img_1.jpg", "/tmp/dcc_file_2/notas.md"];
 		const sent = promptWithAttachments("  o que tem aqui?  ", paths);

@@ -5,7 +5,6 @@ pub(crate) use dcc_infra::workspace_git::{
     resolve_workspace_setup_root, workspace_branch_hints,
 };
 
-
 use dcc_core::domain::workspace::Workspace;
 use dcc_infra::{
     db::SqliteWorkspaceRepo,
@@ -20,10 +19,6 @@ use crate::{
     },
     state::WorkspaceCommandState,
 };
-
-
-
-
 
 pub(crate) fn resolve_workspace_broken_reason(workspace: &Workspace) -> Option<String> {
     let active_root = Path::new(resolve_workspace_active_root(workspace));
@@ -42,10 +37,6 @@ pub(crate) fn resolve_workspace_broken_reason(workspace: &Workspace) -> Option<S
 
     broken_worktree_reason(active_root)
 }
-
-
-
-
 
 /// Checks whether a registered workspace is unavailable without changing its
 /// durable record. Mutation preflight must remain read-only: authorization
@@ -348,8 +339,6 @@ mod tests {
     }
 }
 
-
-
 /// Resolves the base branch a workspace was created from.
 ///
 /// Uses the per-workspace `base_branch` field. The repository row's
@@ -362,12 +351,6 @@ pub(crate) async fn resolve_workspace_target_branch(
 ) -> Option<String> {
     dcc_infra::workspace_git::workspace_base_branch(&state.db_path, workspace_root).await
 }
-
-
-
-
-
-
 
 pub(crate) fn resolve_default_remote_name(root: &str) -> Result<String, String> {
     let output = run_git_output(root, &["remote"])?;
@@ -591,8 +574,6 @@ pub(crate) fn ensure_pushable_branch(
 
     materialize_workspace_branch(root, preferred_branch)
 }
-
-
 
 pub(crate) fn next_available_branch_name(root: &str, preferred: &str) -> String {
     if !git_command_succeeds(

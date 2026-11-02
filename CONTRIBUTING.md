@@ -30,7 +30,7 @@ Or manually:
 
 ```bash
 yarn install
-yarn dev
+cd apps/native && cargo run
 ```
 
 For a new clone or worktree:

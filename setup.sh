@@ -99,7 +99,7 @@ echo -e "${GREEN}${BOLD}╚═════════════════�
 echo ""
 echo -e "${BLUE}Próximos passos:${NC}"
 echo -e "  1. Configure .env conforme necessário"
-echo -e "  2. Execute: ${BOLD}yarn dev${NC} para iniciar o desenvolvimento"
+echo -e "  2. Execute: ${BOLD}cd apps/native && cargo run${NC} para iniciar o desenvolvimento"
 echo ""
 echo -e "${YELLOW}Importante:${NC}"
 echo -e "  • Sempre use Node v$REQUIRED_VERSION neste projeto"
