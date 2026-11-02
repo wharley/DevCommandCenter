@@ -6,6 +6,7 @@
 //! when the panel closes or another one is chosen; one that was running
 //! already (Xcode's) is left as it was. The power mark shuts one down.
 
+pub(crate) mod agent;
 mod keys;
 mod view;
 
@@ -79,6 +80,10 @@ pub struct DevicePanel {
     pressed: bool,
     /// The simulators this panel booted (it shuts them down on leaving).
     pub(crate) started: std::collections::HashSet<String>,
+    /// Agents waiting for the simulator they opened to stream (`agent`).
+    agent_waiting: Vec<agent::Waiting>,
+    /// An agent is choosing the simulator: the running one does not open by itself.
+    agent_choosing: bool,
     _list: Option<Task<()>>,
     _start: Option<Task<()>>,
     _frames: Option<Task<()>>,
@@ -100,6 +105,8 @@ impl DevicePanel {
             room: Rc::default(),
             pressed: false,
             started: Default::default(),
+            agent_waiting: Vec::new(),
+            agent_choosing: false,
             _list: None,
             _start: None,
             _frames: None,
@@ -128,6 +135,7 @@ impl DevicePanel {
                         let booted = simulators.iter().find(|sim| sim.booted).cloned();
                         panel.simulators = simulators;
                         if panel.current.is_none()
+                            && !panel.agent_choosing
                             && let Some(sim) = booted
                         {
                             panel.open(sim, cx);
@@ -209,6 +217,7 @@ impl DevicePanel {
                 cx.notify();
             }
             Err(error) => {
+                panel.answer_agents(Err(error.clone()));
                 panel.phase = Phase::Failed(error);
                 cx.notify();
             }
@@ -229,12 +238,16 @@ impl DevicePanel {
                     for update in batch {
                         match update {
                             Update::Picture(Shown(picture)) => panel.picture = Some(picture),
-                            Update::Size(width, height) => panel.size = (width, height),
+                            Update::Size(width, height) => {
+                                panel.size = (width, height);
+                                panel.answer_agents_when_live();
+                            }
                             Update::Closed(reason) => {
                                 panel.link = None;
-                                panel.phase = Phase::Failed(
-                                    reason.unwrap_or_else(|| cx.t("device.ended").to_string()),
-                                );
+                                let reason =
+                                    reason.unwrap_or_else(|| cx.t("device.ended").to_string());
+                                panel.answer_agents(Err(reason.clone()));
+                                panel.phase = Phase::Failed(reason);
                             }
                         }
                     }

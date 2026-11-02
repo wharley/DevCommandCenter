@@ -302,6 +302,8 @@ impl Shell {
         });
         let computer_subscriptions = computer::link(&computer_approvals, &conversation, window, cx);
         browser::trim_cache_daily(cx);
+        #[cfg(target_os = "macos")]
+        device::serve_agents(window, cx);
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
         let (notes, notes_follow) = Self::new_notes(&sidebar, &conversation, window, cx);

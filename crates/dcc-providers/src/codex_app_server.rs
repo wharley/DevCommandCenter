@@ -2223,6 +2223,17 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_task_status"
                 | "dcc_task_wait"
                 | "dcc_task_cancel"
+                | "dcc_device_list"
+                | "dcc_device_open"
+                | "dcc_device_screenshot"
+                | "dcc_device_describe"
+                | "dcc_device_tap"
+                | "dcc_device_swipe"
+                | "dcc_device_type"
+                | "dcc_device_button"
+                | "dcc_device_launch"
+                | "dcc_device_open_url"
+                | "dcc_device_install"
         )
 }
 

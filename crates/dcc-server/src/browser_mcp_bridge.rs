@@ -845,6 +845,17 @@ fn rpc_timeout(value: &Value) -> Duration {
     if is_control_request {
         return COMPUTER_CONTROL_REQUEST_HTTP_TIMEOUT;
     }
+    // Booting a simulator or installing a build takes a while.
+    let device_call = value
+        .as_object()
+        .filter(|object| object.get("method").and_then(Value::as_str) == Some("tools/call"))
+        .and_then(|object| object.get("params"))
+        .and_then(|params| params.get("name"))
+        .and_then(Value::as_str)
+        .filter(|name| crate::device_tools::is_device_tool(name));
+    if let Some(name) = device_call {
+        return crate::device_tools::timeout(name);
+    }
     let Some(call) = delegation_call else {
         return Duration::from_secs(5);
     };
@@ -1529,6 +1540,9 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
         "dcc_computer_key" => call.arguments.as_ref().is_some_and(|arguments| {
             serde_json::from_value::<ComputerKeyArgs>(arguments.clone()).is_ok()
         }),
+        name if crate::device_tools::is_device_tool(name) => {
+            crate::device_tools::call_is_well_formed(name, &call.arguments)
+        }
         _ => false,
     }
 }
@@ -1670,6 +1684,24 @@ async fn dispatch_tool(
         );
     }
     match call.name.as_str() {
+        name if crate::device_tools::is_device_tool(name) => {
+            if !bridge.lease_is_current(binding) {
+                return ToolDispatch::computer_error(
+                    "the iOS Simulator is unavailable for this provider session",
+                );
+            }
+            let response =
+                crate::device_tools::dispatch(&binding.session_id, name, call.arguments).await;
+            if response["isError"] == true {
+                ToolDispatch {
+                    response,
+                    outcome: BrowserAuditOutcome::Failed,
+                    grant_state: BrowserAuditGrantState::NotApplicable,
+                }
+            } else {
+                ToolDispatch::executed(response, BrowserAuditGrantState::NotApplicable)
+            }
+        }
         "dcc_delegate_task" | "dcc_propose_task" | "dcc_task_message" | "dcc_task_status"
         | "dcc_task_wait" | "dcc_task_cancel" => {
             if !bridge.lease_is_current(binding) {
@@ -3034,6 +3066,10 @@ fn tools() -> Vec<Value> {
         json!({"name":"dcc_task_wait","description":"Block until a task you delegated finishes, up to timeoutSeconds, and return its result. Use only when you cannot continue without it; otherwise DCC delivers the result on its own. If it times out the task keeps running and the result still arrives as a [DCC] message.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600,"default":300}},"required":["taskId"]},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}}),
         json!({"name":"dcc_task_cancel","description":"Cancel a task you delegated that is still running. Its partial work is discarded.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64},"reason":{"type":"string","maxLength":2000}},"required":["taskId"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}}),
     ]
+    .into_iter()
+    // The iOS Simulator, where the app offers one.
+    .chain(crate::device_tools::tools())
+    .collect()
 }
 
 #[cfg(test)]
@@ -4308,6 +4344,51 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn device_tools_pass_the_gate_and_get_their_own_time() {
+        let call = |name: &str, arguments: Value| ToolCall {
+            name: name.into(),
+            arguments: Some(arguments),
+            _meta: None,
+        };
+        for (name, arguments) in [
+            ("dcc_device_list", json!({})),
+            (
+                "dcc_device_open",
+                json!({"udid": "47B9DDB6-8CF6-4866-9A60-B4D1F6EC0B4D"}),
+            ),
+            ("dcc_device_screenshot", json!({})),
+            ("dcc_device_describe", json!({})),
+            ("dcc_device_tap", json!({"x": 100, "y": 200})),
+            (
+                "dcc_device_swipe",
+                json!({"fromX": 1, "fromY": 2, "toX": 3, "toY": 4}),
+            ),
+            ("dcc_device_type", json!({"text": "oi"})),
+            ("dcc_device_button", json!({"name": "home"})),
+            (
+                "dcc_device_launch",
+                json!({"bundleId": "com.apple.Preferences"}),
+            ),
+            (
+                "dcc_device_open_url",
+                json!({"url": "exp://127.0.0.1:8081"}),
+            ),
+            ("dcc_device_install", json!({"appPath": "/tmp/Feedr.app"})),
+        ] {
+            assert!(
+                tool_call_is_well_formed(&call(name, arguments)),
+                "{name} is rejected"
+            );
+        }
+        assert!(!tool_call_is_well_formed(&call(
+            "dcc_device_tap",
+            json!({"x": 1})
+        )));
+        let open = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dcc_device_open","arguments":{}}});
+        assert_eq!(rpc_timeout(&open), Duration::from_secs(120));
     }
 
     #[test]

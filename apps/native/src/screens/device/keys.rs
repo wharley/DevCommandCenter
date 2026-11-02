@@ -49,6 +49,44 @@ fn usage(key: &str) -> Option<u32> {
     }
 }
 
+/// What to press to type `ch` on a US keyboard: the key, and Shift.
+pub fn for_char(ch: char) -> Option<(u32, bool)> {
+    const SHIFTED: [(char, char); 21] = [
+        ('!', '1'),
+        ('@', '2'),
+        ('#', '3'),
+        ('$', '4'),
+        ('%', '5'),
+        ('^', '6'),
+        ('&', '7'),
+        ('*', '8'),
+        ('(', '9'),
+        (')', '0'),
+        ('_', '-'),
+        ('+', '='),
+        ('{', '['),
+        ('}', ']'),
+        ('|', '\\'),
+        (':', ';'),
+        ('"', '\''),
+        ('~', '`'),
+        ('<', ','),
+        ('>', '.'),
+        ('?', '/'),
+    ];
+    match ch {
+        '\n' => return Some((0x28, false)),
+        '\t' => return Some((0x2B, false)),
+        ' ' => return Some((0x2C, false)),
+        'A'..='Z' => return usage(&ch.to_ascii_lowercase().to_string()).map(|u| (u, true)),
+        _ => {}
+    }
+    if let Some((_, base)) = SHIFTED.iter().find(|(shifted, _)| *shifted == ch) {
+        return usage(&base.to_string()).map(|u| (u, true));
+    }
+    usage(&ch.to_string()).map(|u| (u, false))
+}
+
 /// What to press for `keystroke`: the key, and whether Shift goes with it.
 /// `None` for what the simulator should not get (⌘ and ⌃ shortcuts).
 pub fn for_keystroke(keystroke: &Keystroke) -> Option<(u32, bool)> {
@@ -78,5 +116,16 @@ mod tests {
         assert_eq!(key("left"), Some((0x50, false)));
         assert_eq!(key("cmd-c"), None, "the app's shortcut");
         assert_eq!(key("f5"), None);
+    }
+
+    #[test]
+    fn text_types_with_shift_where_it_needs_it() {
+        assert_eq!(for_char('a'), Some((0x04, false)));
+        assert_eq!(for_char('A'), Some((0x04, true)));
+        assert_eq!(for_char('@'), Some((0x1F, true)));
+        assert_eq!(for_char('?'), Some((0x38, true)));
+        assert_eq!(for_char('\n'), Some((0x28, false)));
+        assert_eq!(for_char(' '), Some((0x2C, false)));
+        assert_eq!(for_char('é'), None, "outside the US layout");
     }
 }
