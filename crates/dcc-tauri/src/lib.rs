@@ -7,6 +7,7 @@ pub mod conversation_rewind;
 pub(crate) use dcc_infra::delegation_apply;
 pub mod delegation_runtime;
 pub mod delivery_failure;
+pub mod device_routing;
 pub mod git;
 pub mod guarded_undo_runtime;
 pub mod mcp_connect;

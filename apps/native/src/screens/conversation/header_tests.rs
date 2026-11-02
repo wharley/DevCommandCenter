@@ -110,7 +110,12 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 fn the_buttons_reach_their_surfaces_and_resume(cx: &mut TestAppContext) {
     let (view, cx, events, server) =
         open(cx, vec![("/api/v1/sessions/a/resume", 200, "{}".into())]);
-    assert!(cx.debug_bounds("conversation-header").is_some());
+    let header = cx.debug_bounds("conversation-header").expect("the header");
+    assert_eq!(
+        header.size.height,
+        gpui::px(super::header::HEIGHT),
+        "the side panels' bars line up with it"
+    );
     assert!(
         cx.debug_bounds("header-terminal-count").is_none(),
         "nothing running"

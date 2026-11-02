@@ -127,24 +127,30 @@ For a web task, start with dcc_browser_status. If the target is not already open
 
 When the Browser reaches a sign-in, MFA, CAPTCHA, payment, or any identity-sensitive step, stop and let the user complete it in the visible Browser. Never ask for, copy, import, or invent cookies, passwords, credentials, or a shared external-browser session. After the user completes the handoff, call dcc_browser_status or dcc_browser_context again.
 
-Computer Use is a separate experimental capability for an explicitly user-requested external desktop-app task. It is not an automatic fallback for Browser access. For that separate task, first call dcc_computer_status; if access is needed, call dcc_computer_request_control with the concrete reason and wait for the user's decision. Do not attempt OS automation or claim desktop access without that grant.
-[End DCC host tool routing]"#;
+Computer Use is a separate experimental capability for an explicitly user-requested external desktop-app task (not the iOS Simulator). It is not an automatic fallback for Browser access. For that separate task, first call dcc_computer_status; if access is needed, call dcc_computer_request_control with the concrete reason and wait for the user's decision. Do not attempt OS automation or claim desktop access without that grant."#;
+const DCC_APP_MCP_TOOL_ROUTING_END: &str = "[End DCC host tool routing]";
 
+/// The host's tool routing after the turn's own instructions; `device` is
+/// the iOS Simulator guidance for this turn (`device_routing`).
 fn append_dcc_app_mcp_tool_instructions(
     existing: Option<String>,
     app_mcp_attached: bool,
+    device: Option<String>,
 ) -> Option<String> {
     if !app_mcp_attached {
         return existing;
     }
+    let routing = match device {
+        Some(device) => format!(
+            "{DCC_APP_MCP_TOOL_ROUTING_INSTRUCTIONS}\n\n{device}\n{DCC_APP_MCP_TOOL_ROUTING_END}"
+        ),
+        None => format!("{DCC_APP_MCP_TOOL_ROUTING_INSTRUCTIONS}\n{DCC_APP_MCP_TOOL_ROUTING_END}"),
+    };
     Some(match existing {
         Some(existing) if !existing.trim().is_empty() => {
-            format!(
-                "{}\n\n{DCC_APP_MCP_TOOL_ROUTING_INSTRUCTIONS}",
-                existing.trim_end()
-            )
+            format!("{}\n\n{routing}", existing.trim_end())
         }
-        _ => DCC_APP_MCP_TOOL_ROUTING_INSTRUCTIONS.to_string(),
+        _ => routing,
     })
 }
 
@@ -7300,9 +7306,11 @@ impl SessionCommandState {
                     self.take_cold_attach_reanchor(session_id),
                     self.take_native_resume_armed(session_id),
                 );
+                let project_root = self.session_project_root(&session).await;
                 turn.tool_instructions = append_dcc_app_mcp_tool_instructions(
                     turn.tool_instructions,
                     binding.ephemeral_mcp_lease_id.is_some(),
+                    crate::device_routing::guidance(project_root.as_deref()),
                 );
                 Input::Turn(turn)
             }
@@ -7710,6 +7718,20 @@ impl SessionCommandState {
         provider
             .interrupt_native_subagent(&binding.handle, agent_thread_id)
             .await
+    }
+
+    /// Where the session's agent works: its worktree, else its checkout.
+    async fn session_project_root(&self, session: &Session) -> Option<std::path::PathBuf> {
+        let workspace = SqliteWorkspaceRepo::open(&self.db_path)
+            .ok()?
+            .get_workspace(&session.workspace_id)
+            .await
+            .ok()??;
+        let root = workspace
+            .worktree_path
+            .filter(|path| !path.trim().is_empty())
+            .unwrap_or(workspace.root_path);
+        Some(std::path::PathBuf::from(root))
     }
 
     async fn multi_workspace_scope_instructions(
@@ -8812,22 +8834,28 @@ mod tests {
     #[test]
     fn app_mcp_tool_routing_is_present_for_first_and_resumed_turns_only_when_attached() {
         assert_eq!(
-            append_dcc_app_mcp_tool_instructions(Some("existing instructions".to_string()), false),
+            append_dcc_app_mcp_tool_instructions(
+                Some("existing instructions".to_string()),
+                false,
+                None
+            ),
             Some("existing instructions".to_string())
         );
-        let first = append_dcc_app_mcp_tool_instructions(None, true)
+        let first = append_dcc_app_mcp_tool_instructions(None, true, Some("SIMULATOR".into()))
             .expect("first attached turn has host instructions");
         assert!(first.contains("dcc_browser_status"));
         assert!(first.contains("dcc_browser_open"));
         assert!(first.contains("dcc_browser_context"));
         assert!(first.contains("401 or 403"));
         assert!(first.contains("dcc_computer_request_control"));
+        assert!(first.contains("\n\nSIMULATOR\n[End DCC host tool routing]"), "the turn's simulator guidance");
         assert!(first.contains("sign-in, MFA, CAPTCHA"));
         assert!(first.contains("not an automatic fallback"));
 
         let resumed = append_dcc_app_mcp_tool_instructions(
             Some("durable objective context".to_string()),
             true,
+            None,
         )
         .expect("resumed attached turn has host instructions");
         assert!(resumed.starts_with("durable objective context\n\n"));

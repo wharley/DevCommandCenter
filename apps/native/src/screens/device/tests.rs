@@ -53,6 +53,12 @@ fn the_list_shows_until_a_simulator_is_live_at_its_proportions(cx: &mut TestAppC
     });
     draw(cx);
     assert!(cx.debug_bounds("device-panel").is_some());
+    let bar = cx.debug_bounds("device-bar").expect("the bar");
+    assert_eq!(
+        bar.size.height,
+        px(crate::screens::conversation::header::HEIGHT),
+        "its line meets the conversation header's"
+    );
     assert!(cx.debug_bounds("device-screen").is_none(), "the list first");
 
     panel.update(cx, |panel, cx| {

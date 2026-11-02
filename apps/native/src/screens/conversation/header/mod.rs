@@ -34,6 +34,10 @@ pub struct PendingClose {
     pub requires_abort: bool,
 }
 
+/// The header's height with its bottom line; the side panels' bars (the
+/// Device panel) match it so the lines meet.
+pub const HEIGHT: f32 = 49.0;
+
 #[derive(Default)]
 pub struct HeaderState {
     pub terminals: TerminalCounts,

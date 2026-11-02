@@ -150,6 +150,8 @@ impl DevicePanel {
 
     /// Ends the helper off the main thread (it waits for the process).
     fn release(&mut self) {
+        // The agents check their visible changes only while one is live.
+        dcc_tauri::device_routing::set_device_panel_open(false);
         if let Some(link) = self.link.take() {
             std::thread::spawn(move || drop(link));
         }
@@ -213,6 +215,7 @@ impl DevicePanel {
             Ok((link, events)) => {
                 panel.link = Some(Arc::new(link));
                 panel.phase = Phase::Live;
+                dcc_tauri::device_routing::set_device_panel_open(true);
                 panel.follow(events, cx);
                 cx.notify();
             }

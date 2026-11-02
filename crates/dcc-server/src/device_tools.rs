@@ -48,7 +48,10 @@ static HOST: OnceLock<Arc<dyn DeviceHost>> = OnceLock::new();
 
 /// The native app's simulator, once it registers it (macOS).
 pub fn register_device_host(host: Arc<dyn DeviceHost>) {
-    let _ = HOST.set(host);
+    if HOST.set(host).is_ok() {
+        // The agents are told about it from the next turn on.
+        dcc_tauri::device_routing::set_device_tools_available(true);
+    }
 }
 
 fn host() -> Result<&'static Arc<dyn DeviceHost>, String> {
