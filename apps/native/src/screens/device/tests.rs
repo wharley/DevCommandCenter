@@ -46,6 +46,8 @@ fn the_list_shows_until_a_simulator_is_live_at_its_proportions(cx: &mut TestAppC
             name: "iPhone 16 Pro".into(),
             runtime: "iOS 18.3".into(),
             booted: false,
+            ipad: false,
+            last_booted: None,
         }];
         cx.notify();
     });

@@ -218,54 +218,83 @@ impl DevicePanel {
                 .child(div().mt(px(4.0)).text_size(px(11.0)).child(error.clone()))
                 .into_any_element();
         }
+        let [recent, iphones, ipads] = crate::data::device::sections(&self.simulators);
+        let sections = [
+            ("device.recent", recent),
+            ("device.iphones", iphones),
+            ("device.ipads", ipads),
+        ];
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (label, sims) in sections {
+            if sims.is_empty() {
+                continue;
+            }
+            rows.push(
+                div()
+                    .px(px(8.0))
+                    .pt(px(if rows.is_empty() { 6.0 } else { 14.0 }))
+                    .pb(px(4.0))
+                    .text_size(px(11.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(colors.muted_foreground)
+                    .child(cx.t(label))
+                    .into_any_element(),
+            );
+            for sim in sims {
+                let chosen = sim.clone();
+                rows.push(
+                    div()
+                        .id(SharedString::from(format!("device-sim-{}", sim.udid)))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(8.0))
+                        .rounded(px(6.0))
+                        .px(px(8.0))
+                        .py(px(6.0))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(colors.accent.opacity(0.6)))
+                        .on_click(
+                            cx.listener(move |panel, _, _, cx| panel.open(chosen.clone(), cx)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .min_w_0()
+                                .text_size(px(13.0))
+                                .child(
+                                    Icon::new(if sim.ipad { "tablet" } else { "smartphone" })
+                                        .size(14.0),
+                                )
+                                .child(div().truncate().child(sim.name.clone())),
+                        )
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .text_size(px(11.0))
+                                .text_color(colors.muted_foreground)
+                                .child(if sim.booted {
+                                    format!("{} · {}", sim.runtime, cx.t("device.running"))
+                                } else {
+                                    sim.runtime.clone()
+                                }),
+                        )
+                        .into_any_element(),
+                );
+            }
+        }
         div()
+            .id("device-list")
+            .debug_selector(|| "device-list".into())
+            .size_full()
+            .overflow_y_scroll()
             .flex()
             .flex_col()
             .gap(px(2.0))
             .p(px(8.0))
-            .child(
-                div()
-                    .px(px(8.0))
-                    .py(px(6.0))
-                    .text_size(px(11.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(colors.muted_foreground)
-                    .child(cx.t("device.choose")),
-            )
-            .children(self.simulators.iter().enumerate().map(|(index, sim)| {
-                let chosen = sim.clone();
-                div()
-                    .id(("device-sim", index))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(8.0))
-                    .rounded(px(6.0))
-                    .px(px(8.0))
-                    .py(px(6.0))
-                    .cursor_pointer()
-                    .hover(|style| style.bg(colors.accent.opacity(0.6)))
-                    .on_click(cx.listener(move |panel, _, _, cx| panel.open(chosen.clone(), cx)))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .text_size(px(13.0))
-                            .child(Icon::new("smartphone").size(14.0))
-                            .child(sim.name.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(colors.muted_foreground)
-                            .child(if sim.booted {
-                                format!("{} · {}", sim.runtime, cx.t("device.running"))
-                            } else {
-                                sim.runtime.clone()
-                            }),
-                    )
-            }))
+            .children(rows)
             .into_any_element()
     }
 

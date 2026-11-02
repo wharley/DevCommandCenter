@@ -19,6 +19,30 @@ pub struct Simulator {
     /// `iOS 26.1`.
     pub runtime: String,
     pub booted: bool,
+    pub ipad: bool,
+    /// When it last ran (`2026-10-15T19:22:05Z`); never, for one not used yet.
+    pub last_booted: Option<String>,
+}
+
+/// How many simulators "Recentes" shows.
+const RECENT: usize = 3;
+
+/// The list in the panel's sections: the ones used lately (running first),
+/// then the other iPhones, then the other iPads.
+pub fn sections(simulators: &[Simulator]) -> [Vec<&Simulator>; 3] {
+    let recent: Vec<&Simulator> = simulators
+        .iter()
+        .filter(|sim| sim.booted || sim.last_booted.is_some())
+        .take(RECENT)
+        .collect();
+    let rest = |ipad: bool| {
+        simulators
+            .iter()
+            .filter(|sim| sim.ipad == ipad && !recent.iter().any(|seen| seen.udid == sim.udid))
+            .collect::<Vec<_>>()
+    };
+    let (iphones, ipads) = (rest(false), rest(true));
+    [recent, iphones, ipads]
 }
 
 #[derive(Deserialize)]
@@ -34,6 +58,10 @@ struct Entry {
     state: String,
     #[serde(default)]
     is_available: bool,
+    #[serde(default)]
+    device_type_identifier: String,
+    #[serde(default)]
+    last_booted_at: Option<String>,
 }
 
 /// `com.apple.CoreSimulator.SimRuntime.iOS-26-1` → `iOS 26.1`; only iOS.
@@ -50,8 +78,9 @@ fn version_of(runtime: &str) -> Vec<u32> {
         .collect()
 }
 
-/// `simctl list devices available -j`: the iPhones and iPads, the booted
-/// ones first, then the newest iOS, then by name.
+/// `simctl list devices available -j`: the iPhones and iPads, the running
+/// ones first, then the most recently used, then iPhones before iPads, the
+/// newest iOS first, then by name.
 pub fn parse_list(json: &str) -> Vec<Simulator> {
     let Ok(listing) = serde_json::from_str::<Listing>(json) else {
         return Vec::new();
@@ -65,16 +94,21 @@ pub fn parse_list(json: &str) -> Vec<Simulator> {
                 .into_iter()
                 .filter(|entry| entry.is_available)
                 .map(move |entry| Simulator {
+                    ipad: entry.device_type_identifier.contains("iPad")
+                        || entry.name.starts_with("iPad"),
                     udid: entry.udid,
                     name: entry.name,
                     runtime: runtime.clone(),
                     booted: entry.state == "Booted",
+                    last_booted: entry.last_booted_at,
                 })
         })
         .collect();
     simulators.sort_by(|a, b| {
         b.booted
             .cmp(&a.booted)
+            .then_with(|| b.last_booted.cmp(&a.last_booted))
+            .then_with(|| a.ipad.cmp(&b.ipad))
             .then_with(|| version_of(&b.runtime).cmp(&version_of(&a.runtime)))
             .then_with(|| a.name.cmp(&b.name))
     });
@@ -127,31 +161,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn iphones_come_booted_first_then_newest_ios() {
+    fn running_then_recent_then_iphones_before_ipads() {
         let json = r#"{"devices":{
             "com.apple.CoreSimulator.SimRuntime.iOS-18-3":[
-                {"udid":"A","name":"iPhone 16","state":"Shutdown","isAvailable":true}],
+                {"udid":"A","name":"iPad Air 11-inch (M3)","state":"Shutdown","isAvailable":true,"deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M3"},
+                {"udid":"B","name":"iPhone 16","state":"Shutdown","isAvailable":true,"deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-16"},
+                {"udid":"C","name":"iPhone 16 Pro","state":"Shutdown","isAvailable":true,"lastBootedAt":"2026-10-15T19:22:05Z"}],
             "com.apple.CoreSimulator.SimRuntime.iOS-26-1":[
-                {"udid":"B","name":"iPhone 17 Pro","state":"Shutdown","isAvailable":true},
-                {"udid":"C","name":"iPhone Air","state":"Shutdown","isAvailable":false}],
+                {"udid":"D","name":"iPhone 17 Pro","state":"Shutdown","isAvailable":true},
+                {"udid":"E","name":"iPhone Air","state":"Shutdown","isAvailable":false}],
             "com.apple.CoreSimulator.SimRuntime.watchOS-11-0":[
-                {"udid":"D","name":"Apple Watch","state":"Booted","isAvailable":true}],
+                {"udid":"F","name":"Apple Watch","state":"Booted","isAvailable":true}],
             "com.apple.CoreSimulator.SimRuntime.iOS-17-5":[
-                {"udid":"E","name":"iPhone 15","state":"Booted","isAvailable":true}]
+                {"udid":"G","name":"iPhone 15","state":"Booted","isAvailable":true,"lastBootedAt":"2026-11-02T10:00:00Z"},
+                {"udid":"H","name":"iPhone SE (3rd generation)","state":"Shutdown","isAvailable":true,"lastBootedAt":"2026-11-01T10:00:00Z"}]
         }}"#;
         let list = parse_list(json);
-        let order: Vec<(&str, &str, bool)> = list
-            .iter()
-            .map(|sim| (sim.udid.as_str(), sim.runtime.as_str(), sim.booted))
-            .collect();
-        assert_eq!(
-            order,
-            vec![
-                ("E", "iOS 17.5", true),
-                ("B", "iOS 26.1", false),
-                ("A", "iOS 18.3", false),
-            ]
-        );
+        let order: Vec<&str> = list.iter().map(|sim| sim.udid.as_str()).collect();
+        assert_eq!(order, vec!["G", "H", "C", "D", "B", "A"]);
+        assert!(list.iter().find(|sim| sim.udid == "A").unwrap().ipad);
+        let [recent, iphones, ipads] = sections(&list);
+        let ids =
+            |sims: &Vec<&Simulator>| sims.iter().map(|sim| sim.udid.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&recent), vec!["G", "H", "C"]);
+        assert_eq!(ids(&iphones), vec!["D", "B"]);
+        assert_eq!(ids(&ipads), vec!["A"]);
         assert!(parse_list("not json").is_empty());
     }
 }

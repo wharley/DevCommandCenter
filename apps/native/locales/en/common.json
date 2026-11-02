@@ -5707,6 +5707,9 @@
     "noXcode": "No simulators found. Install Xcode and an iOS runtime.",
     "running": "running",
     "starting": "Starting {{name}}…",
-    "retry": "Try again"
+    "retry": "Try again",
+    "recent": "Recent",
+    "iphones": "iPhone",
+    "ipads": "iPad"
   }
 }
