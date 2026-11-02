@@ -266,6 +266,14 @@ impl Page for WryPage {
     }
 
     fn url(&self) -> Option<String> {
+        // wry unwraps `WKWebView.URL`, which is nil while a download replaces
+        // the navigation or before the first load; that aborted the app.
+        #[cfg(target_os = "macos")]
+        return unsafe { self.wk().URL() }
+            .and_then(|url| url.absoluteString())
+            .map(|url| url.to_string())
+            .filter(|url| !url.is_empty());
+        #[cfg(not(target_os = "macos"))]
         self.view.url().ok()
     }
 
