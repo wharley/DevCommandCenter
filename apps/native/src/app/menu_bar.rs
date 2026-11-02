@@ -110,7 +110,7 @@ fn toggle(place: super::menu_bar_item::ButtonPlace, cx: &mut App) {
         show: true,
         kind: WindowKind::PopUp,
         is_movable: false,
-        app_id: Some("com.devcommandcenter.native".into()),
+        app_id: Some("com.devcommandcenter.app".into()),
         ..Default::default()
     };
     match cx.open_window(options, |window, cx| {

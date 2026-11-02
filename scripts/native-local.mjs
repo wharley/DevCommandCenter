@@ -1,41 +1,40 @@
 #!/usr/bin/env node
 /**
- * Local build of the native app (GPUI), installed BESIDE the desktop app so
- * both can be tried on the same data. The desktop app in /Applications is
- * never touched: not quit, not replaced, not moved.
+ * Local build of the DCC (the native app, GPUI) installed as THE app:
+ * "Dev Command Center" (com.devcommandcenter.app) in /Applications, on the
+ * released app's data. It replaces the Tauri desktop app, which goes to the
+ * Trash, and the side-by-side "Dev Command Center Native" of the test week.
  *
  *   yarn native:local                  build, snapshot, install, open
  *   node scripts/native-local.mjs build  build and sign only (no install)
  *   yarn native:local --skip-build     install the last build again
  *   yarn native:local --skip-sidecars  rebuild the app, reuse the built helpers
- *   yarn native:local --version 0.2.0  build as 0.2.0-native.g<commit>
- *   yarn native:rollback               put back the native app the last install replaced
+ *   yarn native:local --version 0.3.0  build as 0.3.0-local.g<commit>
+ *   yarn native:rollback               put back the native build the last install replaced
  *   yarn native:rollback --with-db     ...and the database as it was at that moment
  *
- * The native app hosts the backend (agents, terminals, the API) when no
- * desktop answers on the port; with the desktop open it uses the desktop's.
- * Do not open the desktop while the native app hosts: two backends would
- * share one database.
+ * The app hosts the backend (agents, terminals, the API) itself.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(scriptDir, '..');
 const nativeDir = join(repoRoot, 'apps', 'native');
 
-const APP_NAME = 'Dev Command Center Native';
+const APP_NAME = 'Dev Command Center';
 const APP_BUNDLE_NAME = `${APP_NAME}.app`;
-const BUNDLE_ID = 'com.devcommandcenter.native';
+const BUNDLE_ID = 'com.devcommandcenter.app';
 const EXECUTABLE = 'dcc-native';
 const INSTALL_PATH = join('/Applications', APP_BUNDLE_NAME);
 const BUILT_APP_PATH = join(nativeDir, 'target', 'release', 'bundle', APP_BUNDLE_NAME);
-// The desktop app this one sits beside: only looked at, never changed.
-const DESKTOP_MAIN = join('/Applications', 'Dev Command Center.app', 'Contents', 'MacOS', 'dev-command-center-tauri');
-// Both apps use the released app's data.
+// The Tauri desktop's executable: an install found with it is the old app.
+const TAURI_EXECUTABLE = 'dev-command-center-tauri';
+// The test week's side-by-side app, retired by the first install as THE app.
+const SIDE_APP = { path: join('/Applications', 'Dev Command Center Native.app'), id: 'com.devcommandcenter.native' };
 const DATA_DIR = join(homedir(), 'Library', 'Application Support', 'com.devcommandcenter.app');
 const DATABASE = join(DATA_DIR, 'database.sqlite');
 const SNAPSHOTS_DIR = join(homedir(), '.dcc', 'native-builds', 'snapshots');
@@ -90,7 +89,7 @@ function bundleVersion(appPath) {
   return capture('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', join(appPath, 'Contents', 'Info.plist')]);
 }
 
-/** <next patch>-native.g<commit>, or <base>-native.g<commit> with --version. */
+/** <next patch>-local.g<commit>, or <base>-local.g<commit> with --version. */
 function nativeVersion(base) {
   const commit = capture('git', ['rev-parse', '--short', 'HEAD']) || 'unknown';
   const dirty = capture('git', ['status', '--porcelain', '--untracked-files=no']) ? '.dirty' : '';
@@ -98,14 +97,14 @@ function nativeVersion(base) {
     if (!/^\d+\.\d+\.\d+$/.test(base)) {
       fail(`--version must look like 0.2.0, got ${base}`);
     }
-    return `${base}-native.g${commit}${dirty}`;
+    return `${base}-local.g${commit}${dirty}`;
   }
   const { version } = JSON.parse(readFileSync(join(repoRoot, 'src-tauri', 'tauri.conf.json'), 'utf8'));
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!match) {
     fail(`unexpected version in tauri.conf.json: ${version}`);
   }
-  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}-native.g${commit}${dirty}`;
+  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}-local.g${commit}${dirty}`;
 }
 
 /** PATH with a Node that satisfies the sidecar build (>=22.12). */
@@ -220,30 +219,53 @@ function waitUntilGone(pattern, timeoutMs) {
   return pidsMatching(pattern).length === 0;
 }
 
-/** Quits the native app and the helpers it started from its own bundle. */
-function stopNativeApp() {
-  const bundleProcesses = join(INSTALL_PATH, 'Contents', 'MacOS') + '/';
-  const mainProcess = join(INSTALL_PATH, 'Contents', 'MacOS', EXECUTABLE);
-  if (pidsMatching(mainProcess).length > 0) {
-    log(`quitting ${APP_NAME}...`);
-    spawnSync('osascript', ['-e', `tell application id "${BUNDLE_ID}" to quit`], { stdio: 'ignore' });
-    if (!waitUntilGone(mainProcess, 30_000)) {
-      fail(`${APP_NAME} did not quit within 30s. Close it and run again.`);
-    }
+/** Quits the app at `path` (by its bundle id) and the helpers it started
+ * from its own bundle, whichever build it is (native or the Tauri one). */
+function stopApp(path, id, name) {
+  const bundleProcesses = join(path, 'Contents', 'MacOS') + '/';
+  const running = () => pidsMatching(bundleProcesses).length > 0;
+  if (!running()) {
+    return;
   }
-  const helpers = pidsMatching(bundleProcesses);
-  if (helpers.length > 0) {
-    log(`stopping ${helpers.length} helper process(es) from the native bundle (dccd, ai-memory, sidecars)`);
-    spawnSync('kill', ['-TERM', ...helpers.map(String)], { stdio: 'ignore' });
+  log(`quitting ${name}...`);
+  spawnSync('osascript', ['-e', `tell application id "${id}" to quit`], { stdio: 'ignore' });
+  if (!waitUntilGone(bundleProcesses, 30_000)) {
+    const left = pidsMatching(bundleProcesses);
+    log(`stopping ${left.length} helper process(es) left from ${name} (dccd, ai-memory, sidecars)`);
+    spawnSync('kill', ['-TERM', ...left.map(String)], { stdio: 'ignore' });
     if (!waitUntilGone(bundleProcesses, 10_000)) {
       spawnSync('kill', ['-KILL', ...pidsMatching(bundleProcesses).map(String)], { stdio: 'ignore' });
-      waitUntilGone(bundleProcesses, 5_000);
+      if (!waitUntilGone(bundleProcesses, 5_000)) {
+        fail(`${name} did not quit. Close it and run again.`);
+      }
     }
   }
 }
 
-function desktopRunning() {
-  return pidsMatching(DESKTOP_MAIN).length > 0;
+function stopNativeApp() {
+  stopApp(INSTALL_PATH, BUNDLE_ID, APP_NAME);
+}
+
+/** To the Trash (the person empties it), never deleted outright. */
+function trash(path) {
+  const target = join(homedir(), '.Trash', `${basename(path, '.app')} ${timestamp()}.app`);
+  moveApp(path, target);
+  log(`moved ${path} to the Trash`);
+}
+
+/** The Tauri desktop at the install path: replaced, not kept (the native app
+ * is THE app now). */
+function isTauriApp(path) {
+  return existsSync(join(path, 'Contents', 'MacOS', TAURI_EXECUTABLE));
+}
+
+/** The test week's side-by-side native app: one DCC on the machine. */
+function retireSideApp() {
+  if (!existsSync(SIDE_APP.path)) {
+    return;
+  }
+  stopApp(SIDE_APP.path, SIDE_APP.id, 'Dev Command Center Native');
+  trash(SIDE_APP.path);
 }
 
 function listSnapshots() {
@@ -296,12 +318,17 @@ function install({ skipBuild, skipSidecars, baseVersion }) {
   const builtVersion = bundleVersion(BUILT_APP_PATH);
 
   stopNativeApp();
+  retireSideApp();
 
   const snapshotDir = join(SNAPSHOTS_DIR, timestamp());
+  const tauri = existsSync(INSTALL_PATH) && isTauriApp(INSTALL_PATH);
   const replacedVersion = existsSync(INSTALL_PATH) ? bundleVersion(INSTALL_PATH) : null;
-  log(`backing up the database${replacedVersion ? ` and ${replacedVersion}` : ''} into ${snapshotDir}`);
+  log(`backing up the database${replacedVersion && !tauri ? ` and ${replacedVersion}` : ''} into ${snapshotDir}`);
   const backedUp = backupDatabase(join(snapshotDir, 'db', 'database.sqlite'));
-  if (replacedVersion) {
+  if (tauri) {
+    log(`replacing the Tauri desktop ${replacedVersion}`);
+    trash(INSTALL_PATH);
+  } else if (replacedVersion) {
     moveApp(INSTALL_PATH, join(snapshotDir, APP_BUNDLE_NAME));
   }
   mkdirSync(snapshotDir, { recursive: true });
@@ -311,11 +338,8 @@ function install({ skipBuild, skipSidecars, baseVersion }) {
   );
   pruneSnapshots();
 
-  log(`installing ${builtVersion} into ${INSTALL_PATH} (the desktop app is left as it is)`);
+  log(`installing ${builtVersion} into ${INSTALL_PATH}`);
   run('ditto', [BUILT_APP_PATH, INSTALL_PATH]);
-  if (desktopRunning()) {
-    log('the desktop app is open: the native app will use its backend. Quit the desktop first to try the native app on its own.');
-  }
   run('open', [INSTALL_PATH]);
   log(`done: ${replacedVersion ?? 'nothing'} -> ${builtVersion}. Undo with: yarn native:rollback`);
 }
@@ -327,9 +351,6 @@ function rollback({ withDb }) {
   }
   const snapshotDir = join(SNAPSHOTS_DIR, latest);
   const meta = JSON.parse(readFileSync(join(snapshotDir, 'meta.json'), 'utf8'));
-  if (withDb && desktopRunning()) {
-    fail('quit the desktop app before restoring the database.');
-  }
   const currentVersion = existsSync(INSTALL_PATH) ? bundleVersion(INSTALL_PATH) : null;
 
   stopNativeApp();
@@ -359,7 +380,7 @@ function rollback({ withDb }) {
     moveApp(join(snapshotDir, APP_BUNDLE_NAME), INSTALL_PATH);
     run('open', [INSTALL_PATH]);
   } else {
-    log('the native app was not installed before that build; it is removed.');
+    log('no native build was installed before that one; it is removed.');
   }
   rmSync(snapshotDir, { recursive: true, force: true });
   log(`done: ${currentVersion ?? 'nothing'} -> ${meta.replacedVersion ?? 'nothing'}. The replaced app and database are in ${ROLLED_BACK_DIR}.`);

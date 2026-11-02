@@ -26,7 +26,7 @@ pub fn open_main(prefs: Prefs, prefs_path: PathBuf, cx: &mut App) -> anyhow::Res
                 appears_transparent: false,
                 traffic_light_position: None,
             }),
-            app_id: Some("com.devcommandcenter.native".into()),
+            app_id: Some("com.devcommandcenter.app".into()),
             ..Default::default()
         },
         |window, cx| {

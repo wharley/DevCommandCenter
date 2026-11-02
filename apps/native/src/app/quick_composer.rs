@@ -84,7 +84,7 @@ pub fn show(cx: &mut App) {
         kind: WindowKind::PopUp,
         is_movable: true,
         is_resizable: false,
-        app_id: Some("com.devcommandcenter.native".into()),
+        app_id: Some("com.devcommandcenter.app".into()),
         ..Default::default()
     };
     let opened = cx.open_window(options, |window, cx| {
