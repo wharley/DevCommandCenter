@@ -1,6 +1,7 @@
 //! HTML inside GitHub markdown (bot comments, PR bodies), the way Streamdown
 //! with `rehype-harden` shows it: text and links stay, tags and comments go.
-//! `<a href>` links its text, `<img alt>` shows the alt, `<br>` and block tags
+//! `<a href>` links its text, `<img>` is the image (its alt when it does not
+//! load, `super::image`), `<br>` and block tags
 //! break the line, `<b>`/`<strong>`, `<i>`/`<em>`, `<s>`/`<del>` and `<code>`
 //! style. Anything else (`<sup>`, `<picture>`, `<relative-time>`…) keeps
 //! only its text.
@@ -128,8 +129,15 @@ fn tag(inner: &str, state: &mut Html, inline: &mut InlineBuilder) {
             })
         }
         "img" => {
-            if let Some(alt) = attribute(body, "alt").filter(|alt| !alt.trim().is_empty()) {
-                text(&alt, state, inline);
+            let alt = attribute(body, "alt").unwrap_or_default();
+            match attribute(body, "src").filter(|src| super::image::loads(src)) {
+                Some(src) => {
+                    let height = attribute(body, "height").and_then(|value| value.parse().ok());
+                    let link = inline.link.clone();
+                    inline.push_image(src, alt.trim().to_string(), height, link);
+                }
+                None if !alt.trim().is_empty() => text(&alt, state, inline),
+                None => {}
             }
         }
         "br" => inline.push("\n", false),

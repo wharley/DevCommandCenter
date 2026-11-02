@@ -1,32 +1,45 @@
 //! The global shortcuts' side of the API while this app hosts the backend
 //! (`DesktopShortcuts`, the desktop's `quick_composer` and Appshots): the
-//! quick composer's launch journal and key. Appshots are not in this app.
+//! quick composer's launch journal and key, and the Appshots key
+//! (`data::appshot_key`), each registered here and kept in its own file.
 
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Mutex;
 
 use dcc_server::quick_composer_journal::{self as journal, QuickComposerState};
 use global_hotkey::hotkey::{HotKey, Modifiers};
 use serde_json::{Value, json};
 
 use crate::app::global_keys::{self, Request};
+use crate::data::appshot_key::SavedKey;
 
 pub struct HostShortcuts {
     journal: QuickComposerState,
+    appshots: SavedKey,
+    /// The saved Appshots key did not register (another app holds it).
+    appshots_error: Mutex<bool>,
+}
+
+/// Appshots need macOS 14 (ScreenCaptureKit).
+fn appshots_supported() -> bool {
+    cfg!(target_os = "macos") && dcc_server::computer_use_commands::appshot_status().0
+}
+
+fn register(key: HotKey) -> bool {
+    global_keys::request(|reply| Request::Register(key, reply)).is_ok()
 }
 
 impl HostShortcuts {
-    /// Opens the journal and registers the saved key once the UI runs.
+    /// Opens both and registers the saved keys once the UI runs.
     pub fn open(app_data: &Path) -> Result<Self, String> {
         let shortcuts = Self {
             journal: QuickComposerState::open(app_data)?,
+            appshots: SavedKey::open(&app_data.join("appshots")),
+            appshots_error: Mutex::new(false),
         };
-        if let Some(key) = shortcuts
-            .journal
-            .shortcut()
-            .and_then(|key| HotKey::from_str(&key).ok())
-        {
-            let registered = global_keys::request(|reply| Request::Register(key, reply)).is_ok();
+        if let Some(key) = saved_key(shortcuts.journal.shortcut()) {
+            let registered = register(key);
             if registered {
                 global_keys::set_quick_composer(Some(&key));
             }
@@ -34,8 +47,23 @@ impl HostShortcuts {
                 *error = !registered;
             }
         }
+        if appshots_supported()
+            && let Some(key) = saved_key(shortcuts.appshots.shortcut())
+        {
+            let registered = register(key);
+            if registered {
+                global_keys::set_appshots(Some(&key));
+            }
+            if let Ok(mut error) = shortcuts.appshots_error.lock() {
+                *error = !registered;
+            }
+        }
         Ok(shortcuts)
     }
+}
+
+fn saved_key(shortcut: Option<String>) -> Option<HotKey> {
+    shortcut.and_then(|key| HotKey::from_str(&key).ok())
 }
 
 /// `quick_composer_set_shortcut`: Command, Control or Option with a key.
@@ -51,6 +79,31 @@ fn parse(shortcut: Option<&str>) -> Result<Option<HotKey>, String> {
         return Err("shortcutInvalid".into());
     }
     Ok(key)
+}
+
+/// Moves a global key from `old` to `key`: the new one registered first,
+/// then kept (`persist`), then the old one let go (unless it never
+/// registered, `failed`). A failed save lets the new one go again.
+fn swap(
+    old: Option<HotKey>,
+    key: Option<HotKey>,
+    failed: bool,
+    persist: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if let Some(key) = key {
+        global_keys::request(|reply| Request::Register(key, reply))
+            .map_err(|_| "shortcutUnavailable".to_string())?;
+    }
+    if let Err(failure) = persist() {
+        if let Some(key) = key {
+            let _ = global_keys::request(|reply| Request::Unregister(key, reply));
+        }
+        return Err(failure);
+    }
+    if !failed && let Some(old) = old {
+        let _ = global_keys::request(|reply| Request::Unregister(old, reply));
+    }
+    Ok(())
 }
 
 impl dcc_server::http_api::DesktopShortcuts for HostShortcuts {
@@ -69,28 +122,13 @@ impl dcc_server::http_api::DesktopShortcuts for HostShortcuts {
             .shortcut_error
             .lock()
             .map_err(|e| e.to_string())?;
-        let old = saved
-            .shortcut
-            .as_deref()
-            .and_then(|key| HotKey::from_str(key).ok());
+        let old = saved_key(saved.shortcut.clone());
         if key == old && !*error {
             return Ok(());
         }
-        if let Some(key) = key {
-            global_keys::request(|reply| Request::Register(key, reply))
-                .map_err(|_| "shortcutUnavailable".to_string())?;
-        }
         let mut next = saved.clone();
         next.shortcut = shortcut;
-        if let Err(failure) = self.journal.persist(&next) {
-            if let Some(key) = key {
-                let _ = global_keys::request(|reply| Request::Unregister(key, reply));
-            }
-            return Err(failure);
-        }
-        if !*error && let Some(old) = old {
-            let _ = global_keys::request(|reply| Request::Unregister(old, reply));
-        }
+        swap(old, key, *error, || self.journal.persist(&next))?;
         global_keys::set_quick_composer(key.as_ref());
         *saved = next;
         *error = false;
@@ -118,11 +156,30 @@ impl dcc_server::http_api::DesktopShortcuts for HostShortcuts {
     }
 
     fn appshots(&self) -> Result<Value, String> {
-        Ok(json!({ "supported": false, "shortcut": null, "shortcutError": false }))
+        let error = self.appshots_error.lock().map_err(|e| e.to_string())?;
+        Ok(json!({
+            "supported": appshots_supported(),
+            "shortcut": self.appshots.shortcut(),
+            "shortcutError": *error,
+        }))
     }
 
-    fn set_appshots(&self, _shortcut: Option<String>) -> Result<(), String> {
-        Err("unsupported".into())
+    fn set_appshots(&self, shortcut: Option<String>) -> Result<(), String> {
+        if !appshots_supported() {
+            return Err("unsupported".into());
+        }
+        let key = parse(shortcut.as_deref())?;
+        let mut error = self.appshots_error.lock().map_err(|e| e.to_string())?;
+        let old = saved_key(self.appshots.shortcut());
+        if key == old && !*error {
+            return Ok(());
+        }
+        swap(old, key, *error, || {
+            self.appshots.persist(shortcut.as_deref())
+        })?;
+        global_keys::set_appshots(key.as_ref());
+        *error = false;
+        Ok(())
     }
 }
 
@@ -133,6 +190,11 @@ mod tests {
     #[test]
     fn a_key_needs_command_control_or_option() {
         assert!(parse(Some("Super+Shift+KeyC")).unwrap().is_some());
+        assert!(
+            parse(Some(crate::data::appshot_key::DEFAULT))
+                .unwrap()
+                .is_some()
+        );
         assert!(parse(None).unwrap().is_none());
         assert_eq!(parse(Some("Shift+KeyC")).unwrap_err(), "shortcutInvalid");
         assert_eq!(parse(Some("Banana")).unwrap_err(), "shortcutInvalid");

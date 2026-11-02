@@ -26,6 +26,8 @@ dirs = "6"
 anyhow = "1"
 chrono = "0.4"
 futures = "0.3"
+# The markdown's remote images (`app::image_http`), the backend's same version.
+reqwest = { version = "0.11", features = ["blocking"] }
 base64 = "0.22"
 # The relay pairing QR in Settings → Conexões (encoded only; drawn by GPUI).
 qrcode = { version = "0.14", default-features = false }

@@ -1,9 +1,11 @@
 //! Boot: the login shell's environment, the backend (when no desktop serves
 //! it), fonts, theme, menus and the main window.
 
+mod appshot_key;
 mod color_space;
 #[cfg(target_os = "macos")]
 pub mod global_keys;
+mod image_http;
 pub mod menu_bar;
 #[cfg(target_os = "macos")]
 mod menu_bar_item;
@@ -69,6 +71,8 @@ pub fn run() {
         })
         .detach();
 
+        // Remote images in markdown (a bot's badge, a PR's screenshot).
+        cx.set_http_client(std::sync::Arc::new(image_http::ImageHttp::new()));
         if let Err(error) = window::open_main(prefs, prefs_path, cx) {
             eprintln!("[dcc-native] could not open the window: {error:#}");
             cx.quit();
@@ -79,6 +83,7 @@ pub fn run() {
         #[cfg(target_os = "macos")]
         global_keys::serve(cx);
         quick_composer::listen(cx);
+        appshot_key::listen(cx);
         cx.activate(true);
     });
 }

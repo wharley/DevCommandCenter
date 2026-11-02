@@ -52,6 +52,30 @@ impl MarkdownStyle {
 }
 
 fn inline_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
+    if inline.images.is_empty() {
+        return styled_text(inline, id, cx);
+    }
+    // Text and images side by side, wrapping like the line would.
+    let pieces = super::image::pieces(inline)
+        .into_iter()
+        .enumerate()
+        .map(|(index, piece)| {
+            let id = SharedString::from(format!("{id}-{index}"));
+            match piece {
+                Ok(text) => styled_text(&text, id, cx),
+                Err(image) => super::image::image(image, id, cx),
+            }
+        });
+    div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_x(px(4.0))
+        .children(pieces)
+        .into_any_element()
+}
+
+fn styled_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
     let colors = &cx.theme().colors;
     let mono = cx.theme().fonts.mono.clone();
     let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();

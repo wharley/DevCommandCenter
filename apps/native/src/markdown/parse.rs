@@ -22,16 +22,18 @@ pub struct Span {
     pub link: Option<String>,
 }
 
-/// Text with styled ranges (byte offsets into `text`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Text with styled ranges (byte offsets into `text`) and the images that
+/// sit in it (`super::image`).
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Inline {
     pub text: String,
     pub spans: Vec<Span>,
+    pub images: Vec<super::image::InlineImage>,
 }
 
 impl Inline {
     pub fn is_empty(&self) -> bool {
-        self.text.trim().is_empty()
+        self.text.trim().is_empty() && self.images.is_empty()
     }
 }
 
@@ -72,11 +74,18 @@ pub(super) struct InlineBuilder {
     pub(super) inline: Inline,
     pub(super) style: SpanStyle,
     pub(super) link: Option<String>,
+    /// A markdown image being read: its url, its alt so far, and the link
+    /// around it.
+    image: Option<(String, String, Option<String>)>,
 }
 
 impl InlineBuilder {
     pub(super) fn push(&mut self, text: &str, code: bool) {
         if text.is_empty() {
+            return;
+        }
+        if let Some((_, alt, _)) = self.image.as_mut() {
+            alt.push_str(text);
             return;
         }
         let start = self.inline.text.len();
@@ -88,6 +97,43 @@ impl InlineBuilder {
                 style,
                 link: self.link.clone(),
             });
+        }
+    }
+
+    /// An image at the end of the text so far.
+    pub(super) fn push_image(
+        &mut self,
+        url: String,
+        alt: String,
+        height: Option<f32>,
+        link: Option<String>,
+    ) {
+        let at = self.inline.text.len();
+        self.inline.images.push(super::image::InlineImage {
+            at,
+            url,
+            alt,
+            height,
+            link,
+        });
+    }
+
+    fn start_image(&mut self, url: &str) {
+        if super::image::loads(url) {
+            self.image = Some((url.to_string(), String::new(), self.link.clone()));
+        } else {
+            // Shown as its alt, linking to it.
+            self.link = Some(url.to_string());
+        }
+    }
+
+    fn end_image(&mut self) {
+        match self.image.take() {
+            Some((url, alt, link)) => {
+                self.push_image(url, alt.trim().to_string(), None, link.clone());
+                self.link = link;
+            }
+            None => self.link = None,
         }
     }
 
@@ -224,7 +270,7 @@ pub fn parse(markdown: &str) -> Vec<Block> {
                 Tag::Strong => builder.inline.style.bold = true,
                 Tag::Strikethrough => builder.inline.style.strike = true,
                 Tag::Link { dest_url, .. } => builder.inline.link = Some(dest_url.to_string()),
-                Tag::Image { dest_url, .. } => builder.inline.link = Some(dest_url.to_string()),
+                Tag::Image { dest_url, .. } => builder.inline.start_image(&dest_url),
                 _ => {}
             },
             Event::End(tag) => match tag {
@@ -298,7 +344,8 @@ pub fn parse(markdown: &str) -> Vec<Block> {
                 TagEnd::Emphasis => builder.inline.style.italic = false,
                 TagEnd::Strong => builder.inline.style.bold = false,
                 TagEnd::Strikethrough => builder.inline.style.strike = false,
-                TagEnd::Link | TagEnd::Image => builder.inline.link = None,
+                TagEnd::Link => builder.inline.link = None,
+                TagEnd::Image => builder.inline.end_image(),
                 _ => {}
             },
             Event::Text(text) => match builder.code.as_mut() {

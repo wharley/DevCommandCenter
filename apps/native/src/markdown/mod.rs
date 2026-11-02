@@ -2,10 +2,12 @@
 //! desktop's `.assistant-markdown-scale` measures (`render`).
 
 mod html;
+mod image;
 mod parse;
 mod render;
 pub mod selection;
 
+pub use image::InlineImage;
 pub use parse::{Block, Inline, ListItem, Span, SpanStyle, parse};
 pub use render::{MarkdownStyle, render_markdown};
 

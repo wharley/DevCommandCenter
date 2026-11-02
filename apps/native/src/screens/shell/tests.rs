@@ -859,3 +859,53 @@ fn the_sidebar_changing_leaves_the_conversation_drawn_from_cache(cx: &mut TestAp
     cx.run_until_parked();
     assert_eq!(renders(cx), before + 1);
 }
+
+/// The Appshots key's capture lands in the composer of the task on screen;
+/// with no task open its file is thrown away.
+#[gpui::test]
+fn an_appshot_from_the_key_goes_into_the_open_tasks_composer(cx: &mut TestAppContext) {
+    use crate::ui::text_area::Chip;
+    let (shell, cx, dir) = open_shell(cx, Prefs::default());
+    cx.update(|_, cx| crate::ui::Toaster::init(cx));
+    let shot = |name: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, b"\x89PNG\r\n\x1a\n").unwrap();
+        path
+    };
+
+    let orphan = shot("orphan.png");
+    shell.update(cx, |shell, cx| shell.take_appshot(Ok(orphan.clone()), cx));
+    assert!(!orphan.exists(), "no task, no composer");
+
+    shell.update(cx, |shell, cx| {
+        shell.conversation.update(cx, |view, cx| {
+            view.show_for_tests(
+                crate::data::conversation::Conversation {
+                    task_id: "task".into(),
+                    session_id: Some("a".into()),
+                    workspace_path: Some(dir.path().to_string_lossy().into_owned()),
+                    ..Default::default()
+                },
+                cx,
+            )
+        })
+    });
+    let taken = shot("taken.png");
+    shell.update(cx, |shell, cx| shell.take_appshot(Ok(taken.clone()), cx));
+    cx.run_until_parked();
+    let chips = shell.read_with(cx, |shell, cx| {
+        shell
+            .conversation
+            .read(cx)
+            .composer
+            .read(cx)
+            .input
+            .read(cx)
+            .chips()
+    });
+    assert!(
+        matches!(chips.as_slice(), [(_, Chip::Image(_))]),
+        "{chips:?}"
+    );
+    assert!(taken.exists());
+}

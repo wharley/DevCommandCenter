@@ -3,6 +3,7 @@
 
 mod agents;
 mod annotation;
+mod appshot;
 mod bootstrap;
 mod browser;
 mod browser_opens;

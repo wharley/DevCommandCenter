@@ -2,7 +2,8 @@
 //! through `tauri-plugin-global-shortcut`, on the same `global-hotkey`). On
 //! macOS they are registered on the main thread: requests from any thread
 //! wait here for the UI's loop. A press of the quick composer's key toggles
-//! it through its stream, as the desktop's key does.
+//! it through its stream, as the desktop's key does; the Appshots key
+//! captures the window in front (`data::appshot_key`).
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -38,6 +39,13 @@ pub fn set_quick_composer(key: Option<&HotKey>) {
     QUICK_COMPOSER.store(key.map_or(0, HotKey::id), Ordering::SeqCst);
 }
 
+/// The Appshots key, numbered the same way (0: none).
+static APPSHOTS: AtomicU32 = AtomicU32::new(0);
+
+pub fn set_appshots(key: Option<&HotKey>) {
+    APPSHOTS.store(key.map_or(0, HotKey::id), Ordering::SeqCst);
+}
+
 /// Asks the main thread; blocks until it answered.
 pub fn request(
     make: impl FnOnce(std::sync::mpsc::Sender<Result<(), String>>) -> Request,
@@ -63,11 +71,13 @@ pub fn serve(cx: &mut App) {
         }
     };
     GlobalHotKeyEvent::set_event_handler(Some(|event: GlobalHotKeyEvent| {
-        if event.state == HotKeyState::Pressed
-            && event.id != 0
-            && event.id == QUICK_COMPOSER.load(Ordering::SeqCst)
-        {
+        if event.state != HotKeyState::Pressed || event.id == 0 {
+            return;
+        }
+        if event.id == QUICK_COMPOSER.load(Ordering::SeqCst) {
             let _ = dcc_server::http_api::native_quick_composer().toggle();
+        } else if event.id == APPSHOTS.load(Ordering::SeqCst) {
+            crate::data::appshot_key::capture_front();
         }
     }));
     cx.spawn(async move |_| {

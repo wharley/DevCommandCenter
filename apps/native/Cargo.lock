@@ -1647,6 +1647,7 @@ dependencies = [
  "qrcode",
  "raw-window-handle",
  "regex",
+ "reqwest",
  "resvg",
  "serde",
  "serde_json",
