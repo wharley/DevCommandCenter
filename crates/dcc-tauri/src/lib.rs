@@ -1,10 +1,3 @@
-// The desktop's Tauri commands are gone. Some private code was reached only
-// by them: the features the native app has not ported yet (Editar a partir
-// daqui, publishing/discarding a Researcher idea, continuing from the base
-// branch, the CodeRabbit review) and the parked Mission Spec. Kept until
-// each is ported or dropped (docs/PLANO_MIGRACAO_GPUI.md, 12h).
-#![allow(dead_code)]
-
 pub(crate) mod antigravity_account_state;
 pub mod antigravity_installation;
 pub mod app_events;
@@ -14,7 +7,6 @@ pub mod conversation_rewind;
 pub(crate) use dcc_infra::delegation_apply;
 pub mod delegation_runtime;
 pub mod delivery_failure;
-pub mod events;
 pub mod git;
 pub mod guarded_undo_runtime;
 pub mod mcp_connect;

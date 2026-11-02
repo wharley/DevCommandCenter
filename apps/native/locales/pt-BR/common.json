@@ -4209,6 +4209,7 @@
         "no_native_conversation": "o DCC não guarda a conversa nativa desta thread",
         "checkpoint_missing": "o ponto de corte desses turnos não foi registrado"
       },
+      "unsupported": "Este agente não consegue voltar a própria conversa ({{reason}}). A mensagem voltou ao composer para você editar e reenviar.",
       "filesLabel": "Arquivos",
       "filesNone": "Esses turnos não alteraram arquivos que o DCC acompanha.",
       "filesRestorable_one": "{{count}} arquivo alterado por esses turnos pode ser restaurado pelo Guarded Undo. Mudanças feitas fora desses turnos não são tocadas.",

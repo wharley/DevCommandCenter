@@ -456,6 +456,13 @@ impl Shell {
             crate::screens::conversation::ConversationEvent::OpenSessionSearch => {
                 self.open_session_search(window, cx)
             }
+            crate::screens::conversation::ConversationEvent::IdeaPublished {
+                project_id,
+                root_path,
+            } => self.idea_published(project_id.clone(), root_path.clone(), cx),
+            crate::screens::conversation::ConversationEvent::IdeaDiscarded => {
+                self.idea_discarded(window, cx)
+            }
             // `handleOpenBrowser`: closes an open one, else opens.
             crate::screens::conversation::ConversationEvent::ToggleBrowser => {
                 if self.browser_open() {

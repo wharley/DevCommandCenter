@@ -990,12 +990,28 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/agents/:agent_id", post(agents::save))
         .route("/api/v1/research/ideas", post(research::create_idea))
         .route(
+            "/api/v1/research/ideas/publish",
+            post(research::publish_idea),
+        )
+        .route(
+            "/api/v1/research/ideas/discard",
+            post(research::discard_idea),
+        )
+        .route(
             "/api/v1/sessions/:session_id/last-turn-review",
             post(turn_review::last_turn),
         )
         .route("/api/v1/turn-review/file-diff", post(turn_review::file_diff))
         .route("/api/v1/guarded-undo/prepare", post(turn_review::prepare_undo))
         .route("/api/v1/guarded-undo/execute", post(turn_review::execute_undo))
+        .route(
+            "/api/v1/conversation-rewind/prepare",
+            post(turn_review::prepare_rewind),
+        )
+        .route(
+            "/api/v1/conversation-rewind/execute",
+            post(turn_review::execute_rewind),
+        )
         .route(
             "/api/v1/sessions/:session_id/task-title",
             post(apply_task_title_handler),
@@ -1886,6 +1902,10 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/sessions/:session_id/agent",
             "POST /api/v1/agents/:agent_id",
             "POST /api/v1/research/ideas",
+            "POST /api/v1/research/ideas/publish",
+            "POST /api/v1/research/ideas/discard",
+            "POST /api/v1/conversation-rewind/prepare",
+            "POST /api/v1/conversation-rewind/execute",
             "POST /api/v1/pull-request-hub/list",
             "POST /api/v1/pull-request-hub/detail",
             "POST /api/v1/pull-request-hub/comment",
@@ -6724,6 +6744,15 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{outcome}");
         assert_eq!(outcome["status"], "blocked");
         assert_eq!(outcome["reasonCode"], "preview_consumed");
+        // "Editar a partir daqui" needs a session it knows.
+        for body in [
+            json!({ "sessionId": "", "anchorTurnId": "t1" }),
+            json!({ "sessionId": "missing", "anchorTurnId": "t1" }),
+        ] {
+            let (status, _) =
+                post_json(&fixture.app, "/api/v1/conversation-rewind/prepare", body).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

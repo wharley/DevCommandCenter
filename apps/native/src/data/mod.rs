@@ -46,6 +46,7 @@ pub mod highlight;
 pub mod host;
 #[cfg(target_os = "macos")]
 pub mod host_shortcuts;
+pub mod idea;
 pub mod keep_awake;
 pub mod loader;
 pub mod local_branches;
@@ -78,6 +79,7 @@ pub mod quick_open;
 pub mod rail;
 pub mod recap;
 pub mod remote_access;
+pub mod rewind;
 pub mod seen;
 pub mod session_activity;
 pub mod session_list;

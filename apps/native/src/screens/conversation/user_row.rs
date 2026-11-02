@@ -6,7 +6,7 @@
 use dcc_core::domain::timeline::TimelineMessage;
 use gpui::{AnyElement, Context, SharedString, Window, div, prelude::*, px, relative};
 
-use super::hover_actions::{MESSAGE_GROUP, copy_action};
+use super::hover_actions::{self, MESSAGE_GROUP};
 use super::{ConversationView, time_ago};
 use crate::data::prompt::{PromptPart, basename, is_audio_path, is_image_path, prompt_parts};
 use crate::i18n::Translate;
@@ -185,11 +185,24 @@ pub(super) fn user_row(
                         .children(retry)
                         .children(stamp),
                 )
-                .child(copy_action(
-                    SharedString::from(format!("{}-copy", message.id)),
-                    message.content.clone(),
-                    cx,
-                )),
+                .child(hover_actions::actions([
+                    hover_actions::action(
+                        SharedString::from(format!("{}-edit", message.id)),
+                        "pencil",
+                        cx.listener({
+                            let (turn, prompt) = (message.turn_id.clone(), message.content.clone());
+                            move |view, _, _, cx| {
+                                view.edit_from_here(turn.clone(), prompt.clone(), cx)
+                            }
+                        }),
+                        cx,
+                    ),
+                    hover_actions::copy(
+                        SharedString::from(format!("{}-copy", message.id)),
+                        message.content.clone(),
+                        cx,
+                    ),
+                ])),
         )
         .into_any_element()
 }

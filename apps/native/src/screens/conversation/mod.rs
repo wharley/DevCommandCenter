@@ -18,11 +18,13 @@ pub(crate) mod header;
 #[cfg(test)]
 mod header_tests;
 mod hover_actions;
+mod idea;
 mod image;
 mod paced;
 mod permission_panel;
 mod requests;
 mod review_strip;
+mod rewind;
 mod scroll_jump;
 mod selection;
 mod system_rows;
@@ -80,6 +82,13 @@ pub enum ConversationEvent {
     OpenSessionSearch,
     /// "Abrir no editor" with this editor (it becomes the preferred one).
     OpenInEditor(&'static str),
+    /// An idea became a project: a task opens in its folder.
+    IdeaPublished {
+        project_id: String,
+        root_path: String,
+    },
+    /// An idea was discarded: the Researcher's page opens.
+    IdeaDiscarded,
 }
 
 impl gpui::EventEmitter<ConversationEvent> for ConversationView {}
@@ -142,6 +151,10 @@ pub struct ConversationView {
     trail: trail::TrailState,
     /// Something arrived while the person read away from the end.
     new_activity: bool,
+    /// "Editar a partir daqui": its plan, dialog and outcome.
+    rewind: rewind::RewindState,
+    /// The research progress and publish card of an idea's task.
+    idea: Option<(Entity<idea::IdeaPanel>, gpui::Subscription)>,
     _clock: Task<()>,
 }
 
@@ -215,6 +228,8 @@ impl ConversationView {
             find: None,
             trail: trail::TrailState::default(),
             new_activity: false,
+            idea: None,
+            rewind: Default::default(),
             _clock: Self::clock_loop(cx),
         }
     }
@@ -272,7 +287,9 @@ impl ConversationView {
         self.list.reset(0);
         if !same_task {
             self.requests.clear();
+            self.idea = None;
         }
+        self.rewind = Default::default();
         let (wake, woken) = futures::channel::mpsc::unbounded();
         self.refresh_wake = Some(wake);
         self._refresh = Some(self.refresh_loop(woken, cx));
@@ -442,6 +459,7 @@ impl ConversationView {
         self.call_agents
             .update(cx, |buttons, cx| buttons.set_busy(busy, cx));
         self.data = Some(next);
+        self.sync_idea(cx);
         self.follow_ai_memory(shown, cx);
         if self.find.is_some() {
             self.search(false, cx);
@@ -759,6 +777,7 @@ impl Render for ConversationView {
             let composer = self.composer.clone();
             composer.update(cx, |composer, cx| composer.append_text(&text, window, cx));
         }
+        self.take_rewound_prompt(window, cx);
         if std::mem::take(&mut self.focus_composer) {
             let handle = gpui::Focusable::focus_handle(self.composer.read(cx).input.read(cx), cx);
             window.focus(&handle, cx);
@@ -847,8 +866,14 @@ impl Render for ConversationView {
             )
             .children(permission_panel::permission_panel(self, cx))
             .when(self.task_id.is_some(), |area| {
-                area.child(self.composer.clone())
+                area.children(self.idea.as_ref().map(|(panel, _)| {
+                    div()
+                        .px(px(16.0))
+                        .child(div().mx_auto().max_w(px(768.0)).child(panel.clone()))
+                }))
+                .child(self.composer.clone())
             })
             .children(self.close_session_dialog(cx))
+            .children(self.rewind_dialog(cx))
     }
 }

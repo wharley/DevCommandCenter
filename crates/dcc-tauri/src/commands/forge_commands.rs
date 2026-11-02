@@ -716,20 +716,6 @@ fn empty_workspace_forge_context() -> WorkspaceForgeContextOutput {
     }
 }
 
-fn legacy_github_cli_status(output: ForgeCliStatusOutput) -> GithubCliStatusOutput {
-    GithubCliStatusOutput {
-        cli_name: output.cli_name,
-        hostname: output.hostname,
-        status: match output.status {
-            ForgeCliStatusState::Ready => GithubCliStatusState::Ready,
-            ForgeCliStatusState::Error => GithubCliStatusState::Error,
-        },
-        login: output.login,
-        message: output.message,
-        login_command: output.login_command,
-    }
-}
-
 pub(crate) fn resolve_forge_cli_snapshot(
     state: &WorkspaceCommandState,
     provider: ForgeCliProvider,

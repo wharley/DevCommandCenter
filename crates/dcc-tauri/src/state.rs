@@ -716,34 +716,6 @@ impl WorkspaceCommandState {
         }
     }
 
-    /// Runs a synchronous child-process-capable operation under the same
-    /// durable authorization and physical mutation lease as other workspace
-    /// mutations.  Feature-off preserves the pre-M4 blocking executor.
-    pub(crate) async fn run_workspace_mutation_blocking<T, E, F>(
-        &self,
-        requested_root: &str,
-        operation: F,
-    ) -> std::result::Result<T, WorkspaceMutationRequestError<E>>
-    where
-        T: Send + 'static,
-        E: Send + 'static,
-        F: FnOnce(&Path) -> std::result::Result<T, E> + Send + 'static,
-    {
-        #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
-        let binding = self
-            .authorize_workspace_mutation(requested_root)
-            .await
-            .map_err(WorkspaceMutationRequestError::Authorization)?;
-        #[cfg(not(all(target_os = "macos", feature = "guarded-undo-capture-v2")))]
-        let binding = AuthorizedWorkspaceMutation {
-            workspace_absolute: PathBuf::from(requested_root),
-        };
-        self.runtime
-            .run_workspace_mutation_blocking(binding, operation)
-            .await
-            .map_err(WorkspaceMutationRequestError::Runtime)
-    }
-
     /// Resolves the requested root from the durable workspace registry before
     /// admitting a mutation of both its worktree and shared Git common-dir.
     /// With capture v2 disabled this intentionally follows the existing direct
@@ -1458,10 +1430,6 @@ impl AiMemoryCircuitBreaker {
 }
 
 impl SessionCommandState {
-    pub(crate) fn runtime_generation(&self) -> String {
-        self.runtime.runtime_generation().to_string()
-    }
-
     pub fn new_headless(db_path: PathBuf, app_data_dir: PathBuf) -> Self {
         Self::from_parts(db_path, app_data_dir, Arc::new(NoopEventBus), true)
     }

@@ -6,10 +6,14 @@ use std::time::Duration;
 
 use chrono::{SecondsFormat, Utc};
 use dcc_core::domain::idea::{idea_template, Idea, IDEAS_DIR_NAME, IDEA_FOLDER_PREFIX};
-use dcc_infra::db::SqliteWorkspaceRepo;
+use dcc_core::domain::repository::RepositoryId;
+use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
+use dcc_infra::workspace_deletion::delete_repository_with_workspaces;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    commands::forge::{github, resolve_cli_binary},
+    commands::workspace_support::run_git_network_output_with_workspace_auth,
     git::{git_output_err, run_git_output},
     state::WorkspaceCommandState,
 };
@@ -340,6 +344,144 @@ fn same_disk(left: &Path, right: &Path) -> bool {
 #[cfg(not(unix))]
 fn same_disk(_left: &Path, _right: &Path) -> bool {
     true
+}
+
+/// Publishes an idea: checks everything that can fail first, rebuilds its
+/// first commit with `docs/IDEIA.md`, `AGENTS.md` and `CLAUDE.md`, creates the
+/// GitHub repository and pushes, moves the folder to `destination/name`, and
+/// turns the idea into a normal project. The app then opens a task in it.
+pub async fn research_publish_idea_with_state(
+    state: &WorkspaceCommandState,
+    input: PublishIdeaInput,
+) -> Result<PublishedIdea, String> {
+    let name = input.name.trim().to_string();
+    if !is_valid_repository_name(&name) {
+        return Err("use letters, numbers, '.', '_' or '-' for the repository name".to_string());
+    }
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let root = registered_idea_root(&repo, &input.root_path)?;
+    if !root.join(IDEA_FILE).is_file() {
+        return Err(format!("{IDEA_FILE} is missing from the idea folder"));
+    }
+    let destination = PathBuf::from(input.destination.trim());
+    if !destination.is_dir() {
+        return Err(format!(
+            "the folder {} does not exist",
+            destination.display()
+        ));
+    }
+    let target = destination.join(&name);
+    if target.exists() {
+        return Err(format!("{} already exists", target.display()));
+    }
+    if !same_disk(&root, &destination) {
+        return Err("choose a folder on the same disk as ~/dcc-ideias".to_string());
+    }
+    let keep_idea_local = input.keep_idea_local && input.visibility == IdeaVisibility::Public;
+    let visibility_flag = match input.visibility {
+        IdeaVisibility::Private => "--private",
+        IdeaVisibility::Public => "--public",
+    };
+    let db_path = state.db_path.clone();
+    let publish_root = root.clone();
+    let publish_target = target.clone();
+    let publish_name = name.clone();
+    let repository_url = tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
+        let gh = resolve_cli_binary("gh")?;
+        let auth = github::auth_status(GITHUB_HOST)?;
+        let login = auth
+            .active_login
+            .clone()
+            .or_else(|| auth.logins.first().cloned())
+            .ok_or_else(|| "connect the GitHub CLI first: gh auth login".to_string())?;
+        let exists = run_gh(&gh, &publish_root, &["repo", "view", &publish_name, "--json", "name"])?;
+        if exists.status.success() {
+            return Err(format!("the repository {login}/{publish_name} already exists on GitHub"));
+        }
+        let mut url = None;
+        publish_idea_folder(
+            &publish_root,
+            &publish_target,
+            &publish_name,
+            keep_idea_local,
+            |root| {
+                let created = run_gh(
+                    &gh,
+                    root,
+                    &[
+                        "repo",
+                        "create",
+                        &publish_name,
+                        visibility_flag,
+                        "--source",
+                        ".",
+                        "--remote",
+                        "origin",
+                    ],
+                )?;
+                if !created.status.success() {
+                    return Err(format!(
+                        "could not create the repository: {}",
+                        output_detail(&created)
+                    ));
+                }
+                url = String::from_utf8_lossy(&created.stdout)
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| line.starts_with("https://"))
+                    .map(ToString::to_string);
+                let pushed = run_git_network_output_with_workspace_auth(
+                    &db_path,
+                    &root.to_string_lossy(),
+                    &["push", "-u", "origin", "main"],
+                    Some(&login),
+                )?;
+                if !pushed.status.success() {
+                    return Err(format!(
+                        "the repository {login}/{publish_name} was created on GitHub, but the push failed: {}. Delete it on GitHub or choose another name.",
+                        output_detail(&pushed)
+                    ));
+                }
+                Ok(())
+            },
+        )?;
+        Ok(url)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+
+    let old_root = input.root_path.clone();
+    let new_root = target.to_string_lossy().into_owned();
+    if let Err(error) = repo.publish_idea(&old_root, &new_root, &name) {
+        // Keep the folder where the records still point.
+        let _ = std::fs::rename(&target, &root);
+        return Err(error.to_string());
+    }
+    state.clear_delivery_failures(&old_root);
+    Ok(PublishedIdea {
+        root_path: new_root,
+        repository_url,
+    })
+}
+
+/// Discards an idea: its task, the researcher's conversation, the records
+/// and the folder in `~/dcc-ideias`. Nothing is kept.
+pub async fn research_discard_idea_with_state(
+    state: &WorkspaceCommandState,
+    input: IdeaRootInput,
+) -> Result<(), String> {
+    let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let session_repo =
+        SqliteSessionRepo::open(&state.db_path).map_err(|error| error.to_string())?;
+    let root = registered_idea_root(&repo, &input.root_path)?;
+    let id = RepositoryId(input.root_path.clone());
+    let removed =
+        delete_repository_with_workspaces(state, &repo, &session_repo, &id, &state.db_path).await?;
+    for workspace in removed {
+        state.clear_delivery_failures(&workspace.root_path);
+    }
+    std::fs::remove_dir_all(&root)
+        .map_err(|error| format!("could not delete {}: {error}", root.display()))
 }
 
 #[cfg(test)]

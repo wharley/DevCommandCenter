@@ -86,6 +86,8 @@ fn open<'a>(
                 ConversationEvent::OpenSessionSearch => "session-search",
                 ConversationEvent::OpenInEditor(editor) => editor,
                 ConversationEvent::ReviewDelegation { .. } => "delegation",
+                ConversationEvent::IdeaPublished { .. } => "idea-published",
+                ConversationEvent::IdeaDiscarded => "idea-discarded",
             });
         })
         .detach();

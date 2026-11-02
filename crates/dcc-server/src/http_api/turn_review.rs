@@ -1,12 +1,14 @@
 //! The last turn's review for the native app's changes list: what the turn
 //! changed (and one file's captured patch), and Guarded Undo in its two
 //! steps — prepare (read-only, a preview with a token) and execute (with
-//! that token, once the person confirmed). They run the desktop's own
-//! commands, which hold the capture and the undo journal.
+//! that token, once the person confirmed). "Editar a partir daqui" plans
+//! and carries out a rewind the same way, restoring files through Guarded
+//! Undo. They run the desktop's own commands, which hold the capture and the
+//! undo journal.
 use super::*;
 use dcc_tauri::commands::session_commands::{
-    self, ExecuteGuardedUndoInput, LastTurnReviewInput, PrepareGuardedUndoInput,
-    TurnReviewFileDiffInput,
+    self, ExecuteConversationRewindInput, ExecuteGuardedUndoInput, LastTurnReviewInput,
+    PrepareConversationRewindInput, PrepareGuardedUndoInput, TurnReviewFileDiffInput,
 };
 
 fn reply<T: Serialize>(result: Result<T, String>) -> Result<Json<Value>, HttpApiError> {
@@ -77,4 +79,20 @@ pub(super) async fn execute_undo(
         )
         .await,
     )
+}
+
+/// Read-only: what "Editar a partir daqui" would remove and restore.
+pub(super) async fn prepare_rewind(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<PrepareConversationRewindInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(session_commands::prepare_conversation_rewind_with_state(&backend.sessions, input).await)
+}
+
+/// The prepared rewind; a conversation that moved since refuses it.
+pub(super) async fn execute_rewind(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<ExecuteConversationRewindInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    reply(session_commands::execute_conversation_rewind_with_state(&backend.sessions, input).await)
 }

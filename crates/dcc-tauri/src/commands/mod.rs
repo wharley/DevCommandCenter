@@ -1,7 +1,6 @@
 pub mod agent_commands;
 mod local_branch_follow;
 pub mod local_branches;
-pub mod coderabbit;
 pub mod common;
 mod deletion_runtime;
 pub mod delegation_commands;

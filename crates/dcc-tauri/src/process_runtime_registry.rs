@@ -260,24 +260,6 @@ impl ProcessRuntime {
             .await
     }
 
-    /// Variant for synchronous operations which can run child processes.  On
-    /// feature-on macOS it is the same physical mutation worker; feature-off
-    /// it retains the command layer's blocking executor boundary.
-    pub(crate) async fn run_workspace_mutation_blocking<T, E, F>(
-        &self,
-        binding: AuthorizedWorkspaceMutation,
-        operation: F,
-    ) -> Result<T, WorkspaceMutationRunError<E>>
-    where
-        T: Send + 'static,
-        E: Send + 'static,
-        F: FnOnce(&Path) -> Result<T, E> + Send + 'static,
-    {
-        self.guarded_undo_runtime
-            .run_workspace_mutation_blocking(binding.into_workspace_absolute(), operation)
-            .await
-    }
-
     /// Coordinates mutations which may touch both one worktree and the Git
     /// common directory shared by every linked worktree. The durable binding
     /// remains the only path authority accepted by this layer.
@@ -544,13 +526,6 @@ impl ProcessRuntime {
                 dcc_core::CoreError::Repository("event hub has no subscribers".to_string())
             }))
         }
-    }
-
-    /// Public process-local generation used only to reconcile the additive
-    /// session-live transport with a durable snapshot. It is not authority or
-    /// persisted state.
-    pub(crate) fn runtime_generation(&self) -> &str {
-        &self.runtime_generation
     }
 
     #[cfg(test)]
@@ -1166,7 +1141,7 @@ mod tests {
         assert_eq!(live[0].runtime_sequence, 1);
         assert_eq!(live[1].runtime_sequence, 2);
         assert_eq!(live[0].runtime_generation, live[1].runtime_generation);
-        assert_eq!(live[0].runtime_generation, runtime.runtime_generation());
+        assert_eq!(live[0].runtime_generation, runtime.runtime_generation);
         assert!(live[0].durable.is_none());
         assert_eq!(
             live[1].durable.as_ref().unwrap(),

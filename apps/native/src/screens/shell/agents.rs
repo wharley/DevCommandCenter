@@ -135,3 +135,57 @@ impl Shell {
             .unwrap_or_else(|| gpui::div().into_any_element())
     }
 }
+
+impl Shell {
+    /// An idea became a project: a task in its new folder opens, the composer
+    /// focused (`createWorkspace` after `research_publish_idea`).
+    pub(super) fn idea_published(
+        &mut self,
+        project_id: String,
+        root_path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(api) = (!cfg!(test))
+            .then(crate::data::desktop_api::DesktopApi::load)
+            .flatten()
+        else {
+            return;
+        };
+        let input = dcc_core::application::CreateWorkspaceForRepoInput {
+            project_id: dcc_core::domain::project::ProjectId(project_id),
+            workspace_root: root_path,
+            base_branch: "main".into(),
+            name: None,
+            isolation_mode: None,
+            context_folders: Vec::new(),
+        };
+        cx.spawn(async move |this, cx| {
+            let created = cx
+                .background_executor()
+                .spawn(async move { api.create_workspace(&input) })
+                .await;
+            let _ = this.update(cx, |shell, cx| match created {
+                Ok(task) => shell.open_created(task.workspace_id, cx),
+                Err(error) => crate::ui::Toaster::error(error.to_string(), cx),
+            });
+        })
+        .detach();
+    }
+
+    /// An idea was discarded: back to the Researcher's page.
+    pub(super) fn idea_discarded(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let researcher = self
+            .sidebar
+            .read(cx)
+            .agents()
+            .iter()
+            .find(|agent| {
+                agent.preset.as_deref() == Some(crate::screens::agent_page::RESEARCHER_PRESET)
+            })
+            .map(|agent| agent.id.clone());
+        match researcher {
+            Some(id) => self.open_agent(id, window, cx),
+            None => self.show(Surface::Conversation, cx),
+        }
+    }
+}

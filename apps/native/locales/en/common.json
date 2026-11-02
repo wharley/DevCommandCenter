@@ -4209,6 +4209,7 @@
         "no_native_conversation": "DCC holds no native conversation for this thread",
         "checkpoint_missing": "the cut point for these turns was not recorded"
       },
+      "unsupported": "This agent can't take its own conversation back ({{reason}}). The message is back in the composer to edit and send again.",
       "filesLabel": "Files",
       "filesNone": "These turns did not change files DCC tracks.",
       "filesRestorable_one": "{{count}} file these turns changed can be restored by Guarded Undo. Changes made outside these turns are not touched.",

@@ -50,7 +50,7 @@ pub use dcc_core::domain::workspace_git::{
 };
 pub(crate) use dcc_infra::workspace_git::read_workspace_git_status as workspace_git_status_inner;
 #[cfg(test)]
-use dcc_infra::workspace_actions::{normalize_snooze_until, normalize_workspace_name};
+use dcc_infra::workspace_actions::normalize_snooze_until;
 #[cfg(test)]
 use dcc_infra::git::remove_worktree;
 pub use dcc_core::domain::workspace_git::WorkspaceGitPreviewScope;
@@ -125,18 +125,15 @@ use crate::{
         WorkspaceDeliveryRecoveryOutput,
     },
     git::{
-        git_command_succeeds, git_output_err, parse_name_status_z,
-        run_git_network_output, run_git_output, run_git_output_owned,
+        git_command_succeeds, git_output_err, parse_name_status_z, run_git_output,
+        run_git_output_owned,
     },
     guarded_undo_runtime::WorkspaceMutationRunError,
     state::{
         DeliveryRecoveryClaim, SessionCommandState, WorkspaceCommandState,
         WorkspaceMutationRequestError,
     },
-    workspace_setup::{
-        run_workspace_setup_with_options_blocking, run_workspace_task_command,
-        WorkspaceSetupFailurePolicy, WORKSPACE_VALIDATION_TIMEOUT,
-    },
+    workspace_setup::{run_workspace_task_command, WORKSPACE_VALIDATION_TIMEOUT},
 };
 
 const DCC_SPEC_CONTEXT_START: &str = "<!-- dcc:spec:start -->";
@@ -148,9 +145,10 @@ pub(crate) use dcc_infra::workspace_deletion::delegation::{
     delegation_worktrees_root, remove_journaled_delegation_worktree, validate_branch_for_fetch,
     validate_delegation_operation_workspace_scope, validate_delegation_worktree_path,
 };
+#[cfg(test)]
+use dcc_infra::workspace_deletion::remote_branch::resolve_commitish_sha;
 pub(crate) use dcc_infra::workspace_deletion::remote_branch::{
-    cleanup_unused_workspace_push_target,
-    redact_push_route_credentials, resolve_commitish_sha,
+    cleanup_unused_workspace_push_target, redact_push_route_credentials,
 };
 pub(crate) use dcc_infra::workspace_deletion::cleanup_workspace_files;
 #[cfg(test)]
@@ -560,17 +558,6 @@ pub struct RepositoryLinkedFolders {
     pub context_paths: Vec<String>,
 }
 
-impl RepositoryLinkedFolders {
-    fn new(repository_id: String, paths: Vec<String>) -> Self {
-        let context_paths = dcc_infra::project_actions::linked_context_paths(&paths);
-        Self {
-            repository_id,
-            paths,
-            context_paths,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ListRepositoryLinkedFoldersOutput {
@@ -946,36 +933,6 @@ fn recommended_workspace_setup_report(workspace: &Workspace) -> WorkspaceSetupRe
         message: Some(
             "Workspace setup is recommended and will run only after user confirmation.".to_string(),
         ),
-    }
-}
-
-async fn execute_workspace_setup_report(
-    state: &WorkspaceCommandState,
-    workspace: &Workspace,
-) -> WorkspaceSetupReport {
-    let setup_suggestions = collect_workspace_setup_suggestions(workspace);
-    let setup_root = resolve_workspace_setup_root(workspace).to_string();
-    match state
-        .run_git_workspace_mutation_blocking(&setup_root, move |root| {
-            let root = root
-                .to_str()
-                .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
-            run_workspace_setup_with_options_blocking(
-                root,
-                &setup_suggestions,
-                WorkspaceSetupFailurePolicy::ContinueOnFailure,
-            )
-            .map(|outcome| outcome.report)
-        })
-        .await
-        .map_err(workspace_mutation_error)
-    {
-        Ok(report) => report,
-        Err(error) => WorkspaceSetupReport {
-            status: WorkspaceSetupStatus::Failed,
-            steps: Vec::new(),
-            message: Some(format!("The workspace setup runner failed: {error}")),
-        },
     }
 }
 
@@ -3033,18 +2990,6 @@ pub async fn workspace_git_stage_all_with_state(
     Err(git_output_err("git add -A", &output.stderr))
 }
 
-fn git_diff_output_text(output: std::process::Output, command: &str) -> Result<String, String> {
-    if output.status.success() || output.status.code() == Some(1) {
-        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
-    }
-    Err(git_output_err(command, &output.stderr))
-}
-
-fn run_git_diff_text(root: &str, args: &[&str], command: &str) -> Result<String, String> {
-    let output = run_git_output(root, args)?;
-    git_diff_output_text(output, command)
-}
-
 fn resolve_worktree_write_path(root: &str, rel: &str) -> Result<PathBuf, String> {
     let root_canonical = PathBuf::from(root)
         .canonicalize()
@@ -4885,169 +4830,6 @@ async fn cleanup_terminal_delegation_apply_transaction(
     Ok(())
 }
 
-struct ContinueBranchLocalOutcome {
-    target_branch: String,
-    old_branch: String,
-    old_head: String,
-    new_branch: String,
-    new_head: String,
-}
-
-enum ContinueBranchFailure {
-    Fetch { detail: String, target: String },
-    Other(String),
-}
-
-impl From<String> for ContinueBranchFailure {
-    fn from(error: String) -> Self {
-        Self::Other(error)
-    }
-}
-
-fn continue_from_base_branch_inner(
-    root: &str,
-    requested_target_branch: Option<&str>,
-    preferred_new_branch: &str,
-) -> Result<ContinueBranchLocalOutcome, ContinueBranchFailure> {
-    let target_branch = requested_target_branch
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            resolve_default_branch_name(root).unwrap_or_else(|_| "main".to_string())
-        });
-    validate_branch_for_fetch(root, &target_branch)?;
-    let fetch_refspec = remote_branch_fetch_refspec("origin", &target_branch);
-    let fetch =
-        run_git_network_output(root, &["fetch", "origin", &fetch_refspec]).map_err(|detail| {
-            ContinueBranchFailure::Fetch {
-                detail,
-                target: target_branch.clone(),
-            }
-        })?;
-    if !fetch.status.success() {
-        return Err(ContinueBranchFailure::Fetch {
-            detail: git_output_err("git fetch origin", &fetch.stderr),
-            target: target_branch,
-        });
-    }
-    let start_point = resolve_continue_start_point(root, &target_branch)?;
-    let start_commit = resolve_commitish_sha(root, &start_point)?;
-    let preferred_new_branch = if preferred_new_branch.trim().is_empty() {
-        "workspace"
-    } else {
-        preferred_new_branch
-    };
-    let new_branch = next_available_branch_name(root, preferred_new_branch);
-    let old_branch = resolve_current_branch_name(root)
-        .map_err(|error| format!("failed to resolve current workspace branch: {error}"))?;
-    let old_head = resolve_current_commit_sha(root)?
-        .filter(|head| !head.trim().is_empty())
-        .ok_or_else(|| "failed to resolve current workspace commit".to_string())?;
-    let switch = run_git_output(root, &["switch", "-c", &new_branch, &start_commit])?;
-    if !switch.status.success() {
-        return Err(ContinueBranchFailure::Other(
-            "Continue could not move your local changes onto the target branch. Commit, stash, or discard the conflicting changes, then try again."
-                .to_string(),
-        ));
-    }
-    let _ = run_git_output(root, &["branch", "--unset-upstream", &new_branch]);
-    let new_head = resolve_current_commit_sha(root)?
-        .filter(|head| !head.trim().is_empty())
-        .ok_or_else(|| "failed to resolve continued workspace commit".to_string())?;
-    if resolve_commitish_sha(root, &format!("refs/heads/{new_branch}"))? != new_head {
-        return Err(ContinueBranchFailure::Other(
-            "continued workspace branch identity changed unexpectedly".to_string(),
-        ));
-    }
-    Ok(ContinueBranchLocalOutcome {
-        target_branch,
-        old_branch,
-        old_head,
-        new_branch,
-        new_head,
-    })
-}
-
-fn rollback_continue_branch_guarded(
-    root: &str,
-    old_branch: &str,
-    old_head: &str,
-    new_branch: &str,
-    expected_new_head: &str,
-) -> Result<(), String> {
-    if resolve_current_branch_name(root)? != new_branch
-        || resolve_current_commit_sha(root)?.as_deref() != Some(expected_new_head)
-        || resolve_commitish_sha(root, &format!("refs/heads/{new_branch}"))? != expected_new_head
-    {
-        return Err("workspace changed after branch creation; rollback refused".to_string());
-    }
-    let switch = if old_branch == "HEAD" {
-        run_git_output(root, &["switch", "--detach", old_head])?
-    } else {
-        run_git_output(root, &["switch", old_branch])?
-    };
-    if !switch.status.success() {
-        return Err("could not restore the previous workspace branch".to_string());
-    }
-    if resolve_commitish_sha(root, &format!("refs/heads/{new_branch}"))? != expected_new_head {
-        return Err("continued branch changed during rollback; deletion refused".to_string());
-    }
-    let delete = run_git_output(root, &["branch", "-D", new_branch])?;
-    if !delete.status.success() {
-        return Err("could not remove the continued branch during rollback".to_string());
-    }
-    Ok(())
-}
-
-fn resolve_continue_start_point(root: &str, target_branch: &str) -> Result<String, String> {
-    let remote_ref = format!("origin/{target_branch}");
-    let remote_exists = run_git_output(root, &["rev-parse", "--verify", &remote_ref])?;
-    if remote_exists.status.success() {
-        return Ok(remote_ref);
-    }
-
-    let local_exists = run_git_output(root, &["rev-parse", "--verify", target_branch])?;
-    if local_exists.status.success() {
-        return Ok(target_branch.to_string());
-    }
-
-    Err(format!(
-        "could not resolve base branch `{target_branch}` locally or on origin"
-    ))
-}
-
-fn sanitize_branch_name(name: &str) -> String {
-    let slug: String = name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    // Collapse multiple dashes and trim from edges
-    let mut result = String::new();
-    let mut last_dash = true;
-    for c in slug.chars() {
-        if c == '-' {
-            if !last_dash {
-                result.push('-');
-            }
-            last_dash = true;
-        } else {
-            result.push(c);
-            last_dash = false;
-        }
-    }
-    let result = result.trim_end_matches('-').to_string();
-    if result.is_empty() {
-        "workspace".to_string()
-    } else {
-        result.chars().take(50).collect()
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ParsedWorkspaceSourceKind {
     Branch(String),
@@ -6289,8 +6071,6 @@ pub async fn write_workspace_file_with_state(
 
 // What only the tests below reach (the commands that used them went with Tauri).
 #[cfg(test)]
-use dcc_core::{domain::workspace_bundle::WorkspaceBundleState, ports::WorkspaceBundleRepo};
-#[cfg(test)]
 use dcc_infra::git::list_local_branch_names;
 #[cfg(test)]
 use dcc_infra::workspace_deletion::remote_branch::workspace_remote_branch_deletion_target;
@@ -6726,70 +6506,6 @@ mod editor_workspace_file_tests {
             workspace_state_for_setup_report(&compile_warning),
             WorkspaceState::Ready
         );
-    }
-
-    #[tokio::test]
-    async fn renaming_a_task_persists_the_workspace_and_multi_project_label() {
-        use std::sync::{Arc, Mutex};
-
-        let connection = Arc::new(Mutex::new(
-            rusqlite::Connection::open_in_memory().expect("in-memory database"),
-        ));
-        let repo = SqliteWorkspaceRepo::from_connection(connection).expect("workspace repo");
-        let primary = workspace_for_rename("primary", "Old task");
-        let secondary = workspace_for_rename("secondary", "Secondary");
-        repo.save_workspace(&primary).await.expect("save primary");
-        repo.save_workspace(&secondary)
-            .await
-            .expect("save secondary");
-        let bundle_id = WorkspaceBundleId("bundle-rename".to_string());
-        repo.save_workspace_bundle(
-            &dcc_core::domain::workspace_bundle::WorkspaceBundle {
-                id: bundle_id.clone(),
-                name: "Old task".to_string(),
-                primary_workspace_id: primary.id.clone(),
-                state: WorkspaceBundleState::Ready,
-                isolation: dcc_core::domain::workspace_bundle::WorkspaceBundleIsolation::Worktree,
-                created_at: "2026-08-01T00:00:00Z".to_string(),
-                updated_at: "2026-08-01T00:00:00Z".to_string(),
-            },
-            &[
-                dcc_core::domain::workspace_bundle::WorkspaceBundleMember {
-                    bundle_id: bundle_id.clone(),
-                    workspace_id: primary.id.clone(),
-                    created_for_bundle: true,
-                    position: 0,
-                },
-                dcc_core::domain::workspace_bundle::WorkspaceBundleMember {
-                    bundle_id: bundle_id.clone(),
-                    workspace_id: secondary.id.clone(),
-                    created_for_bundle: true,
-                    position: 1,
-                },
-            ],
-        )
-        .await
-        .expect("save bundle");
-
-        let renamed = rename_workspace_in_repo(
-            &repo,
-            RenameWorkspaceInput {
-                workspace_id: primary.id.0.clone(),
-                name: "  Checkout   sem conflito  ".to_string(),
-            },
-        )
-        .await
-        .expect("rename task");
-
-        assert_eq!(renamed.name.as_deref(), Some("Checkout sem conflito"));
-        let bundle = repo
-            .get_workspace_bundle(&bundle_id)
-            .await
-            .expect("read bundle")
-            .expect("bundle exists");
-        assert_eq!(bundle.bundle.name, "Checkout sem conflito");
-        assert_eq!(bundle.members.len(), 2);
-        assert!(normalize_workspace_name("   ").is_err());
     }
 
     #[test]
@@ -8182,8 +7898,7 @@ mod editor_workspace_file_tests {
         );
         // Only the folder without Git joins a task as context.
         assert_eq!(
-            RepositoryLinkedFolders::new("dcc".to_string(), vec![lp.clone(), plain.clone()])
-                .context_paths,
+            dcc_infra::project_actions::linked_context_paths(&[lp.clone(), plain.clone()]),
             vec![plain]
         );
         for (paths, error) in [
@@ -8365,31 +8080,6 @@ mod editor_workspace_file_tests {
         assert!(matches!(failure.phase, WorkspaceSyncFailurePhase::Pull));
         assert!(git_command_succeeds(&root, &["rev-parse", "--verify", "-q", "MERGE_HEAD"]));
         assert!(!rebase_onto_is_safe(&root, "main", "refs/remotes/origin/main"));
-    }
-
-    #[test]
-    fn continue_does_not_create_a_branch_when_origin_fetch_fails() {
-        let repo = TestDir::new("continue-fetch-failure");
-        let git = |args: &[&str]| {
-            let output = run_git_output(repo.as_str(), args).expect("run git");
-            assert!(output.status.success(), "git {:?} failed", args);
-        };
-        git(&["init", "-b", "main"]);
-        git(&["config", "user.name", "DCC Test"]);
-        git(&["config", "user.email", "dcc@example.invalid"]);
-        git(&["commit", "--allow-empty", "-m", "base"]);
-
-        let error = match continue_from_base_branch_inner(repo.as_str(), Some("main"), "continued")
-        {
-            Err(error) => error,
-            Ok(_) => panic!("missing origin must fail closed"),
-        };
-        assert!(matches!(error, ContinueBranchFailure::Fetch { .. }));
-        assert_eq!(
-            resolve_current_branch_name(repo.as_str()).expect("unchanged branch"),
-            "main"
-        );
-        assert!(resolve_commitish_sha(repo.as_str(), "refs/heads/continued").is_err());
     }
 
     #[test]
@@ -8656,52 +8346,6 @@ mod editor_workspace_file_tests {
                 .stdout,
             b"refs/heads/work\n"
         );
-    }
-
-    #[test]
-    fn continue_rollback_requires_exact_branch_and_head_identity() {
-        let repo = TestDir::new("continue-rollback-identity");
-        initialize_branch_test_repository(repo.as_str(), "previous-work");
-        let previous_head = resolve_current_commit_sha(repo.as_str())
-            .expect("read previous head")
-            .expect("previous head");
-        let switch = run_git_output(
-            repo.as_str(),
-            &["switch", "-c", "continued-work", &previous_head],
-        )
-        .expect("create continued branch");
-        assert!(switch.status.success());
-        let continued_head = resolve_current_commit_sha(repo.as_str())
-            .expect("read continued head")
-            .expect("continued head");
-
-        assert!(rollback_continue_branch_guarded(
-            repo.as_str(),
-            "previous-work",
-            &previous_head,
-            "continued-work",
-            &"0".repeat(40),
-        )
-        .is_err());
-        assert_eq!(
-            resolve_current_branch_name(repo.as_str()).expect("branch after refused rollback"),
-            "continued-work"
-        );
-        assert!(resolve_commitish_sha(repo.as_str(), "refs/heads/continued-work").is_ok());
-
-        rollback_continue_branch_guarded(
-            repo.as_str(),
-            "previous-work",
-            &previous_head,
-            "continued-work",
-            &continued_head,
-        )
-        .expect("rollback exact continued branch");
-        assert_eq!(
-            resolve_current_branch_name(repo.as_str()).expect("restored branch"),
-            "previous-work"
-        );
-        assert!(resolve_commitish_sha(repo.as_str(), "refs/heads/continued-work").is_err());
     }
 
     #[test]
@@ -9839,158 +9483,6 @@ mod editor_workspace_file_tests {
     }
 }
 
-fn read_mission_validation_entry(
-    path: &Path,
-    file_name: &str,
-    specs_canonical: &Path,
-) -> Result<Option<MissionValidationEntry>, String> {
-    if !path.is_file() {
-        return Ok(None);
-    }
-    if fs::symlink_metadata(path)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        return Ok(None);
-    }
-    let file_canonical = path.canonicalize().map_err(|error| error.to_string())?;
-    if !file_canonical.starts_with(specs_canonical) {
-        return Ok(None);
-    }
-
-    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let history_name = file_name.replace(".validation.json", ".validation.history.jsonl");
-    let history_path = specs_canonical.join(&history_name);
-    let history_relative_path = if history_path.is_file()
-        && !fs::symlink_metadata(&history_path)
-            .map(|metadata| metadata.file_type().is_symlink())
-            .unwrap_or(false)
-    {
-        let history_canonical = history_path
-            .canonicalize()
-            .map_err(|error| error.to_string())?;
-        if history_canonical.starts_with(specs_canonical) {
-            Some(format!(".devcommandcenter/specs/{history_name}"))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    Ok(Some(MissionValidationEntry {
-        relative_path: format!(".devcommandcenter/specs/{file_name}"),
-        content,
-        history_relative_path,
-    }))
-}
-
-fn save_mission_validation_inner(
-    root: &Path,
-    spec_relative_path: &str,
-    report: &Value,
-) -> Result<SaveMissionValidationOutput, String> {
-    let root_canonical = root
-        .to_path_buf()
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    let specs_dir = root_canonical.join(".devcommandcenter").join("specs");
-    fs::create_dir_all(&specs_dir).map_err(|error| error.to_string())?;
-    let specs_canonical = specs_dir
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    if !specs_canonical.starts_with(&root_canonical) {
-        return Err("mission specs directory must stay inside the workspace".to_string());
-    }
-
-    let spec_name = spec_relative_path
-        .strip_prefix(".devcommandcenter/specs/")
-        .ok_or_else(|| "invalid spec path".to_string())?;
-    let validation_name = spec_name.replace(".spec.md", ".validation.json");
-    let history_name = spec_name.replace(".spec.md", ".validation.history.jsonl");
-    let target = specs_canonical.join(&validation_name);
-    if fs::symlink_metadata(&target)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        return Err("validation target must not be a symlink".to_string());
-    }
-    let history_target = specs_canonical.join(&history_name);
-    if fs::symlink_metadata(&history_target)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        return Err("validation history target must not be a symlink".to_string());
-    }
-
-    let pretty = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
-    fs::write(&target, format!("{pretty}\n")).map_err(|error| error.to_string())?;
-    append_mission_validation_history_entry(
-        &history_target,
-        spec_relative_path,
-        &validation_name,
-        report,
-    )?;
-
-    Ok(SaveMissionValidationOutput {
-        relative_path: format!(".devcommandcenter/specs/{validation_name}"),
-        history_relative_path: format!(".devcommandcenter/specs/{history_name}"),
-    })
-}
-
-fn append_mission_validation_history_entry(
-    history_target: &Path,
-    spec_relative_path: &str,
-    validation_name: &str,
-    report: &Value,
-) -> Result<(), String> {
-    let criteria = report
-        .get("criteria")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let mut pass_count = 0usize;
-    let mut fail_count = 0usize;
-    let mut unknown_count = 0usize;
-    for criterion in criteria {
-        match criterion.get("status").and_then(Value::as_str) {
-            Some("PASS") => pass_count += 1,
-            Some("FAIL") => fail_count += 1,
-            Some("UNKNOWN") => unknown_count += 1,
-            _ => {}
-        }
-    }
-
-    let saved_at = report
-        .get("dccSavedAt")
-        .and_then(Value::as_str)
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| Utc::now().to_rfc3339());
-    let history_entry = serde_json::json!({
-        "dccMissionValidationHistory": true,
-        "savedAt": saved_at,
-        "persistenceMode": report
-            .get("dccPersistenceMode")
-            .and_then(Value::as_str)
-            .unwrap_or("manual"),
-        "specRelativePath": spec_relative_path,
-        "specHash": report.get("specHash").and_then(Value::as_str),
-        "validationRelativePath": format!(".devcommandcenter/specs/{validation_name}"),
-        "summary": report.get("summary").and_then(Value::as_str),
-        "passCount": pass_count,
-        "failCount": fail_count,
-        "unknownCount": unknown_count,
-    });
-
-    let serialized = serde_json::to_string(&history_entry).map_err(|error| error.to_string())?;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_target)
-        .map_err(|error| error.to_string())?;
-    use std::io::Write;
-    writeln!(file, "{serialized}").map_err(|error| error.to_string())
-}
-
 fn compile_mission_spec_context_for_path(
     workspace_root: &str,
     spec_relative_path: &str,
@@ -10207,80 +9699,6 @@ fn build_mission_spec_filename(workspace_branch: &str) -> String {
     }
 }
 
-fn classify_generated_context_section(
-    current: &str,
-    generated_section: &str,
-) -> (MissionSpecContextFileState, Option<String>) {
-    match (
-        current.find(DCC_SPEC_CONTEXT_START),
-        current.find(DCC_SPEC_CONTEXT_END),
-    ) {
-        (Some(start), Some(end)) if start < end => {
-            let end_index = end + DCC_SPEC_CONTEXT_END.len();
-            let existing_section = &current[start..end_index];
-            if existing_section.trim_end_matches('\n') == generated_section.trim_end_matches('\n') {
-                (MissionSpecContextFileState::Current, None)
-            } else {
-                (
-                    MissionSpecContextFileState::Stale,
-                    Some("compiled dcc:spec section differs from the active spec".to_string()),
-                )
-            }
-        }
-        (None, None) => (
-            MissionSpecContextFileState::Missing,
-            Some("context file exists without a dcc:spec section".to_string()),
-        ),
-        _ => (
-            MissionSpecContextFileState::Invalid,
-            Some("context file has incomplete dcc:spec markers".to_string()),
-        ),
-    }
-}
-
-fn classify_mission_spec_context_target(
-    target: MissionSpecContextTarget,
-    spec_relative_path: &str,
-    spec_markdown: &str,
-    current: &str,
-) -> Result<(MissionSpecContextFileState, Option<String>), String> {
-    match target.kind {
-        MissionSpecContextTargetKind::MarkdownSection => Ok(classify_generated_context_section(
-            current,
-            &render_mission_spec_context_section(spec_relative_path, spec_markdown),
-        )),
-        MissionSpecContextTargetKind::ManifestJson => classify_generated_context_manifest(
-            current,
-            &render_mission_spec_context_manifest(spec_relative_path, spec_markdown)?,
-        ),
-    }
-}
-
-fn classify_generated_context_manifest(
-    current: &str,
-    generated_manifest: &str,
-) -> Result<(MissionSpecContextFileState, Option<String>), String> {
-    let current_json: Value = match serde_json::from_str(current) {
-        Ok(value) => value,
-        Err(_) => {
-            return Ok((
-                MissionSpecContextFileState::Invalid,
-                Some("context manifest is not valid JSON".to_string()),
-            ));
-        }
-    };
-    let generated_json: Value =
-        serde_json::from_str(generated_manifest).map_err(|error| error.to_string())?;
-    if current_json == generated_json {
-        Ok((MissionSpecContextFileState::Current, None))
-    } else {
-        Ok((
-            MissionSpecContextFileState::Stale,
-            Some("context manifest differs from the active spec and provider targets".to_string()),
-        ))
-    }
-}
-
 fn compute_mission_spec_hash(spec_markdown: &str) -> String {
     let mut hash: u32 = 0x811c9dc5;
     for byte in spec_markdown.as_bytes() {
@@ -10418,13 +9836,6 @@ pub async fn archive_workspace_with_state(
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|e| e.to_string())?;
     dcc_infra::workspace_actions::archive_workspace(&repo, input.workspace_id).await?;
     Ok(())
-}
-
-async fn rename_workspace_in_repo(
-    repo: &SqliteWorkspaceRepo,
-    input: RenameWorkspaceInput,
-) -> Result<Workspace, String> {
-    dcc_infra::workspace_actions::rename_workspace(repo, input.workspace_id, &input.name).await
 }
 
 /// `complete_workspace` for callers without a Tauri `State` (the HTTP API).
