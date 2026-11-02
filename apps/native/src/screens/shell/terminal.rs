@@ -110,15 +110,21 @@ impl Shell {
                 .count(),
         };
         let browser_open = self.browser_open();
+        #[cfg(target_os = "macos")]
+        let device_open = self.device_open();
+        #[cfg(not(target_os = "macos"))]
+        let device_open = false;
         let editor = self.preferred_editor();
         self.conversation.update(cx, |conversation, cx| {
             let header = &mut conversation.header;
             if header.terminals != counts
                 || header.browser_open != browser_open
+                || header.device_open != device_open
                 || header.editor != editor
             {
                 header.terminals = counts;
                 header.browser_open = browser_open;
+                header.device_open = device_open;
                 header.editor = editor;
                 cx.notify();
             }

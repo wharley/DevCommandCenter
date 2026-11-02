@@ -6,6 +6,8 @@ mod annotation;
 mod appshot;
 mod bootstrap;
 mod browser;
+#[cfg(target_os = "macos")]
+mod device;
 mod browser_opens;
 mod cached;
 mod cli_updates;
@@ -160,6 +162,9 @@ pub struct Shell {
     shortcuts_open: bool,
     /// The Browser beside the conversation (screen 8).
     browser: browser::BrowserState,
+    /// The iOS Simulator beside the conversation.
+    #[cfg(target_os = "macos")]
+    device: Option<device::OpenDevice>,
     /// The agents' requests to open it, and the card asking for them.
     browser_approvals: Entity<crate::screens::browser::approval::BrowserApprovals>,
     /// "Atualização dos agentes", top right while a CLI has a newer release.
@@ -312,6 +317,8 @@ impl Shell {
             _notes: notes_follow,
             delivery,
             browser: browser::BrowserState::new(),
+            #[cfg(target_os = "macos")]
+            device: None,
             browser_approvals,
             _browser_approvals: approval_subscriptions,
             computer_approvals,
@@ -455,6 +462,10 @@ impl Shell {
             }
             crate::screens::conversation::ConversationEvent::OpenSessionSearch => {
                 self.open_session_search(window, cx)
+            }
+            crate::screens::conversation::ConversationEvent::ToggleDevice => {
+                #[cfg(target_os = "macos")]
+                self.toggle_device(window, cx);
             }
             crate::screens::conversation::ConversationEvent::IdeaPublished {
                 project_id,
@@ -893,6 +904,8 @@ impl Render for Shell {
                         None => self.conversation_with_stage(cx),
                     };
                     let content = self.with_browser(content, window, cx);
+                    #[cfg(target_os = "macos")]
+                    let content = self.with_device(content);
                     self.with_terminal(content, cx)
                 }
                 Surface::NewTask => {

@@ -5693,5 +5693,20 @@
     "timedOut": "O DCC demorou demais para responder. Tente de novo.",
     "slashCompact": "Compactar o contexto do provider nesta conversa",
     "copySelection": "Copiar"
+  },
+  "device": {
+    "open": "Abrir o simulador iOS",
+    "close": "Fechar o simulador",
+    "choose": "Escolha um simulador",
+    "home": "Início",
+    "switcher": "Apps abertos",
+    "lock": "Bloquear",
+    "powerOff": "Desligar o simulador",
+    "noHelper": "O auxiliar do simulador não está nesta instalação do DCC.",
+    "ended": "O simulador parou de responder.",
+    "noXcode": "Nenhum simulador encontrado. Instale o Xcode e um runtime de iOS.",
+    "running": "ligado",
+    "starting": "Ligando o {{name}}…",
+    "retry": "Tentar de novo"
   }
 }

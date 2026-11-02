@@ -38,6 +38,8 @@ pub struct PendingClose {
 pub struct HeaderState {
     pub terminals: TerminalCounts,
     pub browser_open: bool,
+    /// The iOS Simulator panel shows (macOS).
+    pub device_open: bool,
     pub history_open: bool,
     /// "Nova sessão" is starting one.
     pub starting: bool,

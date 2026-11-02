@@ -29,6 +29,7 @@ test("only a well-formed command reaches the simulator", () => {
 	assert.equal(parseCommand('{"id":4,"op":"touch","phase":"tap","x":0.5,"y":0.2}').error, "touch phase");
 	assert.equal(parseCommand('{"id":5,"op":"touch","phase":"end","x":996,"y":1245}').error, "touch point");
 	assert.equal(parseCommand('{"op":"button","name":"home; rm -rf"}').error, "button");
+	assert.deepEqual(parseCommand('{"op":"button","name":"app_switcher"}'), { id: null, op: "button", name: "app_switcher" });
 	assert.equal(parseCommand('{"op":"exec","cmd":"ls"}').error, "unknown op exec");
 	assert.equal(parseCommand("nope").error, "not JSON");
 	assert.deepEqual(parseCommand('{"id":6,"op":"key","phase":"down","usage":4}'), {

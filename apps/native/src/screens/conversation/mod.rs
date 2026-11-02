@@ -79,6 +79,8 @@ pub enum ConversationEvent {
     OpenTerminal,
     /// The header's Globe: the Browser opens, or closes.
     ToggleBrowser,
+    /// The header's phone: the iOS Simulator panel opens, or closes.
+    ToggleDevice,
     /// "Buscar sessões passadas".
     OpenSessionSearch,
     /// "Abrir no editor" with this editor (it becomes the preferred one).

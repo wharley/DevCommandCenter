@@ -92,7 +92,12 @@ objc2-web-kit = { version = "0.3", default-features = false, features = ["std", 
 block2 = "0.6"
 # Voice notes in the person's message: CoreAudio reads Ogg Opus (WhatsApp).
 objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioPlayer", "AVAudioFile", "AVAudioBuffer", "AVAudioFormat", "AVAudioTypes", "AVAudioSettings"] }
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "CFDictionary", "CFNumber", "CFString"] }
+# The Device panel decodes the iOS Simulator's H.264 into the CVPixelBuffer
+# GPUI draws (`surface`).
+objc2-video-toolbox = { version = "0.3", default-features = false, features = ["std", "VTDecompressionSession", "VTErrors", "VTBase", "objc2-core-media", "objc2-core-video"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime", "objc2-core-video"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn"] }
 
 [dev-dependencies]
 minisign = "0.7"

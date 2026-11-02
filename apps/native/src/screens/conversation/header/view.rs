@@ -148,6 +148,24 @@ impl ConversationView {
         tip("header-browser-tip", label, button)
     }
 
+    /// The iOS Simulator beside the conversation (only on a Mac).
+    fn device_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !cfg!(target_os = "macos") {
+            return None;
+        }
+        let open = self.header.device_open;
+        let label = cx.t(if open { "device.close" } else { "device.open" });
+        let mut button = icon_button("header-device")
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::ToggleDevice)))
+            .child(Icon::new("smartphone").size(14.0).stroke(1.8));
+        if open {
+            button = button
+                .text_color(tw::CYAN_400.hsla())
+                .hover_text_color(tw::CYAN_300.hsla());
+        }
+        Some(tip("header-device-tip", label, button))
+    }
+
     /// `TextSearch` (find in this conversation) and `Search` (past sessions).
     fn find_buttons(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
@@ -275,6 +293,7 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
                         .child(view.editor_picker(cx))
                         .child(view.terminal_button(cx))
                         .child(view.browser_button(cx))
+                        .children(view.device_button(cx))
                         .child(view.delivery.clone())
                         .children(view.ai_memory_export(cx))
                         .children(view.ai_memory_menu(cx))

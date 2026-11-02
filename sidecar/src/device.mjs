@@ -47,7 +47,8 @@ export function envelope(tag, payload) {
 	return out;
 }
 
-/** The tag for an encoded frame from the addon's flags. */
+/** The tag of an encoded frame, from the addon's flags (the frame comes
+ * enveloped already; the tag decides what a backlog may drop). */
 export function frameTag(flags) {
 	if (flags & FLAG_DESCRIPTION) return TAG.description;
 	return flags & FLAG_KEYFRAME ? TAG.keyframe : TAG.delta;
@@ -96,7 +97,7 @@ export function parseCommand(line) {
 			if (!KEY_PHASES.has(value.phase) || !Number.isInteger(value.usage)) return bad("key");
 			return { id, op: "key", phase: value.phase, usage: value.usage };
 		case "button":
-			if (typeof value.name !== "string" || !/^[a-z-]{1,24}$/.test(value.name)) return bad("button");
+			if (typeof value.name !== "string" || !/^[a-z_]{1,24}$/.test(value.name)) return bad("button");
 			return { id, op: "button", name: value.name };
 		case "orientation":
 			if (!Number.isInteger(value.value)) return bad("orientation");
@@ -181,7 +182,8 @@ export async function runDevice() {
 			return;
 		}
 		if (tag === TAG.keyframe) waitingForKeyframe = false;
-		send(tag, Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+		// The addon hands each frame already in the envelope (length, tag).
+		socket.write(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
 	});
 	status({ started: true });
 

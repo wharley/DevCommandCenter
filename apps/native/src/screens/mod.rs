@@ -8,6 +8,8 @@ pub mod code_column;
 pub mod command_palette;
 pub mod composer;
 pub mod computer_use;
+#[cfg(target_os = "macos")]
+pub mod device;
 pub mod conversation;
 pub mod diff_view;
 pub mod feedback;

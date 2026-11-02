@@ -80,6 +80,8 @@ pub mod rail;
 pub mod recap;
 pub mod remote_access;
 pub mod rewind;
+#[cfg(target_os = "macos")]
+pub mod device;
 pub mod video;
 pub mod seen;
 pub mod session_activity;
