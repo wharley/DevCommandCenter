@@ -2002,6 +2002,12 @@ export type PullRequestHubCommentOutput = {
 	comment: PullRequestHubComment,
 };
 
+export type PullRequestHubCommit = {
+	oid: string,
+	headline: string,
+	committedDate: string | null,
+};
+
 export type PullRequestHubDetailInput = {
 	repositoryRoot: string,
 	number: number,
@@ -2017,6 +2023,10 @@ export type PullRequestHubDetailOutput = {
 	inlineComments: PullRequestHubInlineComment[],
 	reviewCapabilities: PullRequestHubReviewCapabilities,
 	mergeCapabilities: PullRequestHubMergeCapabilities | null,
+	// Who reviewed and when (GitHub).
+	reviews?: PullRequestHubReview[],
+	// The commits, oldest first (GitHub).
+	commits?: PullRequestHubCommit[],
 };
 
 export type PullRequestHubDraftComment = {
@@ -2047,6 +2057,10 @@ export type PullRequestHubInlineComment = {
 	createdAt: string | null,
 	url: string | null,
 	resolved: boolean | null,
+	// The code under it changed since: `line` is where it was, not where it is.
+	outdated?: boolean,
+	// The code it was written on, as the forge kept it.
+	diffHunk?: string | null,
 };
 
 export type PullRequestHubItem = {
@@ -2113,6 +2127,13 @@ export type PullRequestHubMergeOutput = {
 };
 
 export type PullRequestHubMergeStatus = "merged" | "queued" | "submitted";
+
+export type PullRequestHubReview = {
+	author: PullRequestHubActor | null,
+	// `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`…
+	state: string,
+	submittedAt: string | null,
+};
 
 export type PullRequestHubReviewCapabilities = {
 	inlineComments: boolean,
