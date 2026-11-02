@@ -80,6 +80,7 @@ pub mod rail;
 pub mod recap;
 pub mod remote_access;
 pub mod rewind;
+pub mod video;
 pub mod seen;
 pub mod session_activity;
 pub mod session_list;

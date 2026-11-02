@@ -33,6 +33,7 @@ mod tests;
 mod tool_row;
 mod trail;
 mod user_row;
+mod video;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};

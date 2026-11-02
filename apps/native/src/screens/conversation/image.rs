@@ -39,7 +39,7 @@ fn size_of(path: &str, cx: &mut App) -> Option<(f32, f32)> {
 
 /// The size that fits `width`×`height` in `max_width`×`max_height`, never
 /// enlarged.
-fn fit(size: (f32, f32), max_width: f32, max_height: f32) -> (f32, f32) {
+pub(super) fn fit(size: (f32, f32), max_width: f32, max_height: f32) -> (f32, f32) {
     let scale = (max_width / size.0).min(max_height / size.1).min(1.0);
     (size.0 * scale, size.1 * scale)
 }

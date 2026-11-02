@@ -8,7 +8,9 @@ use gpui::{AnyElement, Context, SharedString, Window, div, prelude::*, px, relat
 
 use super::hover_actions::{self, MESSAGE_GROUP};
 use super::{ConversationView, time_ago};
-use crate::data::prompt::{PromptPart, basename, is_audio_path, is_image_path, prompt_parts};
+use crate::data::prompt::{
+    PromptPart, basename, is_audio_path, is_image_path, is_video_path, prompt_parts,
+};
 use crate::i18n::Translate;
 use crate::markdown::{MarkdownStyle, render_markdown};
 use crate::theme::{ActiveTheme, Theme};
@@ -122,6 +124,8 @@ pub(super) fn user_row(
             .children(attachments.iter().map(|path| {
                 if is_audio_path(path) {
                     super::audio::card(path, cx).into_any_element()
+                } else if is_video_path(path) {
+                    super::video::card(path, cx)
                 } else if is_image_path(path) {
                     super::image::thumbnail(path, cx).unwrap_or_else(|| attachment_chip(path, cx))
                 } else {

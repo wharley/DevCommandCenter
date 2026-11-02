@@ -245,3 +245,94 @@ fn an_attached_image_shows_as_a_thumbnail(cx: &mut TestAppContext) {
     let opened = view.read_with(cx, |view, _| view.image_open.clone());
     assert_eq!(opened.as_deref(), Some(tall.to_str().unwrap()));
 }
+
+/// A bare address in a prompt is drawn as a site link, its icon in the line.
+#[gpui::test]
+fn a_bare_address_in_a_prompt_draws_as_a_site_link(cx: &mut TestAppContext) {
+    let (view, cx) = open_view(cx);
+    let events = records(vec![
+        json!({ "type": "turn_started", "turnId": "t1", "prompt": "veja https://bloop.email/ e http://localhost:3000/x, ok?" }),
+        json!({ "type": "turn_completed", "turnId": "t1" }),
+    ]);
+    let conversation = Conversation {
+        task_id: "task".into(),
+        session_id: Some("s1".into()),
+        rows: Arc::new(project_session(&events, "s1")),
+        last_sequence: 2,
+        ..Conversation::default()
+    };
+    view.update(cx, |view, cx| {
+        view.task_id = Some("task".into());
+        view.loading = false;
+        view.apply(Rc::new(conversation), cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let blocks = view.read_with(cx, |view, _| {
+        view.markdown("veja https://bloop.email/ e http://localhost:3000/x, ok?")
+    });
+    let crate::markdown::Block::Paragraph(inline) = &blocks[0] else {
+        panic!("paragraph");
+    };
+    assert_eq!(
+        inline.spans.iter().filter(|span| span.style.site).count(),
+        2
+    );
+}
+
+/// An attached video shows its first frame at its proportions, with its
+/// length; one without a poster stays a chip.
+#[gpui::test]
+fn an_attached_video_shows_its_first_frame(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let poster = dir.path().join("poster.png");
+    image::RgbImage::new(448, 330).save(&poster).unwrap();
+    let movie = dir.path().join("tela.mp4");
+    let gone = dir.path().join("sem-poster.mov");
+    let (view, cx) = open_view(cx);
+    cx.update(|_, cx| {
+        super::video::seed(
+            movie.to_str().unwrap(),
+            Some(crate::data::video::Video {
+                poster: poster.clone(),
+                size: (448.0, 330.0),
+                seconds: Some(81.5),
+            }),
+            cx,
+        );
+        super::video::seed(gone.to_str().unwrap(), None, cx);
+    });
+    let show = |turn: &str, prompt: String, cx: &mut gpui::VisualTestContext| {
+        let events = records(vec![
+            json!({ "type": "turn_started", "turnId": turn, "prompt": prompt }),
+            json!({ "type": "turn_completed", "turnId": turn }),
+        ]);
+        let conversation = Conversation {
+            task_id: "task".into(),
+            session_id: Some("s1".into()),
+            rows: Arc::new(project_session(&events, "s1")),
+            last_sequence: if turn == "t1" { 2 } else { 4 },
+            ..Conversation::default()
+        };
+        view.update(cx, |view, cx| {
+            view.task_id = Some("task".into());
+            view.loading = false;
+            view.apply(Rc::new(conversation), cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    };
+    show("t1", format!("@{} o que acha?", movie.display()), cx);
+    let card = cx
+        .debug_bounds("user-message-video")
+        .expect("the video card");
+    assert!(
+        (card.size.width - gpui::px(226.0)).abs() < gpui::px(1.0),
+        "{card:?}"
+    );
+    assert!(card.size.height < gpui::px(175.0), "{card:?}");
+    show("t2", format!("@{} o que acha?", gone.display()), cx);
+    assert!(cx.debug_bounds("user-message-video").is_none());
+}

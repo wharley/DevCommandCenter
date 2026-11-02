@@ -199,6 +199,11 @@ pub fn is_audio_path(path: &str) -> bool {
     )
 }
 
+/// A video the person attached (a screen recording, a clip).
+pub fn is_video_path(path: &str) -> bool {
+    has_extension(path, &["mp4", "mov", "m4v", "webm", "mkv", "avi"])
+}
+
 fn has_extension(path: &str, extensions: &[&str]) -> bool {
     path.rsplit_once('.').is_some_and(|(_, ext)| {
         extensions
