@@ -1,13 +1,13 @@
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+#!/usr/bin/env node
+/**
+ * The helpers the app bundle carries beside it (`scripts/native-local.mjs`
+ * and the release copy them into Contents/MacOS, or /usr/lib on Linux):
+ * the CLI and the daemons from `dcc-server` (`dcc`, `dccd`, `dccd-http`),
+ * the pinned ai-memory release (checksum checked) and the Claude SDK
+ * helper compiled with bun. All land in target/release under their plain
+ * names; the Claude helper in sidecar/dist.
+ */
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,67 +16,31 @@ import { spawnSync } from 'node:child_process';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(scriptDir, '..');
 const sidecarDir = join(repoRoot, 'sidecar');
-const srcTauriDir = join(repoRoot, 'src-tauri');
-const targetDir = join(srcTauriDir, 'target');
+const targetDir = join(repoRoot, 'target');
 const releaseDir = join(targetDir, 'release');
-const sidecarDistDir = join(sidecarDir, 'dist');
-const isDevMode = process.argv.includes('--dev');
 const aiMemoryVersion = process.env.AI_MEMORY_VERSION || 'v2.6.1';
 
 if (!/^v\d+\.\d+\.\d+$/.test(aiMemoryVersion)) {
   throw new Error(`invalid AI_MEMORY_VERSION: ${aiMemoryVersion}`);
 }
 
-function shouldUseShell(command) {
-  if (process.platform !== 'win32') {
-    return false;
-  }
-
-  const normalized = command.toLowerCase();
-  return normalized === 'yarn' || normalized.endsWith('.cmd') || normalized.endsWith('.bat');
-}
-
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    stdio: 'inherit',
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      CARGO_TARGET_DIR: targetDir,
-      ...options.env,
-    },
-    shell: shouldUseShell(command),
-    ...options,
-  });
-
+  const result = spawnSync(command, args, { stdio: 'inherit', cwd: repoRoot, ...options });
   if (result.error) {
     console.error(`[build-sidecars] failed to start ${command}:`, result.error);
     process.exit(1);
   }
-
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
 }
 
 function detectHostTriple() {
-  const result = spawnSync('rustc', ['-vV'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-
-  if (result.status !== 0 || !result.stdout) {
-    throw new Error('failed to detect rust host triple');
-  }
-
-  const hostLine = result.stdout
-    .split('\n')
-    .find((line) => line.startsWith('host: '));
-
+  const result = spawnSync('rustc', ['-vV'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+  const hostLine = result.status === 0 ? result.stdout.split('\n').find((line) => line.startsWith('host: ')) : null;
   if (!hostLine) {
     throw new Error('rust host triple not found');
   }
-
   return hostLine.slice('host: '.length).trim();
 }
 
@@ -84,63 +48,13 @@ function binaryName(baseName) {
   return process.platform === 'win32' ? `${baseName}.exe` : baseName;
 }
 
-function targetBinaryName(baseName, hostTriple) {
-  return `${baseName}-${hostTriple}${process.platform === 'win32' ? '.exe' : ''}`;
-}
-
-function ensurePlaceholder(dir, baseName, hostTriple) {
-  const placeholder = join(dir, targetBinaryName(baseName, hostTriple));
-  if (!existsSync(placeholder)) {
-    mkdirSync(dir, { recursive: true });
-    if (baseName === 'ai-memory') {
-      // Tauri validates externalBin during `tauri dev`, but development does
-      // not need a copied runtime. Keep this marker tiny; the real binary is
-      // installed separately for dev and downloaded only by release builds.
-      writeFileSync(
-        placeholder,
-        process.platform === 'win32' ? '@echo off\r\nexit /b 1\r\n' : '#!/bin/sh\nexit 1\n',
-      );
-      chmodSync(placeholder, 0o755);
-    } else {
-      copyFileSync(process.execPath, placeholder);
-    }
-  }
-}
-
 function copyExecutable(source, target) {
-  // Release binaries may be emitted as read-only executables (0555). Make an
-  // existing target replaceable so repeated dev/release builds are idempotent,
-  // then keep the staged sidecar executable and writable by its owner.
+  // Release binaries may be read-only (0555): keep repeated builds replaceable.
   if (existsSync(target)) {
     chmodSync(target, 0o755);
   }
   copyFileSync(source, target);
   chmodSync(target, 0o755);
-}
-
-function copySidecar(baseName, hostTriple) {
-  const source = join(releaseDir, binaryName(baseName));
-  const target = join(releaseDir, targetBinaryName(baseName, hostTriple));
-
-  if (!existsSync(source)) {
-    throw new Error(`missing built sidecar: ${source}`);
-  }
-
-  mkdirSync(releaseDir, { recursive: true });
-  copyExecutable(source, target);
-}
-
-function copyCompiledClaudeSidecar(hostTriple) {
-  const baseName = 'dcc-claude-sidecar';
-  const source = join(sidecarDistDir, binaryName(baseName));
-  const target = join(sidecarDistDir, targetBinaryName(baseName, hostTriple));
-
-  if (!existsSync(source)) {
-    throw new Error(`missing built Claude sidecar: ${source}`);
-  }
-
-  mkdirSync(sidecarDistDir, { recursive: true });
-  copyExecutable(source, target);
 }
 
 function aiMemoryAssetFor(hostTriple) {
@@ -215,50 +129,18 @@ function stageAiMemory(hostTriple) {
     throw new Error(`ai-memory executable was not found inside ${asset}`);
   }
 
-  const staged = join(releaseDir, executableName);
-  copyExecutable(executable, staged);
-  copySidecar('ai-memory', hostTriple);
+  copyExecutable(executable, join(releaseDir, executableName));
   writeFileSync(join(releaseDir, 'ai-memory.version'), `${aiMemoryVersion}\n${actual}\n`);
   console.log(`[build-sidecars] staged ai-memory ${aiMemoryVersion} (${actual})`);
 }
 
 const hostTriple = detectHostTriple();
 mkdirSync(releaseDir, { recursive: true });
-for (const baseName of ['dcc', 'dccd', 'dccd-http', 'ai-memory']) {
-  ensurePlaceholder(releaseDir, baseName, hostTriple);
-}
 
-if (isDevMode) {
-  ensurePlaceholder(sidecarDistDir, 'dcc-claude-sidecar', hostTriple);
-  console.log(`[build-sidecars] prepared dev placeholders for ${hostTriple}; ai-memory is expected to be installed separately`);
-  process.exit(0);
-}
+// Our SDK integration only; Claude Code is a user-installed prerequisite.
+run('bun', ['build', '--compile', 'src/index.mjs', '--outfile', 'dist/dcc-claude-sidecar'], { cwd: sidecarDir });
 
-// Compile our SDK integration only. Claude Code is a user-installed prerequisite.
-run('bun', ['build', '--compile', 'src/index.mjs', '--outfile', 'dist/dcc-claude-sidecar'], {
-  cwd: sidecarDir,
-  env: {
-    ...process.env,
-  },
-});
-copyCompiledClaudeSidecar(hostTriple);
-
-run('cargo', [
-  'build',
-  '--manifest-path',
-  join(srcTauriDir, 'Cargo.toml'),
-  '--release',
-  '--bin',
-  'dcc',
-  '--bin',
-  'dccd',
-  '--bin',
-  'dccd-http',
-]);
-
-copySidecar('dcc', hostTriple);
-copySidecar('dccd', hostTriple);
-copySidecar('dccd-http', hostTriple);
+run('cargo', ['build', '--release', '-p', 'dcc-server', '--bin', 'dcc', '--bin', 'dccd', '--bin', 'dccd-http']);
 stageAiMemory(hostTriple);
 
-console.log(`[build-sidecars] prepared dcc, dccd, dccd-http, ai-memory and Claude sidecar for ${hostTriple}`);
+console.log(`[build-sidecars] built dcc, dccd, dccd-http, ai-memory and the Claude helper for ${hostTriple}`);

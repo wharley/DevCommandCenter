@@ -1,7 +1,7 @@
 /**
  * The phone's pt-BR copy for the trace and the access selector, under the
- * desktop's own i18n keys (`apps/desktop/src/i18n/locales/pt-BR/common.json`).
- * Metro can't reach apps/desktop, so the texts are copied here instead of
+ * app's own i18n keys (`apps/native/locales/pt-BR/common.json`).
+ * Metro can't reach apps/native, so the texts are copied here instead of
  * translated again; `labels.test.ts` fails as soon as one drifts from the
  * desktop. Tool kinds follow the desktop's `classifyToolAction`
  * (`turn-activity.logic.ts`), checked by the same test.

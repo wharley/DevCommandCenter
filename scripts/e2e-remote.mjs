@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // End-to-end test of remote access through the relay, all on this machine:
 // starts the relay with `wrangler dev` (no Cloudflare account, nothing
-// deployed), then runs `src-tauri/tests/remote_relay_e2e.rs`, which serves
+// deployed), then runs `crates/dcc-server/tests/remote_relay_e2e.rs`, which serves
 // the API like the desktop app on a temporary database and drives a Node
 // "phone" (packages/remote-protocol/test/e2e/phone.ts) through the relay.
 //
@@ -93,7 +93,7 @@ const test = spawn(
 	[
 		"test",
 		"-p",
-		"dev-command-center-tauri",
+		"dcc-server",
 		"--test",
 		"remote_relay_e2e",
 		"--",

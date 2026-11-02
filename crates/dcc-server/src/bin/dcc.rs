@@ -1,4 +1,4 @@
-use dev_command_center_tauri::daemon_client::{
+use dcc_server::daemon_client::{
     default_app_data_dir, ensure_daemon_version, rpc_with_info, sidecar_binary_candidates,
     sidecar_command, DaemonRuntimeInfo,
 };

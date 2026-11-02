@@ -48,10 +48,10 @@ pub fn matches(skill: &SkillRecord, query: &str) -> bool {
         .contains(&query.trim().to_lowercase())
 }
 
-/// `ORCHESTRATION_PRESET`, from the same `SKILL.md` the desktop bundles.
+/// `ORCHESTRATION_PRESET`, from the app's bundled `SKILL.md`.
 pub fn orchestration_preset() -> SkillRecord {
     const MARKDOWN: &str =
-        include_str!("../../../desktop/src/features/skills/presets/dcc-orchestration/SKILL.md");
+        include_str!("../../assets/skills/dcc-orchestration/SKILL.md");
     let (frontmatter, body) = MARKDOWN
         .strip_prefix("---")
         .and_then(|rest| rest.trim_start_matches(['\r', '\n']).split_once("\n---"))

@@ -1,5 +1,5 @@
 /**
- * The "phone" of the end-to-end test (`src-tauri/tests/remote_relay_e2e.rs`,
+ * The "phone" of the end-to-end test (`crates/dcc-server/tests/remote_relay_e2e.rs`,
  * run by `scripts/e2e-remote.mjs`). Talks to the desktop only through the
  * relay, with this package's client.
  *

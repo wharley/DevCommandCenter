@@ -10,7 +10,7 @@ function lookup(tree: unknown, key: string): unknown {
 
 describe("labels", () => {
 	it("match the desktop's pt-BR texts key by key", () => {
-		const desktop = JSON.parse(readFileSync(new URL("i18n/locales/pt-BR/common.json", desktopRoot), "utf8"));
+		const desktop = JSON.parse(readFileSync(new URL("../../../apps/native/locales/pt-BR/common.json", import.meta.url), "utf8"));
 		for (const [key, text] of Object.entries(DESKTOP_PT_BR)) {
 			expect(lookup(desktop, key), key).toBe(text);
 		}

@@ -27,15 +27,15 @@ use dcc_core::ports::events::CoreEvent;
 use dcc_core::ports::repository::{AppendEventOutcome, SessionEventRepo, SessionRepo, ThreadRepo};
 use dcc_core::ports::EventBus;
 use dcc_tauri::state::SessionCommandState;
-use dev_command_center_tauri::agent_requests::{
+use dcc_server::agent_requests::{
     now_ms, AgentRequestAnswer, AgentRequestDecision, AgentRequestDetail, AgentRequestError,
     AgentRequestSource, AnswerOrigin, InMemoryAgentRequests, PendingAgentRequest,
 };
-use dev_command_center_tauri::http_api::{build_router, HttpBackend};
-use dev_command_center_tauri::http_config::HttpConfig;
-use dev_command_center_tauri::pairing;
-use dev_command_center_tauri::remote_connector::{RemoteEvent, RemoteHub};
-use dev_command_center_tauri::remote_push::PushConfig;
+use dcc_server::http_api::{build_router, HttpBackend};
+use dcc_server::http_config::HttpConfig;
+use dcc_server::pairing;
+use dcc_server::remote_connector::{RemoteEvent, RemoteHub};
+use dcc_server::remote_push::PushConfig;
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 

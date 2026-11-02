@@ -54,14 +54,6 @@ futures-util = "0.3"
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-plugin-global-shortcut = "2"
 
-[[bin]]
-name = "dccd"
-path = "src/bin/dccd.rs"
-
-[[bin]]
-name = "dccd-http"
-path = "src/bin/dccd-http.rs"
-
 [features]
 default = ["guarded-undo-capture-v2"]
 guarded-undo-capture-v2 = ["dcc-tauri/guarded-undo-capture-v2"]

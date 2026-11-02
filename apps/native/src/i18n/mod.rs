@@ -1,6 +1,6 @@
-//! Text from the desktop's own catalogs (`apps/desktop/src/i18n/locales`),
+//! Text from the app's catalogs (`apps/native/locales`, the desktop's before it),
 //! read with i18next's rules: dotted keys, `{{name}}` interpolation and
-//! `_one`/`_other` plurals. One catalog for both apps, no copied strings.
+//! `_one`/`_other` plurals.
 
 use std::collections::HashMap;
 
@@ -8,8 +8,8 @@ use gpui::{App, Global, SharedString};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const PT_BR: &str = include_str!("../../../desktop/src/i18n/locales/pt-BR/common.json");
-const EN: &str = include_str!("../../../desktop/src/i18n/locales/en/common.json");
+const PT_BR: &str = include_str!("../../locales/pt-BR/common.json");
+const EN: &str = include_str!("../../locales/en/common.json");
 
 /// The desktop's `AppLocale`; Portuguese is its default too.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

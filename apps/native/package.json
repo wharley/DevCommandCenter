@@ -1,0 +1,8 @@
+{
+  "name": "@dcc/native",
+  "private": true,
+  "description": "The DCC app (Rust, GPUI). Only the icon generator's source lives here.",
+  "devDependencies": {
+    "lucide-react": "^1.7.0"
+  }
+}

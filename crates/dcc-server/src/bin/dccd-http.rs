@@ -1,7 +1,7 @@
-use dev_command_center_tauri::daemon_client::default_app_data_dir;
-use dev_command_center_tauri::http_api::{build_router, HttpBackend};
-use dev_command_center_tauri::http_config::HttpConfig;
-use dev_command_center_tauri::remote_connector::RemoteHub;
+use dcc_server::daemon_client::default_app_data_dir;
+use dcc_server::http_api::{build_router, HttpBackend};
+use dcc_server::http_config::HttpConfig;
+use dcc_server::remote_connector::RemoteHub;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -144,7 +144,7 @@ async fn main() {
     };
 
     if let Err(error) =
-        dev_command_center_tauri::http_api::recover_mobile_tasks(&config.read().await.db_path)
+        dcc_server::http_api::recover_mobile_tasks(&config.read().await.db_path)
     {
         eprintln!("[DCC HTTP] Failed to recover mobile task journal: {error}");
         std::process::exit(1);
@@ -164,5 +164,5 @@ async fn main() {
 
 fn ensure_pairing_schema(db_path: &std::path::Path) -> Result<(), String> {
     let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
-    dev_command_center_tauri::pairing::ensure_pairing_schema(&conn).map_err(|e| e.to_string())
+    dcc_server::pairing::ensure_pairing_schema(&conn).map_err(|e| e.to_string())
 }

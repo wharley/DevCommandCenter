@@ -1,4 +1,4 @@
-use dev_command_center_tauri::daemon_runtime::DaemonService;
+use dcc_server::daemon_runtime::DaemonService;
 use std::path::PathBuf;
 
 fn main() {
@@ -8,7 +8,7 @@ fn main() {
     let app_data_dir = std::env::var_os("DCC_DAEMON_APP_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    let runtime_path = dev_command_center_tauri::daemon_client::runtime_file(&app_data_dir);
+    let runtime_path = dcc_server::daemon_client::runtime_file(&app_data_dir);
 
     let service = match DaemonService::new(db_path) {
         Ok(service) => service,
@@ -18,7 +18,7 @@ fn main() {
         }
     };
 
-    if let Err(error) = dev_command_center_tauri::daemon_runtime::serve(service, &runtime_path) {
+    if let Err(error) = dcc_server::daemon_runtime::serve(service, &runtime_path) {
         eprintln!("[DCC][dccd] {error}");
         std::process::exit(1);
     }

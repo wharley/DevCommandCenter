@@ -44,10 +44,10 @@ const MIN_NODE = [22, 12];
 
 // What the bundle carries beside the app, as the desktop's does.
 const SIDECARS = [
-  join(repoRoot, 'src-tauri', 'target', 'release', 'dcc'),
-  join(repoRoot, 'src-tauri', 'target', 'release', 'dccd'),
-  join(repoRoot, 'src-tauri', 'target', 'release', 'dccd-http'),
-  join(repoRoot, 'src-tauri', 'target', 'release', 'ai-memory'),
+  join(repoRoot, 'target', 'release', 'dcc'),
+  join(repoRoot, 'target', 'release', 'dccd'),
+  join(repoRoot, 'target', 'release', 'dccd-http'),
+  join(repoRoot, 'target', 'release', 'ai-memory'),
   join(repoRoot, 'sidecar', 'dist', 'dcc-claude-sidecar'),
 ];
 
@@ -99,10 +99,12 @@ function nativeVersion(base) {
     }
     return `${base}-local.g${commit}${dirty}`;
   }
-  const { version } = JSON.parse(readFileSync(join(repoRoot, 'src-tauri', 'tauri.conf.json'), 'utf8'));
+  // The released version lives in the app's own Cargo.toml.
+  const manifest = readFileSync(join(nativeDir, 'Cargo.toml'), 'utf8');
+  const version = /^version = "([^"]+)"/m.exec(manifest)?.[1] ?? '';
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!match) {
-    fail(`unexpected version in tauri.conf.json: ${version}`);
+    fail(`unexpected version in apps/native/Cargo.toml: ${version}`);
   }
   return `${match[1]}.${match[2]}.${Number(match[3]) + 1}-local.g${commit}${dirty}`;
 }
@@ -187,7 +189,7 @@ function build(version, { skipSidecars }) {
   for (const sidecar of SIDECARS) {
     run('cp', [sidecar, macos]);
   }
-  run('cp', [join(repoRoot, 'src-tauri', 'icons', 'icon.icns'), join(resources, 'icon.icns')]);
+  run('cp', [join(nativeDir, 'assets', 'app-icon', 'icon.icns'), join(resources, 'icon.icns')]);
   writeFileSync(join(BUILT_APP_PATH, 'Contents', 'Info.plist'), infoPlist(version));
 
   const identity = signingIdentity();
