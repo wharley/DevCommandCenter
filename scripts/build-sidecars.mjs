@@ -3,9 +3,11 @@
  * The helpers the app bundle carries beside it (`scripts/native-local.mjs`
  * and the release copy them into Contents/MacOS, or /usr/lib on Linux):
  * the CLI and the daemons from `dcc-server` (`dcc`, `dccd`, `dccd-http`),
- * the pinned ai-memory release (checksum checked) and the Claude SDK
- * helper compiled with bun. All land in target/release under their plain
- * names; the Claude helper in sidecar/dist.
+ * the pinned ai-memory release (checksum checked), the Claude SDK
+ * helper compiled with bun and, on macOS, serve-sim's native addon for the
+ * iOS Simulator (pinned npm release, checksum checked; the Claude helper
+ * loads it, see sidecar/src/device.mjs). All land in target/release under
+ * their plain names; the Claude helper in sidecar/dist.
  */
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -19,6 +21,10 @@ const sidecarDir = join(repoRoot, 'sidecar');
 const targetDir = join(repoRoot, 'target');
 const releaseDir = join(targetDir, 'release');
 const aiMemoryVersion = process.env.AI_MEMORY_VERSION || 'v2.6.1';
+// Bump both together, after the Device panel is tried on the new release:
+// the addon reaches private CoreSimulator frameworks that each Xcode moves.
+const serveSimVersion = '0.1.48';
+const serveSimSha256 = '07ce5aa9cc21081080bde29238ed257cf0ab9977608d90774ed4b31137fb6e58';
 
 if (!/^v\d+\.\d+\.\d+$/.test(aiMemoryVersion)) {
   throw new Error(`invalid AI_MEMORY_VERSION: ${aiMemoryVersion}`);
@@ -134,6 +140,31 @@ function stageAiMemory(hostTriple) {
   console.log(`[build-sidecars] staged ai-memory ${aiMemoryVersion} (${actual})`);
 }
 
+/** serve-sim's universal (arm64 + x86_64) addon, from its npm tarball. */
+function stageServeSim() {
+  const cacheDir = join(targetDir, 'serve-sim-cache', serveSimVersion);
+  const archivePath = join(cacheDir, `serve-sim-${serveSimVersion}.tgz`);
+  const extractDir = join(cacheDir, 'extract');
+  mkdirSync(cacheDir, { recursive: true });
+  if (!existsSync(archivePath)) {
+    run('curl', ['-fsSL', `https://registry.npmjs.org/serve-sim/-/serve-sim-${serveSimVersion}.tgz`, '-o', archivePath]);
+  }
+  const actual = sha256(archivePath);
+  if (actual !== serveSimSha256) {
+    rmSync(archivePath, { force: true });
+    throw new Error(`serve-sim checksum mismatch: expected ${serveSimSha256}, got ${actual}`);
+  }
+  rmSync(extractDir, { recursive: true, force: true });
+  mkdirSync(extractDir, { recursive: true });
+  run('tar', ['-xzf', archivePath, '-C', extractDir]);
+  const addon = join(extractDir, 'package', 'dist', 'native', 'serve-sim-native.node');
+  if (!existsSync(addon)) {
+    throw new Error(`serve-sim ${serveSimVersion} has no dist/native/serve-sim-native.node`);
+  }
+  copyExecutable(addon, join(releaseDir, 'serve-sim-native.node'));
+  console.log(`[build-sidecars] staged serve-sim ${serveSimVersion} (${actual})`);
+}
+
 const hostTriple = detectHostTriple();
 mkdirSync(releaseDir, { recursive: true });
 
@@ -142,5 +173,8 @@ run('bun', ['build', '--compile', 'src/index.mjs', '--outfile', 'dist/dcc-claude
 
 run('cargo', ['build', '--release', '-p', 'dcc-server', '--bin', 'dcc', '--bin', 'dccd', '--bin', 'dccd-http']);
 stageAiMemory(hostTriple);
+if (process.platform === 'darwin') {
+  stageServeSim();
+}
 
 console.log(`[build-sidecars] built dcc, dccd, dccd-http, ai-memory and the Claude helper for ${hostTriple}`);

@@ -52,6 +52,9 @@ const SIDECARS = [
   join(repoRoot, 'target', 'release', 'dccd-http'),
   join(repoRoot, 'target', 'release', 'ai-memory'),
   join(repoRoot, 'sidecar', 'dist', 'dcc-claude-sidecar'),
+  // The iOS Simulator's capture and input, loaded by the Claude helper; it
+  // must carry our signature (library validation refuses another team's).
+  join(repoRoot, 'target', 'release', 'serve-sim-native.node'),
 ];
 
 function log(message) {
@@ -197,6 +200,7 @@ function build(version, { skipSidecars, release = false }) {
     run('cp', [sidecar, macos]);
   }
   run('cp', [join(nativeDir, 'assets', 'app-icon', 'icon.icns'), join(resources, 'icon.icns')]);
+  run('cp', [join(repoRoot, 'sidecar', 'vendor', 'serve-sim', 'LICENSE'), join(resources, 'LICENSE-serve-sim')]);
   writeFileSync(join(BUILT_APP_PATH, 'Contents', 'Info.plist'), infoPlist(version));
 
   const identity = signingIdentity();

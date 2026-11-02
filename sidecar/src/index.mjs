@@ -23,6 +23,7 @@ import { finishTurn } from "./turn-lifecycle.mjs";
 import { createTurnInput, SESSION_STATE_ENV } from "./turn-input.mjs";
 import { waitForPendingResponse } from "./pending-response.mjs";
 import { claudeCommand, resolveClaudeExecutable } from "./claude-executable.mjs";
+import { runDevice } from "./device.mjs";
 import {
 	adoptNativeSession,
 	createTurnTrace,
@@ -438,6 +439,11 @@ async function handleSteer(payload, state) {
 }
 
 async function main() {
+	// The iOS Simulator for the app's Device panel (`device.mjs`).
+	if (process.argv[2] === "device") {
+		await runDevice();
+		process.exit(0);
+	}
 	if (process.argv.includes("--version")) {
 		process.stdout.write(`dcc-claude-sidecar ${SIDECAR_VERSION}\n`);
 		return;
