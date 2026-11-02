@@ -311,7 +311,12 @@ fn rename_field(rename: &super::actions::Rename, cx: &App) -> gpui::AnyElement {
 
 /// `WorkspaceRailAvatar`: a task outside any known project shows its
 /// provider, or its initials.
-fn avatar(title: &str, name: &str, provider: Option<&str>, cx: &App) -> impl IntoElement {
+pub(super) fn avatar(
+    title: &str,
+    name: &str,
+    provider: Option<&str>,
+    cx: &App,
+) -> impl IntoElement {
     let colors = &cx.theme().colors;
     div()
         .flex()

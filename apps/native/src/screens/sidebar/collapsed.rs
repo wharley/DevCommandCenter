@@ -1,13 +1,19 @@
-//! The collapsed rail (76px): icon buttons on top, one initials tile per
-//! task, the tools at the bottom.
+//! The collapsed rail (76px): icon buttons on top, one tile per task with
+//! its project's mascot (walking while it runs, a dot when it needs the
+//! person), the tools at the bottom.
 
+use std::collections::HashMap;
+
+use dcc_core::domain::attention::AttentionReason;
 use gpui::{ClickEvent, Context, SharedString, Window, div, prelude::*, px};
 
 use super::footer::{TOOLS, tool_button};
 use super::header::code_column_toggle;
-use super::row::{initials, selected_background};
+use super::labels::reason_dot;
+use super::row::{avatar, selected_background};
 use super::{Sidebar, SidebarEvent};
 use crate::i18n::Translate;
+use crate::project::ProjectGlyph;
 use crate::theme::ActiveTheme;
 use crate::ui::tooltip::Side;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip};
@@ -35,15 +41,19 @@ fn icon_button(
 pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
     let has_tasks = !sidebar.state.is_empty();
     let has_selection = sidebar.state.selected_task_id.is_some();
+    // The first reason is the newest, as "Needs you" lists them.
+    let mut reasons = HashMap::new();
+    for item in sidebar.state.attention() {
+        reasons.entry(item.workspace_id).or_insert(item.reason);
+    }
+    let running = sidebar.state.running_ids();
     let mut tiles = Vec::new();
     for task in &sidebar.state.data.tasks {
-        tiles.push(task_tile(
-            sidebar,
-            &task.id,
-            &task.display_title(),
-            &task.name,
-            cx,
-        ));
+        let state = TileState {
+            running: running.contains(&task.id),
+            reason: reasons.get(&task.id).copied(),
+        };
+        tiles.push(task_tile(sidebar, task, state, cx));
     }
     let mut tools = Vec::new();
     for (id, icon, event) in TOOLS {
@@ -175,21 +185,56 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         )
 }
 
+/// What a task's tile shows besides its project.
+#[derive(Clone, Copy)]
+struct TileState {
+    running: bool,
+    reason: Option<AttentionReason>,
+}
+
 fn task_tile(
     sidebar: &Sidebar,
-    task_id: &str,
-    title: &str,
-    name: &str,
+    task: &crate::data::tasks::TaskSummary,
+    state: TileState,
     cx: &mut Context<Sidebar>,
 ) -> gpui::AnyElement {
+    let task_id = task.id.as_str();
+    let title = task.display_title();
     let selected = sidebar.state.selected_task_id.as_deref() == Some(task_id);
+    // The same face as the task's row in the open list.
+    let glyph = match sidebar.project_for(task) {
+        Some(project) => ProjectGlyph::new(
+            project.icon.as_deref(),
+            project.color.as_deref(),
+            Some(&project.root_path),
+        )
+        .tile(26.0)
+        .moving(state.running && sidebar.mascot_frame)
+        .into_any_element(),
+        None => {
+            let provider = sidebar.state.data.provider_ids.get(task_id);
+            avatar(&title, &task.name, provider.map(String::as_str), cx).into_any_element()
+        }
+    };
+    let dot = state.reason.map(|reason| {
+        div()
+            .debug_selector(|| format!("rail-task-dot-{task_id}"))
+            .absolute()
+            .top(px(1.0))
+            .right(px(1.0))
+            .size(px(9.0))
+            .rounded_full()
+            .border_2()
+            .border_color(cx.theme().colors.sidebar)
+            .bg(reason_dot(reason, cx))
+    });
     let theme = cx.theme();
     let colors = &theme.colors;
     let hover_background = colors.accent.opacity(0.6);
-    let hover_text = colors.foreground;
     let id = task_id.to_string();
     let tile = div()
         .id(SharedString::from(format!("rail-task-{task_id}")))
+        .relative()
         .flex()
         .flex_shrink_0()
         .items_center()
@@ -197,32 +242,23 @@ fn task_tile(
         .size(px(36.0))
         .rounded(theme.radius.lg)
         .border_1()
-        .text_size(px(10.0))
-        .font_weight(gpui::FontWeight::SEMIBOLD)
         .cursor_pointer()
         .when(selected, |tile| {
-            tile.bg(selected_background(cx))
-                .text_color(colors.foreground)
-                .border_color(colors.border)
+            tile.bg(selected_background(cx)).border_color(colors.border)
         })
         .when(!selected, |tile| {
-            tile.bg(colors.accent.opacity(0.35))
-                .text_color(colors.muted_foreground)
-                .border_color(gpui::transparent_black())
-                .hover(move |style| style.bg(hover_background).text_color(hover_text))
+            tile.border_color(gpui::transparent_black())
+                .hover(move |style| style.bg(hover_background))
         })
         .on_click(
             cx.listener(move |this, _: &ClickEvent, _: &mut Window, cx| this.open_task(&id, cx)),
         )
-        .child(SharedString::from(initials(if name.is_empty() {
-            title
-        } else {
-            name
-        })));
+        .child(glyph)
+        .children(dot);
     Tooltip::text(
         SharedString::from(format!("tip-rail-task-{task_id}")),
         tile,
-        title.to_string(),
+        title,
     )
     .side(Side::Right)
     .into_any_element()

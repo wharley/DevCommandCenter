@@ -22,6 +22,8 @@ mod meta_chips;
 mod navigation;
 #[cfg(test)]
 mod open_tests;
+#[cfg(test)]
+mod rail_tests;
 mod piece;
 mod project_menu;
 mod repo_picker;
