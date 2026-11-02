@@ -18,8 +18,6 @@ use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip};
 pub const WIDTH: f32 = 400.0;
 /// Room around the screen; the corner mask reaches into it.
 const MARGIN: f32 = 24.0;
-/// The bar and the margins around the screen.
-const CHROME: f32 = 56.0 + 2.0 * MARGIN;
 /// An iPhone's display corners: ~55pt on a 402pt wide screen.
 const CORNER: f32 = 0.135;
 
@@ -32,41 +30,73 @@ fn icon_button(id: &'static str, icon: &'static str) -> Button {
 }
 
 /// GPUI clips a video surface only to a rectangle, so the display's rounded
-/// corners are painted over it: a ring in the panel's color whose inner edge
-/// is the rounded screen (a border's inner radius is its outer radius less
-/// its width, as in CSS), and a hairline on that edge.
+/// corners are painted over it: in each corner, the bit outside the arc in
+/// the panel's color, and a hairline along the rounded edge.
 fn corner_mask(radius: f32, background: gpui::Hsla, line: gpui::Hsla) -> AnyElement {
-    // Reaching √2−1 of the radius past the screen covers its corners.
-    let reach = (radius * 0.42).ceil() + 1.0;
-    let ring = px(reach);
-    let mut mask = div()
-        .absolute()
-        .top(-ring)
-        .left(-ring)
-        .right(-ring)
-        .bottom(-ring)
-        .rounded(px(radius + reach))
-        .border_color(background);
-    let width: gpui::AbsoluteLength = ring.into();
-    mask.style().border_widths = gpui::EdgesRefinement {
-        top: Some(width),
-        right: Some(width),
-        bottom: Some(width),
-        left: Some(width),
-    };
     div()
         .absolute()
+        .top_0()
+        .left_0()
         .size_full()
-        .child(mask)
+        .child(
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    for path in corner_paths(bounds, px(radius)) {
+                        window.paint_path(path, background);
+                    }
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
         .child(
             div()
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full()
                 .rounded(px(radius))
                 .border_1()
                 .border_color(line),
         )
         .into_any_element()
+}
+
+/// The four pieces between a rectangle's corners and its rounded edge (a
+/// quarter circle as one cubic Bézier, k = 0.5523).
+fn corner_paths(
+    bounds: gpui::Bounds<gpui::Pixels>,
+    radius: gpui::Pixels,
+) -> Vec<gpui::Path<gpui::Pixels>> {
+    let k = radius * 0.5523;
+    let (left, top) = (bounds.origin.x, bounds.origin.y);
+    let (right, bottom) = (left + bounds.size.width, top + bounds.size.height);
+    // (corner, start of the arc on the horizontal edge, end on the vertical,
+    // and which way each runs from the corner).
+    [
+        (gpui::point(left, top), 1.0, 1.0),
+        (gpui::point(right, top), -1.0, 1.0),
+        (gpui::point(right, bottom), -1.0, -1.0),
+        (gpui::point(left, bottom), 1.0, -1.0),
+    ]
+    .into_iter()
+    .filter_map(|(corner, dx, dy)| {
+        let along = |x: f32, y: f32| gpui::point(corner.x + radius * x, corner.y + radius * y);
+        let mut path = gpui::PathBuilder::fill();
+        path.move_to(corner);
+        path.line_to(along(dx, 0.0));
+        path.cubic_bezier_to(
+            along(0.0, dy),
+            gpui::point(corner.x + (radius - k) * dx, corner.y),
+            gpui::point(corner.x, corner.y + (radius - k) * dy),
+        );
+        path.close();
+        path.build().ok()
+    })
+    .collect()
 }
 
 impl DevicePanel {
@@ -186,8 +216,15 @@ impl DevicePanel {
             (0, _) | (_, 0) => (1179.0, 2556.0),
             (width, height) => (width as f32, height as f32),
         };
+        // The room measured at the last layout; before it, the window's.
+        let room = self.room.get();
+        let room_height = if room.height > px(0.0) {
+            f32::from(room.height)
+        } else {
+            f32::from(window.viewport_size().height) - 140.0
+        };
         let room_width = WIDTH - 2.0 * MARGIN;
-        let room_height = (f32::from(window.viewport_size().height) - CHROME - 48.0).max(200.0);
+        let room_height = (room_height - 2.0 * MARGIN).max(160.0);
         let scale = (room_width / width).min(room_height / height);
         let (shown_width, shown_height) = (width * scale, height * scale);
         let bounds = self.screen.clone();
@@ -242,6 +279,8 @@ impl DevicePanel {
             .child(
                 canvas(move |painted, _, _| bounds.set(painted), |_, _, _, _| {})
                     .absolute()
+                    .top_0()
+                    .left_0()
                     .size_full(),
             )
             .into_any_element()
@@ -370,12 +409,24 @@ impl Render for DevicePanel {
                 let text = cx.t_with("device.starting", &Args::default().with("name", name));
                 self.message(text, true, cx)
             }
-            Phase::Live => div()
-                .flex()
-                .justify_center()
-                .pt(px(MARGIN))
-                .child(self.screen(window, cx))
-                .into_any_element(),
+            Phase::Live => {
+                let room = self.room.clone();
+                div()
+                    .relative()
+                    .size_full()
+                    .flex()
+                    .justify_center()
+                    .pt(px(MARGIN))
+                    .child(
+                        canvas(move |bounds, _, _| room.set(bounds.size), |_, _, _, _| {})
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full(),
+                    )
+                    .child(self.screen(window, cx))
+                    .into_any_element()
+            }
             Phase::Failed(reason) => {
                 let retry = self.current.clone();
                 div()

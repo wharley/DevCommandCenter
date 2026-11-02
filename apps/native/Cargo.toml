@@ -99,8 +99,14 @@ objc2-video-toolbox = { version = "0.3", default-features = false, features = ["
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMBase", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer", "CMTime", "objc2-core-video"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVReturn"] }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# Apple's text system for a headless test off the main thread.
+gpui_apple = { package = "gpui-pre-apple", version = "=0.3.9", default-features = false, features = ["font-kit", "runtime_shaders"] }
+
 [dev-dependencies]
 minisign = "0.7"
+# Real Metal rendering in tests that look at a screen (the Device panel).
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", default-features = false, features = ["font-kit", "runtime_shaders", "test-support"] }
 gpui = { package = "gpui-pre", version = "=0.3.9", default-features = false, features = ["test-support"] }
 tempfile = "3"
 

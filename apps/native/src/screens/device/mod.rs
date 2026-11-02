@@ -73,6 +73,8 @@ pub struct DevicePanel {
     pub(crate) focus: FocusHandle,
     /// Where the screen was painted, for the pointer.
     pub(crate) screen: Rc<Cell<Bounds<Pixels>>>,
+    /// The room the panel has below its bar, as last laid out.
+    pub(crate) room: Rc<Cell<gpui::Size<Pixels>>>,
     /// A finger is down on the screen.
     pressed: bool,
     /// The simulators this panel booted (it shuts them down on leaving).
@@ -95,6 +97,7 @@ impl DevicePanel {
             size: (0, 0),
             focus: cx.focus_handle(),
             screen: Rc::default(),
+            room: Rc::default(),
             pressed: false,
             started: Default::default(),
             _list: None,

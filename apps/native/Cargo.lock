@@ -1638,6 +1638,7 @@ dependencies = [
  "futures",
  "global-hotkey",
  "gpui-pre",
+ "gpui-pre-apple",
  "gpui-pre-platform",
  "gtk",
  "image",
@@ -3125,6 +3126,7 @@ dependencies = [
  "gpui-pre-linux",
  "gpui-pre-macos",
  "gpui-pre-web",
+ "gpui-pre-wgpu",
  "gpui-pre-windows",
 ]
 
@@ -3229,6 +3231,7 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-collections",
  "gpui-pre-util",
+ "image",
  "itertools",
  "log",
  "parking_lot",

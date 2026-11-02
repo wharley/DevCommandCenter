@@ -2,7 +2,7 @@
 //! simulator frame drawn at the screen's proportions, the pointer as 0..1 of
 //! the screen; and, by hand, a real simulator end to end.
 
-use gpui::{Bounds, TestAppContext, WindowAppearance, point, px, size};
+use gpui::{AppContext, Bounds, TestAppContext, WindowAppearance, point, px, size};
 
 use super::{DevicePanel, Phase};
 use crate::data::device::Simulator;
@@ -67,6 +67,9 @@ fn the_list_shows_until_a_simulator_is_live_at_its_proportions(cx: &mut TestAppC
     let ratio = f32::from(screen.size.height) / f32::from(screen.size.width);
     assert!((ratio - 2622.0 / 1206.0).abs() < 0.02, "{screen:?}");
     assert!(screen.size.width <= px(super::view::WIDTH));
+    // The pointer maps over the screen itself, not below it.
+    let touch = panel.read_with(cx, |panel, _| panel.screen.get());
+    assert_eq!(touch, screen, "the touch area is the screen");
 }
 
 #[gpui::test]
@@ -143,4 +146,50 @@ fn the_panel_shuts_down_only_what_it_booted(cx: &mut TestAppContext) {
         assert_eq!(panel.leave().as_deref(), Some("OURS"));
         assert_eq!(panel.leave(), None, "once");
     });
+}
+
+/// The panel drawn by Metal, saved to look at:
+/// `DCC_DEVICE_PICTURE=/tmp/x.png cargo test device_panel_picture -- --ignored`.
+#[test]
+#[ignore = "renders with the GPU"]
+fn device_panel_picture() {
+    use std::sync::Arc;
+
+    let out = std::env::var("DCC_DEVICE_PICTURE").expect("DCC_DEVICE_PICTURE");
+    let mut cx = gpui::HeadlessAppContext::with_platform(
+        Arc::new(gpui_apple::AppleTextSystem::new()),
+        Arc::new(crate::assets::Assets),
+        gpui_platform::current_headless_renderer,
+    );
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+    });
+    let window = cx
+        .open_window(size(px(400.0), px(900.0)), |_, cx| {
+            cx.new(|cx| {
+                let mut panel = DevicePanel::new(cx);
+                panel.current = Some(Simulator {
+                    udid: "47B9DDB6-8CF6-4866-9A60-B4D1F6EC0B4D".into(),
+                    name: "iPhone 16 Pro".into(),
+                    runtime: "iOS 18.1".into(),
+                    booted: true,
+                    ipad: false,
+                    last_booted: None,
+                });
+                panel.phase = Phase::Live;
+                panel.size = (1206, 2622);
+                panel.picture = Some(first_picture());
+                panel
+            })
+        })
+        .unwrap();
+    // Twice: the second layout uses the room the first measured.
+    for _ in 0..2 {
+        cx.update_window(window.into(), |_, window, _| window.refresh())
+            .unwrap();
+        cx.run_until_parked();
+    }
+    let image = cx.capture_screenshot(window.into()).unwrap();
+    image.save(&out).unwrap();
 }
