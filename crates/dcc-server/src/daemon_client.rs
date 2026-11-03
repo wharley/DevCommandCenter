@@ -506,6 +506,26 @@ mod tests {
         assert_eq!(info.launch_id, None);
     }
 
+    /// The daemon outlives the app and is reused while it reports the app's
+    /// version, so an update whose daemon kept the old number would keep the
+    /// old daemon's code running.
+    #[test]
+    fn the_daemon_reports_the_app_version() {
+        let manifest = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/native/Cargo.toml"),
+        )
+        .unwrap();
+        let app_version = manifest
+            .lines()
+            .find_map(|line| line.strip_prefix("version = \""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .unwrap();
+        assert_eq!(
+            DAEMON_VERSION, app_version,
+            "crates/dcc-server/Cargo.toml must carry the version of apps/native/Cargo.toml"
+        );
+    }
+
     #[test]
     fn health_must_report_the_expected_version() {
         assert!(health_matches_version(

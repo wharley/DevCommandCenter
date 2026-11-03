@@ -1,6 +1,6 @@
 [package]
 name = "dcc-server"
-version = "0.1.99"
+version = "0.3.0"
 edition = "2021"
 license.workspace = true
 publish = false

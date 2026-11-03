@@ -42,6 +42,13 @@ jobs:
             echo "No version in apps/native/Cargo.toml"
             exit 1
           fi
+          # The daemon outlives the app and is reused while it reports the
+          # app's version, so its crate carries the same number.
+          daemon="$(sed -n 's/^version = "\([0-9.]*\)"$/\1/p' crates/dcc-server/Cargo.toml | head -1)"
+          if [[ "${daemon}" != "${version}" ]]; then
+            echo "crates/dcc-server/Cargo.toml (${daemon}) does not match apps/native/Cargo.toml (${version})"
+            exit 1
+          fi
           if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
             echo "Tag ${GITHUB_REF_NAME} does not match apps/native/Cargo.toml (${version})"
             exit 1

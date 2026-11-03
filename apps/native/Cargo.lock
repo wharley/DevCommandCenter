@@ -1713,7 +1713,7 @@ dependencies = [
 
 [[package]]
 name = "dcc-server"
-version = "0.1.99"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
