@@ -202,6 +202,7 @@ impl Composer {
                 .with_placeholder(placeholder)
                 .with_max_height(INPUT_MAX_HEIGHT)
                 .with_lists()
+                .with_attachments()
         });
         let input_events = cx.subscribe_in(
             &input,
@@ -214,6 +215,7 @@ impl Composer {
                 TextAreaEvent::MenuAccept => this.accept_mention(None, cx),
                 TextAreaEvent::Cancelled => this.close_mention(cx),
                 TextAreaEvent::PastedNonText => this.paste_image(cx),
+                TextAreaEvent::PastedFiles(paths) => this.add_paths(paths.clone(), cx),
                 TextAreaEvent::Blurred => {}
             },
         );

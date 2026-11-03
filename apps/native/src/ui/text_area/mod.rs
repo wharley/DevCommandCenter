@@ -151,6 +151,9 @@ pub enum TextAreaEvent {
     Blurred,
     /// A paste the clipboard held as something other than text (an image).
     PastedNonText,
+    /// Files copied in Finder or a screenshot tool, in a field that attaches
+    /// them (`with_attachments`) instead of writing their paths.
+    PastedFiles(Vec<std::path::PathBuf>),
     /// ↑ / ↓ / Tab while the owner's menu is open (`set_menu_open`).
     MenuUp,
     MenuDown,
@@ -236,6 +239,8 @@ pub struct TextArea {
     disabled: bool,
     /// Writes Markdown lists and emphasis and marks links (the composer's).
     lists: bool,
+    /// Copied files come in as `PastedFiles`, not as their paths (the composer's).
+    attachments: bool,
     /// The links in the text and their favicons, found at each render.
     links: Vec<(links::Link, Option<Arc<Image>>)>,
     /// A leading `/command` the provider runs, drawn as recognized.
@@ -266,6 +271,7 @@ impl TextArea {
             max_height: None,
             disabled: false,
             lists: false,
+            attachments: false,
             links: Vec::new(),
             command: None,
             layout: None,
@@ -292,6 +298,12 @@ impl TextArea {
     /// sends, Tab / Shift+Tab nest, ⌘B / ⌘I. Links are marked too.
     pub fn with_lists(mut self) -> Self {
         self.lists = true;
+        self
+    }
+
+    /// Copied files are attached, not pasted as their paths.
+    pub fn with_attachments(mut self) -> Self {
+        self.attachments = true;
         self
     }
 
@@ -649,7 +661,14 @@ impl TextArea {
     }
 
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
-        match cx.read_from_clipboard().and_then(|item| item.text()) {
+        let item = cx.read_from_clipboard();
+        if self.attachments
+            && let Some(paths) = item.as_ref().and_then(copied_files)
+        {
+            cx.emit(TextAreaEvent::PastedFiles(paths));
+            return;
+        }
+        match item.and_then(|item| item.text()) {
             Some(text) => {
                 let text = text.replace("\r\n", "\n");
                 if text.encode_utf16().count() >= LARGE_PASTE {
@@ -870,4 +889,19 @@ impl Render for TextArea {
             .on_scroll_wheel(cx.listener(Self::on_scroll))
             .child(TextAreaElement::new(cx.entity(), self.max_height))
     }
+}
+
+/// The files a clipboard item holds (Finder's copy, a screenshot tool's
+/// file), if any.
+fn copied_files(item: &gpui::ClipboardItem) -> Option<Vec<std::path::PathBuf>> {
+    let paths: Vec<_> = item
+        .entries()
+        .iter()
+        .filter_map(|entry| match entry {
+            gpui::ClipboardEntry::ExternalPaths(paths) => Some(paths.paths().to_vec()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    (!paths.is_empty()).then_some(paths)
 }

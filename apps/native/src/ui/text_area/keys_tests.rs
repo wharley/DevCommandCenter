@@ -63,3 +63,55 @@ fn a_paste_goes_in_at_the_caret(cx: &mut TestAppContext) {
         "abcXYZdef"
     );
 }
+
+#[gpui::test]
+fn copied_files_are_attached_where_the_field_takes_them(cx: &mut TestAppContext) {
+    use std::path::PathBuf;
+
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        super::bind_keys(cx);
+        cx.bind_keys([gpui::KeyBinding::new(
+            "cmd-v",
+            crate::app::menus::EditPaste,
+            None,
+        )]);
+    });
+    let shot = PathBuf::from("/Users/me/CleanShot 2026-11-02 at 21.33.43@2x.png");
+    let copied = gpui::ClipboardItem {
+        entries: vec![gpui::ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+            [shot.clone()].into_iter().collect(),
+        ))],
+    };
+    // The composer's field: the file comes as an attachment, not its path.
+    let (area, cx) = cx.add_window_view(|window, cx| TextArea::new(window, cx).with_attachments());
+    let pasted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = pasted.clone();
+    area.update_in(cx, |area, window, cx| {
+        cx.subscribe_self(move |_, event: &super::TextAreaEvent, _| {
+            if let super::TextAreaEvent::PastedFiles(paths) = event {
+                seen.borrow_mut().extend(paths.clone());
+            }
+        })
+        .detach();
+        window.focus(&area.focus_handle(cx), cx);
+    });
+    cx.run_until_parked();
+    cx.write_to_clipboard(copied.clone());
+    cx.simulate_keystrokes("cmd-v");
+    assert_eq!(pasted.borrow().as_slice(), [shot.clone()]);
+    assert_eq!(area.read_with(cx, |area, _| area.text().to_string()), "");
+
+    // Any other field still writes the path.
+    let (plain, cx) = cx.add_window_view(TextArea::new);
+    plain.update_in(cx, |area, window, cx| {
+        window.focus(&area.focus_handle(cx), cx)
+    });
+    cx.run_until_parked();
+    cx.write_to_clipboard(copied);
+    cx.simulate_keystrokes("cmd-v");
+    assert_eq!(
+        plain.read_with(cx, |area, _| area.text().to_string()),
+        shot.display().to_string()
+    );
+}
