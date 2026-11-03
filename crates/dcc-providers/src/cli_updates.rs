@@ -35,8 +35,9 @@ struct Cli {
     provider_id: &'static str,
     binary: &'static str,
     npm: Option<&'static str>,
-    /// Formula or cask name, and whether it is a cask.
-    homebrew: Option<(&'static str, bool)>,
+    /// Its Homebrew package (a cask or a formula, also as `name@channel`,
+    /// like `claude-code@latest`); the installed one is read from its path.
+    homebrew: Option<&'static str>,
     /// A path fragment of its own installer, and the feed it follows.
     native: Option<(&'static str, Feed)>,
     /// Its own updater's arguments, when it has one.
@@ -48,7 +49,7 @@ const CLIS: &[Cli] = &[
         provider_id: "codex",
         binary: "codex",
         npm: Some("@openai/codex"),
-        homebrew: Some(("codex", true)),
+        homebrew: Some("codex"),
         native: None,
         self_update: Some(&["update"]),
     },
@@ -56,7 +57,7 @@ const CLIS: &[Cli] = &[
         provider_id: "claude_code",
         binary: "claude",
         npm: Some("@anthropic-ai/claude-code"),
-        homebrew: Some(("claude-code", true)),
+        homebrew: Some("claude-code"),
         native: Some((
             "/.local/share/claude/",
             Feed::Npm("@anthropic-ai/claude-code"),
@@ -83,7 +84,7 @@ const CLIS: &[Cli] = &[
         provider_id: "gemini",
         binary: "gemini",
         npm: Some("@google/gemini-cli"),
-        homebrew: Some(("gemini-cli", false)),
+        homebrew: Some("gemini-cli"),
         native: None,
         self_update: None,
     },
@@ -154,9 +155,26 @@ fn terminal_command(cli: &Cli, action: Option<&UpdateAction>, found: &Path) -> S
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Source {
     Native,
-    Npm { prefix: PathBuf },
-    Homebrew,
+    Npm {
+        prefix: PathBuf,
+    },
+    /// The package as installed (`claude-code@latest` is not `claude-code`).
+    Homebrew {
+        name: String,
+        cask: bool,
+    },
     Unknown,
+}
+
+/// The Homebrew package a path lives in: its name, and whether it is a cask.
+fn homebrew_package(path: &str) -> Option<(String, bool)> {
+    [("/Caskroom/", true), ("/Cellar/", false)]
+        .into_iter()
+        .find_map(|(marker, cask)| {
+            let rest = &path[path.find(marker)? + marker.len()..];
+            let name = rest.split('/').next().filter(|name| !name.is_empty())?;
+            Some((name.to_string(), cask))
+        })
 }
 
 fn source_of(cli: &Cli, found: &Path, real: &Path) -> Source {
@@ -166,14 +184,21 @@ fn source_of(cli: &Cli, found: &Path, real: &Path) -> Source {
             return Source::Native;
         }
     }
-    // Before npm: a formula keeps its own node_modules inside the Cellar.
-    if paths
-        .iter()
-        .any(|path| path.contains("/Cellar/") || path.contains("/Caskroom/"))
-    {
-        return Source::Homebrew;
-    }
     let real_path = real.to_string_lossy();
+    let in_node_modules = real_path.contains("/lib/node_modules/");
+    // Before npm: a formula keeps its own node_modules inside the Cellar. A
+    // package that is not this CLI's (Homebrew's `node`) only lends its npm.
+    if let Some((name, cask)) = paths.iter().find_map(|path| homebrew_package(path)) {
+        let ours = cli.homebrew.is_some_and(|base| {
+            name == base
+                || name
+                    .strip_prefix(base)
+                    .is_some_and(|rest| rest.starts_with('@'))
+        });
+        if ours || !in_node_modules {
+            return Source::Homebrew { name, cask };
+        }
+    }
     match real_path.find("/lib/node_modules/") {
         Some(cut) => Source::Npm {
             prefix: PathBuf::from(&real_path[..cut]),
@@ -291,13 +316,12 @@ fn action(cli: &Cli, source: &Source, found: &Path) -> Option<UpdateAction> {
                 })
                 .filter(|_| cli.npm.is_some())
         }
-        Source::Homebrew => {
-            let (name, cask) = cli.homebrew?;
+        Source::Homebrew { name, cask } => {
             let mut args = vec!["upgrade".to_string()];
-            if cask {
+            if *cask {
                 args.push("--cask".into());
             }
-            args.push(name.to_string());
+            args.push(name.clone());
             Some(UpdateAction {
                 program: homebrew()?,
                 args,
@@ -386,10 +410,7 @@ async fn homebrew_latest(name: &str, cask: bool) -> Option<String> {
 async fn latest(cli: &Cli, source: &Source, program: &Path) -> Option<String> {
     match source {
         Source::Native => latest_from(cli.native?.1, program).await,
-        Source::Homebrew => {
-            let (name, cask) = cli.homebrew?;
-            homebrew_latest(name, cask).await
-        }
+        Source::Homebrew { name, cask } => homebrew_latest(name, *cask).await,
         Source::Npm { .. } | Source::Unknown => latest_from(Feed::Npm(cli.npm?), program).await,
     }
 }
@@ -577,8 +598,39 @@ mod tests {
                 Path::new("/opt/homebrew/bin/gemini"),
                 Path::new("/opt/homebrew/Cellar/gemini-cli/0.32.1/libexec/lib/node_modules/@google/gemini-cli/dist/index.js"),
             ),
-            Source::Homebrew,
+            Source::Homebrew {
+                name: "gemini-cli".into(),
+                cask: false
+            },
             "a formula's own node_modules stay Homebrew's"
+        );
+        // Claude from the `@latest` cask: that cask, not `claude-code`.
+        let source = source_of(
+            cli("claude_code"),
+            Path::new("/opt/homebrew/bin/claude"),
+            Path::new("/opt/homebrew/Caskroom/claude-code@latest/2.1.282/claude"),
+        );
+        assert_eq!(
+            source,
+            Source::Homebrew {
+                name: "claude-code@latest".into(),
+                cask: true
+            }
+        );
+        if let Some(update) = action(cli("claude_code"), &source, Path::new("/x")) {
+            assert_eq!(update.args, ["upgrade", "--cask", "claude-code@latest"]);
+        }
+        // Claude from npm with Homebrew's Node: that Node's npm, not `brew upgrade node`.
+        let node = "/opt/homebrew/Cellar/node/24.1.0";
+        assert_eq!(
+            source_of(
+                cli("claude_code"),
+                Path::new("/opt/homebrew/bin/claude"),
+                &Path::new(node).join("lib/node_modules/@anthropic-ai/claude-code/cli.js"),
+            ),
+            Source::Npm {
+                prefix: PathBuf::from(node)
+            }
         );
         assert_eq!(
             source_of(
