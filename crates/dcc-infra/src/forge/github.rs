@@ -1047,6 +1047,23 @@ pub fn create_change_request(
     ))
 }
 
+/// The open pull requests the account reviewed, across every repository, in
+/// one search (the hub's "since your review"): each with the account's
+/// reviews, its last 100 commits and last 50 comments. `viewer` names whose.
+const REVIEWED_QUERY: &str = "query { viewer { login } search(query: \"is:pr is:open reviewed-by:@me archived:false\", type: ISSUE, first: 50) { nodes { ... on PullRequest { url number title repository { nameWithOwner } author { login } latestReviews(first: 30) { nodes { author { login } state submittedAt } } commits(last: 100) { nodes { commit { committedDate } } } comments(last: 50) { nodes { author { login } createdAt } } } } } }";
+
+/// One `gh` for every repository; `login` only for an account that is not
+/// the CLI's active one (it costs two more calls for its token).
+pub fn reviewed_pull_requests_json(host: &str, login: Option<&str>) -> Result<Value, String> {
+    let query = format!("query={REVIEWED_QUERY}");
+    run_hub_gh_json(
+        &std::env::temp_dir().to_string_lossy(),
+        host,
+        login,
+        &["api", "graphql", "--hostname", host, "-f", &query],
+    )
+}
+
 fn run_hub_gh_json(
     root: &str,
     host: &str,

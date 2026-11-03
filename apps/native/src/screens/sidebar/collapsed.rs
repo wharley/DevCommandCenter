@@ -151,7 +151,24 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         .child(expand)
         .children(code_column)
         .child(new_task)
-        .child(pull_requests)
+        .child(
+            // An amber dot while a reviewed pull request has news.
+            div()
+                .relative()
+                .child(pull_requests)
+                .when(sidebar.pr_news() > 0, |button| {
+                    button.child(
+                        div()
+                            .debug_selector(|| "rail-pull-requests-news".into())
+                            .absolute()
+                            .top(px(2.0))
+                            .right(px(2.0))
+                            .size(px(6.0))
+                            .rounded_full()
+                            .bg(crate::theme::tailwind::AMBER_500.hsla()),
+                    )
+                }),
+        )
         .child(notes)
         .children(super::agents::rail_buttons(sidebar, cx))
         .children(project_buttons.into_iter().flatten())

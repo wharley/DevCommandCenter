@@ -60,6 +60,7 @@ pub fn run() {
         crate::screens::file_view::bind_keys(cx);
         crate::screens::annotation::bind_keys(cx);
         crate::ui::Toaster::init(cx);
+        crate::data::pr_news::PrNews::init(cx);
         cx.on_app_quit(|_| {
             crate::data::host::shutdown();
             async {}

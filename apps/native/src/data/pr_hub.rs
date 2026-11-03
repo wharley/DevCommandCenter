@@ -49,6 +49,42 @@ pub struct Item {
     pub linked_workspace_id: Option<String>,
 }
 
+/// `PullRequestHubSinceReview`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SinceViewerReview {
+    pub reviewed_at: String,
+    pub commits: u32,
+    /// The author's comments on it.
+    pub replies: u32,
+    pub last_activity: Option<String>,
+}
+
+/// `PullRequestHubReviewed`: an open pull request the person reviewed, from
+/// one search across every repository.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Reviewed {
+    pub url: String,
+    pub number: u32,
+    /// `owner/name`
+    pub repository: String,
+    pub title: String,
+    pub author: Option<String>,
+    /// The person's latest review: `APPROVED`, `CHANGES_REQUESTED`,
+    /// `COMMENTED` or `DISMISSED`.
+    pub state: String,
+    pub since: SinceViewerReview,
+}
+
+/// `PullRequestHubReviewedOutput`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ReviewedList {
+    pub items: Vec<Reviewed>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Warning {
@@ -133,16 +169,17 @@ pub struct Commit {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Filter {
+    /// Waiting on the person's review, or reviewed by them: what needs them
+    /// comes first, so it is the tab the hub opens on.
     #[default]
-    All,
-    /// Waiting on the person's review.
     Reviewing,
     /// Opened by the person.
     Mine,
+    All,
 }
 
 impl Filter {
-    pub const ALL: [Filter; 3] = [Filter::All, Filter::Reviewing, Filter::Mine];
+    pub const ALL: [Filter; 3] = [Filter::Reviewing, Filter::Mine, Filter::All];
 
     pub fn key(self) -> &'static str {
         match self {
@@ -154,14 +191,19 @@ impl Filter {
 }
 
 /// `filteredItems`: the filter, then the search over title, repository,
-/// author and branch.
-pub fn filtered<'a>(items: &'a [Item], filter: Filter, search: &str) -> Vec<&'a Item> {
+/// author and branch. `reviewed`: the person reviewed it ("Revisando").
+pub fn filtered<'a>(
+    items: &'a [Item],
+    filter: Filter,
+    search: &str,
+    reviewed: impl Fn(&Item) -> bool,
+) -> Vec<&'a Item> {
     let needle = search.trim().to_lowercase();
     items
         .iter()
         .filter(|item| match filter {
             Filter::All => true,
-            Filter::Reviewing => item.review_requested_for_viewer,
+            Filter::Reviewing => item.review_requested_for_viewer || reviewed(item),
             Filter::Mine => item.created_by_viewer,
         })
         .filter(|item| {
@@ -264,6 +306,17 @@ impl DesktopApi {
         )?)
     }
 
+    /// The open pull requests the person reviewed and what came since: one
+    /// search (one `gh`) for every repository.
+    pub fn pr_hub_reviewed(&self) -> Result<ReviewedList, ApiError> {
+        decode(self.request_waiting(
+            "POST",
+            "/api/v1/pull-request-hub/reviewed",
+            Some(&json!({})),
+            FORGE_WAIT,
+        )?)
+    }
+
     /// `pullRequestHubDetail`; `include_code` reads the patches too.
     pub fn pr_hub_detail(&self, item: &Item, include_code: bool) -> Result<Detail, ApiError> {
         decode(self.request_waiting(
@@ -344,16 +397,19 @@ mod tests {
             item("1", "Fix login", true, false),
             item("2", "Docs", false, true),
         ];
-        assert_eq!(filtered(&items, Filter::All, "").len(), 2);
-        assert_eq!(filtered(&items, Filter::Reviewing, "")[0].id, "1");
-        assert_eq!(filtered(&items, Filter::Mine, "")[0].id, "2");
-        assert_eq!(filtered(&items, Filter::All, "ANA").len(), 2);
+        assert_eq!(filtered(&items, Filter::All, "", |_| false).len(), 2);
         assert_eq!(
-            filtered(&items, Filter::All, "login").len(),
+            filtered(&items, Filter::Reviewing, "", |_| false)[0].id,
+            "1"
+        );
+        assert_eq!(filtered(&items, Filter::Mine, "", |_| false)[0].id, "2");
+        assert_eq!(filtered(&items, Filter::All, "ANA", |_| false).len(), 2);
+        assert_eq!(
+            filtered(&items, Filter::All, "login", |_| false).len(),
             2,
             "the branch counts"
         );
-        assert_eq!(filtered(&items, Filter::All, "docs")[0].id, "2");
+        assert_eq!(filtered(&items, Filter::All, "docs", |_| false)[0].id, "2");
     }
 
     #[test]

@@ -43,7 +43,23 @@ struct Entry {
     primary: bool,
     current: bool,
     count: usize,
+    /// The count needs the person (amber).
+    urgent: bool,
     event: SidebarEvent,
+}
+
+impl Sidebar {
+    /// The reviewed pull requests with news, beside "Pull Requests".
+    pub fn set_pr_news(&mut self, count: usize, cx: &mut Context<Self>) {
+        if self.pr_news != count {
+            self.pr_news = count;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn pr_news(&self) -> usize {
+        self.pr_news
+    }
 }
 
 pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
@@ -59,6 +75,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
             primary: true,
             current: current == Some(NavPage::NewTask),
             count: 0,
+            urgent: false,
             event: SidebarEvent::NewTask,
         },
         Entry {
@@ -69,7 +86,8 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
             label: cx.t("sidebar.pullRequests"),
             primary: false,
             current: current == Some(NavPage::PullRequests),
-            count: 0,
+            count: sidebar.pr_news,
+            urgent: true,
             event: SidebarEvent::OpenPullRequests,
         },
         Entry {
@@ -81,6 +99,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
             primary: false,
             current: false,
             count: sidebar.state.data.open_notes,
+            urgent: false,
             event: SidebarEvent::OpenNotes,
         },
     ];
@@ -115,6 +134,20 @@ fn row(entry: Entry, cx: &mut Context<Sidebar>) -> gpui::AnyElement {
         colors.muted_foreground
     };
     let hover_text = colors.foreground;
+    let (count_bg, count_fg) = if entry.urgent {
+        let amber = if theme.appearance == crate::theme::Appearance::Dark {
+            crate::theme::tailwind::AMBER_400.hsla()
+        } else {
+            crate::theme::tailwind::AMBER_600.hsla()
+        };
+        (
+            crate::theme::tailwind::AMBER_500.hsla().opacity(0.14),
+            amber,
+        )
+    } else {
+        (colors.foreground.opacity(0.05), text)
+    };
+    let count_id = format!("{}-count", entry.id);
     let event = entry.event;
     let icon = Icon::new(entry.icon).stroke(entry.stroke);
     let icon = match entry.icon_color {
@@ -150,10 +183,12 @@ fn row(entry: Entry, cx: &mut Context<Sidebar>) -> gpui::AnyElement {
         .when(entry.count > 0, |row| {
             row.child(
                 div()
+                    .debug_selector(move || count_id)
                     .ml_auto()
                     .px(px(6.0))
                     .rounded_full()
-                    .bg(colors.foreground.opacity(0.05))
+                    .bg(count_bg)
+                    .text_color(count_fg)
                     .text_size(px(10.0))
                     .font_features(tabular_nums())
                     .child(entry.count.to_string()),

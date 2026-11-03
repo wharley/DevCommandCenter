@@ -80,8 +80,9 @@ fn the_hub_lists_filters_and_reads_a_pull_request(cx: &mut TestAppContext) {
         hub.refresh(cx);
     });
     cx.run_until_parked();
+    // "Revisando" opens first: only what needs the person.
     assert!(cx.debug_bounds("pr-card-pr-1").is_some());
-    assert!(cx.debug_bounds("pr-card-pr-2").is_some());
+    assert!(cx.debug_bounds("pr-card-pr-2").is_none());
     assert_eq!(
         hub.read_with(cx, |hub, _| hub.selected.clone()).as_deref(),
         Some("pr-1"),
@@ -146,8 +147,8 @@ fn narrow_shows_the_list_or_the_detail(cx: &mut TestAppContext) {
         crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
         crate::ui::text_input::bind_keys(cx);
     });
-    let list = json!({ "items": [item("pr-1", 1, "Fix login", false, false)], "warnings": [] })
-        .to_string();
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
     let detail = json!({ "body": null, "comments": [], "checks": [] }).to_string();
     let (port, _desktop) = fake_desktop_routes(vec![
         ("/api/v1/pull-request-hub/list", 200, list),

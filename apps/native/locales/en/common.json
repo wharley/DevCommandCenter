@@ -808,6 +808,12 @@
     }
   },
   "pullRequests": {
+    "myReview": {
+      "approved": "You approved",
+      "changesRequested": "You requested changes",
+      "commented": "You commented",
+      "dismissed": "Your review was dismissed"
+    },
     "reviewerOffer": "May I review this PR?",
     "title": "Pull Requests",
     "subtitle": "Every project, without creating a task",

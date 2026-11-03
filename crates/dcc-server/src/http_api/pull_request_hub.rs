@@ -16,6 +16,7 @@ use dcc_tauri::commands::session_commands::{self, RunPullRequestReviewAgentInput
 pub(super) fn routes() -> Router<HttpState> {
     Router::new()
         .route("/api/v1/pull-request-hub/list", post(list))
+        .route("/api/v1/pull-request-hub/reviewed", post(reviewed))
         .route("/api/v1/pull-request-hub/detail", post(detail))
         .route("/api/v1/pull-request-hub/comment", post(comment))
         .route("/api/v1/pull-request-hub/merge", post(merge))
@@ -60,6 +61,15 @@ async fn list(
     Json(input): Json<PullRequestHubListInput>,
 ) -> Result<Json<Value>, HttpApiError> {
     reply(forge_commands::pull_request_hub_list_with_state(&backend.workspace, input).await)
+}
+
+/// The open pull requests the person reviewed, with what came since: one
+/// search, for the app's count beside "Pull Requests".
+async fn reviewed(State(backend): State<Arc<HttpBackend>>) -> Result<Json<Value>, HttpApiError> {
+    reply(
+        dcc_tauri::commands::pr_hub_since::pull_request_hub_reviewed_with_state(&backend.workspace)
+            .await,
+    )
 }
 
 async fn detail(

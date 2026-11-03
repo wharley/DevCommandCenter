@@ -22,6 +22,7 @@ mod merge;
 mod notes;
 mod onboarding;
 mod palette;
+mod pr_watch;
 mod quick_open;
 mod regions;
 mod session_search;
@@ -169,6 +170,7 @@ pub struct Shell {
     browser_approvals: Entity<crate::screens::browser::approval::BrowserApprovals>,
     /// "Atualização dos agentes", top right while a CLI has a newer release.
     cli_updates: Entity<cli_updates::CliUpdates>,
+    _pr_watch: Entity<pr_watch::PrWatch>,
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
@@ -315,6 +317,10 @@ impl Shell {
         Self {
             onboarding: None,
             cli_updates: cx.new(cli_updates::CliUpdates::new),
+            _pr_watch: {
+                let sidebar = sidebar.clone();
+                cx.new(|cx| pr_watch::PrWatch::new(sidebar, cx))
+            },
             notes,
             _notes: notes_follow,
             delivery,

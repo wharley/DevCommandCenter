@@ -35,6 +35,32 @@ fn the_rail_marks_only_the_tasks_that_need_the_person(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("rail-task-dot-w-ready").is_none());
 }
 
+/// Reviewed pull requests with news: a count beside "Pull Requests", a dot
+/// on the rail's icon; none without news.
+#[gpui::test]
+fn pull_requests_with_news_are_counted_open_and_dotted_collapsed(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    for collapsed in [false, true] {
+        let seen = dir.path().join(format!("seen-{collapsed}.json"));
+        let (sidebar, cx) =
+            cx.add_window_view(|_, cx| Sidebar::new(collapsed, false, false, seen, cx));
+        let mark = if collapsed {
+            "rail-pull-requests-news"
+        } else {
+            "nav-pull-requests-count"
+        };
+        cx.run_until_parked();
+        assert!(cx.debug_bounds(mark).is_none(), "{mark}: no news");
+        sidebar.update(cx, |sidebar, cx| sidebar.set_pr_news(2, cx));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds(mark).is_some(), "{mark}");
+    }
+}
+
 /// The rail drawn by Metal, saved to look at:
 /// `DCC_RAIL_PICTURE=/tmp/x.png cargo test rail_picture -- --ignored`.
 #[test]

@@ -255,6 +255,7 @@ impl PrHub {
                                     .text_color(colors.foreground)
                                     .child(item.title.clone()),
                             )
+                            .children(review_row(item, cx))
                             .child(
                                 div()
                                     .mt(px(8.0))
@@ -485,4 +486,67 @@ impl PrHub {
             }))
             .into_any_element()
     }
+}
+
+/// Under the title of a pull request the person reviewed: their latest
+/// review ("Você aprovou"), so they know they reviewed it, and what came
+/// since ("2 commits novos · @daniel respondeu no PR") until they open it
+/// again (amber: it needs them).
+fn review_row(item: &Item, cx: &mut Context<PrHub>) -> Option<AnyElement> {
+    let state = crate::data::pr_news::my_review(item, cx)?;
+    let dark = cx.theme().appearance == crate::theme::Appearance::Dark;
+    let pick = |light: tw::Oklch, darker: tw::Oklch| {
+        if dark { light.hsla() } else { darker.hsla() }
+    };
+    let (key, color) = match state.as_str() {
+        "APPROVED" => ("approved", pick(tw::EMERALD_400, tw::EMERALD_600)),
+        "CHANGES_REQUESTED" => ("changesRequested", pick(tw::RED_400, tw::RED_600)),
+        "DISMISSED" => ("dismissed", cx.theme().colors.muted_foreground),
+        _ => ("commented", cx.theme().colors.muted_foreground),
+    };
+    let id = item.id.clone();
+    let mine = div()
+        .debug_selector(move || format!("pr-my-review-{id}"))
+        .flex_none()
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(color.opacity(0.3))
+        .px(px(6.0))
+        .py(px(1.0))
+        .text_size(px(10.0))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(color)
+        .child(cx.t(&format!("pullRequests.myReview.{key}")));
+    let news = crate::data::pr_news::is_new(item, cx)
+        .then(|| crate::data::pr_news::item_news_text(item, cx))
+        .flatten()
+        .map(|text| {
+            let amber = pick(tw::AMBER_400, tw::AMBER_600);
+            let id = item.id.clone();
+            div()
+                .debug_selector(move || format!("pr-news-{id}"))
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .rounded(px(6.0))
+                .bg(tw::AMBER_500.hsla().opacity(0.1))
+                .px(px(6.0))
+                .py(px(2.0))
+                .text_size(px(10.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(amber)
+                .child(div().flex_none().size(px(6.0)).rounded_full().bg(amber))
+                .child(div().min_w_0().truncate().child(text))
+        });
+    Some(
+        div()
+            .mt(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(mine)
+            .children(news)
+            .into_any_element(),
+    )
 }

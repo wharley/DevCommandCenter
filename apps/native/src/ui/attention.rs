@@ -27,6 +27,21 @@ pub fn request_attention(title: &str, body: &str) {
     let _ = (title, body);
 }
 
+/// A system notification while the person is in another app, without
+/// bouncing the Dock: news that can wait, unlike a waiting agent.
+pub fn notify_away(title: &str, body: &str) {
+    #[cfg(not(test))]
+    {
+        if app_is_active() {
+            return;
+        }
+        let (title, body) = clipped(title, body);
+        std::thread::spawn(move || notify(&title, &body));
+    }
+    #[cfg(test)]
+    let _ = (title, body);
+}
+
 #[cfg(all(target_os = "macos", not(test)))]
 fn app_is_active() -> bool {
     use objc2::MainThreadMarker;

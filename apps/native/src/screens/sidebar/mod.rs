@@ -115,6 +115,8 @@ pub struct Sidebar {
     mascot_frame: bool,
     /// The page on screen a navigation row stands for.
     current_page: Option<NavPage>,
+    /// Pull requests reviewed that got news since (`PrNews`).
+    pr_news: usize,
     /// A task just created: opened as soon as the list has it.
     pending_open: Option<String>,
     /// The first load opens the first task, like the desktop does.
@@ -191,6 +193,7 @@ impl Sidebar {
             pieces: piece::Pieces::default(),
             mascot_frame: false,
             current_page: None,
+            pr_news: 0,
             pending_open: None,
             opened_first: false,
             unseen_results: HashSet::new(),

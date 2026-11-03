@@ -808,6 +808,12 @@
     }
   },
   "pullRequests": {
+    "myReview": {
+      "approved": "Você aprovou",
+      "changesRequested": "Você pediu alterações",
+      "commented": "Você comentou",
+      "dismissed": "Sua revisão foi descartada"
+    },
     "reviewerOffer": "Posso revisar este PR?",
     "title": "Pull Requests",
     "subtitle": "Todos os projetos, sem criar uma tarefa",

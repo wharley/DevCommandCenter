@@ -81,7 +81,7 @@ impl Shell {
     /// "Pull Requests" from the sidebar: read again each time it opens.
     pub(super) fn open_pull_requests(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match &self.pr_hub {
-            Some((hub, ..)) => hub.update(cx, |hub, cx| hub.refresh(cx)),
+            Some((hub, ..)) => hub.update(cx, |hub, cx| hub.reopen(cx)),
             None => {
                 let hub = cx.new(|cx| PrHub::new(window, cx));
                 let composer = self.conversation.read(cx).composer.clone();

@@ -1907,6 +1907,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/conversation-rewind/prepare",
             "POST /api/v1/conversation-rewind/execute",
             "POST /api/v1/pull-request-hub/list",
+            "POST /api/v1/pull-request-hub/reviewed",
             "POST /api/v1/pull-request-hub/detail",
             "POST /api/v1/pull-request-hub/comment",
             "POST /api/v1/pull-request-hub/merge",
