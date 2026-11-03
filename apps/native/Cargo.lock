@@ -1622,7 +1622,7 @@ dependencies = [
 
 [[package]]
 name = "dcc-native"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -1713,7 +1713,7 @@ dependencies = [
 
 [[package]]
 name = "dcc-server"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "axum",
