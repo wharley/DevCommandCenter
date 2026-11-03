@@ -180,7 +180,17 @@ jobs:
           ditto "${APP}" "${staging}/Dev Command Center.app"
           ln -s /Applications "${staging}/Applications"
           dmg="${out}/Dev.Command.Center_${VERSION}_${ARCH}.dmg"
-          hdiutil create -volname "Dev Command Center" -srcfolder "${staging}" -ov -format UDZO "${dmg}"
+          # The runner's XProtect scan sometimes holds the new image ("Resource
+          # busy"); a later attempt goes through.
+          for attempt in 1 2 3 4 5; do
+            if hdiutil create -volname "Dev Command Center" -srcfolder "${staging}" -ov -format UDZO "${dmg}"; then
+              break
+            fi
+            if [ "${attempt}" = 5 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           codesign --force --timestamp --sign "${APPLE_SIGNING_IDENTITY}" "${dmg}"
           scripts/notarize-macos.sh "${dmg}"
           # The landing page links releases/latest/download/Dev.Command.Center_<arch>.dmg.
