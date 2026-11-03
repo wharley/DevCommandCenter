@@ -147,7 +147,7 @@ impl HeadlessCliProviderAdapter {
     }
 
     fn turn_command(&self, cfg: &SessionConfig) -> Result<Command> {
-        let mut command = Command::new(self.runtime_binary(cfg)?);
+        let mut command = crate::priority::agent_command(self.runtime_binary(cfg)?);
         command.stdin(Stdio::null());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());

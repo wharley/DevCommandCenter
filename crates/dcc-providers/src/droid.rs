@@ -124,7 +124,7 @@ impl DroidProvider {
     }
 
     fn turn_command(&self) -> Command {
-        let mut command = Command::new(&self.binary);
+        let mut command = crate::priority::agent_command(&self.binary);
         command.stdin(Stdio::null());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());

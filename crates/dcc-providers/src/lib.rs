@@ -29,6 +29,7 @@ pub mod headless_cli;
 mod cli_model_lists;
 pub mod cli_updates;
 pub mod model_discovery;
+pub mod priority;
 #[cfg(all(test, unix))]
 mod test_cli;
 

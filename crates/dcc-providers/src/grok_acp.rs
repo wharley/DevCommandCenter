@@ -234,7 +234,7 @@ impl GrokAcpAdapter {
     }
 
     async fn start_runtime(&self, cfg: SessionConfig) -> Result<SessionHandle> {
-        let mut command = Command::new("grok");
+        let mut command = crate::priority::agent_command("grok");
         command.arg("--no-auto-update");
         if let Some(model) = cfg
             .model

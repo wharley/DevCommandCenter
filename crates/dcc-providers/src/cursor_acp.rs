@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, Command},
+    process::{Child, ChildStdin},
     sync::{broadcast, oneshot, Mutex},
     time::timeout,
 };
@@ -480,7 +480,7 @@ impl CursorAcpAdapter {
                 "Cursor ACP bridge requires a DCC MCP projection".to_string(),
             ));
         }
-        let mut command = Command::new(&self.binary);
+        let mut command = crate::priority::agent_command(&self.binary);
         command.arg("acp");
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());

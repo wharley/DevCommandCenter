@@ -391,7 +391,7 @@ impl AntigravityAcpAdapter {
             })?;
         let allowed_roots = canonical_roots(&cwd, &cfg.additional_working_directories)?;
 
-        let mut command = Command::new(&executable);
+        let mut command = crate::priority::agent_command(&executable);
         #[cfg(target_os = "linux")]
         command.arg("--uid=");
         command

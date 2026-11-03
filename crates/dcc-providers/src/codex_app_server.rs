@@ -3309,7 +3309,7 @@ impl CodexAppServerAdapter {
         cfg: &SessionConfig,
         metadata: &CodexRuntimeMetadata,
     ) -> std::result::Result<SessionHandle, CodexStartError> {
-        let mut cmd = Command::new(&self.binary);
+        let mut cmd = crate::priority::agent_command(&self.binary);
         let max_concurrent_subagents = cfg
             .provider_runtime
             .as_ref()

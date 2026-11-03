@@ -2346,7 +2346,7 @@ impl CliProviderAdapter {
     }
 
     fn interactive_command(&self) -> Command {
-        let mut command = Command::new(&self.binary);
+        let mut command = crate::priority::agent_command(&self.binary);
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::null());

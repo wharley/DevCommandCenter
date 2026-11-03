@@ -97,17 +97,17 @@ fn claude_sidecar_command(
                     .to_string(),
             ));
         }
-        return Ok(Command::new(path));
+        return Ok(crate::priority::agent_command(path));
     }
     // Tauri stages Node placeholders beside the debug executable. Only an
     // explicit override may take precedence over the development source.
     if let Some(script) = development_script {
-        let mut command = Command::new("node");
+        let mut command = crate::priority::agent_command("node");
         command.arg(script);
         return Ok(command);
     }
     if let Some(binary) = bundled_binary {
-        return Ok(Command::new(binary));
+        return Ok(crate::priority::agent_command(binary));
     }
     Err(CoreError::Provider(
         "The DCC Claude integration is missing. Reinstall DCC to repair it.".to_string(),
