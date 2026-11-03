@@ -99,7 +99,7 @@ fn copied_files_are_attached_where_the_field_takes_them(cx: &mut TestAppContext)
     cx.run_until_parked();
     cx.write_to_clipboard(copied.clone());
     cx.simulate_keystrokes("cmd-v");
-    assert_eq!(pasted.borrow().as_slice(), [shot.clone()]);
+    assert_eq!(pasted.borrow().as_slice(), std::slice::from_ref(&shot));
     assert_eq!(area.read_with(cx, |area, _| area.text().to_string()), "");
 
     // Any other field still writes the path.

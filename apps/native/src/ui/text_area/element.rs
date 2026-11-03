@@ -76,6 +76,23 @@ impl DisplayMap {
     }
 }
 
+impl super::Layout {
+    /// Where a chip or a link's icon at a text `offset` is drawn: on the row
+    /// that holds its spacers. When a soft wrap falls right before them, the
+    /// offset's own position is the end of the row above, past the field's
+    /// edge, and the spacers left on the next row would read as an indent.
+    pub(super) fn insert_origin(&self, offset: usize) -> gpui::Point<Pixels> {
+        let at = self.position_for(offset);
+        let first_spacer = self.map.to_display(offset) + SPACER.len_utf8();
+        let next = self.display_position(first_spacer);
+        if next.y > at.y {
+            point(px(0.0), next.y)
+        } else {
+            at
+        }
+    }
+}
+
 pub struct LayoutState {
     text: SharedString,
     runs: Vec<TextRun>,
@@ -480,7 +497,7 @@ impl Element for TextAreaElement {
             .into_iter()
             .map(|(start, favicon)| {
                 let mut icon = links::icon(favicon, cx);
-                let at = layout.position_for(start);
+                let at = layout.insert_origin(start);
                 let at = point(origin.x + at.x, origin.y + at.y - scroll);
                 links::prepaint_icon(&mut icon, at, line_height, window, cx);
                 icon
@@ -544,7 +561,7 @@ impl Element for TextAreaElement {
                 icon.paint(window, cx);
             }
             for (offset, data, laid) in &state.chips {
-                let at = layout.position_for(*offset);
+                let at = layout.insert_origin(*offset);
                 let origin = point(bounds.left() + at.x, bounds.top() + at.y - scroll);
                 let close = chip::paint(data, laid, origin, line_height, window, cx);
                 layout.chip_closes.push((close, *offset));

@@ -11,6 +11,8 @@ mod handler;
 mod keys_tests;
 pub(crate) mod links;
 mod lists;
+#[cfg(test)]
+mod wrap_tests;
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -184,7 +186,12 @@ impl Layout {
 
     /// The caret's top-left for a text `offset`, in content coordinates.
     fn position_for(&self, offset: usize) -> Point<Pixels> {
-        let offset = self.map.to_display(offset);
+        self.display_position(self.map.to_display(offset))
+    }
+
+    /// The top-left for an `offset` in the display copy. At a soft wrap it is
+    /// the end of the row above, where a caret belongs.
+    fn display_position(&self, offset: usize) -> Point<Pixels> {
         match self.line_for_offset(offset) {
             Some((start, line, top)) => {
                 let position = line
