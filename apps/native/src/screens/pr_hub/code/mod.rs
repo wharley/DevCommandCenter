@@ -19,13 +19,17 @@ mod view;
 
 use std::time::Instant;
 
-use gpui::{AppContext, Context, Entity, Focusable, Subscription, Window};
+use gpui::{AppContext, Context, Entity, Focusable, SharedString, Subscription, Window};
 
 use super::{DETAIL_FRESH, PrHub, message};
 use crate::data::pr_hub::Detail;
 use crate::data::pr_review::{DraftComment, InlineComment, ReviewEvent, draft_key};
 use crate::i18n::Translate;
 use crate::ui::{TextArea, TextAreaEvent};
+
+/// The review's fields (comment, reply, review, the Reviewer's instruction)
+/// scroll inside past this height.
+const FIELD_MAX_HEIGHT: f32 = 200.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tab {
@@ -75,12 +79,23 @@ impl CodeReview {
     pub fn new(window: &mut Window, cx: &mut Context<PrHub>) -> (Self, Vec<Subscription>) {
         let reply_placeholder = cx.t("pullRequests.code.replyPlaceholder");
         let body_placeholder = cx.t("pullRequests.code.reviewPlaceholders.comment");
-        let draft = cx.new(|cx| TextArea::new(window, cx));
-        let reply = cx.new(|cx| TextArea::new(window, cx).with_placeholder(reply_placeholder));
-        let body = cx.new(|cx| TextArea::new(window, cx).with_placeholder(body_placeholder));
+        // Past `FIELD_MAX_HEIGHT` each field scrolls inside, so a long text
+        // (the Reviewer's review) never pushes its send button off the window.
+        let field =
+            |placeholder: Option<SharedString>, window: &mut Window, cx: &mut Context<PrHub>| {
+                cx.new(|cx| {
+                    let area = TextArea::new(window, cx).with_max_height(FIELD_MAX_HEIGHT);
+                    match placeholder {
+                        Some(placeholder) => area.with_placeholder(placeholder),
+                        None => area,
+                    }
+                })
+            };
+        let draft = field(None, window, cx);
+        let reply = field(Some(reply_placeholder), window, cx);
+        let body = field(Some(body_placeholder), window, cx);
         let instruction_placeholder = cx.t("pullRequests.code.agentInstructionPlaceholder");
-        let instruction =
-            cx.new(|cx| TextArea::new(window, cx).with_placeholder(instruction_placeholder));
+        let instruction = field(Some(instruction_placeholder), window, cx);
         // Enter is a new line in each; Escape drops the line comment.
         let newline = |area: Entity<TextArea>, cx: &mut Context<PrHub>| {
             area.update(cx, |area, cx| area.insert("\n", cx))

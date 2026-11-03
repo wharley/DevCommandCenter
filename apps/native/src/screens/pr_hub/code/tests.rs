@@ -250,3 +250,60 @@ fn the_code_tab_says_what_changed_since_the_review(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(hub.read_with(cx, |hub, _| hub.tab), Tab::Summary);
 }
+
+/// The Reviewer's review is long: the field scrolls inside and its send
+/// button stays in a short window.
+#[gpui::test]
+fn a_long_review_keeps_its_send_button_in_the_window(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let detail = json!({
+        "body": null, "comments": [], "checks": [], "inlineComments": [],
+        "files": [
+            { "path": "src/login.rs", "status": "modified", "additions": 1, "deletions": 1,
+              "patch": "@@ -1,1 +1,1 @@\n-    old();\n+    new();" },
+        ],
+        "reviewCapabilities": { "inlineComments": true, "approve": true, "requestChanges": true,
+            "replyToThreads": true, "resolveThreads": true },
+        "mergeCapabilities": null,
+    })
+    .to_string();
+    let detail_route = || ("/api/v1/pull-request-hub/detail", 200, detail.clone());
+    let (port, _desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list),
+        detail_route(),
+        detail_route(),
+        detail_route(),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1100.0), px(640.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    let bounds = cx.debug_bounds("pr-tab-code").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    hub.update(cx, |hub, cx| {
+        let body = hub.review.body.clone();
+        body.update(cx, |area, cx| {
+            area.set_text(&"Uma linha da revisão do Revisor.\n".repeat(80), cx)
+        });
+    });
+    cx.run_until_parked();
+    let field = cx.debug_bounds("pr-review-body").unwrap();
+    assert!(field.size.height <= px(220.0), "{:?}", field.size);
+    let send = cx.debug_bounds("pr-review-send").unwrap();
+    assert!(send.bottom() <= px(640.0), "send at {:?}", send);
+    assert!(
+        cx.debug_bounds("pr-code-files").is_some(),
+        "the files stay above"
+    );
+}
