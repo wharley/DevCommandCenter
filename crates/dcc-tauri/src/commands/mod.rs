@@ -16,5 +16,6 @@ pub mod workspace_attention;
 pub mod workspace_cleanup;
 pub mod workspace_commands;
 pub mod workspace_delivery;
+pub mod delivery_draft;
 pub(crate) mod workspace_support;
 

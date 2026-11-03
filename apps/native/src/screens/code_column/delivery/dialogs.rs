@@ -10,6 +10,7 @@ use gpui::{
 };
 
 use super::super::CodeColumn;
+use super::draft::{DraftField, draft_label};
 use super::{Confirm, PreviewOrigin};
 use crate::i18n::{Args, Translate};
 use crate::theme::{ActiveTheme, fonts};
@@ -145,7 +146,12 @@ fn preview(
                 .flex_col()
                 .gap(px(8.0))
                 .py(px(12.0))
-                .child(label(cx.t("commit.preview.label")))
+                .child(draft_label(
+                    cx.t("commit.preview.label"),
+                    DraftField::CommitSubject,
+                    column,
+                    cx,
+                ))
                 .child(field(
                     preview.subject.clone().into_any_element(),
                     &subject_focus,
@@ -154,7 +160,12 @@ fn preview(
                     window,
                     cx,
                 ))
-                .child(label(cx.t("commit.preview.bodyLabel")))
+                .child(draft_label(
+                    cx.t("commit.preview.bodyLabel"),
+                    DraftField::CommitBody,
+                    column,
+                    cx,
+                ))
                 .child(field(
                     preview.body.clone().into_any_element(),
                     &body_focus,

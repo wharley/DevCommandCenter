@@ -12,6 +12,9 @@ mod dialogs;
 mod dock;
 #[cfg(test)]
 mod dock_tests;
+mod draft;
+#[cfg(test)]
+mod draft_tests;
 mod header;
 mod overlay;
 mod request;
@@ -83,6 +86,8 @@ pub(crate) struct Delivery {
     pub preparing: Option<bool>,
     /// "Criar PR" from the conversation's menu.
     pub request: Option<request::RequestDialog>,
+    /// The ✨ writing a field of either dialog.
+    pub drafting: Option<draft::Drafting>,
     /// The task completed after its merge, once.
     pub completed: Option<String>,
     /// `.dcc.toml`'s delivery policy and its before-merge checks, read with

@@ -630,6 +630,27 @@ impl DesktopApi {
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
     }
 
+    /// The ✨: the task's agent drafts one field (`commitSubject`,
+    /// `commitBody`, `requestTitle` or `requestBody`), agreeing with the
+    /// dialog's other one.
+    pub fn draft(
+        &self,
+        workspace_id: &str,
+        field: &str,
+        companion: Option<&str>,
+    ) -> Result<String, ApiError> {
+        let value = self.delivery(
+            workspace_id,
+            "draft",
+            &json!({ "field": field, "companion": companion }),
+        )?;
+        value
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| ApiError::Failed("no draft".into()))
+    }
+
     /// The reviewed commit, pushed unless the repository has no remote.
     pub fn commit_reviewed(
         &self,

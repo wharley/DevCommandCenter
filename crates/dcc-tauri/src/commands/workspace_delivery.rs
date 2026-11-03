@@ -195,9 +195,17 @@ pub struct DeliveryRequestInput {
     pub changes_token: Option<String>,
 }
 
-struct Target {
-    workspace: Workspace,
-    root: String,
+pub(crate) struct Target {
+    pub(crate) workspace: Workspace,
+    pub(crate) root: String,
+}
+
+/// The task by id and its folder (the worktree's, else the project's).
+pub(crate) async fn delivery_target(
+    state: &WorkspaceCommandState,
+    workspace_id: &str,
+) -> Result<Target, DeliveryError> {
+    target(state, workspace_id).await
 }
 
 async fn target(state: &WorkspaceCommandState, workspace_id: &str) -> Result<Target, DeliveryError> {

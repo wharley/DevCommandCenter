@@ -160,6 +160,9 @@ fn a_commit_without_a_remote_goes_through_its_preview(cx: &mut TestAppContext) {
         assert_eq!(preview.origin, PreviewOrigin::Dock { push: false });
         assert_eq!(preview.subject.read(cx).text(), "chore: update a");
     });
+    for sparkles in ["draft-commit-subject", "draft-commit-body"] {
+        assert!(cx.debug_bounds(sparkles).is_some(), "{sparkles} drawn");
+    }
     click(cx, "commit-preview-confirm");
     let sent = requests(server);
     assert_eq!(
@@ -254,6 +257,9 @@ fn create_request_takes_the_local_changes_as_a_draft(cx: &mut TestAppContext) {
         cx.debug_bounds("request-submit").is_some(),
         "the overlay draws it"
     );
+    for sparkles in ["draft-request-title", "draft-request-body"] {
+        assert!(cx.debug_bounds(sparkles).is_some(), "{sparkles} drawn");
+    }
     click(cx, "request-submit");
     let sent = requests(server);
     let lines: Vec<&str> = sent.iter().map(|(line, _)| line.as_str()).collect();

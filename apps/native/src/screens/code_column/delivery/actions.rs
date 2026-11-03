@@ -156,6 +156,7 @@ impl CodeColumn {
         if self.delivery.button() != CommitButtonStatus::Busy && !self.delivery.busy {
             self.delivery.preview = None;
             self.delivery.preparing = None;
+            self.delivery.drafting = None;
             cx.notify();
         }
     }
@@ -173,6 +174,7 @@ impl CodeColumn {
         let fingerprint = preview.fingerprint.clone();
         if let PreviewOrigin::Dock { push } = preview.origin {
             self.delivery.preview = None;
+            self.delivery.drafting = None;
             self.dock_commit(message, body, fingerprint, push, cx);
             return;
         }
@@ -292,6 +294,7 @@ impl CodeColumn {
                     Ok(Some(Outcome::Done(kind, text))) => {
                         Toaster::settle(toast, kind, text, None, cx);
                         column.delivery.preview = None;
+                        column.delivery.drafting = None;
                         column.settle_button(CommitButtonStatus::Done, cx);
                     }
                     Ok(Some(Outcome::Blocked)) => {
@@ -303,6 +306,7 @@ impl CodeColumn {
                             cx,
                         );
                         column.delivery.preview = None;
+                        column.delivery.drafting = None;
                         column.settle_button(CommitButtonStatus::Done, cx);
                     }
                     Ok(None) => {

@@ -6832,6 +6832,16 @@ mod tests {
         assert!(!preview["subject"].as_str().unwrap().is_empty());
         assert_eq!(git(&repo, &["diff", "--cached", "--name-only"]).trim(), "docs/guia.md");
 
+        // The ✨ asks the task's agent; a task without a conversation has none.
+        let (status, draft) = post_json(
+            &fixture.app,
+            &action("draft"),
+            json!({ "field": "commitSubject" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{draft}");
+        assert!(draft.to_string().contains("ainda não tem conversa"), "{draft}");
+
         // The person's edited message is what lands, pushed.
         let (status, body) = post_json(
             &fixture.app,

@@ -3980,6 +3980,11 @@
     "finish": "Concluir"
   },
   "commit": {
+    "draft": {
+      "write": "Escrever com IA",
+      "stop": "Parar",
+      "failed": "Não deu para escrever com IA"
+    },
     "merged": "Merged",
     "closed": "Closed",
     "default": "Commit",

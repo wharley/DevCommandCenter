@@ -14,14 +14,14 @@ use crate::test_support::{fake_desktop_routes, git, git_checkout, task_database}
 use crate::theme::{Theme, ThemePreference};
 use crate::ui::Toaster;
 
-struct Setup {
+pub(super) struct Setup {
     _db: tempfile::TempDir,
     server: std::thread::JoinHandle<Vec<(String, String)>>,
 }
 
 /// The column on "Mudanças" over `root`, its task in a database of its
 /// own, the desktop answering each step's route in turn.
-fn open<'a>(
+pub(super) fn open<'a>(
     cx: &'a mut TestAppContext,
     root: &std::path::Path,
     worktree: Option<&std::path::Path>,
@@ -57,14 +57,14 @@ fn ok(path: &'static str) -> (&'static str, u16, String) {
     (path, 200, r#"{"ok":true}"#.to_string())
 }
 
-const PREPARE: &str = "/api/v1/workspaces/w-1/delivery/prepare-commit";
+pub(super) const PREPARE: &str = "/api/v1/workspaces/w-1/delivery/prepare-commit";
 const COMMIT: &str = "/api/v1/workspaces/w-1/delivery/commit-reviewed";
 const MERGE: &str = "/api/v1/workspaces/w-1/delivery/merge";
 const COMPLETE: &str = "/api/v1/workspaces/w-1/delivery/complete";
 const PUSH: &str = "/api/v1/workspaces/w-1/delivery/push";
 const SYNC: &str = "/api/v1/workspaces/w-1/delivery/sync-base";
 
-fn requests(setup: Setup) -> Vec<(String, Value)> {
+pub(super) fn requests(setup: Setup) -> Vec<(String, Value)> {
     setup
         .server
         .join()
@@ -77,7 +77,7 @@ fn requests(setup: Setup) -> Vec<(String, Value)> {
         .collect()
 }
 
-fn toasts(cx: &mut gpui::VisualTestContext) -> Vec<String> {
+pub(super) fn toasts(cx: &mut gpui::VisualTestContext) -> Vec<String> {
     cx.update(|_, cx| Toaster::messages(cx))
 }
 

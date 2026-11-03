@@ -10,8 +10,9 @@ use gpui::{
 };
 
 use super::super::{CodeColumn, Loaded};
-use super::dialogs::{field, label};
+use super::dialogs::field;
 use super::dock::dock_failed;
+use super::draft::{DraftField, draft_label};
 use crate::data::desktop_api::{ChangeRequestContext, RequestInput};
 use crate::data::forge::ForgeContext;
 use crate::i18n::{Args, Translate};
@@ -141,6 +142,7 @@ impl CodeColumn {
             .is_some_and(|request| !request.sending)
         {
             self.delivery.request = None;
+            self.delivery.drafting = None;
             cx.notify();
         }
     }
@@ -200,6 +202,7 @@ impl CodeColumn {
                 match result {
                     Ok(()) => {
                         column.delivery.request = None;
+                        column.delivery.drafting = None;
                         let text = cx.t_with(
                             "composer.executionDock.createRequest.created",
                             &Args::default().with("requestLabel", label),
@@ -391,11 +394,12 @@ pub(super) fn request_dialog(
         .bg(colors.muted.opacity(0.2))
         .p(px(12.0))
     });
-    let draft_label = div()
+    let draft_check_label = div()
         .font_weight(FontWeight::MEDIUM)
         .child(cx.t("composer.executionDock.createRequest.draft"))
         .into_any_element();
-    let draft = check_row("request-draft", request.draft, true, draft_label, cx).items_center();
+    let draft =
+        check_row("request-draft", request.draft, true, draft_check_label, cx).items_center();
     let fields = div()
         .flex()
         .flex_col()
@@ -407,8 +411,11 @@ pub(super) fn request_dialog(
                 .flex()
                 .flex_col()
                 .gap(px(6.0))
-                .child(label(
+                .child(draft_label(
                     cx.t("composer.executionDock.createRequest.titleLabel"),
+                    DraftField::RequestTitle,
+                    column,
+                    cx,
                 ))
                 .child(title_field),
         )
@@ -417,8 +424,11 @@ pub(super) fn request_dialog(
                 .flex()
                 .flex_col()
                 .gap(px(6.0))
-                .child(label(
+                .child(draft_label(
                     cx.t("composer.executionDock.createRequest.descriptionLabel"),
+                    DraftField::RequestBody,
+                    column,
+                    cx,
                 ))
                 .child(body_field),
         )

@@ -9,6 +9,7 @@
 //! named by id; its folder comes from the database, never from the phone.
 //! Destructive steps (push, archive) are confirmed in the app.
 use super::*;
+use dcc_tauri::commands::delivery_draft::{self, DeliveryDraftInput};
 use dcc_tauri::commands::workspace_delivery::{
     self, DeliveryCommitInput, DeliveryError, DeliveryRequestInput, DeliveryReviewedCommitInput,
 };
@@ -100,6 +101,13 @@ pub(super) async fn act(
             workspace_delivery::delivery_prepare_commit(state, &backend.sessions, &workspace_id)
                 .await
                 .map(|suggestion| json!(suggestion))
+        }
+        // The ✨ beside a field of the commit or pull request dialog.
+        "draft" => {
+            let input: DeliveryDraftInput = body(&raw)?;
+            delivery_draft::delivery_draft(state, &backend.sessions, &workspace_id, input)
+                .await
+                .map(|draft| json!(draft))
         }
         "commit-reviewed" => {
             let input: DeliveryReviewedCommitInput = body(&raw)?;
