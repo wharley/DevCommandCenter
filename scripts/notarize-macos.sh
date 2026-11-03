@@ -67,10 +67,12 @@ fi
 echo "Stapling the notarization ticket..."
 # Stapling fetches the ticket from Apple's CDN, which can drop the connection
 # or not have the fresh ticket yet (v0.1.99 Intel: "network connection was
-# lost", error 68). The ticket is already issued, so retrying is safe.
+# lost", error 68). The ticket is already issued, so retrying is safe. The
+# validation asks the same CDN, so it is retried with the staple (v0.3.0 Intel
+# stapled, then lost the connection validating).
 staple_attempt=1
-until xcrun stapler staple "${target_path}"; do
-  if [[ "${staple_attempt}" -ge 5 ]]; then
+until xcrun stapler staple "${target_path}" && xcrun stapler validate "${target_path}"; do
+  if [[ "${staple_attempt}" -ge 8 ]]; then
     echo "Stapling failed after ${staple_attempt} attempts." >&2
     exit 1
   fi
@@ -78,7 +80,6 @@ until xcrun stapler staple "${target_path}"; do
   staple_attempt=$((staple_attempt + 1))
   sleep 30
 done
-xcrun stapler validate "${target_path}"
 
 echo "Assessing with Gatekeeper..."
 if [[ "${target_path}" == *.app ]]; then
