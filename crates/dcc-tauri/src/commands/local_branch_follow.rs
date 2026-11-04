@@ -37,30 +37,42 @@ type Window = (i64, i64);
 
 /// The folder's latest branch moves, newest first.
 fn checkouts(root: &str) -> Option<Vec<Checkout>> {
+    // `%gd` with `--date=unix` is `HEAD@{<when the move happened>}`; `%ct`
+    // would be the date of the commit it landed on, often days older.
     let output = run_git_output(
         root,
-        &["reflog", "show", "--format=%ct%x09%gs", "HEAD", "--"],
+        &[
+            "reflog",
+            "show",
+            "--date=unix",
+            "--format=%gd%x09%gs",
+            "HEAD",
+            "--",
+        ],
     )
     .ok()?;
     if !output.status.success() {
         return None;
     }
-    Some(
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| {
-                let (at, subject) = line.split_once('\t')?;
-                let moved = subject.strip_prefix("checkout: moving from ")?;
-                let (from, to) = moved.rsplit_once(" to ")?;
-                Some(Checkout {
-                    at: at.trim().parse().ok()?,
-                    from: from.to_string(),
-                    to: to.to_string(),
-                })
+    Some(parse_checkouts(&String::from_utf8_lossy(&output.stdout)))
+}
+
+fn parse_checkouts(reflog: &str) -> Vec<Checkout> {
+    reflog
+        .lines()
+        .filter_map(|line| {
+            let (selector, subject) = line.split_once('\t')?;
+            let at = selector.rsplit_once("@{")?.1.strip_suffix('}')?;
+            let moved = subject.strip_prefix("checkout: moving from ")?;
+            let (from, to) = moved.rsplit_once(" to ")?;
+            Some(Checkout {
+                at: at.trim().parse().ok()?,
+                from: from.to_string(),
+                to: to.to_string(),
             })
-            .take(MAX_CHECKOUTS)
-            .collect(),
-    )
+        })
+        .take(MAX_CHECKOUTS)
+        .collect()
 }
 
 fn seconds(at: &str) -> Option<i64> {
@@ -214,6 +226,39 @@ mod tests {
         assert!(!followed(&made, "develop", "dcc/fix", &own, &[]));
         assert!(!followed(&made, "main", "other", &own, &[]));
         assert!(!followed(&[], "main", "dcc/fix", &own, &[]));
+    }
+
+    #[test]
+    fn a_move_is_dated_when_it_happened_not_by_its_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let git = |args: &[&str], date: &str| {
+            let status = std::process::Command::new("git")
+                .args(["-c", "user.name=T", "-c", "user.email=t@example.com"])
+                .args(args)
+                .current_dir(root)
+                .env("GIT_AUTHOR_DATE", "@1000000000 +0000")
+                .env("GIT_COMMITTER_DATE", date)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        };
+        git(&["init", "-q", "-b", "main"], "@1000000000 +0000");
+        // A commit from long ago, then a branch made on it now: the reflog
+        // entry takes the committer date git is given at that moment.
+        git(
+            &["commit", "-q", "--allow-empty", "-m", "old"],
+            "@1000000000 +0000",
+        );
+        git(&["switch", "-q", "-c", "dcc/new"], "@1700000000 +0000");
+        assert_eq!(
+            checkouts(root).unwrap(),
+            [checkout(1_700_000_000, "main", "dcc/new")]
+        );
+        assert_eq!(
+            parse_checkouts("HEAD@{12}\tcommit: x\nHEAD@{5}\tcheckout: moving from a to b\n"),
+            [checkout(5, "a", "b")]
+        );
     }
 
     #[test]
