@@ -71,10 +71,9 @@ application icon and never replace the mark.
 
 | Asset | Purpose |
 | --- | --- |
-| [`src-tauri/icons/app-icon.svg`](../src-tauri/icons/app-icon.svg) | Master application icon with the dark squircle container |
-| [`public/dcc-glyph.svg`](../public/dcc-glyph.svg) | Standalone glyph for compact product UI |
-| [`public/dcc-mark.svg`](../public/dcc-mark.svg) | Web and documentation version of the complete mark |
-| `src-tauri/icons/` | Generated platform assets for macOS, Linux, Windows, Android, and iOS |
+| [`docs/assets/dcc-mark.svg`](assets/dcc-mark.svg) | Master of the complete mark with the dark squircle container, used in the documentation |
+| [`apps/native/assets/app-icon/`](../apps/native/assets/app-icon/) | The application icon the native app bundles (`icon.icns` for macOS, `icon.png`) |
+| [`apps/native/assets/dcc-glyph.svg`](../apps/native/assets/dcc-glyph.svg) | Standalone glyph for compact product UI |
 
 Use the complete mark for application icons, launchers, favicons, and prominent
 brand placement. Use the standalone glyph inside DCC when another rounded-square
@@ -85,13 +84,9 @@ change the proportions, or rely on glow to make the silhouette legible.
 
 ## Regenerating platform icons
 
-After changing the master SVG, regenerate the platform-specific assets with:
-
-```bash
-yarn tauri icon src-tauri/icons/app-icon.svg \
-  --output src-tauri/icons \
-  --ios-color '#05091C'
-```
+After changing the master SVG, export it again as the 512 px `icon.png` and the
+`icon.icns` in `apps/native/assets/app-icon/` (the macOS bundle copies
+`icon.icns`; build it with `iconutil` from an `.iconset`).
 
 Review at least the 32 px icon, the macOS Dock icon, and the standalone glyph in
 the sidebar before accepting a visual change.

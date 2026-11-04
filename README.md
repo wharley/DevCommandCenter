@@ -1,6 +1,6 @@
 <p align="center">
   <a href="docs/BRAND.md">
-    <img src="public/dcc-mark.svg" alt="Dev Command Center mark" width="112" height="112" />
+    <img src="docs/assets/dcc-mark.svg" alt="Dev Command Center icon" width="112" height="112" />
   </a>
 </p>
 
@@ -23,7 +23,7 @@ persistence in one native application (Rust and GPUI).
 > installed and authenticated CLIs. Install only the providers you want to use.
 > See [Provider setup](#provider-setup), including Antigravity's separate setup.
 
-![Dev Command Center running an agent task across multiple projects](docs/assets/dcc-workbench-running-task.png)
+![Dev Command Center: an agent checks a coupon on the iPhone simulator while other tasks run](docs/assets/dcc-native-workbench.png)
 
 ## Core capabilities
 
