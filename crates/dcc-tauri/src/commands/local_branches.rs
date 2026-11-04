@@ -180,6 +180,20 @@ async fn status(db: &Path, workspace: &Workspace) -> Result<LocalBranchesOutput,
         }
     }
     let has_conversation = has_conversation || bound.is_some();
+    // A branch its own agent moved to is the task's from its next message on
+    // (the guard rebinds it then): say so now instead of a mismatch.
+    if let (Some(expected), Some(branch)) = (bound.as_deref(), current.as_deref()) {
+        if expected != branch {
+            for session in session_ids(db, &workspace.id)? {
+                if super::local_branch_follow::agent_switched(db, &session, &root, expected, branch)
+                    .await
+                {
+                    bound = Some(branch.to_string());
+                    break;
+                }
+            }
+        }
+    }
     let task_branch = bound
         .or_else(|| current.clone())
         .unwrap_or_else(|| workspace.base_branch.clone());
@@ -1007,6 +1021,11 @@ mod tests {
                 .unwrap();
             git(&f.root, &["switch", "-c", "dcc/fix"]).unwrap();
             f.event_at(&session, 3, completed, at(1)).await.unwrap();
+            // Before the next message the composer already shows it as the
+            // task's branch, not a mismatch.
+            let shown = status(&f.db, &f.workspace).await.unwrap();
+            assert_eq!(shown.current_branch.as_deref(), Some("dcc/fix"));
+            assert_eq!(shown.task_branch, "dcc/fix");
             f.event(&session, 4, Fixture::started()).await.unwrap();
             let repo = SqliteWorkspaceRepo::open(&f.db).unwrap();
             assert_eq!(

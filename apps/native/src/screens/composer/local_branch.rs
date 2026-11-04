@@ -33,6 +33,7 @@ impl super::Composer {
             .clone()
             .or_else(|| context.base_branch.clone());
         let started = session.start.is_none() || session.running;
+        let running = session.running;
         if self
             .local_branch
             .as_ref()
@@ -42,7 +43,9 @@ impl super::Composer {
             self.local_branch = Some(cx.new(|cx| LocalBranchPicker::new(task_id, api, cx)));
         }
         if let Some(picker) = &self.local_branch {
-            picker.update(cx, |picker, cx| picker.set_state(fallback, started, cx));
+            picker.update(cx, |picker, cx| {
+                picker.set_state(fallback, started, running, cx)
+            });
         }
     }
 }
@@ -54,6 +57,8 @@ pub struct LocalBranchPicker {
     fallback: Option<String>,
     /// The conversation started (or its first turn is on its way).
     started: bool,
+    /// A turn of the conversation is running.
+    running: bool,
     data: Option<LocalBranchesOutput>,
     load_failed: bool,
     open: bool,
@@ -74,6 +79,7 @@ impl LocalBranchPicker {
             api,
             fallback: None,
             started: false,
+            running: false,
             data: None,
             load_failed: false,
             open: false,
@@ -93,15 +99,26 @@ impl LocalBranchPicker {
         &self.task_id
     }
 
-    /// What the conversation knows: its branch, and whether it started.
-    pub fn set_state(&mut self, fallback: Option<String>, started: bool, cx: &mut Context<Self>) {
-        if self.fallback == fallback && self.started == started {
+    /// What the conversation knows: its branch, whether it started and
+    /// whether a turn is running. A turn's start or end re-reads the branch:
+    /// its agent may have moved the folder, and a message rebinds the task.
+    pub fn set_state(
+        &mut self,
+        fallback: Option<String>,
+        started: bool,
+        running: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.fallback == fallback && self.started == started && self.running == running {
             return;
         }
         self.fallback = fallback;
-        if self.started != started {
+        if self.started != started || self.running != running {
+            if self.started != started {
+                self.open = false;
+            }
             self.started = started;
-            self.open = false;
+            self.running = running;
             self.read(false, cx);
         }
         cx.notify();

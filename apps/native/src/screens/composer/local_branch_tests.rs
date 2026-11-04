@@ -138,7 +138,7 @@ fn a_started_conversation_leaves_the_branch_locked(cx: &mut TestAppContext) {
         ],
     );
     picker.update(cx, |picker, cx| {
-        picker.set_state(Some("main".into()), true, cx)
+        picker.set_state(Some("main".into()), true, false, cx)
     });
     cx.run_until_parked();
     click(cx, "local-branch-trigger");
@@ -147,6 +147,34 @@ fn a_started_conversation_leaves_the_branch_locked(cx: &mut TestAppContext) {
         assert!(!picker.open, "a locked branch does not open");
     });
     assert_eq!(bodies(server).len(), 2);
+}
+
+/// A turn's start and end re-read the branch: the agent may have moved the
+/// folder, and the desktop then names that branch as the task's.
+#[gpui::test]
+fn a_turn_starting_or_ending_reads_the_branch_again(cx: &mut TestAppContext) {
+    let (picker, cx, server) = open(
+        cx,
+        vec![
+            (LIST, 200, branches("main", true)),
+            (LIST, 200, branches("main", true)),
+            (LIST, 200, branches("dcc/fix", true)),
+        ],
+    );
+    picker.update(cx, |picker, cx| {
+        picker.set_state(Some("main".into()), true, true, cx)
+    });
+    cx.run_until_parked();
+    picker.update(cx, |picker, cx| {
+        picker.set_state(Some("main".into()), true, false, cx)
+    });
+    cx.run_until_parked();
+    picker.read_with(cx, |picker, _| {
+        let data = picker.data.as_ref().unwrap();
+        assert_eq!(data.current_branch.as_deref(), Some("dcc/fix"));
+        assert_eq!(data.task_branch, "dcc/fix");
+    });
+    assert_eq!(bodies(server).len(), 3);
 }
 
 /// The rail's branch is the picker only on the project's own checkout.
