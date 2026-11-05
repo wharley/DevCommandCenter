@@ -132,26 +132,143 @@ fn real_simulator_streams_through_the_helper() {
     assert!(tree.is_ok(), "{tree:?}");
 }
 
-/// Only a simulator the panel booted goes down when the panel leaves it.
-#[gpui::test]
-fn the_panel_shuts_down_only_what_it_booted(cx: &mut TestAppContext) {
-    let (panel, cx) = open(cx);
-    let sim = |udid: &str| Simulator {
+fn sim(udid: &str, booted: bool) -> Simulator {
+    Simulator {
         udid: udid.into(),
-        name: "iPhone 16 Pro".into(),
+        name: format!("iPhone {udid}"),
         runtime: "iOS 18.3".into(),
-        booted: true,
+        booted,
         ipad: false,
         last_booted: None,
-    };
-    panel.update(cx, |panel, _| {
-        panel.current = Some(sim("XCODE"));
-        assert_eq!(panel.leave(), None, "Xcode's stays running");
-        panel.current = Some(sim("OURS"));
-        panel.started.insert("OURS".into());
-        assert_eq!(panel.leave().as_deref(), Some("OURS"));
-        assert_eq!(panel.leave(), None, "once");
+    }
+}
+
+fn task(id: &str) -> super::owners::Owner {
+    super::owners::Owner {
+        task_id: id.into(),
+        title: format!("Tarefa {id}"),
+    }
+}
+
+/// Linked but before its first picture, the panel still says it starts:
+/// coming back to a task's simulator never shows an empty black screen.
+#[gpui::test]
+fn the_screen_waits_for_its_first_picture(cx: &mut TestAppContext) {
+    let (panel, cx) = open(cx);
+    panel.update(cx, |panel, cx| {
+        panel.current = Some(sim("A", true));
+        panel.phase = Phase::Live;
+        panel.size = (1206, 2622);
+        cx.notify();
     });
+    draw(cx);
+    assert!(cx.debug_bounds("device-screen").is_none(), "no picture yet");
+    panel.update(cx, |panel, cx| {
+        panel.picture = Some(first_picture());
+        cx.notify();
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("device-screen").is_some());
+}
+
+/// Each task keeps its simulator: the panel follows the task on screen,
+/// another task's stays running and reads "em uso por" in the list.
+#[gpui::test]
+fn the_panel_follows_each_task_to_its_own_simulator(cx: &mut TestAppContext) {
+    let (panel, cx) = open(cx);
+    panel.update(cx, |panel, cx| {
+        panel.simulators = vec![sim("A", true), sim("B", true)];
+        panel.task_changed(Some(task("1")), &[], cx);
+        assert_eq!(panel.current.as_ref().unwrap().udid, "A", "the running one");
+        assert_eq!(panel.owners.of_task("1"), Some("A"));
+        panel.started.insert("A".into());
+
+        panel.task_changed(Some(task("2")), &[], cx);
+        assert_eq!(panel.current.as_ref().unwrap().udid, "B", "a free one");
+        assert_eq!(panel.owners.of_task("2"), Some("B"));
+        assert!(panel.started.contains("A"), "task 1's keeps running");
+
+        panel.task_changed(Some(task("1")), &[], cx);
+        assert_eq!(panel.current.as_ref().unwrap().udid, "A", "its own again");
+        // Task 1 cannot take task 2's by hand.
+        panel.open(sim("B", true), cx);
+        assert_eq!(panel.current.as_ref().unwrap().udid, "A");
+        cx.notify();
+    });
+    draw(cx);
+    let row = cx.debug_bounds("device-sim-B");
+    assert!(row.is_none(), "the list hides while one is shown");
+    panel.update(cx, |panel, cx| panel.stop_showing(cx));
+    draw(cx);
+    assert!(cx.debug_bounds("device-sim-B").is_some());
+    let labels = panel.update(cx, |panel, cx| panel.taken_labels(cx));
+    assert_eq!(
+        labels.get("B").map(String::as_str),
+        Some("em uso por Tarefa 2")
+    );
+    assert!(!labels.contains_key("A"), "its own is free");
+}
+
+/// A task that finished lets its simulator go, shut down if the panel
+/// booted it; one the panel did not boot (Xcode's) keeps running.
+#[gpui::test]
+fn a_finished_task_shuts_its_simulator_down(cx: &mut TestAppContext) {
+    let (panel, cx) = open(cx);
+    panel.update(cx, |panel, cx| {
+        panel.simulators = vec![sim("A", true), sim("B", true)];
+        panel.task_changed(Some(task("1")), &[], cx);
+        panel.started.insert("A".into());
+        panel.task_changed(Some(task("2")), &[], cx);
+        assert_eq!(panel.current.as_ref().unwrap().udid, "B");
+
+        panel.task_changed(Some(task("3")), &["1".into(), "2".into()], cx);
+        assert_eq!(panel.owners.of_task("1"), None);
+        assert_eq!(panel.owners.of_task("2"), None);
+        assert!(!panel.started.contains("A"), "the panel's goes down");
+        assert_eq!(
+            panel.current.as_ref().map(|sim| sim.udid.as_str()),
+            Some("A"),
+            "task 3 takes a free running one"
+        );
+    });
+}
+
+/// An agent never takes the simulator the person is using for another
+/// task, nor one another task holds.
+#[gpui::test]
+fn an_agent_is_refused_another_tasks_simulator(cx: &mut TestAppContext) {
+    let (panel, cx) = open(cx);
+    let answers = panel.update(cx, |panel, cx| {
+        panel.simulators = vec![sim("A", true), sim("B", false)];
+        panel.task_changed(Some(task("1")), &[], cx);
+        let mut answers = Vec::new();
+        for (owner, udid) in [(task("2"), None), (task("2"), Some("A".to_string()))] {
+            let (reply, answer) = futures::channel::oneshot::channel();
+            panel.agent_open(Some(owner), udid, reply, cx);
+            answers.push(answer);
+        }
+        // With the person elsewhere, the agent may not name task 1's either.
+        panel.stop_showing(cx);
+        let (reply, answer) = futures::channel::oneshot::channel();
+        panel.agent_open(Some(task("2")), Some("A".into()), reply, cx);
+        answers.push(answer);
+        answers
+    });
+    let errors: Vec<String> = answers
+        .into_iter()
+        .map(|answer| futures::executor::block_on(answer).unwrap().unwrap_err())
+        .collect();
+    assert!(
+        errors[0].contains("\"Tarefa 1\", which the person has open"),
+        "{}",
+        errors[0]
+    );
+    assert!(errors[1].contains("Tarefa 1"), "{}", errors[1]);
+    assert!(
+        errors[2].contains("in use by the task \"Tarefa 1\""),
+        "{}",
+        errors[2]
+    );
 }
 
 /// The panel drawn by Metal, saved to look at:

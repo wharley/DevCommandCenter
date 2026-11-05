@@ -12,6 +12,7 @@ use futures::channel::{mpsc, oneshot};
 use gpui::Context;
 use serde_json::{Value, json};
 
+use super::owners::Owner;
 use super::{DevicePanel, Phase, keys};
 use crate::data::device::link::DeviceLink;
 use crate::data::device::{self, Simulator};
@@ -24,6 +25,8 @@ pub enum AgentRequest {
     /// once it streams.
     Open {
         udid: Option<String>,
+        /// The task of the agent's session.
+        owner: Option<Owner>,
         reply: Waiting,
     },
     /// The panel's helper for `udid`, while it shows it.
@@ -58,12 +61,34 @@ fn closed() -> String {
     "the DCC window is closed".into()
 }
 
+/// The task a provider session works in, named for "in use by …".
+fn session_owner(session_id: &str) -> Option<Owner> {
+    use dcc_core::domain::session::SessionId;
+    use dcc_core::ports::{SessionRepo, WorkspaceRepo};
+    let db = crate::data::loader::database_path();
+    let sessions = dcc_infra::db::SqliteSessionRepo::open(&db).ok()?;
+    let session =
+        futures::executor::block_on(sessions.get_session(&SessionId(session_id.into()))).ok()??;
+    let workspaces = dcc_infra::db::SqliteWorkspaceRepo::open(&db).ok()?;
+    let workspace =
+        futures::executor::block_on(workspaces.get_workspace(&session.workspace_id)).ok()??;
+    let title = workspace
+        .name
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| workspace.base_branch.clone());
+    Some(Owner {
+        task_id: workspace.id.0,
+        title,
+    })
+}
+
 impl DeviceHost for AgentHost {
-    fn open(&self, udid: Option<String>) -> DeviceFuture<OpenDevice> {
+    fn open(&self, session_id: &str, udid: Option<String>) -> DeviceFuture<OpenDevice> {
         let (reply, answer) = oneshot::channel();
+        let owner = session_owner(session_id);
         let sent = self
             .requests
-            .unbounded_send(AgentRequest::Open { udid, reply });
+            .unbounded_send(AgentRequest::Open { udid, owner, reply });
         Box::pin(async move {
             sent.map_err(|_| closed())?;
             answer.await.map_err(|_| closed())?
@@ -142,16 +167,61 @@ impl DevicePanel {
         }
     }
 
-    /// An agent's `dcc_device_open`: the simulator it names, the one shown,
-    /// or the most recently used.
-    pub fn agent_open(&mut self, udid: Option<String>, reply: Waiting, cx: &mut Context<Self>) {
+    /// Why `task`'s agent may not have the panel now: it shows, for the
+    /// person, the simulator of the task they have open.
+    fn busy_for(&self, task: Option<&str>) -> Option<String> {
+        let shown = self.current.as_ref()?;
+        let holder = self.owners.owner(&shown.udid)?;
+        let on_screen = self.task.as_ref()?;
+        (on_screen.task_id == holder.task_id && task != Some(holder.task_id.as_str())).then(|| {
+            format!(
+                "DCC's Device panel shows the simulator of the task \"{}\", which the person has open; this task's simulator shows when they come back to it. Do not retry now.",
+                holder.title
+            )
+        })
+    }
+
+    /// An agent's `dcc_device_open`: the simulator it names, its task's, the
+    /// one shown, or the most recently used — never another task's.
+    pub(crate) fn agent_open(
+        &mut self,
+        owner: Option<Owner>,
+        udid: Option<String>,
+        reply: Waiting,
+        cx: &mut Context<Self>,
+    ) {
+        let task = owner.as_ref().map(|owner| owner.task_id.clone());
+        if let Some(busy) = self.busy_for(task.as_deref()) {
+            let _ = reply.send(Err(busy));
+            return;
+        }
+        if let Some(udid) = &udid
+            && let Some(holder) = self.owners.taken(udid, task.as_deref())
+        {
+            let _ = reply.send(Err(format!(
+                "simulator {udid} is in use by the task \"{}\"; pick another with dcc_device_list",
+                holder.title
+            )));
+            return;
+        }
+        let wanted = udid.or_else(|| {
+            task.as_deref()
+                .and_then(|task| self.owners.of_task(task))
+                .map(str::to_string)
+        });
         let shown = self.current.as_ref().map(|sim| sim.udid.clone());
-        if udid.is_none() || udid == shown {
+        let shown_free = shown
+            .as_deref()
+            .is_some_and(|udid| self.owners.taken(udid, task.as_deref()).is_none());
+        if (wanted.is_none() && shown_free) || (wanted.is_some() && wanted == shown) {
+            if let (Some(owner), Some(udid)) = (owner.clone(), shown.as_deref()) {
+                self.owners.claim(udid, owner);
+            }
             if let Some(device) = self.open_device() {
                 let _ = reply.send(Ok(device));
                 return;
             }
-            if shown.is_some() && self.phase == Phase::Starting {
+            if self.phase == Phase::Starting {
                 self.agent_waiting.push(reply);
                 return;
             }
@@ -166,20 +236,22 @@ impl DevicePanel {
             let _ = this.update(cx, |panel, cx| {
                 panel.agent_choosing = false;
                 let chosen: Result<Simulator, String> = listed.and_then(|simulators| {
-                    let found = match &udid {
+                    let free =
+                        |sim: &&Simulator| panel.owners.taken(&sim.udid, task.as_deref()).is_none();
+                    let found = match &wanted {
                         Some(udid) => simulators.iter().find(|sim| &sim.udid == udid),
                         // Running or most recently used first, then iPhones.
-                        None => simulators.iter().find(|sim| !sim.ipad),
+                        None => simulators.iter().filter(free).find(|sim| !sim.ipad),
                     };
-                    let chosen = found.cloned().ok_or_else(|| match &udid {
+                    let chosen = found.cloned().ok_or_else(|| match &wanted {
                         Some(udid) => format!("no simulator {udid}; call dcc_device_list"),
-                        None => "no iPhone simulator; install one with Xcode".to_string(),
+                        None => "no free iPhone simulator; install one with Xcode".to_string(),
                     });
                     panel.simulators = simulators;
                     chosen
                 });
                 match chosen {
-                    Ok(sim) => panel.open(sim, cx),
+                    Ok(sim) => panel.open_for(sim, owner, cx),
                     Err(error) => panel.answer_agents(Err(error)),
                 }
             });

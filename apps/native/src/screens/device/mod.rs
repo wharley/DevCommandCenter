@@ -2,12 +2,16 @@
 //! the app (its H.264 decoded by VideoToolbox into GPUI's `surface`) and
 //! used with the mouse and keyboard like the Simulator app — no Simulator
 //! window. The simulator is chosen from the ones Xcode has; one not running
-//! is booted without its window. A simulator the panel booted is shut down
-//! when the panel closes or another one is chosen; one that was running
-//! already (Xcode's) is left as it was. The power mark shuts one down.
+//! is booted without its window. Each task keeps its own simulator
+//! (`owners`): the panel follows the task on screen, and another task's
+//! simulator keeps running. The simulators the panel booted are shut down
+//! when it closes, when their task finishes, or when a task changes to
+//! another one; one that was running already (Xcode's) is left as it was.
+//! The power mark shuts one down.
 
 pub(crate) mod agent;
 mod keys;
+pub(crate) mod owners;
 mod view;
 
 use std::cell::Cell;
@@ -23,13 +27,12 @@ use crate::data::device::decode::{Decoder, Picture};
 use crate::data::device::link::{DeviceLink, LinkEvent};
 use crate::data::device::{self, Simulator};
 use crate::i18n::Translate;
+use owners::{Owner, Owners};
 
 impl Drop for DevicePanel {
     fn drop(&mut self) {
         self.release();
-        if let Some(udid) = self.leave() {
-            device::shutdown_detached(&udid);
-        }
+        self.shut_down_started();
     }
 }
 
@@ -84,6 +87,10 @@ pub struct DevicePanel {
     agent_waiting: Vec<agent::Waiting>,
     /// An agent is choosing the simulator: the running one does not open by itself.
     agent_choosing: bool,
+    /// The task each simulator belongs to.
+    pub(crate) owners: Owners,
+    /// The task on screen.
+    pub(crate) task: Option<Owner>,
     _list: Option<Task<()>>,
     _start: Option<Task<()>>,
     _frames: Option<Task<()>>,
@@ -107,6 +114,8 @@ impl DevicePanel {
             started: Default::default(),
             agent_waiting: Vec::new(),
             agent_choosing: false,
+            owners: Owners::default(),
+            task: None,
             _list: None,
             _start: None,
             _frames: None,
@@ -131,12 +140,10 @@ impl DevicePanel {
                 match listed {
                     Ok(simulators) => {
                         panel.list_error = None;
-                        // The one already running opens by itself.
-                        let booted = simulators.iter().find(|sim| sim.booted).cloned();
                         panel.simulators = simulators;
                         if panel.current.is_none()
                             && !panel.agent_choosing
-                            && let Some(sim) = booted
+                            && let Some(sim) = panel.opens_by_itself()
                         {
                             panel.open(sim, cx);
                         }
@@ -157,23 +164,122 @@ impl DevicePanel {
         }
     }
 
-    /// The open simulator, when the panel booted it: it goes down on leaving.
-    pub(crate) fn leave(&mut self) -> Option<String> {
-        let udid = self.current.as_ref()?.udid.clone();
-        self.started.remove(&udid).then_some(udid)
+    /// What shows without a choice: the task's own simulator, else one
+    /// already running that no other task holds.
+    pub(crate) fn opens_by_itself(&self) -> Option<Simulator> {
+        let task = self.task.as_ref().map(|task| task.task_id.as_str());
+        if let Some(own) = task.and_then(|task| self.owners.of_task(task)) {
+            return self.simulators.iter().find(|sim| sim.udid == own).cloned();
+        }
+        self.simulators
+            .iter()
+            .find(|sim| sim.booted && self.owners.taken(&sim.udid, task).is_none())
+            .cloned()
     }
 
-    /// Boots `sim` if needed and shows it; the one before goes down if the
-    /// panel booted it.
-    pub(crate) fn open(&mut self, sim: Simulator, cx: &mut Context<Self>) {
+    /// Shuts `udid` down if the panel booted it.
+    fn shut_down(&mut self, udid: &str) {
+        if self.started.remove(udid) {
+            device::shutdown_detached(udid);
+        }
+    }
+
+    fn shut_down_started(&mut self) {
+        for udid in std::mem::take(&mut self.started) {
+            device::shutdown_detached(&udid);
+        }
+    }
+
+    /// The list again, the simulator shown before still running.
+    pub(crate) fn stop_showing(&mut self, cx: &mut Context<Self>) {
         self.release();
-        if self
+        self._start = None;
+        self._frames = None;
+        self.picture = None;
+        self.current = None;
+        self.phase = Phase::Choosing;
+        cx.notify();
+    }
+
+    /// The task on screen changed: its own simulator shows, or the list
+    /// when the one shown is another task's. The simulators of `finished`
+    /// tasks are let go and shut down.
+    pub(crate) fn task_changed(
+        &mut self,
+        task: Option<Owner>,
+        finished: &[String],
+        cx: &mut Context<Self>,
+    ) {
+        for task_id in finished {
+            if let Some(udid) = self.owners.release_task(task_id) {
+                if self.current.as_ref().is_some_and(|sim| sim.udid == udid) {
+                    self.stop_showing(cx);
+                }
+                self.shut_down(&udid);
+            }
+        }
+        if task == self.task {
+            return;
+        }
+        self.task = task.clone();
+        let Some(task) = task else {
+            return;
+        };
+        let shown = self.current.as_ref().map(|sim| sim.udid.clone());
+        let own = self.owners.of_task(&task.task_id).map(str::to_string);
+        if own.is_some() && own == shown {
+            return;
+        }
+        let others = shown
+            .as_deref()
+            .is_some_and(|udid| self.owners.taken(udid, Some(&task.task_id)).is_some());
+        if own.is_some() || others {
+            self.stop_showing(cx);
+        }
+        if self.current.is_none()
+            && let Some(sim) = self.opens_by_itself()
+        {
+            self.open(sim, cx);
+        }
+    }
+
+    /// Boots `sim` if needed and shows it for the task on screen; never
+    /// another task's.
+    pub(crate) fn open(&mut self, sim: Simulator, cx: &mut Context<Self>) {
+        let owner = self.task.clone();
+        let task = owner.as_ref().map(|owner| owner.task_id.as_str());
+        if self.owners.taken(&sim.udid, task).is_some() {
+            return;
+        }
+        self.open_for(sim, owner, cx);
+    }
+
+    /// Shows `sim` as `owner`'s. The one shown before goes down if the panel
+    /// booted it and no other task holds it, and so does the one `owner`
+    /// held before.
+    pub(crate) fn open_for(
+        &mut self,
+        sim: Simulator,
+        owner: Option<Owner>,
+        cx: &mut Context<Self>,
+    ) {
+        self.release();
+        let task = owner.as_ref().map(|owner| owner.task_id.clone());
+        let mut going = Vec::new();
+        if let Some(current) = self
             .current
             .as_ref()
-            .is_some_and(|current| current.udid != sim.udid)
-            && let Some(previous) = self.leave()
+            .filter(|current| current.udid != sim.udid)
+            && self.owners.taken(&current.udid, task.as_deref()).is_none()
         {
-            device::shutdown_detached(&previous);
+            going.push(current.udid.clone());
+        }
+        if let Some(owner) = owner {
+            going.extend(self.owners.claim(&sim.udid, owner));
+        }
+        for udid in going {
+            self.owners.release(&udid);
+            self.shut_down(&udid);
         }
         self._frames = None;
         self.picture = None;
@@ -263,11 +369,10 @@ impl DevicePanel {
         }));
     }
 
+    /// Every simulator the panel booted goes down, each task's.
     pub(crate) fn close(&mut self, cx: &mut Context<Self>) {
         self.release();
-        if let Some(udid) = self.leave() {
-            device::shutdown_detached(&udid);
-        }
+        self.shut_down_started();
         cx.emit(DeviceEvent::Closed);
     }
 
@@ -277,6 +382,7 @@ impl DevicePanel {
             return;
         };
         self.started.remove(&sim.udid);
+        self.owners.release(&sim.udid);
         self.release();
         self._frames = None;
         self.picture = None;

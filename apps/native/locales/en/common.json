@@ -5735,6 +5735,7 @@
     "ended": "The simulator stopped responding.",
     "noXcode": "No simulators found. Install Xcode and an iOS runtime.",
     "running": "running",
+    "inUseBy": "in use by {{task}}",
     "starting": "Starting {{name}}…",
     "retry": "Try again",
     "recent": "Recent",

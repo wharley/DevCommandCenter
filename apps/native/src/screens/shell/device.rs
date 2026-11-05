@@ -1,6 +1,6 @@
 //! The Device panel (an iOS Simulator) beside the conversation, opened from
 //! the header's phone or by an agent's `dcc_device_open`. It stays while the
-//! person moves between tasks: the simulator is the Mac's, not the task's.
+//! person moves between tasks and shows each task's own simulator.
 
 use std::sync::Arc;
 
@@ -10,7 +10,36 @@ use gpui::{AnyElement, AppContext, Context, Entity, Subscription, Window, div, p
 
 use super::Shell;
 use crate::screens::device::agent::{AgentHost, AgentRequest};
+use crate::screens::device::owners::Owner;
 use crate::screens::device::{DeviceEvent, DevicePanel};
+
+/// The tasks among `tasks` that were completed, archived or deleted.
+fn finished_tasks(tasks: Vec<String>) -> Vec<String> {
+    use dcc_core::domain::workspace::{WorkspaceId, WorkspaceState};
+    use dcc_core::ports::WorkspaceRepo;
+    if tasks.is_empty() {
+        return tasks;
+    }
+    let db = crate::data::loader::database_path();
+    let Ok(repo) = dcc_infra::db::SqliteWorkspaceRepo::open(&db) else {
+        return Vec::new();
+    };
+    tasks
+        .into_iter()
+        .filter(|id| {
+            match futures::executor::block_on(repo.get_workspace(&WorkspaceId(id.clone()))) {
+                Ok(Some(task)) => {
+                    matches!(
+                        task.state,
+                        WorkspaceState::Completed | WorkspaceState::Archived
+                    )
+                }
+                Ok(None) => true,
+                Err(_) => false,
+            }
+        })
+        .collect()
+}
 
 pub(super) type OpenDevice = (Entity<DevicePanel>, Subscription);
 
@@ -37,12 +66,12 @@ pub(super) fn serve_agents(window: &mut Window, cx: &mut Context<Shell>) {
 impl Shell {
     fn agent_device(&mut self, request: AgentRequest, window: &mut Window, cx: &mut Context<Self>) {
         match request {
-            AgentRequest::Open { udid, reply } => {
+            AgentRequest::Open { udid, owner, reply } => {
                 if self.device.is_none() {
                     self.toggle_device(window, cx);
                 }
                 if let Some((panel, _)) = &self.device {
-                    panel.update(cx, |panel, cx| panel.agent_open(udid, reply, cx));
+                    panel.update(cx, |panel, cx| panel.agent_open(owner, udid, reply, cx));
                 }
             }
             AgentRequest::Link { udid, reply } => {
@@ -66,9 +95,44 @@ impl Shell {
                 }
             });
             self.device = Some((panel, events));
+            self.device_task_changed(cx);
         }
         self.sync_header(cx);
         cx.notify();
+    }
+
+    /// The task on screen, as the Device panel names it.
+    fn task_on_screen(&self, cx: &gpui::App) -> Option<Owner> {
+        let data = self.conversation.read(cx).data()?;
+        let title = data
+            .workspace_name
+            .clone()
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| data.branch.clone())
+            .unwrap_or_else(|| data.task_id.clone());
+        Some(Owner {
+            task_id: data.task_id.clone(),
+            title,
+        })
+    }
+
+    /// The panel follows the task on screen to its own simulator; the
+    /// simulators of tasks that finished go down.
+    pub(super) fn device_task_changed(&mut self, cx: &mut Context<Self>) {
+        let Some((panel, _)) = &self.device else {
+            return;
+        };
+        let panel = panel.clone();
+        let task = self.task_on_screen(cx);
+        let (same, held) = {
+            let panel = panel.read(cx);
+            (panel.task == task, panel.owners.tasks())
+        };
+        if same {
+            return;
+        }
+        let finished = finished_tasks(held);
+        panel.update(cx, |panel, cx| panel.task_changed(task, &finished, cx));
     }
 
     pub(super) fn device_open(&self) -> bool {

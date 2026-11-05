@@ -34,9 +34,10 @@ pub struct OpenDevice {
 
 /// What the native app does for the agents' simulator tools.
 pub trait DeviceHost: Send + Sync {
-    /// Boots `udid` (or the panel's, or the most recently used) and shows it
-    /// in the Device panel; resolves once it streams.
-    fn open(&self, udid: Option<String>) -> DeviceFuture<OpenDevice>;
+    /// Boots `udid` (or the session's task's, the panel's, or the most
+    /// recently used) and shows it in the Device panel; resolves once it
+    /// streams. A simulator another task holds is refused.
+    fn open(&self, session_id: &str, udid: Option<String>) -> DeviceFuture<OpenDevice>;
     /// A helper command (`touch`, `multiTouch`, `button`, `key`,
     /// `describe`) on the simulator the panel shows.
     fn command(&self, udid: String, command: Value) -> DeviceFuture<Value>;
@@ -432,7 +433,7 @@ async fn run(
     }
     if name == "dcc_device_open" {
         let args = parse::<OpenArgs>(&arguments).ok_or("invalid arguments")?;
-        let device = host.open(args.udid).await?;
+        let device = host.open(session_id, args.udid).await?;
         if let Ok(mut opened) = opened().lock() {
             opened.insert(session_id.to_string(), device.clone());
         }
@@ -664,7 +665,7 @@ mod tests {
     }
 
     impl DeviceHost for Fake {
-        fn open(&self, udid: Option<String>) -> DeviceFuture<OpenDevice> {
+        fn open(&self, _session_id: &str, udid: Option<String>) -> DeviceFuture<OpenDevice> {
             Box::pin(async move {
                 Ok(OpenDevice {
                     udid: udid.unwrap_or_else(|| "47B9DDB6-8CF6-4866-9A60-B4D1F6EC0B4D".into()),

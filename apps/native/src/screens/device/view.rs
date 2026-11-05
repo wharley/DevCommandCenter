@@ -109,6 +109,7 @@ impl DevicePanel {
         let panel = cx.entity().downgrade();
         let simulators = self.simulators.clone();
         let current = self.current.as_ref().map(|sim| sim.udid.clone());
+        let taken = self.taken_labels(cx);
         let muted = colors.muted_foreground;
         let trigger = move |_open: bool| {
             Button::new("device-current")
@@ -137,7 +138,11 @@ impl DevicePanel {
                         let _ = panel.update(cx, |panel, cx| panel.open(chosen, cx));
                     })
                     .detail(sim.runtime.clone());
-                    if current.as_deref() == Some(sim.udid.as_str()) {
+                    if let Some(label) = taken.get(&sim.udid) {
+                        item = item
+                            .detail(format!("{} · {label}", sim.runtime))
+                            .disabled(true);
+                    } else if current.as_deref() == Some(sim.udid.as_str()) {
                         item = item.trailing("✓");
                     } else if sim.booted {
                         item = item.trailing("●");
@@ -287,6 +292,25 @@ impl DevicePanel {
             .into_any_element()
     }
 
+    /// "em uso por <tarefa>" for each simulator another task holds.
+    pub(crate) fn taken_labels(
+        &self,
+        cx: &Context<Self>,
+    ) -> std::collections::HashMap<String, String> {
+        let task = self.task.as_ref().map(|task| task.task_id.as_str());
+        self.simulators
+            .iter()
+            .filter_map(|sim| {
+                let holder = self.owners.taken(&sim.udid, task)?;
+                let label = cx.t_with(
+                    "device.inUseBy",
+                    &crate::i18n::Args::default().with("task", holder.title.clone()),
+                );
+                Some((sim.udid.clone(), label.to_string()))
+            })
+            .collect()
+    }
+
     fn list(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         if let Some(error) = &self.list_error {
@@ -304,6 +328,7 @@ impl DevicePanel {
             ("device.iphones", iphones),
             ("device.ipads", ipads),
         ];
+        let taken = self.taken_labels(cx);
         let mut rows: Vec<AnyElement> = Vec::new();
         for (label, sims) in sections {
             if sims.is_empty() {
@@ -322,9 +347,13 @@ impl DevicePanel {
             );
             for sim in sims {
                 let chosen = sim.clone();
+                let held = taken.get(&sim.udid).cloned();
+                let free = held.is_none();
+                let id = SharedString::from(format!("device-sim-{}", sim.udid));
                 rows.push(
                     div()
-                        .id(SharedString::from(format!("device-sim-{}", sim.udid)))
+                        .id(id.clone())
+                        .debug_selector(move || id.to_string())
                         .flex()
                         .items_center()
                         .justify_between()
@@ -332,11 +361,14 @@ impl DevicePanel {
                         .rounded(px(6.0))
                         .px(px(8.0))
                         .py(px(6.0))
-                        .cursor_pointer()
-                        .hover(|style| style.bg(colors.accent.opacity(0.6)))
-                        .on_click(
-                            cx.listener(move |panel, _, _, cx| panel.open(chosen.clone(), cx)),
-                        )
+                        .when(free, |row| {
+                            row.cursor_pointer()
+                                .hover(|style| style.bg(colors.accent.opacity(0.6)))
+                                .on_click(cx.listener(move |panel, _, _, cx| {
+                                    panel.open(chosen.clone(), cx)
+                                }))
+                        })
+                        .when(!free, |row| row.opacity(0.55))
                         .child(
                             div()
                                 .flex()
@@ -355,10 +387,12 @@ impl DevicePanel {
                                 .flex_shrink_0()
                                 .text_size(px(11.0))
                                 .text_color(colors.muted_foreground)
-                                .child(if sim.booted {
-                                    format!("{} · {}", sim.runtime, cx.t("device.running"))
-                                } else {
-                                    sim.runtime.clone()
+                                .child(match (&held, sim.booted) {
+                                    (Some(label), _) => format!("{} · {label}", sim.runtime),
+                                    (None, true) => {
+                                        format!("{} · {}", sim.runtime, cx.t("device.running"))
+                                    }
+                                    (None, false) => sim.runtime.clone(),
                                 }),
                         )
                         .into_any_element(),
@@ -399,7 +433,13 @@ impl DevicePanel {
 impl Render for DevicePanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
-        let body = match self.phase.clone() {
+        // Linked but no picture yet (a second or two): still starting, not
+        // an empty black screen.
+        let phase = match self.phase.clone() {
+            Phase::Live if self.picture.is_none() => Phase::Starting,
+            phase => phase,
+        };
+        let body = match phase {
             Phase::Choosing => self.list(cx),
             Phase::Starting => {
                 let name = self
