@@ -95,6 +95,7 @@ pub fn build_recap(input: &RecapInput) -> Option<Recap> {
         committed_vs_base_count: input.committed_vs_base as i64,
         pr_number: input.pr.and_then(|pr| pr.number),
         pr_state: input.pr.and_then(|pr| pr.state.clone()),
+        pr_merge_state: input.pr.and_then(|pr| pr.merge_state_status.clone()),
         request_label: label,
         pending_delegation_results_count: input.pending_delegations as i64,
         ..WorkspaceRecapInput::new(resolve_commit_mode(branch, input.git, input.pr))

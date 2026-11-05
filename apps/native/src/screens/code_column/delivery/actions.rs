@@ -58,7 +58,7 @@ impl CodeColumn {
 
     /// The button's status: busy while it runs, then "done" for 900ms or
     /// "error" for 1.2s.
-    fn settle_button(&mut self, status: CommitButtonStatus, cx: &mut Context<Self>) {
+    pub(crate) fn settle_button(&mut self, status: CommitButtonStatus, cx: &mut Context<Self>) {
         self.delivery.button = Some(status);
         cx.notify();
         let wait = match status {
@@ -90,7 +90,8 @@ impl CodeColumn {
                 self.delivery.confirm = Some(Confirm::Merge);
                 self.settle_button(CommitButtonStatus::Done, cx);
             }
-            CommitMode::OpenPr | CommitMode::Fix => self.open_request(mode, cx),
+            CommitMode::OpenPr => self.open_request(mode, cx),
+            CommitMode::Fix => self.fix_checks(cx),
             CommitMode::Push | CommitMode::CreatePr => self.run_step(mode, None, cx),
             CommitMode::ResolveConflicts => self.open_merge_resolver(cx),
             CommitMode::CompleteMerge => {
@@ -188,7 +189,7 @@ impl CodeColumn {
     }
 
     /// "Abrir PR" / "Corrigir CI": the pull request in the browser.
-    fn open_request(&mut self, mode: CommitMode, cx: &mut Context<Self>) {
+    pub(crate) fn open_request(&mut self, mode: CommitMode, cx: &mut Context<Self>) {
         let label = self.delivery.request_label();
         match self.delivery.pr.as_ref().and_then(|pr| pr.url.clone()) {
             Some(url) => {

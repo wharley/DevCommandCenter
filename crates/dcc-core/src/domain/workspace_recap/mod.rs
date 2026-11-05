@@ -212,6 +212,9 @@ pub struct WorkspaceRecapInput {
     pub committed_vs_base_count: i64,
     pub pr_number: Option<u32>,
     pub pr_state: Option<String>,
+    /// The forge's merge state (`UNSTABLE`, `BLOCKED`, `DIRTY`…): what keeps
+    /// an open pull request from merging.
+    pub pr_merge_state: Option<String>,
     /// "PR" or "MR".
     pub request_label: &'static str,
     /// CodeRabbit findings that still match the diff.
@@ -242,6 +245,7 @@ impl WorkspaceRecapInput {
             committed_vs_base_count: 0,
             pr_number: None,
             pr_state: None,
+            pr_merge_state: None,
             request_label: "PR",
             pending_review_findings_count: 0,
             code_rabbit_review_available: false,

@@ -1518,6 +1518,8 @@
         "ahead_one": "{{count}} commit local aguardando push.",
         "ahead_other": "{{count}} commits locais aguardando push.",
         "checksFailing": "{{pr}} está com checks falhando.",
+        "prBlocked": "{{pr}} está bloqueado: falta uma aprovação ou outra regra do repositório.",
+        "prConflicts": "{{pr}} tem conflito com a base.",
         "mergeReady": "{{pr}} está limpo e pronto para merge.",
         "prOpen": "{{pr}} está aberto.",
         "readyForPr_one": "{{count}} arquivo commitado sobre a base — ainda sem {{requestLabel}}.",

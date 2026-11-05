@@ -246,6 +246,23 @@ fn maps_fix_to_failing_checks_with_attention_tone() {
 }
 
 #[test]
+fn a_blocked_or_conflicting_pull_request_is_not_called_failing_checks() {
+    let recap = |merge_state: &str| {
+        build_workspace_recap(&WorkspaceRecapInput {
+            pr_number: Some(9),
+            pr_state: Some("open".into()),
+            pr_merge_state: Some(merge_state.into()),
+            request_label: "PR",
+            ..input(CommitMode::Fix)
+        })
+        .message_key
+    };
+    assert_eq!(recap("UNSTABLE"), "checksFailing");
+    assert_eq!(recap("BLOCKED"), "prBlocked");
+    assert_eq!(recap("dirty"), "prConflicts");
+}
+
+#[test]
 fn marks_an_open_change_request_as_awaiting_review() {
     let recap = build_workspace_recap(&WorkspaceRecapInput {
         pr_number: Some(31),

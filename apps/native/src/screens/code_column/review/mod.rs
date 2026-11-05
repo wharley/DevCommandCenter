@@ -4,6 +4,7 @@
 //! forge acts as (the identity chip in the header). All of it comes from the
 //! desktop, which keeps the failure and runs the forge's CLI.
 
+mod checks;
 mod failure;
 mod identity;
 mod picker;
@@ -41,6 +42,9 @@ use crate::ui::{TextInput, Toaster};
 const EVERY: Duration = Duration::from_secs(15);
 /// `WORKSPACE_PR_REVIEW_COMMENTS_REFETCH_INTERVAL_MS`
 const COMMENTS_EVERY: Duration = Duration::from_secs(30);
+/// A GitHub pull request's failing checks (and their failing step's log)
+/// are read at most this often, and only while it has some.
+const CHECKS_EVERY: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PipelineLoad {
@@ -107,6 +111,7 @@ pub(crate) struct Review {
     pub confirm_job_retry: Option<(u64, String)>,
     read_at: Option<Instant>,
     comments_at: Option<Instant>,
+    checks_at: Option<Instant>,
 }
 
 impl Review {
@@ -207,6 +212,28 @@ impl CodeColumn {
         if read_comments {
             self.review.comments_at = Some(Instant::now());
         }
+        // Only while the pull request's checks fail (or a failure from them
+        // is still shown, so it clears once they pass): a green one costs
+        // nothing, and the logs are read once per commit.
+        let checks_failing = self
+            .delivery
+            .pr
+            .as_ref()
+            .is_some_and(|pr| pr.merge_state_status.as_deref() == Some("UNSTABLE"))
+            || self
+                .review
+                .failure
+                .as_ref()
+                .is_some_and(|failure| failure.operation == "pipeline");
+        let read_checks = checks_failing
+            && (force
+                || self
+                    .review
+                    .checks_at
+                    .is_none_or(|at| at.elapsed() >= CHECKS_EVERY));
+        if read_checks {
+            self.review.checks_at = Some(Instant::now());
+        }
         self._review = Some(cx.spawn(async move |this, cx| {
             let path = root.clone();
             let read = cx
@@ -237,6 +264,15 @@ impl CodeColumn {
                         }
                         _ => None,
                     };
+                    let github = forge.as_ref().is_some_and(|forge| {
+                        forge.connected() && forge.provider.as_deref() == Some("github")
+                    });
+                    if read_checks && github {
+                        // Stores the checks that failed, with their failing
+                        // step's log, as the delivery failure read below.
+                        let effective = forge.as_ref().and_then(|f| f.effective_login.clone());
+                        let _ = api.pipeline(&path, effective.as_deref());
+                    }
                     let failure = api.delivery_failure(&path).ok().flatten();
                     let connected = forge.as_ref().is_some_and(ForgeContext::connected);
                     let forge_login = forge.as_ref().and_then(|f| f.effective_login.clone());

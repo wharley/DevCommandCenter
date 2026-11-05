@@ -389,12 +389,22 @@ fn policy(input: &WorkspaceRecapInput) -> Option<Primary> {
     None
 }
 
+/// What blocks the pull request: failing checks, a required review or
+/// rule, or a conflict with its base.
+fn fix_reason(merge_state: Option<&str>) -> &'static str {
+    match merge_state.map(str::to_ascii_uppercase).as_deref() {
+        Some("BLOCKED") => "prBlocked",
+        Some("DIRTY") => "prConflicts",
+        _ => "checksFailing",
+    }
+}
+
 fn last_git_step(input: &WorkspaceRecapInput) -> Primary {
     let mode = input.commit_mode;
     match mode {
         CommitMode::Fix => primary(
             State::Blocked,
-            "checksFailing",
+            fix_reason(input.pr_merge_state.as_deref()),
             pr(input),
             Tone::Attention,
             Some(Action::Git(mode)),

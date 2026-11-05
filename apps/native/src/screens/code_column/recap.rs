@@ -101,6 +101,7 @@ impl CodeColumn {
             committed_vs_base_count: self.changes.branch_count().unwrap_or(0) as i64,
             pr_number,
             pr_state: pr.and_then(|pr| pr.state.clone()),
+            pr_merge_state: pr.and_then(|pr| pr.merge_state_status.clone()),
             request_label: self.delivery.request_label(),
             pending_delegation_results_count: self.pending_delegations as i64,
             delivery_failure: review.failure.as_ref().map(|failure| RecapDeliveryFailure {

@@ -633,3 +633,66 @@ fn the_badge_a_listed_conversation_and_the_tree_open_the_stage_on_it(cx: &mut Te
     );
     let _ = requests(setup.server);
 }
+
+/// "Corrigir CI" on GitHub: the checks that failed, with their log, go into
+/// the composer for the agent, and the failure opens in Mudanças.
+#[gpui::test]
+fn fixing_ci_on_github_puts_the_failing_checks_in_the_composer(cx: &mut TestAppContext) {
+    let mut checks = failure();
+    checks["operation"] = json!("pipeline");
+    checks["classification"] = json!("checks");
+    checks["output"] = json!(
+        "GitHub checks failed for PR #12.\n- CI / Typecheck: error TS2339: Property 'orders' does not exist"
+    );
+    let (column, cx, setup) = open(
+        cx,
+        vec![
+            answer(connected("ana", "ana")),
+            answer(json!({ "accounts": [] })),
+            answer(json!({ "snapshot": null })),
+            answer(json!({ "pipeline": null })),
+            answer(json!({ "snapshot": checks })),
+        ],
+    );
+    column.update(cx, |column, cx| {
+        column.delivery.pr = Some(WorkspacePrStatusOutput {
+            provider: Some("github".into()),
+            host: Some("github.com".into()),
+            number: Some(12),
+            title: Some("Guia".into()),
+            url: Some("https://github.com/o/r/pull/12".into()),
+            head_branch: None,
+            base_branch: Some("main".into()),
+            state: Some("open".into()),
+            is_draft: false,
+            mergeable: Some("MERGEABLE".into()),
+            merge_state_status: Some("UNSTABLE".into()),
+        });
+        column.fix_checks(cx);
+    });
+    cx.run_until_parked();
+    let events = setup.events.borrow().clone();
+    let prompt = events
+        .iter()
+        .find_map(|event| match event {
+            CodeColumnEvent::AskAgent { prompt, .. } => Some(prompt.clone()),
+            _ => None,
+        })
+        .expect("the failing checks went to the composer");
+    assert!(prompt.contains("error TS2339"), "{prompt}");
+    column.read_with(cx, |column, _| {
+        assert!(column.review.failure_open);
+        assert_eq!(
+            column.review.failure.as_ref().map(|f| f.operation.as_str()),
+            Some("pipeline")
+        );
+    });
+    let paths: Vec<String> = requests(setup.server)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(
+        &paths[paths.len() - 2..],
+        ["/api/v1/forge/pipeline", "/api/v1/git/delivery-failure"]
+    );
+}
