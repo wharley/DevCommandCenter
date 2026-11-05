@@ -140,6 +140,17 @@ async fn register_dynamic_client(
         )));
     }
     let body = reply.json().unwrap_or(Value::Null);
+    registered_client(&body, redirect_uri)
+}
+
+/// Longest `client_id` taken as is. Some servers issue long ones (ClickUp's
+/// is a signed token of about 300 characters); cutting one makes the server
+/// refuse it as `invalid_client`.
+const MAX_CLIENT_ID_CHARS: usize = 4096;
+
+/// The client a registration response describes, its `client_id` exactly as
+/// issued.
+fn registered_client(body: &Value, redirect_uri: &str) -> McpOauthResult<McpOauthClient> {
     let client_id = body
         .get("client_id")
         .and_then(Value::as_str)
@@ -147,6 +158,12 @@ async fn register_dynamic_client(
         .ok_or_else(|| {
             McpOauthError::ClientRegistrationRejected("no client_id was returned".to_string())
         })?;
+    if client_id.chars().count() > MAX_CLIENT_ID_CHARS || client_id.chars().any(char::is_control) {
+        return Err(McpOauthError::ClientRegistrationRejected(format!(
+            "it returned an unusable client_id ({})",
+            bounded_text(client_id)
+        )));
+    }
     let client_secret = body
         .get("client_secret")
         .and_then(Value::as_str)
@@ -162,7 +179,7 @@ async fn register_dynamic_client(
         (true, _) => ClientAuthMethod::ClientSecretBasic,
     };
     Ok(McpOauthClient {
-        client_id: bounded_text(client_id),
+        client_id: client_id.to_string(),
         client_secret,
         auth_method,
         registration: ClientRegistrationKind::Dynamic,
@@ -199,6 +216,19 @@ mod tests {
     }
 
     const REDIRECT: &str = "http://127.0.0.1:46327/oauth/mcp/callback";
+
+    #[test]
+    fn a_long_client_id_is_kept_as_issued() {
+        // ClickUp issues a signed token of about 300 characters.
+        let issued = format!("mcp-client-{}", "eyJhbGciOiJIUzI1NiJ9.".repeat(15));
+        assert!(issued.chars().count() > 200);
+        let body = serde_json::json!({ "client_id": issued });
+        let client = registered_client(&body, "http://127.0.0.1:46327/oauth/mcp/callback").unwrap();
+        assert_eq!(client.client_id, issued);
+        assert!(!client.client_id.contains('…'));
+        assert!(registered_client(&serde_json::json!({ "client_id": "a\nb" }), "r").is_err());
+        assert!(registered_client(&serde_json::json!({}), "r").is_err());
+    }
 
     #[tokio::test]
     async fn prefers_the_metadata_document_when_allowed() {
