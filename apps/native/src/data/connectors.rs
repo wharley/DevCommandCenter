@@ -525,7 +525,23 @@ mod tests {
 
     #[test]
     fn the_catalog_and_the_slack_app() {
-        assert_eq!(visible_presets().count(), 6);
+        assert_eq!(visible_presets().count(), 14);
+        // Every visible one shows its brand mark.
+        for preset in visible_presets() {
+            let logo = preset
+                .logo
+                .unwrap_or_else(|| panic!("{} has no logo", preset.id));
+            assert!(
+                crate::data::connector_marks::svg(&format!("connectors/{logo}.svg")).is_some(),
+                "{} has no mark",
+                preset.id
+            );
+        }
+        assert_eq!(
+            preset_for_url("https://mcp.supabase.com/mcp").unwrap().auth,
+            Auth::OAuth,
+            "one click"
+        );
         assert_eq!(
             preset_for_url("https://mcp.slack.com/mcp").unwrap().auth,
             Auth::SlackApp
