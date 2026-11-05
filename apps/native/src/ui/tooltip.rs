@@ -121,7 +121,15 @@ impl Tooltip {
         text: impl Into<gpui::SharedString>,
     ) -> Self {
         let text = text.into();
-        Self::new(id, trigger, move |_, _| text.clone().into_any_element())
+        // Shrinkable, so a long label wraps inside the bubble's 320 px
+        // instead of running past it.
+        Self::new(id, trigger, move |_, _| {
+            div()
+                .debug_selector(|| "tooltip-text".into())
+                .min_w_0()
+                .child(text.clone())
+                .into_any_element()
+        })
     }
 
     pub fn side(mut self, side: Side) -> Self {
@@ -356,6 +364,46 @@ mod tests {
 
     fn window() -> Size<Pixels> {
         size(px(1400.0), px(900.0))
+    }
+
+    struct LongTip;
+
+    impl Render for LongTip {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                div().absolute().top(px(400.0)).left(px(700.0)).child(
+                    Tooltip::text(
+                        "long-tip",
+                        div()
+                            .id("long-tip-trigger")
+                            .debug_selector(|| "long-tip-trigger".into())
+                            .size(px(20.0)),
+                        "Portas desta tarefa: 41030 a 41039 ($DCC_PORT nos terminais, tasks e \
+                         agentes dela). Abrir localhost:41030 no browser do DCC.",
+                    )
+                    .side(Side::Top)
+                    .align(Align::End),
+                ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_long_label_wraps_inside_its_bubble(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(crate::theme::Theme::new(
+                crate::theme::ThemePreference::Light,
+                gpui::WindowAppearance::Light,
+            ))
+        });
+        let (_, cx) = cx.add_window_view(|_, _| LongTip);
+        cx.run_until_parked();
+        let trigger = cx.debug_bounds("long-tip-trigger").expect("the trigger");
+        cx.simulate_mouse_move(trigger.center(), None, gpui::Modifiers::none());
+        cx.run_until_parked();
+        let text = cx.debug_bounds("tooltip-text").expect("the open label");
+        assert!(text.size.width <= px(320.0), "{:?}", text.size);
+        assert!(text.size.height > px(LABEL_HEIGHT), "{:?}", text.size);
     }
 
     #[test]
