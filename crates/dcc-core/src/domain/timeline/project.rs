@@ -49,6 +49,20 @@ pub(super) fn merge_tool_call_detail(call: &mut ToolCall, detail: Option<&ToolCa
     call.detail = Some(next);
 }
 
+/// Separates text that resumes after a tool call from the text before it, so
+/// "…the docs." and "WebFetch was blocked…" don't read as "…the docs.WebFetch".
+fn start_paragraph(existing: &mut String, next: &str) {
+    if existing.trim().is_empty() || existing.ends_with("\n\n") || next.starts_with('\n') {
+        return;
+    }
+    let gap = if existing.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    };
+    existing.push_str(gap);
+}
+
 #[derive(Default)]
 struct Projector {
     session_id: String,
@@ -75,6 +89,9 @@ struct Projector {
     confirmed_subagent_models: HashMap<String, String>,
     latest_turn_id: Option<String>,
     steers: HashMap<String, usize>,
+    /// Turns whose loose text was interrupted by a tool call or reasoning: the
+    /// next text starts a new paragraph instead of running into the last one.
+    text_breaks: HashSet<String>,
 }
 
 impl Projector {
@@ -285,7 +302,11 @@ impl Projector {
                 let running = self.is_running(turn);
                 let aborted = self.aborted_turns.get(turn).cloned();
                 let status = aborted.map(|reason| self.incomplete(turn, reason));
+                let paragraph = !content.is_empty() && self.text_breaks.remove(turn);
                 let message = &mut self.messages[index];
+                if paragraph {
+                    start_paragraph(&mut message.content, content);
+                }
                 message.content.push_str(content);
                 message.streaming = running;
                 if let Some(status) = status {
@@ -395,6 +416,7 @@ impl Projector {
                 reasoning_id,
                 label,
             } => {
+                self.text_breaks.insert(turn_id.0.clone());
                 let key = (turn_id.0.clone(), reasoning_id.clone());
                 if self.completed_reasoning_items.contains(&key) {
                     return;
@@ -468,6 +490,7 @@ impl Projector {
                 command,
                 file,
             } => {
+                self.text_breaks.insert(turn_id.0.clone());
                 if is_hidden_tool_action(action) {
                     return;
                 }

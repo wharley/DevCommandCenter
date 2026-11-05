@@ -444,3 +444,24 @@ fn only_open_permission_requests_wait_in_the_panel() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].id(), "p2");
 }
+
+#[test]
+fn text_after_a_tool_call_starts_a_new_paragraph() {
+    let rows = Script::new()
+        .started("turn-1", "Alpha")
+        .delta("turn-1", "Vou ler a doc")
+        .delta("turn-1", "umentação.")
+        .push(json!({ "type": "turn_tool_call_started", "turnId": "turn-1", "toolCallId": "t1", "action": "WebFetch", "command": null, "file": null }))
+        .push(json!({ "type": "turn_tool_call_completed", "turnId": "turn-1", "toolCallId": "t1" }))
+        .delta("turn-1", "WebFetch foi bloqueado.\n")
+        .push(json!({ "type": "turn_reasoning_started", "turnId": "turn-1", "reasoningId": "r1", "label": null }))
+        .delta("turn-1", "Achei.")
+        .push(json!({ "type": "turn_tool_call_started", "turnId": "turn-1", "toolCallId": "t2", "action": "Read file", "command": null, "file": null }))
+        .delta("turn-1", "\n\nPronto.")
+        .completed("turn-1")
+        .assistants();
+    assert_eq!(
+        rows[0].content,
+        "Vou ler a documentação.\n\nWebFetch foi bloqueado.\n\nAchei.\n\nPronto."
+    );
+}
