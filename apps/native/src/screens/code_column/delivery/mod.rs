@@ -38,6 +38,10 @@ use crate::ui::text_area::TextArea;
 
 /// How often the status loop reads the pull request again.
 const PR_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+/// A commit's or pull request's text scrolls inside its field past these
+/// heights, so a long ✨ draft never stretches the dialog.
+pub(super) const BODY_MAX_HEIGHT: f32 = 200.0;
+pub(super) const SUBJECT_MAX_HEIGHT: f32 = 96.0;
 
 /// A step that asks first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

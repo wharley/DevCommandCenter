@@ -190,12 +190,14 @@ impl CodeColumn {
                 match suggestion {
                     Ok(suggestion) => {
                         let subject = cx.new(|cx| {
-                            let mut area = TextArea::new(window, cx);
+                            let mut area = TextArea::new(window, cx)
+                                .with_max_height(super::SUBJECT_MAX_HEIGHT);
                             area.set_text(&suggestion.subject, cx);
                             area
                         });
                         let body = cx.new(|cx| {
-                            let mut area = TextArea::new(window, cx);
+                            let mut area =
+                                TextArea::new(window, cx).with_max_height(super::BODY_MAX_HEIGHT);
                             area.set_text(suggestion.body.as_deref().unwrap_or_default(), cx);
                             area
                         });

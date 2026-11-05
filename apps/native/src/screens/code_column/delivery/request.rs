@@ -72,7 +72,11 @@ impl CodeColumn {
             input
         });
         let placeholder = cx.t("composer.executionDock.createRequest.descriptionPlaceholder");
-        let body = cx.new(|cx| TextArea::new(window, cx).with_placeholder(placeholder));
+        let body = cx.new(|cx| {
+            TextArea::new(window, cx)
+                .with_placeholder(placeholder)
+                .with_max_height(super::BODY_MAX_HEIGHT)
+        });
         title.update(cx, |input, cx| input.focus_and_select_all(window, cx));
         // Enter sends (the form's submit), Esc closes.
         let title_events = cx.subscribe(
@@ -351,7 +355,10 @@ pub(super) fn request_dialog(
     );
     let body_focus = request.body.read(cx).focus_handle(cx);
     let body_field = field(
-        request.body.clone().into_any_element(),
+        div()
+            .debug_selector(|| "request-body".into())
+            .child(request.body.clone())
+            .into_any_element(),
         &body_focus,
         Some(96.0),
         false,

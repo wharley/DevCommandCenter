@@ -280,3 +280,38 @@ fn create_request_takes_the_local_changes_as_a_draft(cx: &mut TestAppContext) {
     assert!(column.read_with(cx, |column, _| column.delivery.request.is_none()));
     assert!(toasts(cx).contains(&"PR criado".to_string()));
 }
+
+/// A long ✨ description scrolls inside its field: the dialog keeps its size.
+#[gpui::test]
+fn a_long_description_scrolls_inside_its_field(cx: &mut TestAppContext) {
+    let repo = git_checkout(&[("a.txt", "um\n")]);
+    std::fs::write(repo.path().join("a.txt"), "dois\n").unwrap();
+    let db = tempfile::tempdir().unwrap();
+    let long = (1..=80)
+        .map(|line| format!("- linha {line}"))
+        .collect::<Vec<_>>()
+        .join("\\n");
+    let answer = format!(r#"{{"text":"{long}"}}"#);
+    let draft = "/api/v1/workspaces/w-1/delivery/draft";
+    let (column, cx, _server) = open(cx, repo.path(), db.path(), vec![(draft, 200, answer)]);
+    column.update_in(cx, |column, window, cx| {
+        column.open_request_dialog(false, window, cx)
+    });
+    cx.run_until_parked();
+    column.update(cx, |column, cx| {
+        column.toggle_draft(super::draft::DraftField::RequestBody, cx)
+    });
+    cx.run_until_parked();
+    column.read_with(cx, |column, cx| {
+        let request = column.delivery.request.as_ref().unwrap();
+        assert!(request.body.read(cx).text().contains("linha 80"));
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let field = cx.debug_bounds("request-body").expect("the description");
+    assert!(
+        field.size.height <= px(super::BODY_MAX_HEIGHT + 1.0),
+        "{:?}",
+        field.size
+    );
+}
