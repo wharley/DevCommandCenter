@@ -2751,7 +2751,15 @@
         "github": "Repositórios, issues, pull requests e Actions.",
         "sentry": "Investigue erros, issues e releases.",
         "slack": "Busque e leia mensagens, canais e arquivos do seu workspace.",
-        "zedy": "Produtos, coleções e links de checkout da sua loja."
+        "zedy": "Produtos, coleções e links de checkout da sua loja.",
+        "supabase": "Projetos, bancos, migrações e logs do Supabase.",
+        "vercel": "Projetos, deploys e logs da Vercel.",
+        "cloudflare": "Workers, KV, R2 e D1 da sua conta.",
+        "neon": "Bancos Postgres, branches e migrações.",
+        "netlify": "Sites, deploys e logs da Netlify.",
+        "posthog": "Eventos, insights e feature flags.",
+        "revenuecat": "Produtos, ofertas e assinaturas dos seus apps.",
+        "atlassian": "Issues do Jira e páginas do Confluence."
       },
       "connect": {
         "title": "Conectar {{name}}",

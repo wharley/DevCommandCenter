@@ -526,7 +526,15 @@ mod tests {
     #[test]
     fn the_catalog_and_the_slack_app() {
         assert_eq!(visible_presets().count(), 14);
-        // Every visible one shows its brand mark.
+        // Every visible one shows its brand mark and its line, in both
+        // languages.
+        for locale in [crate::i18n::Locale::PtBr, crate::i18n::Locale::En] {
+            let i18n = crate::i18n::I18n::new(locale);
+            for preset in visible_presets() {
+                let key = format!("settings.connectors.catalog.{}", preset.id);
+                assert!(i18n.has(&key, &Default::default()), "{key} ({locale:?})");
+            }
+        }
         for preset in visible_presets() {
             let logo = preset
                 .logo
