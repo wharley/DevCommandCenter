@@ -126,6 +126,8 @@ pub enum ComposerEvent {
     OpenTerminal,
     /// A thumbnail above the field: the image full size.
     OpenImage(String),
+    /// The task's port under the composer: that address in the Browser.
+    OpenUrl(String),
     /// The quick composer's send: the host creates the task, starts the
     /// conversation and sends this.
     QuickSubmit(Box<QuickTurn>),

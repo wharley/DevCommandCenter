@@ -2137,6 +2137,8 @@
       "projectFallback": "Projeto atual",
       "workingBranch": "Branch · {{branch}}",
       "baseBranch": "Base · {{branch}}",
+      "taskPort": "porta {{port}}",
+      "taskPortHint": "Portas desta tarefa: {{port}} a {{last}} ($DCC_PORT nos terminais, tasks e agentes dela). Abrir localhost:{{port}} no browser do DCC.",
       "branchUnavailable": "Git indisponível",
       "coordinatedProjects_one": "{{count}} projeto coordenado",
       "coordinatedProjects_other": "{{count}} projetos coordenados",
@@ -3571,6 +3573,22 @@
         "prompt": "Abra a tela de checkout, tente finalizar uma compra com o cartão de teste e me diga em que passo o erro aparece. Use a evidência de console e rede que eu coletei.",
         "tip": "Capturar evidência exige o controle do agente ativo. Sem ele, o botão explica o que falta.",
         "keywords": "navegador browser preview servidor local página agente controle 60 segundos evidência console rede coletar tela"
+      },
+      "ports": {
+        "label": "Portas e .env por tarefa",
+        "summary": "Cada tarefa tem as suas portas e o seu .env: dois servidores do mesmo projeto rodam lado a lado.",
+        "whatIs": "Cada tarefa ganha um bloco de 10 portas, a partir de 41000, que fica com ela enquanto existir. O terminal da tarefa, as tasks do .dcc.toml e os agentes recebem DCC_PORT (a primeira porta do bloco), DCC_WORKSPACE_PATH, DCC_ROOT_PATH, DCC_WORKSPACE_NAME, DCC_DEFAULT_BRANCH e DCC_WORKSPACE_ID. Ao criar a worktree, o DCC copia os arquivos .env* que o git ignora no projeto. O DCC não roda nem instala nada por conta própria.",
+        "whenToUse": "Quando duas tarefas do mesmo projeto precisam do servidor de dev ao mesmo tempo, ou quando a worktree nova precisa das chaves do .env para subir.",
+        "steps": [
+          "A porta da tarefa aparece embaixo do composer, ao lado do branch (por exemplo, porta 41020). Clique nela para abrir esse endereço no navegador integrado.",
+          "No script do projeto, use a variável no lugar de uma porta fixa. Next.js: next dev -p $DCC_PORT. Vite: vite --port $DCC_PORT --strictPort.",
+          "Expo: expo start --port $DCC_PORT. Num app React Native sem Expo, o Metro lê RCT_METRO_PORT=$DCC_PORT. Precisa de outra porta? Use de $((DCC_PORT + 1)) até $((DCC_PORT + 9)).",
+          "Para escolher quais arquivos ignorados vão para a worktree, crie um .worktreeinclude na raiz do projeto, com a sintaxe do .gitignore (por exemplo, .env* e config/local.json). É o mesmo arquivo que o Conductor e o Claude Code leem.",
+          "O agente da tarefa já recebe as variáveis e sabe qual é a porta. Se ele decidir subir um servidor, usa essa porta."
+        ],
+        "prompt": "Sobe o servidor de dev desta tarefa na porta dela e me diga o endereço.",
+        "tip": "O .env é copiado uma vez, quando a worktree nasce, e nunca sobrescreve: cada tarefa pode mudar o seu sem mexer nas outras.",
+        "keywords": "porta portas port DCC_PORT env .env worktreeinclude servidor dev localhost next vite expo metro variáveis lado a lado conductor"
       },
       "delegate": {
         "label": "Delegar para outro agente",

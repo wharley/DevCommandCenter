@@ -911,6 +911,7 @@ fn the_setup_warning_opens_the_terminal(cx: &mut TestAppContext) {
                         steps: vec![],
                         message: Some("yarn install failed".into()),
                     }),
+                    port: None,
                 }),
                 ..session("a")
             },
@@ -933,6 +934,42 @@ fn the_setup_warning_opens_the_terminal(cx: &mut TestAppContext) {
     cx.simulate_click(button.center(), gpui::Modifiers::none());
     cx.run_until_parked();
     assert!(opened.get());
+}
+
+#[gpui::test]
+fn the_task_port_opens_its_address_in_the_browser(cx: &mut TestAppContext) {
+    let (composer, cx) = open(cx);
+    let opened = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let sink = opened.clone();
+    composer.update(cx, |composer, cx| {
+        composer.set_session(
+            ComposerSession {
+                context: Some(crate::data::conversation::ExecutionContext {
+                    project_label: Some("Pagamentos".into()),
+                    base_branch: Some("main".into()),
+                    isolated: true,
+                    port: Some(41_020),
+                    ..Default::default()
+                }),
+                ..session("a")
+            },
+            cx,
+        );
+        cx.subscribe(
+            &cx.entity(),
+            move |_, _, event: &super::ComposerEvent, _| {
+                if let super::ComposerEvent::OpenUrl(url) = event {
+                    *sink.borrow_mut() = Some(url.clone());
+                }
+            },
+        )
+        .detach();
+    });
+    cx.run_until_parked();
+    let chip = cx.debug_bounds("task-port").expect("the task's port");
+    cx.simulate_click(chip.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(opened.borrow().as_deref(), Some("http://localhost:41020"));
 }
 
 #[gpui::test]

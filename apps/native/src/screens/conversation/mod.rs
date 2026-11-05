@@ -79,6 +79,8 @@ pub enum ConversationEvent {
     OpenTerminal,
     /// The header's Globe: the Browser opens, or closes.
     ToggleBrowser,
+    /// The task's port: the Browser opens on this address.
+    OpenBrowserAt(String),
     /// The header's phone: the iOS Simulator panel opens, or closes.
     ToggleDevice,
     /// "Buscar sessões passadas".
@@ -178,6 +180,9 @@ impl ConversationView {
                     ComposerEvent::Refresh => view.refresh_now(cx),
                     ComposerEvent::OpenSession(session) => view.open_session(session.clone(), cx),
                     ComposerEvent::OpenTerminal => cx.emit(ConversationEvent::OpenTerminal),
+                    ComposerEvent::OpenUrl(url) => {
+                        cx.emit(ConversationEvent::OpenBrowserAt(url.clone()))
+                    }
                     ComposerEvent::OpenImage(path) => {
                         view.image_open = Some(path.clone());
                         cx.notify();

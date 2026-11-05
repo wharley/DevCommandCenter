@@ -493,6 +493,9 @@ impl Shell {
                     self.open_browser(None, window, cx);
                 }
             }
+            crate::screens::conversation::ConversationEvent::OpenBrowserAt(url) => {
+                self.open_browser(Some(url.clone()), window, cx)
+            }
             // `openPreferredTerminal`: the worktree, else the project.
             crate::screens::conversation::ConversationEvent::OpenTerminal => {
                 self.terminal.update(cx, |dock, cx| {

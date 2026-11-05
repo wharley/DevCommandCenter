@@ -192,6 +192,7 @@ fn only_a_local_task_picks_its_branch_under_the_composer(cx: &mut TestAppContext
         current_branch: Some("main".into()),
         isolated,
         setup_report: None,
+        port: None,
     };
     let task = |isolated| crate::screens::composer::ComposerSession {
         task_id: Some("w-1".into()),

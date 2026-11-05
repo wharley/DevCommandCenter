@@ -112,6 +112,40 @@ fn mode_option(
         .into_any_element()
 }
 
+/// "porta 41020": the task's first port (`DCC_PORT`); a click opens it in
+/// the Browser, the tooltip names the whole block.
+fn task_port(port: u16, cx: &mut Context<Composer>) -> AnyElement {
+    let url = format!("http://localhost:{port}");
+    let args = Args::default().with("port", port.to_string());
+    let label = cx.t_with("composer.executionDock.taskPort", &args);
+    let last = port.saturating_add(9).to_string();
+    let hint = cx.t_with(
+        "composer.executionDock.taskPortHint",
+        &args.with("last", last),
+    );
+    let hover = cx.theme().colors.muted.opacity(0.45);
+    let chip = div()
+        .id("task-port")
+        .debug_selector(|| "task-port".into())
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .gap(px(6.0))
+        .rounded(px(6.0))
+        .px(px(6.0))
+        .py(px(4.0))
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .on_click(cx.listener(move |_, _, _, cx| cx.emit(ComposerEvent::OpenUrl(url.clone()))))
+        .child(Icon::new("globe-2").size(14.0))
+        .child(label);
+    // The chip sits near the window's right edge: the bubble grows left.
+    crate::ui::Tooltip::text("task-port-tip", chip, hint)
+        .side(crate::ui::tooltip::Side::Top)
+        .align(crate::ui::tooltip::Align::End)
+        .into_any_element()
+}
+
 pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> Option<AnyElement> {
     let context = composer.session.context.clone()?;
     let colors = cx.theme().colors.clone();
@@ -325,6 +359,7 @@ pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> O
         .align(crate::ui::tooltip::Align::End)
         .offset(10.0)
     };
+    let port = context.port.map(|port| task_port(port, cx));
     Some(
         div()
             .mt(px(8.0))
@@ -364,6 +399,7 @@ pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> O
                             .items_center()
                             .justify_end()
                             .gap(px(16.0))
+                            .children(port)
                             .child(
                                 div()
                                     .flex()

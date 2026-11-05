@@ -147,6 +147,8 @@ pub struct ExecutionContext {
     /// A protected worktree, not the project's own checkout.
     pub isolated: bool,
     pub setup_report: Option<dcc_core::domain::workspace::WorkspaceSetupReport>,
+    /// The first of the task's ports (`DCC_PORT`); none once it is finished.
+    pub port: Option<u16>,
 }
 
 impl PartialEq for ExecutionContext {
@@ -157,6 +159,7 @@ impl PartialEq for ExecutionContext {
             && self.base_branch == other.base_branch
             && self.current_branch == other.current_branch
             && self.isolated == other.isolated
+            && self.port == other.port
             && format!("{:?}", self.setup_report) == format!("{:?}", other.setup_report)
     }
 }
@@ -165,6 +168,22 @@ impl Eq for ExecutionContext {}
 
 /// `effectiveSelectedSessionId` with nothing picked yet: the first open
 /// session that is not a delegated child, else the first open one.
+/// The task's port block, taken now if it has none: what its terminals and
+/// agents get anyway. A finished task takes none.
+fn task_port(
+    workspaces: &SqliteWorkspaceRepo,
+    record: &dcc_core::domain::workspace::Workspace,
+) -> Option<u16> {
+    use dcc_core::domain::workspace::WorkspaceState;
+    if matches!(
+        record.state,
+        WorkspaceState::Completed | WorkspaceState::Archived
+    ) {
+        return None;
+    }
+    workspaces.workspace_port_base(&record.id).ok()
+}
+
 pub fn choose_session<'a>(
     summaries: &'a [WorkspaceSessionSummary],
     delegated: &HashSet<String>,
@@ -379,6 +398,7 @@ pub fn load(
             current_branch: None,
             isolated: record.worktree_path.is_some(),
             setup_report: record.setup_report.clone(),
+            port: task_port(&workspaces, record),
         });
         conversation.workspace_name = record.name.clone();
         conversation.project_id = Some(record.project_id.0.clone());

@@ -83,6 +83,7 @@ fn open<'a>(
             sink.borrow_mut().push(match event {
                 ConversationEvent::OpenTerminal => "terminal",
                 ConversationEvent::ToggleBrowser => "browser",
+                ConversationEvent::OpenBrowserAt(_) => "browser-at",
                 ConversationEvent::ToggleDevice => "device",
                 ConversationEvent::OpenSessionSearch => "session-search",
                 ConversationEvent::OpenInEditor(editor) => editor,

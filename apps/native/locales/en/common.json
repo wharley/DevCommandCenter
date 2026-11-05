@@ -2137,6 +2137,8 @@
       "projectFallback": "Current project",
       "workingBranch": "Branch · {{branch}}",
       "baseBranch": "Base · {{branch}}",
+      "taskPort": "port {{port}}",
+      "taskPortHint": "This task's ports: {{port}} to {{last}} ($DCC_PORT in its terminals, tasks and agents). Open localhost:{{port}} in the DCC browser.",
       "branchUnavailable": "Git unavailable",
       "coordinatedProjects_one": "{{count}} coordinated project",
       "coordinatedProjects_other": "{{count}} coordinated projects",
@@ -3571,6 +3573,22 @@
         "prompt": "Open the checkout screen, try to complete a purchase with the test card and tell me at which step the error appears. Use the console and network evidence I collected.",
         "tip": "Capturing evidence requires active agent control. Without it, the button explains what is missing.",
         "keywords": "browser preview local server page agent control 60 seconds evidence console network collect screen"
+      },
+      "ports": {
+        "label": "Ports and .env per task",
+        "summary": "Each task has its own ports and its own .env: two dev servers of one project run side by side.",
+        "whatIs": "Each task gets a block of 10 ports, from 41000 up, that stays with it while it exists. The task's terminal, the .dcc.toml tasks and the agents get DCC_PORT (the first port of the block), DCC_WORKSPACE_PATH, DCC_ROOT_PATH, DCC_WORKSPACE_NAME, DCC_DEFAULT_BRANCH and DCC_WORKSPACE_ID. When the worktree is created, DCC copies the project's .env* files that git ignores. DCC never runs or installs anything on its own.",
+        "whenToUse": "When two tasks of the same project need the dev server at the same time, or when a new worktree needs the .env keys to start.",
+        "steps": [
+          "The task's port shows under the composer, next to the branch (for example, port 41020). Click it to open that address in the built-in browser.",
+          "In the project's script, use the variable instead of a fixed port. Next.js: next dev -p $DCC_PORT. Vite: vite --port $DCC_PORT --strictPort.",
+          "Expo: expo start --port $DCC_PORT. In a React Native app without Expo, Metro reads RCT_METRO_PORT=$DCC_PORT. Need another port? Use $((DCC_PORT + 1)) up to $((DCC_PORT + 9)).",
+          "To choose which ignored files reach the worktree, add a .worktreeinclude at the project root, in .gitignore syntax (for example, .env* and config/local.json). It is the same file Conductor and Claude Code read.",
+          "The task's agent already gets the variables and knows the port. If it decides to start a server, it uses that port."
+        ],
+        "prompt": "Start this task's dev server on its port and tell me the address.",
+        "tip": "The .env is copied once, when the worktree is created, and never overwrites: each task can change its own without touching the others.",
+        "keywords": "port ports DCC_PORT env .env worktreeinclude server dev localhost next vite expo metro variables side by side conductor"
       },
       "delegate": {
         "label": "Delegate to another agent",
