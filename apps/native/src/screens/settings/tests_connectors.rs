@@ -472,3 +472,34 @@ fn the_more_button_opens_its_menu_over_the_dialog(cx: &mut TestAppContext) {
         "\"Gerenciar\" took the click"
     );
 }
+
+/// Slack's steps link to the person's apps (to copy the Client ID again)
+/// and tell whoever made the app before how to add sending, all inside
+/// the dialog.
+#[gpui::test]
+fn slacks_steps_link_to_the_apps_and_fit_the_dialog(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    let (settings, cx, _) = open(Some(SectionId::Integrations), cx);
+    let (port, _server) =
+        fake_desktop_routes(vec![("/api/v1/mcp/integrations", 200, list(vec![]))]);
+    attach(&settings, port, cx);
+    // The card may sit below the test window's fold: open it as its click does.
+    settings.update_in(cx, |settings, window, cx| {
+        let slack =
+            crate::data::connector_catalog::preset_for_url("https://mcp.slack.com/mcp").unwrap();
+        settings.open_connect(
+            crate::data::connectors::Target::of_preset(slack),
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    let dialog = cx.debug_bounds("connector-connect").expect("the dialog");
+    for part in ["connector-slack-apps", "connector-slack-existing"] {
+        let bounds = cx.debug_bounds(part).unwrap_or_else(|| panic!("{part}"));
+        assert!(
+            bounds.right() <= dialog.right() + gpui::px(0.5),
+            "{part} runs past the dialog: {bounds:?} in {dialog:?}"
+        );
+    }
+}

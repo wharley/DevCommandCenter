@@ -71,6 +71,9 @@ fn point(icon: &'static str, title: SharedString, body: AnyElement, cx: &gpui::A
         .into_any_element()
 }
 
+/// The person's Slack apps, where the Client ID can be copied again.
+const SLACK_APPS_URL: &str = "https://api.slack.com/apps";
+
 fn link(
     id: &'static str,
     text: SharedString,
@@ -80,6 +83,7 @@ fn link(
 ) -> AnyElement {
     div()
         .id(id)
+        .debug_selector(move || id.to_string())
         .text_size(px(size))
         .text_color(cx.theme().colors.foreground)
         .underline()
@@ -237,7 +241,25 @@ impl ConnectorConnect {
                 3,
                 cx.t("settings.connectors.connect.slack.clientIdTitle"),
                 vec![
-                    small(cx.t("settings.connectors.connect.slack.clientIdBody"), cx),
+                    // Where it is, and a way back to it when the app was
+                    // made long ago: on the same line, so the dialog keeps
+                    // its height.
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_x(px(4.0))
+                        .child(div().min_w_0().child(small(
+                            cx.t("settings.connectors.connect.slack.clientIdBody"),
+                            cx,
+                        )))
+                        .child(link(
+                            "connector-slack-apps",
+                            cx.t("settings.connectors.connect.slack.openApps"),
+                            SLACK_APPS_URL.to_string(),
+                            11.0,
+                            cx,
+                        ))
+                        .into_any_element(),
                     div()
                         .mt(px(6.0))
                         .child(field("connector-client-id", &self.client_id, cx))

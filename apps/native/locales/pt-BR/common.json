@@ -2791,7 +2791,8 @@
           "installTitle": "Instale no seu workspace",
           "installBody": "No Slack, confirme com Create e depois clique em Install to Workspace e em Allow.",
           "clientIdTitle": "Cole o Client ID",
-          "clientIdBody": "Fica em Basic Information → App Credentials. Não precisa do Client Secret."
+          "clientIdBody": "Fica em Basic Information → App Credentials. Não precisa do Client Secret.",
+          "openApps": "Abrir meus apps do Slack"
         },
         "ownApp": {
           "intro": "O {{name}} não aceita o cadastro automático do DCC. Use um app seu no {{name}} ou um token de acesso.",
