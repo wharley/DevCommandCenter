@@ -221,6 +221,15 @@ fn connect_signs_in_through_the_browser_or_with_a_token(cx: &mut TestAppContext)
     // Signed in: the dialog went and the list was read again.
     assert!(cx.debug_bounds("connector-connect").is_none());
     click(cx, "settings-connector-preset-github");
+    // Its long texts wrap inside the dialog.
+    let dialog = cx.debug_bounds("connector-connect").expect("the dialog");
+    for text in ["connector-data-body", "connector-token-hint"] {
+        let bounds = cx.debug_bounds(text).unwrap_or_else(|| panic!("{text}"));
+        assert!(
+            bounds.right() <= dialog.right() + gpui::px(0.5),
+            "{text} runs past the dialog: {bounds:?} in {dialog:?}"
+        );
+    }
     // A token is needed before continuing.
     cx.update(|_, cx| {
         let (dialog, _) = settings.read(cx).connectors.connect.as_ref().unwrap();

@@ -252,11 +252,18 @@ impl ConnectorConnect {
                 cx,
             )
         });
+        // The text may shrink in the wrapping row, so it wraps inside the
+        // dialog instead of running past it.
         let data_body = div()
             .flex()
             .flex_wrap()
             .gap_x(px(4.0))
-            .child(cx.t_with("settings.connectors.connect.dataBody", &name))
+            .child(
+                div()
+                    .debug_selector(|| "connector-data-body".into())
+                    .min_w_0()
+                    .child(cx.t_with("settings.connectors.connect.dataBody", &name)),
+            )
             .children(learn)
             .into_any_element();
         let token = (auth == Auth::Token).then(|| {
@@ -292,10 +299,15 @@ impl ConnectorConnect {
                         .flex()
                         .flex_wrap()
                         .gap_x(px(4.0))
-                        .child(small(
-                            cx.t_with("settings.connectors.connect.tokenHint", &name),
-                            cx,
-                        ))
+                        .child(
+                            div()
+                                .debug_selector(|| "connector-token-hint".into())
+                                .min_w_0()
+                                .child(small(
+                                    cx.t_with("settings.connectors.connect.tokenHint", &name),
+                                    cx,
+                                )),
+                        )
                         .children(help),
                 )
                 .child(field("connector-token", &self.token, cx))
