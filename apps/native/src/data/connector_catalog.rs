@@ -6,6 +6,19 @@ use serde_json::{Value, json};
 /// `USER_APP_REDIRECT_URI`
 pub const USER_APP_REDIRECT_URI: &str = "http://localhost:46327/oauth/mcp/callback";
 
+/// `SLACK_WRITE_SCOPES`: sending a message (or a thread reply) as the person.
+/// Each send still waits for their approval in the conversation.
+pub const SLACK_WRITE_SCOPES: [&str; 1] = ["chat:write"];
+
+/// Every scope the Slack app asks for: the reads, then the writes.
+pub fn slack_scopes() -> Vec<&'static str> {
+    SLACK_READ_SCOPES
+        .iter()
+        .chain(SLACK_WRITE_SCOPES.iter())
+        .copied()
+        .collect()
+}
+
 /// `SLACK_READ_SCOPES`
 pub const SLACK_READ_SCOPES: [&str; 21] = [
     "search:read.public",
@@ -249,9 +262,10 @@ pub const PRESETS: [Preset; 15] = [
 ];
 
 impl Preset {
-    /// Scopes asked for at sign-in instead of the server's (Slack's reads).
+    /// Scopes asked for at sign-in instead of the server's (Slack's reads
+    /// and `chat:write`).
     pub fn scopes(&self) -> Option<String> {
-        (self.auth == Auth::SlackApp).then(|| SLACK_READ_SCOPES.join(" "))
+        (self.auth == Auth::SlackApp).then(|| slack_scopes().join(" "))
     }
 }
 
@@ -292,11 +306,11 @@ pub fn slack_manifest() -> Value {
     json!({
         "display_information": {
             "name": "Dev Command Center",
-            "description": "Lets your coding agents in Dev Command Center read Slack.",
+            "description": "Lets your coding agents in Dev Command Center read Slack and, with your approval, send messages.",
         },
         "oauth_config": {
             "redirect_urls": [USER_APP_REDIRECT_URI],
-            "scopes": { "user": SLACK_READ_SCOPES },
+            "scopes": { "user": slack_scopes() },
             "pkce_enabled": true,
         },
         "settings": {

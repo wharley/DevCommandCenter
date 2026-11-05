@@ -177,6 +177,15 @@ impl ConnectorConnect {
             .border_color(colors.border.opacity(0.6))
             .p(px(12.0))
             .child(small(cx.t("settings.connectors.connect.slack.intro"), cx))
+            .child(
+                div()
+                    .debug_selector(|| "connector-slack-existing".into())
+                    .min_w_0()
+                    .child(small(
+                        cx.t("settings.connectors.connect.slack.existingApp"),
+                        cx,
+                    )),
+            )
             .child(step(
                 1,
                 cx.t("settings.connectors.connect.slack.createTitle"),

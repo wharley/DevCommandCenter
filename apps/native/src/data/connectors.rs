@@ -434,7 +434,15 @@ impl DesktopApi {
             .then(|| integration_for_url(integrations, &target.url).cloned())
             .flatten();
         let mut integration = match existing {
-            Some(integration) => integration,
+            Some(integration) => {
+                // A catalog connector that asks for its own scopes (Slack)
+                // signs in again with today's list, so a scope added since
+                // it was first connected (`chat:write`) reaches the token.
+                if let Some(scopes) = target.preset.and_then(Preset::scopes) {
+                    self.set_connector_scopes(&integration.definition.id, &scopes)?;
+                }
+                integration
+            }
             None => {
                 let created = self.create_connector(&target.name, &target.url, token)?;
                 self.apply_new_details(&created, target)?;
@@ -524,6 +532,25 @@ mod tests {
     }
 
     #[test]
+    fn reconnecting_slack_asks_for_todays_scopes() {
+        let (port, server) =
+            crate::test_support::fake_desktop_answers(vec![(200, r#"{"ok":true}"#.to_string())]);
+        let api = DesktopApi::new(port, "k");
+        let slack = record("https://mcp.slack.com/mcp", true, Value::Null, &[]);
+        let target = Target::of_preset(preset_for_url("https://mcp.slack.com/mcp").unwrap());
+        let integration = api.ensure_connector(&target, &[slack], None).unwrap();
+        assert_eq!(integration.definition.id, "https://mcp.slack.com/mcp");
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].0, "POST /api/v1/mcp/scopes");
+        let body: Value = serde_json::from_str(&requests[0].1).unwrap();
+        assert!(
+            body["scopes"].as_str().unwrap().contains("chat:write"),
+            "{body}"
+        );
+    }
+
+    #[test]
     fn the_catalog_and_the_slack_app() {
         assert_eq!(visible_presets().count(), 14);
         // Every visible one shows its brand mark and its line, in both
@@ -559,6 +586,21 @@ mod tests {
                 .scopes()
                 .unwrap()
                 .starts_with("search:read.public")
+        );
+        // Reads, plus sending a message (each send waits for approval).
+        let scopes = PRESETS[5].scopes().unwrap();
+        assert!(
+            scopes.split(' ').any(|scope| scope == "chat:write"),
+            "{scopes}"
+        );
+        assert!(scopes.split(' ').any(|scope| scope == "channels:history"));
+        let manifest = crate::data::connector_catalog::slack_manifest();
+        assert!(
+            manifest["oauth_config"]["scopes"]["user"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|scope| scope == "chat:write")
         );
         let url = slack_create_app_url();
         assert!(url.starts_with("https://api.slack.com/apps?new_app=1&manifest_json=%7B"));
