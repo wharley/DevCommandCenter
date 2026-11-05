@@ -64,6 +64,21 @@ fn a_description_keeps_its_lines_and_an_empty_answer_is_none() {
 }
 
 #[test]
+fn an_agents_signature_at_the_end_is_dropped() {
+    let response = "Keeps the caret.\n\n- one\n- two\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n";
+    assert_eq!(
+        clean_draft(DraftField::RequestBody, response).as_deref(),
+        Some("Keeps the caret.\n\n- one\n- two")
+    );
+    // Only at the end: the same words inside the text stay.
+    let inside = "Mentions co-authored-by: in the docs.\n\n- one";
+    assert_eq!(
+        clean_draft(DraftField::CommitBody, inside).as_deref(),
+        Some(inside)
+    );
+}
+
+#[test]
 fn the_prompt_frames_the_change_as_data_and_carries_the_other_field() {
     let context = DraftContext {
         files: "M\ta.txt".into(),
@@ -78,6 +93,7 @@ fn the_prompt_frames_the_change_as_data_and_carries_the_other_field() {
         &context,
     );
     assert!(prompt.starts_with("Write the body of a Git commit message"));
+    assert!(prompt.contains("no signature, attribution or trailer"));
     assert!(prompt
         .contains("It goes with this subject, chosen by the person:\nfix(app): keep the caret"));
     assert!(prompt.contains("TASK NAME (for intent only):\nMelhorar a tela"));
