@@ -173,6 +173,26 @@ fn task_port_instructions(port: u16, ios_app: bool) -> String {
     )
 }
 
+/// What a one-off read-only run (PR review, ✨ draft, commit suggestion) is
+/// told: everything it needs is in the prompt.
+const EPHEMERAL_READ_ONLY_INSTRUCTIONS: &str = "Read-only run. Do not edit files, execute mutating commands, create branches, commits, tasks, worktrees, or publish anything. The patches and data in the prompt are complete: do not fetch, pull or reach the network, and do not ask the user questions. Return only the requested draft response.";
+
+/// Where the provider's own sandbox guarantees read-only, nothing asks: a
+/// network or write ask is denied in place and the agent goes on with what
+/// it has. Plan mode, the fallback, can ask, and an ask ends the run.
+fn ephemeral_turn_mode(
+    capabilities: &dcc_core::domain::Capabilities,
+) -> (Option<bool>, Option<ProviderApprovalPolicy>) {
+    if capabilities
+        .approval_policies
+        .contains(&ProviderApprovalPolicy::ReadOnly)
+    {
+        (None, Some(ProviderApprovalPolicy::ReadOnly))
+    } else {
+        (Some(true), None)
+    }
+}
+
 fn append_task_port_instructions(
     existing: Option<String>,
     port: Option<u16>,
@@ -2096,19 +2116,17 @@ impl SessionCommandState {
             })
             .await?;
         let mut events = provider.stream_events(&handle);
+        let (plan_mode, approval_policy) = ephemeral_turn_mode(&provider.capabilities());
         if let Err(error) = provider
             .send_input(
                 &handle,
                 Input::Turn(dcc_core::ports::ProviderTurnInput {
                     prompt,
-                    tool_instructions: Some(
-                        "Read-only pull request review. Do not edit files, execute mutating commands, create branches, commits, tasks, worktrees, or publish anything. Return only the requested draft response."
-                            .to_string(),
-                    ),
-                    plan_mode: Some(true),
+                    tool_instructions: Some(EPHEMERAL_READ_ONLY_INSTRUCTIONS.to_string()),
+                    plan_mode,
                     effort,
                     fast_mode: None,
-                    approval_policy: None,
+                    approval_policy,
                     resume_fallback_context: None,
                 }),
             )
@@ -2143,10 +2161,15 @@ impl SessionCommandState {
                     ProviderEvent::Failed { message, .. } => {
                         return Err(dcc_core::CoreError::Provider(message));
                     }
-                    ProviderEvent::PermissionRequested { .. }
-                    | ProviderEvent::UserInputRequested { .. } => {
+                    ProviderEvent::PermissionRequested { request, .. } => {
+                        let asked = request.title.unwrap_or(request.tool_name);
+                        return Err(dcc_core::CoreError::Provider(format!(
+                            "The review agent asked for an action this read-only run cannot allow ({asked}). The run was cancelled."
+                        )));
+                    }
+                    ProviderEvent::UserInputRequested { .. } => {
                         return Err(dcc_core::CoreError::Provider(
-                            "The review agent requested an interactive or mutating action. The run was cancelled."
+                            "The review agent asked a question this run cannot answer. The run was cancelled."
                                 .to_string(),
                         ));
                     }
@@ -8895,6 +8918,20 @@ mod tests {
             ephemeral_mcp_lease_id: None,
             usage_limit: Default::default(),
         }
+    }
+
+    #[test]
+    fn a_read_only_run_asks_nothing_where_the_sandbox_guarantees_it() {
+        let codex = dcc_providers::codex::stable_codex_capabilities();
+        assert_eq!(
+            ephemeral_turn_mode(&codex),
+            (None, Some(ProviderApprovalPolicy::ReadOnly))
+        );
+        let grok = dcc_providers::grok_acp::stable_grok_capabilities();
+        assert!(!grok.approval_policies.contains(&ProviderApprovalPolicy::ReadOnly));
+        assert_eq!(ephemeral_turn_mode(&grok), (Some(true), None));
+        assert!(EPHEMERAL_READ_ONLY_INSTRUCTIONS.contains("do not fetch, pull or reach the network"));
+        assert!(EPHEMERAL_READ_ONLY_INSTRUCTIONS.contains("do not ask the user questions"));
     }
 
     #[test]
