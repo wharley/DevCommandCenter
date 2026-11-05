@@ -120,6 +120,12 @@ pub(super) async fn act(
                 .await
                 .map(|output| json!(output))
         }
+        "pull" => workspace_delivery::delivery_pull(state, &workspace_id)
+            .await
+            .map(|output| json!(output)),
+        "fetch-upstream" => {
+            done(workspace_delivery::delivery_fetch_upstream(state, &workspace_id).await)
+        }
         _ => return Err(HttpApiError::not_found("unknown delivery action")),
     };
     result.map(Json).map_err(classify)

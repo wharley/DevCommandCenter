@@ -1291,6 +1291,7 @@ pub fn remote_path_allowed(path: &str) -> bool {
         && !matches!(
             route,
             "/api/v1/forge/cli-status"
+                | "/api/v1/git/fetch-base"
                 | "/api/v1/forge/hosts"
                 | "/api/v1/forge/select-login"
                 | "/api/v1/forge/backfill-bindings"

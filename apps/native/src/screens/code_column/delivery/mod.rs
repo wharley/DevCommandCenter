@@ -17,6 +17,7 @@ mod draft;
 mod draft_tests;
 mod header;
 mod overlay;
+mod pull;
 mod request;
 #[cfg(test)]
 mod tests;
@@ -100,6 +101,8 @@ pub(crate) struct Delivery {
     /// The merge's conflict state, while git reports one (every 5s).
     pub conflicts: Option<dcc_core::domain::merge_conflict::WorkspaceGitConflictStateOutput>,
     pub _conflicts: Option<gpui::Task<()>>,
+    /// When each task's own branch was last fetched.
+    pub upstream: pull::UpstreamFetches,
 }
 
 impl Delivery {
@@ -211,6 +214,9 @@ impl CodeColumn {
                 column.complete_if_merged(cx);
                 if task_changed {
                     column.read_last_turn(cx);
+                    if !cfg!(test) {
+                        column.fetch_upstream(cx);
+                    }
                 }
                 cx.notify();
             });

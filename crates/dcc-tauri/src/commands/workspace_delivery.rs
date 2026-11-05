@@ -41,7 +41,8 @@ use crate::{
             workspace_git_push_with_state, workspace_git_stage_all_with_state,
             workspace_git_status_with_state, workspace_git_sync_base_with_state,
             workspace_project_automation_config_with_state, WorkspaceGitCommitSuggestionOutput,
-            WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput,
+            WorkspaceGitSyncBaseInput, WorkspaceGitSyncBaseOutput, WorkspaceGitPullInput,
+            workspace_git_pull_with_state, workspace_fetch_upstream_with_state,
             workspace_run_project_tasks_with_state, WorkspaceChangeRequestCreateInput,
             WorkspaceGitBranchDiffInput, WorkspaceGitChangeEntry, WorkspaceGitCommitInput,
             WorkspaceGitCommitPushInput, WorkspaceGitCommitSuggestionInput,
@@ -699,6 +700,38 @@ pub async fn delivery_sync_base(
         WorkspaceGitSyncBaseInput {
             workspace_root: target.root.clone(),
             base_branch: base_branch.filter(|branch| !branch.trim().is_empty()),
+            forge_login: None,
+        },
+    )
+    .await?)
+}
+
+/// "Puxar alterações": what someone else pushed to the task's own branch.
+pub async fn delivery_pull(
+    state: &WorkspaceCommandState,
+    workspace_id: &str,
+) -> Result<WorkspaceGitSyncBaseOutput, DeliveryError> {
+    let target = target(state, workspace_id).await?;
+    Ok(workspace_git_pull_with_state(
+        state,
+        WorkspaceGitPullInput {
+            workspace_root: target.root.clone(),
+            forge_login: None,
+        },
+    )
+    .await?)
+}
+
+/// The task's own branch fetched (refs only): how far behind it is shows.
+pub async fn delivery_fetch_upstream(
+    state: &WorkspaceCommandState,
+    workspace_id: &str,
+) -> Result<(), DeliveryError> {
+    let target = target(state, workspace_id).await?;
+    Ok(workspace_fetch_upstream_with_state(
+        state,
+        WorkspaceGitPullInput {
+            workspace_root: target.root.clone(),
             forge_login: None,
         },
     )

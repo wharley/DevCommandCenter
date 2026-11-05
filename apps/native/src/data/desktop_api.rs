@@ -731,6 +731,18 @@ impl DesktopApi {
         )?)
     }
 
+    /// "Puxar alterações": what someone else pushed to the task's branch.
+    pub fn pull(&self, workspace_id: &str) -> Result<SyncedBase, ApiError> {
+        let value = self.delivery(workspace_id, "pull", &json!({}))?;
+        serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
+    }
+
+    /// The task's own branch fetched (refs only).
+    pub fn fetch_upstream(&self, workspace_id: &str) -> Result<(), ApiError> {
+        self.delivery(workspace_id, "fetch-upstream", &json!({}))
+            .map(|_| ())
+    }
+
     /// "Atualizar worktree" with the base (the PR's when it has one).
     pub fn sync_base(
         &self,
@@ -1028,6 +1040,16 @@ impl DesktopApi {
                 "resolved": resolved,
                 "forgeLogin": login,
             }),
+        )
+        .map(|_| ())
+    }
+
+    /// The project's base branch brought from its remote (refs only), so a
+    /// task created next starts from it.
+    pub fn fetch_base(&self, root: &str, base_branch: &str) -> Result<(), ApiError> {
+        self.post(
+            "/api/v1/git/fetch-base",
+            &json!({ "repositoryRoot": root, "baseBranch": base_branch }),
         )
         .map(|_| ())
     }

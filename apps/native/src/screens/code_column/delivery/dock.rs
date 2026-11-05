@@ -82,6 +82,7 @@ impl CodeColumn {
             branch_additions,
             branch_deletions,
             ahead_of_remote_count: status.map_or(0, |status| status.ahead_of_remote_count),
+            behind_of_remote_count: status.map_or(0, |status| status.behind_of_remote_count),
             has_remote: status.map(|status| status.has_remote),
             pull_request_state: pr.and_then(|pr| pr.state.clone()),
             pull_request_number: pr.and_then(|pr| pr.number),
@@ -148,6 +149,7 @@ impl CodeColumn {
                 self.prepare_dock_commit(true, window, cx)
             }
             DockRunMode::SyncBase => self.ask_sync_base(cx),
+            DockRunMode::Pull => self.pull(cx),
             DockRunMode::Mode(CommitMode::CreatePr) => self.open_request_dialog(false, window, cx),
             DockRunMode::Mode(CommitMode::Merge) => {
                 self.delivery.confirm = Some(Confirm::Merge);

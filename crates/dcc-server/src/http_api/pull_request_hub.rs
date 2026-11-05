@@ -39,7 +39,10 @@ fn reply<T: serde::Serialize>(result: Result<T, String>) -> Result<Json<Value>, 
 }
 
 /// The pull request's repository: a project DCC knows, or a task's checkout.
-async fn known_repository(backend: &HttpBackend, root: &str) -> Result<(), HttpApiError> {
+pub(super) async fn known_repository(
+    backend: &HttpBackend,
+    root: &str,
+) -> Result<(), HttpApiError> {
     let root = root.trim();
     let repo = dcc_infra::db::SqliteWorkspaceRepo::open(&backend.workspace.db_path)
         .map_err(|error| HttpApiError::internal(error.to_string()))?;

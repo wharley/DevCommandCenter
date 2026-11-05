@@ -5,12 +5,14 @@
 
 use super::commit_mode::CommitMode;
 
-/// What a step runs: a commit mode, a commit alone, or bringing the base in.
+/// What a step runs: a commit mode, a commit alone, bringing the base in,
+/// or bringing in what someone else pushed to the same branch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DockRunMode {
     Mode(CommitMode),
     Commit,
     SyncBase,
+    Pull,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +22,7 @@ pub enum DockActionId {
     CommitAndPush,
     Push,
     SyncBase,
+    Pull,
     CreatePr,
     CreateDraftPr,
     OpenPr,
@@ -56,6 +59,9 @@ pub struct DockChangeSummary {
     pub branch_additions: u32,
     pub branch_deletions: u32,
     pub ahead_of_remote_count: u32,
+    /// Commits on the branch's remote copy this checkout does not have
+    /// (someone else pushed), as of its last fetch.
+    pub behind_of_remote_count: u32,
     /// False when the repository has no remote; `None` counts as present.
     pub has_remote: Option<bool>,
     pub pull_request_state: Option<String>,
@@ -192,6 +198,8 @@ pub struct DockActionContext {
     pub has_local_changes: bool,
     pub has_branch_changes: bool,
     pub has_ahead_commits: bool,
+    /// Someone else pushed to this branch: pulling comes first.
+    pub behind_remote: u32,
     pub has_change_request: bool,
     pub has_open_request: bool,
     /// False when the repository has no remote; `None` counts as present.
@@ -214,6 +222,7 @@ impl DockActionContext {
             has_local_changes: summary.is_some_and(|summary| summary.files > 0),
             has_branch_changes: summary.is_some_and(|summary| summary.branch_files > 0),
             has_ahead_commits: summary.is_some_and(|summary| summary.ahead_of_remote_count > 0),
+            behind_remote: summary.map_or(0, |summary| summary.behind_of_remote_count),
             has_change_request: state.is_some(),
             has_open_request: state.as_deref() == Some("open"),
             has_remote: summary.and_then(|summary| summary.has_remote),
@@ -261,7 +270,17 @@ pub fn resolve_dock_actions(context: &DockActionContext) -> Vec<DockAction> {
             mode,
             Some(CommitMode::ResolveConflicts | CommitMode::CompleteMerge)
         );
-    let first = if local_only {
+    // Someone else pushed to this branch: their commits come in before any
+    // push (which would be refused) or merge. Conflict work still leads.
+    let pull_first = !local_only
+        && context.behind_remote > 0
+        && !matches!(
+            mode,
+            Some(CommitMode::ResolveConflicts | CommitMode::CompleteMerge)
+        );
+    let first = if pull_first {
+        primary(Some(DockRunMode::Pull), Kind::Execute, loading)
+    } else if local_only {
         primary(
             Some(DockRunMode::Commit),
             Kind::Execute,
@@ -336,6 +355,12 @@ pub fn resolve_dock_actions(context: &DockActionContext) -> Vec<DockAction> {
             Kind::Execute,
             loading,
         ),
+        action(
+            Id::Pull,
+            Some(DockRunMode::Pull),
+            Kind::Execute,
+            loading || no_remote,
+        ),
     ];
     std::iter::once(first)
         .chain(
@@ -367,6 +392,37 @@ mod tests {
         });
         assert_eq!(actions[0].kind, DockActionKind::Review);
         assert!(actions[0].primary);
+    }
+
+    #[test]
+    fn what_someone_else_pushed_is_pulled_first() {
+        let behind = resolve_dock_actions(&DockActionContext {
+            has_local_changes: true,
+            behind_remote: 2,
+            ..context(CommitMode::CommitAndPush)
+        });
+        assert_eq!(behind[0].mode, Some(DockRunMode::Pull));
+        assert!(behind[0].primary);
+        assert_eq!(
+            behind
+                .iter()
+                .filter(|action| action.mode == Some(DockRunMode::Pull))
+                .count(),
+            1,
+            "listed once"
+        );
+        let current = resolve_dock_actions(&context(CommitMode::CommitAndPush));
+        assert_ne!(current[0].mode, Some(DockRunMode::Pull));
+        let pull = current
+            .iter()
+            .find(|action| action.id == DockActionId::Pull)
+            .unwrap();
+        assert!(!pull.disabled, "still in the menu");
+        let conflicts = resolve_dock_actions(&DockActionContext {
+            behind_remote: 2,
+            ..context(CommitMode::ResolveConflicts)
+        });
+        assert_eq!(conflicts[0].kind, DockActionKind::Review, "conflicts first");
     }
 
     #[test]

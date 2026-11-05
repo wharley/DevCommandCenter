@@ -1,6 +1,7 @@
-//! `BranchToolbar`, shown when the branch is behind its base (or while it
-//! syncs): the branch and its folder, "Atualizar · N atrás" right there,
-//! and a menu that copies the branch's name.
+//! `BranchToolbar`, shown when the branch is behind the remote copy it
+//! follows (someone else pushed) or while it syncs: the branch and its
+//! folder, "Puxar · N atrás" right there, and a menu that copies the
+//! branch's name.
 
 use gpui::{AnyElement, ClipboardItem, Context, FontWeight, SharedString, div, prelude::*, px};
 
@@ -73,7 +74,7 @@ pub(crate) fn toolbar(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> Opti
                 button
                     .cursor_pointer()
                     .hover(move |style| style.bg(hover))
-                    .on_click(cx.listener(|column, _, _, cx| column.ask_sync_base(cx)))
+                    .on_click(cx.listener(|column, _, _, cx| column.pull(cx)))
             }
         })
         .child(if syncing {

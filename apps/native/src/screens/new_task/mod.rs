@@ -8,6 +8,7 @@ mod tests;
 mod view;
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use dcc_core::application::linked_task::LinkedFolders;
 use gpui::{Context, EventEmitter, SharedString};
@@ -42,7 +43,12 @@ pub struct NewTaskView {
     pub(crate) menu_open: bool,
     /// Tests point the screen at a fake desktop.
     pub(crate) endpoint: Option<DesktopApi>,
+    /// When each project's base was last fetched (by root).
+    fetched: HashMap<String, Instant>,
 }
+
+/// A project's base is fetched again only after this long.
+const FETCH_EVERY: Duration = Duration::from_secs(5 * 60);
 
 impl EventEmitter<NewTaskEvent> for NewTaskView {}
 
@@ -56,7 +62,46 @@ impl NewTaskView {
             pending: None,
             menu_open: false,
             endpoint: None,
+            fetched: HashMap::new(),
         }
+    }
+
+    /// The screen opened: each listed project's base is brought from its
+    /// remote in the background, one at a time, so the task picked a moment
+    /// later starts from the base as the remote has it. Creation never waits
+    /// for it; a project fetched in the last minutes is skipped.
+    pub fn fetch_bases(&mut self, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let due: Vec<(String, String)> = self
+            .projects
+            .iter()
+            .filter(|project| !project.missing)
+            .filter(|project| {
+                self.fetched
+                    .get(&project.root_path)
+                    .is_none_or(|at| now.duration_since(*at) >= FETCH_EVERY)
+            })
+            .map(|project| (project.root_path.clone(), project.base_branch.clone()))
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        for (root, _) in &due {
+            self.fetched.insert(root.clone(), now);
+        }
+        let endpoint = self.endpoint.clone();
+        cx.background_executor()
+            .spawn(async move {
+                let Some(api) = endpoint.or_else(DesktopApi::load) else {
+                    return;
+                };
+                for (root, base) in due {
+                    // A project offline or without a remote just keeps its
+                    // last copy: nothing to tell the person here.
+                    let _ = api.fetch_base(&root, &base);
+                }
+            })
+            .detach();
     }
 
     /// The projects the sidebar lists, idea folders already out.

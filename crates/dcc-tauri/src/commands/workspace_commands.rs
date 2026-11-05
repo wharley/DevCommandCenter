@@ -3711,6 +3711,14 @@ async fn persist_workspace_base_branch(
         .map_err(|error| error.to_string())
 }
 
+mod remote_sync;
+#[cfg(test)]
+use remote_sync::{branch_upstream, pull_integration};
+pub use remote_sync::{
+    workspace_fetch_base_with_state, workspace_fetch_upstream_with_state,
+    workspace_git_pull_with_state, WorkspaceFetchBaseInput, WorkspaceGitPullInput,
+};
+
 /// `workspace_git_sync_base` for callers without a Tauri `State`.
 pub async fn workspace_git_sync_base_with_state(
     state: &WorkspaceCommandState,
@@ -8058,6 +8066,40 @@ mod editor_workspace_file_tests {
     fn head_parent_count(root: &str) -> usize {
         let output = run_git_output(root, &["rev-list", "--parents", "-n", "1", "HEAD"]).unwrap();
         String::from_utf8_lossy(&output.stdout).split_whitespace().count() - 1
+    }
+
+    #[test]
+    fn pulling_brings_what_someone_else_pushed_to_the_same_branch() {
+        // Local main is the task's own branch here; another clone pushed to it.
+        let (dir, root) = diverged_local_direct_checkout("pull-own-branch", "local.txt");
+        run_git_output(&root, &["branch", "--set-upstream-to=origin/main"]).ok();
+        let (remote, branch) = branch_upstream(&root).unwrap();
+        assert_eq!((remote.as_str(), branch.as_str()), ("origin", "main"));
+        let outcome = sync_workspace_branch_inner(
+            &dir.path.join("workspaces.sqlite"),
+            &root,
+            Some(&branch),
+            Some(&remote),
+            SyncIntegration::PreferRebase,
+            None,
+            None,
+        )
+        .unwrap_or_else(|failure| panic!("pull: {}", failure.detail));
+        assert_ne!(outcome.before, outcome.after);
+        assert_eq!(
+            fs::read_to_string(Path::new(&root).join("shared.txt")).unwrap(),
+            "remote\n",
+            "the other clone's commit arrived"
+        );
+        assert!(Path::new(&root).join("local.txt").exists(), "the local commit stays");
+        assert_eq!(head_parent_count(&root), 1, "rebased on top");
+        run_git_output(&root, &["checkout", "--detach", "-q"]).unwrap();
+        assert!(branch_upstream(&root).is_err(), "a detached task has no branch to pull");
+        assert!(pull_integration(true) == SyncIntegration::PreferRebase);
+        assert!(
+            pull_integration(false) == SyncIntegration::Merge,
+            "a branch following the base merges, never rewriting pushed commits"
+        );
     }
 
     #[test]

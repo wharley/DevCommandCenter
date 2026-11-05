@@ -210,6 +210,44 @@ pub fn create_worktree_branch_from_ref(
 }
 
 /// The `.env` files the worktree needs to run; never fails the creation.
+/// Where a new task starts: the remote's copy of its base when the local
+/// branch is behind it (it often is: the project's own checkout is rarely
+/// pulled), else the local base, which keeps commits not pushed yet. Local
+/// refs only, no network: opening "Nova tarefa" fetches the base ahead.
+pub fn task_start_point(repo_root: &Path, base_branch: &str) -> String {
+    let base = base_branch.trim();
+    let Some(root) = repo_root.to_str() else {
+        return base.to_string();
+    };
+    if base.is_empty() || base.starts_with("origin/") || base.starts_with("refs/") {
+        return base.to_string();
+    }
+    let remote = format!("origin/{base}");
+    let verify = |reference: &str| {
+        crate::git_command::git_command_succeeds(root, &["rev-parse", "--verify", "-q", reference])
+    };
+    if !verify(&format!("refs/remotes/{remote}")) {
+        return base.to_string();
+    }
+    if !verify(&format!("refs/heads/{base}")) {
+        return remote;
+    }
+    let behind = crate::git_command::git_command_succeeds(
+        root,
+        &[
+            "merge-base",
+            "--is-ancestor",
+            &format!("refs/heads/{base}"),
+            &format!("refs/remotes/{remote}"),
+        ],
+    );
+    if behind {
+        remote
+    } else {
+        base.to_string()
+    }
+}
+
 fn copy_ignored_includes(source: &Path, worktree: &Path) {
     match crate::worktree_include::copy_worktree_includes(source, worktree) {
         Ok(report) => {
@@ -364,12 +402,13 @@ impl GitOps for CommandGitOps {
         if is_git_repo(workspace_root) {
             // Creation owns only its generated destination. Repository-wide
             // stale metadata cleanup is a separate explicit maintenance task.
+            let start_point = task_start_point(workspace_root, base_branch);
             let worktree_add_args = vec![
                 OsString::from("worktree"),
                 OsString::from("add"),
                 OsString::from("--detach"),
                 worktree_path.as_os_str().to_os_string(),
-                OsString::from(base_branch),
+                OsString::from(start_point),
             ];
             run_git_stdout(
                 worktree_add_args,
@@ -394,6 +433,91 @@ impl GitOps for CommandGitOps {
 #[cfg(test)]
 mod tests {
     use super::is_broken_worktree_error_text;
+
+    fn git(root: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// A task starts from the remote's base when the local one is behind it,
+    /// and from the local one when that has commits of its own.
+    #[test]
+    fn a_task_starts_from_the_newest_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q", "-b", "main"]);
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=a@b",
+                "-c",
+                "user.name=a",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "one",
+            ],
+        );
+        assert_eq!(
+            super::task_start_point(root, "main"),
+            "main",
+            "no remote copy"
+        );
+        git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=a@b",
+                "-c",
+                "user.name=a",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "two",
+            ],
+        );
+        let two = git(root, &["rev-parse", "HEAD"]);
+        git(root, &["update-ref", "refs/remotes/origin/main", &two]);
+        git(root, &["reset", "-q", "--hard", "HEAD~1"]);
+        assert_eq!(
+            super::task_start_point(root, "main"),
+            "origin/main",
+            "local is behind"
+        );
+        git(
+            root,
+            &[
+                "-c",
+                "user.email=a@b",
+                "-c",
+                "user.name=a",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "mine",
+            ],
+        );
+        assert_eq!(
+            super::task_start_point(root, "main"),
+            "main",
+            "local has its own commit"
+        );
+        assert_eq!(super::task_start_point(root, "origin/dev"), "origin/dev");
+    }
 
     #[test]
     fn broken_worktree_detection_matches_known_git_failures() {

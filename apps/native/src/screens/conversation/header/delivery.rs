@@ -27,6 +27,9 @@ pub(crate) fn action_label(action: &DockAction, request_label: &str, cx: &App) -
         (DockActionId::SyncBase, _) | (_, Some(DockRunMode::SyncBase)) => {
             cx.t("composer.executionDock.actions.syncBase")
         }
+        (DockActionId::Pull, _) | (_, Some(DockRunMode::Pull)) => {
+            cx.t("composer.executionDock.actions.pull")
+        }
         (DockActionId::CreateDraftPr, _) => {
             cx.t_with("composer.executionDock.actions.createDraft", &args)
         }

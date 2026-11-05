@@ -125,3 +125,37 @@ fn a_gone_folder_starts_nothing_and_offers_its_removal(cx: &mut TestAppContext) 
     );
     view.read_with(cx, |view, _| assert!(!view.menu_open));
 }
+
+/// Opening the screen fetches each project's base once, in the background;
+/// opening it again right away fetches nothing.
+#[gpui::test]
+fn opening_the_screen_fetches_each_projects_base_once(cx: &mut TestAppContext) {
+    let ok = (200, r#"{"ok":true}"#.to_string());
+    let (port, server) = crate::test_support::fake_desktop_answers(vec![ok.clone(), ok]);
+    let (view, cx) = open(cx);
+    let mut gone = project("old", "Antigo");
+    gone.missing = true;
+    let projects = vec![project("app", "Checkout"), project("api", "API"), gone];
+    view.update(cx, |view, cx| {
+        view.endpoint = Some(DesktopApi::new(port, "k"));
+        view.set_projects(&projects, &HashMap::new(), cx);
+        view.fetch_bases(cx);
+        view.fetch_bases(cx);
+    });
+    cx.run_until_parked();
+    let requests = server.join().unwrap();
+    let bodies: Vec<serde_json::Value> = requests
+        .iter()
+        .map(|(line, body)| {
+            assert_eq!(line, "POST /api/v1/git/fetch-base");
+            serde_json::from_str(body).unwrap()
+        })
+        .collect();
+    assert_eq!(
+        bodies,
+        vec![
+            serde_json::json!({ "repositoryRoot": "/code/app", "baseBranch": "main" }),
+            serde_json::json!({ "repositoryRoot": "/code/api", "baseBranch": "main" }),
+        ]
+    );
+}

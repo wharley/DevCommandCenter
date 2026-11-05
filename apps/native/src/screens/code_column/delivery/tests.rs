@@ -3,6 +3,7 @@
 //! asked first, a push stopped by the checks, a merged task completed.
 
 use dcc_core::domain::commit_mode::CommitMode;
+use dcc_core::domain::execution_dock::DockRunMode;
 use dcc_core::domain::workspace_git::WorkspacePrStatusOutput;
 use gpui::{Modifiers, TestAppContext, WindowAppearance, px, size};
 use serde_json::Value;
@@ -63,6 +64,7 @@ const MERGE: &str = "/api/v1/workspaces/w-1/delivery/merge";
 const COMPLETE: &str = "/api/v1/workspaces/w-1/delivery/complete";
 const PUSH: &str = "/api/v1/workspaces/w-1/delivery/push";
 const SYNC: &str = "/api/v1/workspaces/w-1/delivery/sync-base";
+const PULL: &str = "/api/v1/workspaces/w-1/delivery/pull";
 
 pub(super) fn requests(setup: Setup) -> Vec<(String, Value)> {
     setup
@@ -256,7 +258,40 @@ fn a_push_the_checks_stop_says_so(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_branch_behind_offers_to_sync_with_the_base(cx: &mut TestAppContext) {
+fn a_branch_behind_its_remote_offers_to_pull(cx: &mut TestAppContext) {
+    let dir = tracked_checkout(false);
+    let pulled = r#"{"branch":"feature","baseBranch":"feature","remote":"origin","updated":true,"conflictCount":0}"#;
+    let (column, cx, setup) = open(
+        cx,
+        &dir.path().join("repo"),
+        None,
+        vec![(PULL, 200, pulled.into())],
+    );
+    column.read_with(cx, |column, _| {
+        assert_eq!(column.status.as_ref().unwrap().behind_of_remote_count, 1)
+    });
+    column.read_with(cx, |column, _| {
+        let first = column.dock().unwrap().actions[0];
+        assert_eq!(first.mode, Some(DockRunMode::Pull), "pulling comes first");
+    });
+    let sync = cx
+        .debug_bounds("branch-toolbar-sync")
+        .expect("the pull bar");
+    cx.simulate_click(sync.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(
+        toasts(cx)
+            .iter()
+            .any(|toast| toast == "Alterações de origin/feature trazidas para a tarefa."),
+        "{:?}",
+        toasts(cx)
+    );
+    let requests = requests(setup);
+    assert_eq!(requests[0].0, PULL);
+}
+
+#[gpui::test]
+fn updating_from_the_base_asks_then_merges_it_in(cx: &mut TestAppContext) {
     let dir = tracked_checkout(false);
     let synced = r#"{"branch":"feature","baseBranch":"main","remote":"origin","updated":true,"conflictCount":0}"#;
     let (column, cx, setup) = open(
@@ -265,13 +300,7 @@ fn a_branch_behind_offers_to_sync_with_the_base(cx: &mut TestAppContext) {
         None,
         vec![(SYNC, 200, synced.into())],
     );
-    column.read_with(cx, |column, _| {
-        assert_eq!(column.status.as_ref().unwrap().behind_of_remote_count, 1)
-    });
-    let sync = cx
-        .debug_bounds("branch-toolbar-sync")
-        .expect("the sync bar");
-    cx.simulate_click(sync.center(), Modifiers::none());
+    column.update(cx, |column, cx| column.ask_sync_base(cx));
     column.read_with(cx, |column, _| {
         assert_eq!(column.delivery.confirm, Some(Confirm::SyncBase))
     });
@@ -284,8 +313,7 @@ fn a_branch_behind_offers_to_sync_with_the_base(cx: &mut TestAppContext) {
         "{:?}",
         toasts(cx)
     );
-    let requests = requests(setup);
-    assert_eq!(requests[0].0, "/api/v1/workspaces/w-1/delivery/sync-base");
+    assert_eq!(requests(setup)[0].0, SYNC);
 }
 
 #[gpui::test]

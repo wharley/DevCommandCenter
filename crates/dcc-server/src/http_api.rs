@@ -70,6 +70,7 @@ mod delivery;
 mod desktop_app;
 mod files;
 mod forge;
+mod fetch_base;
 mod git_changes;
 mod git_conflicts;
 mod keep_awake;
@@ -876,6 +877,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/git/unstage-file", post(git_changes::unstage_file))
         .route("/api/v1/git/discard-file", post(git_changes::discard_file))
         .route("/api/v1/git/stage-all", post(git_changes::stage_all))
+        .route("/api/v1/git/fetch-base", post(fetch_base::fetch_base))
         .route("/api/v1/git/conflict-state", post(git_conflicts::conflict_state))
         .route("/api/v1/git/accept-conflict", post(git_conflicts::accept_conflict))
         .route(
@@ -1803,6 +1805,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/git/unstage-file",
             "POST /api/v1/git/discard-file",
             "POST /api/v1/git/stage-all",
+            "POST /api/v1/git/fetch-base",
             "POST /api/v1/git/conflict-state",
             "POST /api/v1/git/accept-conflict",
             "POST /api/v1/git/mark-conflict-resolved",
