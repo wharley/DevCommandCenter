@@ -122,8 +122,8 @@ fn section_for(task: &TaskSummary, interaction_ms: i64, now_ms: i64) -> TaskSect
     TaskSectionId::Older
 }
 
-/// `projectWorkspaceTaskList`: newest interaction first, split by day, pinned
-/// on top in pin order. With `frozen`, known tasks keep their place (nothing
+/// `projectWorkspaceTaskList`: the running ones first, then newest
+/// interaction, split by day, pinned on top in pin order. With `frozen`, known tasks keep their place (nothing
 /// moves under the pointer), new ones go on top of their section, and a pin
 /// change, being the person's own click, applies at once.
 pub fn task_list(
@@ -141,9 +141,19 @@ pub fn task_list(
         .iter()
         .map(|task| (task, interaction_ms(task, last(task))))
         .collect();
+    let running = |task: &TaskSummary| {
+        activities
+            .get(&task.id)
+            .is_some_and(|activity| activity.is_running())
+    };
     ranked.sort_by(|(a, a_ms), (b, b_ms)| match (&a.pinned_at, &b.pinned_at) {
         (Some(a_pin), Some(b_pin)) => a_pin.cmp(b_pin).then_with(|| a.id.cmp(&b.id)),
-        _ => b_ms.cmp(a_ms).then_with(|| a.id.cmp(&b.id)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => running(b)
+            .cmp(&running(a))
+            .then_with(|| b_ms.cmp(a_ms))
+            .then_with(|| a.id.cmp(&b.id)),
     });
     let frozen_index: HashMap<&str, (usize, TaskSectionId)> = frozen
         .map(|order| {

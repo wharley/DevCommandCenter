@@ -116,6 +116,24 @@ fn a_new_turn_moves_a_task_up_unless_the_list_is_frozen() {
 }
 
 #[test]
+fn a_running_task_comes_first_in_its_day() {
+    // Today: "idle" was touched last, "working" earlier but runs now.
+    let list = vec![
+        task("working", "2026-10-23T12:00:00Z"),
+        task("idle", "2026-10-23T14:40:00Z"),
+        task("also-idle", "2026-10-23T13:00:00Z"),
+    ];
+    let mut activities = HashMap::new();
+    activities.insert(
+        "working".to_string(),
+        activity(AgentActivityState::Active, None),
+    );
+    let sections = task_list(&list, &activities, now(), None);
+    assert_eq!(sections[0].id, TaskSectionId::Today);
+    assert_eq!(ids(&sections[0]), ["working", "idle", "also-idle"]);
+}
+
+#[test]
 fn running_jump_walks_forward_and_wraps() {
     let order = ["a", "b", "c", "d"];
     let running = |id: &str| id == "b" || id == "d";
