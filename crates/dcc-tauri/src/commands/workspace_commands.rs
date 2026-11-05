@@ -1908,6 +1908,18 @@ fn resolve_task_execution_root(root: &str, task: &RepoAutomationTask) -> Result<
     Ok(execution_path.to_string_lossy().to_string())
 }
 
+/// The `DCC_*` variables of the task running at `root` (its port, its
+/// paths), for the project tasks it runs.
+async fn task_run_env(state: &WorkspaceCommandState, root: &str) -> Vec<(String, String)> {
+    let Ok(repo) = SqliteWorkspaceRepo::open(&state.db_path) else {
+        return Vec::new();
+    };
+    match dcc_infra::workspace_git::find_workspace_by_root(&repo, root).await {
+        Ok(Some(workspace)) => dcc_infra::workspace_env::workspace_run_env(&repo, &workspace),
+        _ => Vec::new(),
+    }
+}
+
 /// `workspace_run_project_tasks` for callers without a Tauri `State` (the HTTP API).
 pub async fn workspace_run_project_tasks_with_state(
     state: &WorkspaceCommandState,
@@ -1920,12 +1932,13 @@ pub async fn workspace_run_project_tasks_with_state(
     }
     let expected_config_hash = input.expected_config_hash;
     let task_ids = input.task_ids;
+    let env = task_run_env(state, &root).await;
     let (report, changed_files) = state
         .run_git_workspace_mutation_blocking(&root, move |root| {
             let root = root
                 .to_str()
                 .ok_or_else(|| "workspace path is not valid UTF-8".to_string())?;
-            run_workspace_project_tasks_inner(root, expected_config_hash, task_ids)
+            run_workspace_project_tasks_inner(root, expected_config_hash, task_ids, &env)
         })
         .await
         .map_err(workspace_mutation_error)?;
@@ -1939,6 +1952,7 @@ fn run_workspace_project_tasks_inner(
     root: &str,
     expected_config_hash: Option<String>,
     task_ids: Vec<String>,
+    env: &[(String, String)],
 ) -> Result<(WorkspaceGitValidationReport, bool), String> {
     if workspace_validation_config_hash(root)? != expected_config_hash {
         return Err(
@@ -1977,7 +1991,7 @@ fn run_workspace_project_tasks_inner(
         let before_task = workspace_validation_fingerprint(root)?;
         let execution_root = resolve_task_execution_root(root, &task)?;
         let execution =
-            run_workspace_task_command(&execution_root, &task.command, task.timeout_seconds)?;
+            run_workspace_task_command(&execution_root, &task.command, task.timeout_seconds, env)?;
         let success = execution.success;
         steps.push(WorkspaceGitValidationStep {
             command: task.command,
@@ -2043,6 +2057,7 @@ pub async fn workspace_git_complete_merge_with_state(
     }
     let expected_config_hash = input.validation_config_hash.clone();
     let expected_commands = input.validation_commands.clone();
+    let env = task_run_env(state, &root).await;
     let (mut validation, validated_fingerprint) = state
         .run_git_workspace_mutation_blocking(&root, move |root| {
             let root = root
@@ -2052,6 +2067,7 @@ pub async fn workspace_git_complete_merge_with_state(
                 root,
                 expected_config_hash,
                 expected_commands,
+                &env,
             )
         })
         .await
@@ -2157,6 +2173,7 @@ fn workspace_git_run_confirmed_automation_validations(
     root: &str,
     expected_config_hash: Option<String>,
     expected_commands: Vec<String>,
+    env: &[(String, String)],
 ) -> Result<(WorkspaceGitValidationReport, Option<String>), String> {
     require_merge_ready_to_complete(root)?;
     let configured_automation = read_workspace_automation_config(Path::new(root))?;
@@ -2195,13 +2212,14 @@ fn workspace_git_run_confirmed_automation_validations(
         );
     }
     let source_path = configured_automation.map(|config| config.source_path);
-    workspace_git_run_automation_validations_inner(root, configured_tasks, source_path)
+    workspace_git_run_automation_validations_inner(root, configured_tasks, source_path, env)
 }
 
 fn workspace_git_run_automation_validations_inner(
     root: &str,
     tasks: Vec<RepoAutomationTask>,
     source_path: Option<String>,
+    env: &[(String, String)],
 ) -> Result<(WorkspaceGitValidationReport, Option<String>), String> {
     if tasks.is_empty() {
         return Ok((
@@ -2218,7 +2236,7 @@ fn workspace_git_run_automation_validations_inner(
     for task in tasks {
         let execution_root = resolve_task_execution_root(root, &task)?;
         let execution =
-            run_workspace_task_command(&execution_root, &task.command, task.timeout_seconds)?;
+            run_workspace_task_command(&execution_root, &task.command, task.timeout_seconds, env)?;
         let success = execution.success;
         steps.push(WorkspaceGitValidationStep {
             command: task.command,
@@ -8460,12 +8478,14 @@ mod editor_workspace_file_tests {
             vec![RepoAutomationTask {
                 id: "web_check".to_string(),
                 label: Some("Web check".to_string()),
-                command: "test -f marker.txt".to_string(),
+                // The task's variables reach the command.
+                command: "test -f marker.txt && test \"$DCC_PORT\" = 41010".to_string(),
                 kind: RepoTaskKind::Check,
                 cwd: Some("apps/web".to_string()),
                 timeout_seconds: 30,
             }],
             Some(repo.path.join(".dcc.toml").to_string_lossy().to_string()),
+            &[("DCC_PORT".to_string(), "41010".to_string())],
         )
         .expect("run automation validation");
 

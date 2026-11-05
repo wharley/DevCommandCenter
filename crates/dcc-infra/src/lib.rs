@@ -18,6 +18,7 @@ pub mod workspace_deletion;
 pub mod workspace_file_preview;
 pub mod workspace_git;
 pub mod workspace_search;
+pub mod workspace_env;
 pub mod worktree_include;
 mod git_command;
 mod git_parsing;

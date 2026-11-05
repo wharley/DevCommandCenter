@@ -199,19 +199,22 @@ pub fn run_workspace_validation_command(
     workspace_root: &str,
     script: &str,
 ) -> Result<WorkspaceCommandExecution, String> {
-    run_workspace_command_with_timeout(workspace_root, script, WORKSPACE_VALIDATION_TIMEOUT)
+    run_workspace_command_with_timeout(workspace_root, script, WORKSPACE_VALIDATION_TIMEOUT, &[])
 }
 
+/// `env` is the task's `DCC_*` variables (`dcc_infra::workspace_env`).
 pub fn run_workspace_task_command(
     workspace_root: &str,
     script: &str,
     timeout_seconds: u64,
+    env: &[(String, String)],
 ) -> Result<WorkspaceCommandExecution, String> {
     validate_workspace_task_command(script)?;
     run_workspace_command_with_timeout(
         workspace_root,
         script,
         Duration::from_secs(timeout_seconds.clamp(1, 3600)),
+        env,
     )
 }
 
@@ -219,6 +222,7 @@ fn run_workspace_command_with_timeout(
     workspace_root: &str,
     script: &str,
     timeout: Duration,
+    env: &[(String, String)],
 ) -> Result<WorkspaceCommandExecution, String> {
     let script = script.trim();
     if script.is_empty() {
@@ -238,7 +242,8 @@ fn run_workspace_command_with_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("CI", "1")
-        .env("GIT_TERMINAL_PROMPT", "0");
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .envs(env.iter().map(|(key, value)| (key, value)));
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

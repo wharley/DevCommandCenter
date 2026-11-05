@@ -4580,7 +4580,7 @@ mod tests {
         .unwrap();
         let (status, body) = post_json(
             &fixture.app,
-            "/api/v1/terminals/by-owner/terminal%3Aworktree%3Aw%3At1",
+            "/api/v1/terminals/by-owner/terminal%3Aworktree%3Aw-term%3At1",
             json!({ "cwd": root, "command": "/bin/zsh", "args": ["-l"], "cols": 90, "rows": 20 }),
         )
         .await;
@@ -4608,16 +4608,24 @@ mod tests {
         let calls = fake.calls.lock().unwrap().clone();
         assert_eq!(calls.len(), 4, "{calls:?}");
         assert!(
-            calls[0].starts_with("open terminal:worktree:w:t1 "),
+            calls[0].starts_with("open terminal:worktree:w-term:t1 "),
             "{}",
             calls[0]
         );
-        let options: Value = serde_json::from_str(calls[0].splitn(3, ' ').nth(2).unwrap()).unwrap();
+        let mut options: Value =
+            serde_json::from_str(calls[0].splitn(3, ' ').nth(2).unwrap()).unwrap();
+        // The task's own shell gets its variables and its port block.
+        let env = options.as_object_mut().unwrap().remove("env").unwrap();
+        assert_eq!(env["DCC_WORKSPACE_ID"], "w-term");
+        assert_eq!(env["DCC_WORKSPACE_PATH"], root.as_str());
+        assert_eq!(env["DCC_DEFAULT_BRANCH"], "main");
+        let port: u16 = env["DCC_PORT"].as_str().unwrap().parse().unwrap();
+        assert!(port >= dcc_infra::db::PORT_BLOCK_START, "{port}");
         assert_eq!(
             options,
             json!({
                 "cwd": root, "command": "/bin/zsh", "args": ["-l"], "cols": 90, "rows": 20,
-                "ptyOwnerKey": "terminal:worktree:w:t1",
+                "ptyOwnerKey": "terminal:worktree:w-term:t1",
             })
         );
         assert_eq!(calls[1], "write pty-1 ls\r");

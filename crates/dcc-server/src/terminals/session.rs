@@ -53,6 +53,14 @@ pub fn terminal_spawn(
     let mut cmd = CommandBuilder::new(command);
     cmd.args(&args);
     cmd.cwd(cwd);
+    // The task's `DCC_*` variables (port, paths), when the shell is a task's.
+    if let Some(env) = options.get("env").and_then(Value::as_object) {
+        for (key, value) in env {
+            if let Some(value) = value.as_str() {
+                cmd.env(key, value);
+            }
+        }
+    }
     // Alinha o PTY com o que o xterm.js emula; sem TERM adequado, `clear` e escapes podem falhar
     // quando o app é lançado pela GUI (env mínima).
     #[cfg(unix)]

@@ -101,6 +101,30 @@ fn is_home(cwd: &str) -> bool {
         .is_some_and(|cwd| Some(cwd) == canonical(std::path::Path::new(&home)))
 }
 
+/// The task's `DCC_*` variables for a shell of its own folder
+/// (`terminal:worktree:<task>:<tab>`); none for the project's shells.
+async fn task_env(
+    backend: &HttpBackend,
+    owner_key: &str,
+    cwd: &str,
+) -> serde_json::Map<String, Value> {
+    let Some(task) = owner_key
+        .strip_prefix("terminal:worktree:")
+        .and_then(|rest| rest.rsplit_once(':'))
+        .map(|(task, _tab)| task)
+    else {
+        return serde_json::Map::new();
+    };
+    let Ok(repo) = dcc_infra::db::SqliteWorkspaceRepo::open(&backend.workspace.db_path) else {
+        return serde_json::Map::new();
+    };
+    dcc_infra::workspace_env::workspace_run_env_at(&repo, task, cwd)
+        .await
+        .into_iter()
+        .map(|(key, value)| (key, Value::String(value)))
+        .collect()
+}
+
 /// The shell opens in a task's checkout (its worktree or its repository),
 /// or in the home folder for one of the app's own commands (`HOME_OWNERS`).
 async fn by_owner(
@@ -114,6 +138,7 @@ async fn by_owner(
     if !(app_command && is_home(&input.cwd)) {
         git_changes::task_checkout(&backend, &input.cwd).await?;
     }
+    let env = task_env(&backend, &owner_key, &input.cwd).await;
     let host = host(&backend)?;
     let options = json!({
         "cwd": input.cwd,
@@ -122,6 +147,7 @@ async fn by_owner(
         "cols": input.cols.unwrap_or(120),
         "rows": input.rows.unwrap_or(32),
         "ptyOwnerKey": owner_key,
+        "env": env,
     });
     let value = tokio::task::spawn_blocking(move || host.get_or_create(&owner_key, options))
         .await

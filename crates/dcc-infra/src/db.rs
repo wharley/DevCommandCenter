@@ -18,6 +18,9 @@ mod space;
 pub use space::{database_space, vacuum_into_incremental_mode, DatabaseSpace, VacuumOutcome};
 mod turn_windows;
 pub use turn_windows::TurnWindow;
+mod workspace_ports;
+use workspace_ports::WORKSPACE_PORTS_TABLE_SQL;
+pub use workspace_ports::{port_block_is_free, PORT_BLOCK_SIZE, PORT_BLOCK_START};
 
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
 use crate::guarded_undo::macos_store::{MacArtifactStore, OrphanRecoveryReport};
@@ -1048,7 +1051,7 @@ impl SqliteWorkspaceRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{PROVIDER_ACCOUNT_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{IDEA_TABLE_SQL}\n{REPOSITORY_LINKED_FOLDER_TABLE_SQL}\n{WORKSPACE_CONTEXT_FOLDER_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{REPOSITORY_TABLE_SQL}\n{WORKSPACE_BUNDLE_TABLE_SQL}\n{FORGE_LOGIN_PREFERENCE_TABLE_SQL}\n{PROVIDER_ACCOUNT_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{IDEA_TABLE_SQL}\n{REPOSITORY_LINKED_FOLDER_TABLE_SQL}\n{WORKSPACE_CONTEXT_FOLDER_TABLE_SQL}\n{WORKSPACE_PORTS_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::ensure_column(&conn, "dcc_workspaces", "setup_report_json", "TEXT NULL")?;
