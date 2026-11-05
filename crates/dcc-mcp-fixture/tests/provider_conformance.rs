@@ -336,6 +336,7 @@ where
                 mcp_servers: servers,
                 native_resume_id: None,
                 native_rewind_checkpoint: None,
+                run_env: Vec::new(),
             })
             .await
             .map_err(|_| McpConformanceAdapterError::ProviderSession)?;

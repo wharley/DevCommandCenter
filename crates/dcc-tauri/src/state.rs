@@ -154,6 +154,31 @@ fn append_dcc_app_mcp_tool_instructions(
     })
 }
 
+/// Where a task's dev server goes, if the agent decides to start one. The
+/// numbers are written out because some agents' shells (Cursor's) do not see
+/// the `DCC_PORT` the agent process was started with. It asks for nothing to
+/// be run or installed.
+fn task_port_instructions(port: u16) -> String {
+    let last = port + dcc_infra::db::PORT_BLOCK_SIZE - 1;
+    let next = port + 1;
+    format!(
+        "[DCC task ports] This task has its own ports: {port} to {last} (also $DCC_PORT in the environment when the shell has it). Only if you decide to start a dev server or another local listener for this task, bind it to {port} (use {next} and up for more), not a fixed default such as 3000, so tasks of the same project can run side by side. This is not a request to start servers or install dependencies."
+    )
+}
+
+fn append_task_port_instructions(existing: Option<String>, port: Option<u16>) -> Option<String> {
+    let Some(port) = port else {
+        return existing;
+    };
+    let line = task_port_instructions(port);
+    Some(match existing {
+        Some(existing) if !existing.trim().is_empty() => {
+            format!("{}\n\n{line}", existing.trim_end())
+        }
+        _ => line,
+    })
+}
+
 fn truncate_chars_for_reanchor(value: &str, max_chars: usize) -> String {
     let trimmed = value.trim();
     if trimmed.chars().count() <= max_chars {
@@ -2056,6 +2081,7 @@ impl SessionCommandState {
                 mcp_servers: Vec::new(),
                 native_resume_id: None,
                 native_rewind_checkpoint: None,
+                run_env: Vec::new(),
             })
             .await?;
         let mut events = provider.stream_events(&handle);
@@ -4931,6 +4957,7 @@ impl SessionCommandState {
             provider.native_rewind_cut().is_some(),
         );
         let native_resume_armed = native_resume_id.is_some();
+        let run_env = self.task_run_env(&session.workspace_id).await;
         let handle = match provider
             .prepare_session(SessionConfig {
                 workspace_id: session.workspace_id.clone(),
@@ -4942,6 +4969,7 @@ impl SessionCommandState {
                 mcp_servers,
                 native_resume_id,
                 native_rewind_checkpoint,
+                run_env,
             })
             .await
         {
@@ -6207,6 +6235,27 @@ impl SessionCommandState {
             .map(|_| ())
     }
 
+    /// The task's `DCC_*` variables for its agent (`workspace_env`); none
+    /// when the task cannot be read, so the agent still starts.
+    async fn task_run_env(&self, workspace_id: &WorkspaceId) -> Vec<(String, String)> {
+        let Ok(repo) = SqliteWorkspaceRepo::open(&self.db_path) else {
+            return Vec::new();
+        };
+        match repo.get_workspace(workspace_id).await {
+            Ok(Some(workspace)) => dcc_infra::workspace_env::workspace_run_env(&repo, &workspace),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The task's port block, for the turn's instructions.
+    async fn task_port(&self, workspace_id: &WorkspaceId) -> Option<u16> {
+        self.task_run_env(workspace_id)
+            .await
+            .into_iter()
+            .find(|(key, _)| key == "DCC_PORT")
+            .and_then(|(_, value)| value.parse().ok())
+    }
+
     async fn resolve_session_working_directories(
         &self,
         session: &Session,
@@ -7312,6 +7361,9 @@ impl SessionCommandState {
                     binding.ephemeral_mcp_lease_id.is_some(),
                     crate::device_routing::guidance(project_root.as_deref()),
                 );
+                let port = self.task_port(&session.workspace_id).await;
+                turn.tool_instructions =
+                    append_task_port_instructions(turn.tool_instructions, port);
                 Input::Turn(turn)
             }
             other => other,
@@ -8829,6 +8881,22 @@ mod tests {
             ephemeral_mcp_lease_id: None,
             usage_limit: Default::default(),
         }
+    }
+
+    #[test]
+    fn task_turns_say_where_a_dev_server_goes_without_asking_for_one() {
+        let alone = append_task_port_instructions(None, Some(41_020)).unwrap();
+        assert!(alone.contains("41020 to 41029"), "{alone}");
+        assert!(alone.contains("bind it to 41020 (use 41021"), "{alone}");
+        assert!(alone.contains("Only if you decide"));
+        assert!(alone.contains("not a request to start servers or install dependencies"));
+        let after =
+            append_task_port_instructions(Some("Scope.\n".to_string()), Some(41_000)).unwrap();
+        assert!(after.starts_with("Scope.\n\n[DCC task ports]"), "{after}");
+        assert_eq!(
+            append_task_port_instructions(Some("Scope.".to_string()), None),
+            Some("Scope.".to_string())
+        );
     }
 
     #[test]

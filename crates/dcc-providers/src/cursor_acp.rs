@@ -1650,6 +1650,7 @@ done
                     }],
                     native_resume_id: None,
                     native_rewind_checkpoint: None,
+                    run_env: Vec::new(),
                 })
                 .await
                 .expect("fake ACP session");

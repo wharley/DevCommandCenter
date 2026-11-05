@@ -571,6 +571,7 @@ pub async fn connect_antigravity_for_state(
             mcp_servers: Vec::new(),
             native_resume_id: None,
             native_rewind_checkpoint: None,
+            run_env: Vec::new(),
         })
         .await
         .map_err(|error| error.to_string())?;

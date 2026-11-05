@@ -1102,6 +1102,7 @@ mod tests {
                 mcp_servers: vec![],
                 native_resume_id: None,
                 native_rewind_checkpoint: None,
+                run_env: Vec::new(),
             })
             .await
             .expect("grok session");

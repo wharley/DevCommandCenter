@@ -1590,6 +1590,7 @@ mod account_usage_tests {
                         mcp_servers: vec![],
                         native_resume_id: None,
                         native_rewind_checkpoint: None,
+                        run_env: Vec::new(),
                     })
                     .await
                     .expect_err("missing CLI must not start a session");
@@ -1668,6 +1669,7 @@ exit 43
                     },
                     native_rewind_checkpoint: (mode == "rewound")
                         .then(|| "kept-message-uuid".to_string()),
+                    run_env: Vec::new(),
                 })
                 .await
                 .expect("fake sidecar session");
@@ -1801,6 +1803,7 @@ done
                     mcp_servers: vec![],
                     native_resume_id: None,
                     native_rewind_checkpoint: None,
+                    run_env: Vec::new(),
                 })
                 .await
                 .expect("fake sidecar session");

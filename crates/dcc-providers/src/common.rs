@@ -2258,6 +2258,7 @@ pub(crate) fn apply_cli_spawn_environment(
     cfg: &SessionConfig,
 ) -> Result<()> {
     command.env("PATH", augmented_path());
+    command.envs(cfg.run_env.iter().map(|(key, value)| (key, value)));
     command.env("DCC_PROVIDER_ID", provider_registry_id);
     command.env("DCC_WORKSPACE_ID", &cfg.workspace_id.0);
     command.env("DCC_SESSION_ID", &cfg.session_id.0);
@@ -3005,6 +3006,40 @@ mod tests {
     }
 
     #[test]
+    fn the_task_variables_reach_the_agent_process() {
+        let cfg = SessionConfig {
+            workspace_id: WorkspaceId("workspace".to_string()),
+            session_id: SessionId("session".to_string()),
+            model: None,
+            working_directory: None,
+            additional_working_directories: Vec::new(),
+            provider_runtime: None,
+            mcp_servers: Vec::new(),
+            native_resume_id: None,
+            native_rewind_checkpoint: None,
+            run_env: vec![
+                ("DCC_PORT".to_string(), "41010".to_string()),
+                ("DCC_WORKSPACE_PATH".to_string(), "/tmp/task".to_string()),
+            ],
+        };
+        let mut command = Command::new("true");
+        apply_cli_spawn_environment(&mut command, "test_cli", &cfg).expect("environment");
+        let envs: std::collections::HashMap<_, _> = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(|value| value.to_owned())))
+            .collect();
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("DCC_PORT")),
+            Some(&Some("41010".into()))
+        );
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("DCC_WORKSPACE_PATH")),
+            Some(&Some("/tmp/task".into()))
+        );
+    }
+
+    #[test]
     fn resolves_codex_shadow_layout() {
         let shared_home = temp_path("dcc-codex-shared");
         let shadow_home = temp_path("dcc-codex-shadow");
@@ -3025,6 +3060,7 @@ mod tests {
             mcp_servers: Vec::new(),
             native_resume_id: None,
             native_rewind_checkpoint: None,
+            run_env: Vec::new(),
         };
 
         let layout = resolve_codex_home_layout(&cfg);

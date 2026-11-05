@@ -3175,6 +3175,7 @@ mod tests {
             mcp_servers: projection.servers,
             native_resume_id: None,
             native_rewind_checkpoint: None,
+            run_env: Vec::new(),
         };
         let handle =
             match tokio::time::timeout(Duration::from_secs(30), adapter.prepare_session(config))

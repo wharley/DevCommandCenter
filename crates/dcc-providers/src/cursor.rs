@@ -55,6 +55,8 @@ struct CursorSessionRuntime {
     model: Option<String>,
     cwd: PathBuf,
     additional_directories: Vec<PathBuf>,
+    /// The task's `DCC_*` variables, given to every turn's process.
+    run_env: Vec<(String, String)>,
     events_tx: broadcast::Sender<ProviderEvent>,
     active_turn: Mutex<Option<ActiveCursorTurn>>,
 }
@@ -284,6 +286,7 @@ impl CursorProvider {
         let mut command = self.command();
         command.args(&args);
         command.current_dir(&cwd);
+        command.envs(runtime.run_env.iter().map(|(key, value)| (key, value)));
 
         let mut child = command.spawn().map_err(|error| {
             CoreError::Provider(format!("failed to spawn {}: {}", self.binary, error))
@@ -1300,6 +1303,7 @@ impl Provider for CursorProvider {
                 .iter()
                 .map(PathBuf::from)
                 .collect(),
+            run_env: cfg.run_env.clone(),
             events_tx: broadcast::channel(64).0,
             active_turn: Mutex::new(None),
         });
@@ -1752,5 +1756,57 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--add-dir", "/tmp/web"]));
         assert!(args.windows(2).any(|pair| pair == ["--sandbox", "enabled"]));
+    }
+
+    #[tokio::test]
+    async fn each_cursor_turn_gets_the_task_variables() {
+        use futures::StreamExt;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("dcc-cursor-env-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary = dir.join("cursor-agent");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nif [ \"$1\" = create-chat ]; then echo chat-1; exit 0; fi\nprintf '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"port=%s\"}\\n' \"$DCC_PORT\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let provider = CursorProvider::new(
+            "cursor",
+            binary.to_string_lossy().to_string(),
+            cursor_capabilities(),
+        );
+        let handle = provider
+            .prepare_session(SessionConfig {
+                workspace_id: dcc_core::domain::workspace::WorkspaceId("w".to_string()),
+                session_id: dcc_core::domain::session::SessionId("s".to_string()),
+                model: None,
+                working_directory: Some(dir.to_string_lossy().to_string()),
+                additional_working_directories: Vec::new(),
+                provider_runtime: None,
+                mcp_servers: Vec::new(),
+                native_resume_id: None,
+                native_rewind_checkpoint: None,
+                run_env: vec![("DCC_PORT".to_string(), "41030".to_string())],
+            })
+            .await
+            .expect("session");
+        let mut events = provider.stream_events(&handle);
+        provider
+            .send_input(&handle, Input::Text("echo".to_string()))
+            .await
+            .expect("turn");
+        let mut answer = None;
+        while let Some(Ok(event)) = events.next().await {
+            match event {
+                ProviderEvent::AssistantMessageCompleted { content, .. } => answer = content,
+                ProviderEvent::Completed { .. } => break,
+                _ => {}
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(answer.as_deref(), Some("port=41030"));
     }
 }

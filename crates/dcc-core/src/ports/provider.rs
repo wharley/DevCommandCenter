@@ -48,6 +48,12 @@ pub struct SessionConfig {
     /// (`NativeSessionChanged`) once the cut is in place.
     #[serde(default)]
     pub native_rewind_checkpoint: Option<String>,
+    /// The task's `DCC_*` variables (`DCC_PORT`, `DCC_WORKSPACE_PATH`…) for
+    /// the agent's process. Only read when the agent itself runs something,
+    /// such as a dev server on `DCC_PORT`; DCC runs nothing with them.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub run_env: Vec<(String, String)>,
 }
 
 /// Which turn's checkpoint cuts a native conversation for "edit from here".
@@ -418,6 +424,7 @@ mod tests {
             }],
             native_resume_id: None,
             native_rewind_checkpoint: None,
+            run_env: Vec::new(),
         };
 
         let serialized = serde_json::to_string(&config).expect("serialize session config");

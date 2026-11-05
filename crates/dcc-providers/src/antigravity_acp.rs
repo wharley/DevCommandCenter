@@ -401,6 +401,7 @@ impl AntigravityAcpAdapter {
             .current_dir(&cwd)
             .kill_on_drop(true)
             .env("PATH", augmented_path())
+            .envs(cfg.run_env.iter().map(|(key, value)| (key, value)))
             .env("GEMINI_HOME", &profile)
             .env("AGY_ACP_FORCE_FILE_STORAGE", "1")
             .env("ANTIGRAVITY_HARNESS_PATH", &harness)

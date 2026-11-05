@@ -3324,6 +3324,7 @@ impl CodexAppServerAdapter {
         cmd.kill_on_drop(true);
 
         cmd.env("PATH", augmented_path());
+        cmd.envs(cfg.run_env.iter().map(|(key, value)| (key, value)));
         cmd.env("DCC_PROVIDER_ID", "codex");
         cmd.env("DCC_WORKSPACE_ID", &cfg.workspace_id.0);
         cmd.env("DCC_SESSION_ID", &cfg.session_id.0);
