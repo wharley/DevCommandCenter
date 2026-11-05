@@ -205,7 +205,23 @@ pub fn create_worktree_branch_from_ref(
         GIT_NETWORK_TIMEOUT,
         "git worktree add failed",
     )?;
+    copy_ignored_includes(repo_root, worktree_path);
     Ok(())
+}
+
+/// The `.env` files the worktree needs to run; never fails the creation.
+fn copy_ignored_includes(source: &Path, worktree: &Path) {
+    match crate::worktree_include::copy_worktree_includes(source, worktree) {
+        Ok(report) => {
+            if !report.copied.is_empty() {
+                eprintln!("[dcc] worktree: copied {}", report.copied.join(", "));
+            }
+            for (path, reason) in &report.skipped {
+                eprintln!("[dcc] worktree: left out {path} ({reason})");
+            }
+        }
+        Err(error) => eprintln!("[dcc] worktree: ignored files not copied: {error}"),
+    }
 }
 
 pub fn remove_worktree(repo_root: &Path, worktree_path: &Path) -> Result<()> {
@@ -361,6 +377,7 @@ impl GitOps for CommandGitOps {
                 GIT_NETWORK_TIMEOUT,
                 "git worktree add failed",
             )?;
+            copy_ignored_includes(workspace_root, &worktree_path);
         } else {
             std::fs::create_dir_all(&worktree_path)
                 .map_err(|error| CoreError::Git(error.to_string()))?;
