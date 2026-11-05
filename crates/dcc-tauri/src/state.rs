@@ -158,19 +158,30 @@ fn append_dcc_app_mcp_tool_instructions(
 /// numbers are written out because some agents' shells (Cursor's) do not see
 /// the `DCC_PORT` the agent process was started with. It asks for nothing to
 /// be run or installed.
-fn task_port_instructions(port: u16) -> String {
+fn task_port_instructions(port: u16, ios_app: bool) -> String {
     let last = port + dcc_infra::db::PORT_BLOCK_SIZE - 1;
     let next = port + 1;
+    let metro = if ios_app {
+        format!(
+            " Metro too, if you start it: `npx expo start --port {port}` or `npx expo run:ios --port {port}` (React Native without Expo: RCT_METRO_PORT={port}), not 8081, so the simulator loads this task's bundle."
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "[DCC task ports] This task has its own ports: {port} to {last} (also $DCC_PORT in the environment when the shell has it). Only if you decide to start a dev server or another local listener for this task, bind it to {port} (use {next} and up for more), not a fixed default such as 3000, so tasks of the same project can run side by side. This is not a request to start servers or install dependencies."
+        "[DCC task ports] This task has its own ports: {port} to {last} (also $DCC_PORT in the environment when the shell has it). Only if you decide to start a dev server or another local listener for this task, bind it to {port} (use {next} and up for more), not a fixed default such as 3000, so tasks of the same project can run side by side.{metro} This is not a request to start servers or install dependencies."
     )
 }
 
-fn append_task_port_instructions(existing: Option<String>, port: Option<u16>) -> Option<String> {
+fn append_task_port_instructions(
+    existing: Option<String>,
+    port: Option<u16>,
+    ios_app: bool,
+) -> Option<String> {
     let Some(port) = port else {
         return existing;
     };
-    let line = task_port_instructions(port);
+    let line = task_port_instructions(port, ios_app);
     Some(match existing {
         Some(existing) if !existing.trim().is_empty() => {
             format!("{}\n\n{line}", existing.trim_end())
@@ -7362,8 +7373,11 @@ impl SessionCommandState {
                     crate::device_routing::guidance(project_root.as_deref()),
                 );
                 let port = self.task_port(&session.workspace_id).await;
+                let ios_app = project_root
+                    .as_deref()
+                    .is_some_and(crate::device_routing::is_ios_app_project);
                 turn.tool_instructions =
-                    append_task_port_instructions(turn.tool_instructions, port);
+                    append_task_port_instructions(turn.tool_instructions, port, ios_app);
                 Input::Turn(turn)
             }
             other => other,
@@ -8885,18 +8899,24 @@ mod tests {
 
     #[test]
     fn task_turns_say_where_a_dev_server_goes_without_asking_for_one() {
-        let alone = append_task_port_instructions(None, Some(41_020)).unwrap();
+        let alone = append_task_port_instructions(None, Some(41_020), false).unwrap();
         assert!(alone.contains("41020 to 41029"), "{alone}");
         assert!(alone.contains("bind it to 41020 (use 41021"), "{alone}");
         assert!(alone.contains("Only if you decide"));
         assert!(alone.contains("not a request to start servers or install dependencies"));
         let after =
-            append_task_port_instructions(Some("Scope.\n".to_string()), Some(41_000)).unwrap();
+            append_task_port_instructions(Some("Scope.\n".to_string()), Some(41_000), false)
+                .unwrap();
         assert!(after.starts_with("Scope.\n\n[DCC task ports]"), "{after}");
         assert_eq!(
-            append_task_port_instructions(Some("Scope.".to_string()), None),
+            append_task_port_instructions(Some("Scope.".to_string()), None, true),
             Some("Scope.".to_string())
         );
+        assert!(!alone.contains("Metro"), "{alone}");
+        let ios = append_task_port_instructions(None, Some(41_030), true).unwrap();
+        assert!(ios.contains("npx expo start --port 41030"), "{ios}");
+        assert!(ios.contains("RCT_METRO_PORT=41030"), "{ios}");
+        assert!(ios.contains("not a request to start servers"), "{ios}");
     }
 
     #[test]
