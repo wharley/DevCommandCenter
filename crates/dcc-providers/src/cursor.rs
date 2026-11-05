@@ -78,6 +78,11 @@ struct CursorStreamState {
     assistant_message_started: bool,
     /// Display name from `system/init`, attached to the turn usage.
     model: Option<String>,
+    /// The text as Cursor sent it, and as shown: a new paragraph wherever the
+    /// text resumes after a tool call, which Cursor's `result` glues on.
+    raw_text: String,
+    shown_text: String,
+    text_break: bool,
 }
 
 pub fn adapter() -> CursorBridgeProvider {
@@ -474,10 +479,13 @@ fn parse_cursor_stream_value(value: &Value, state: &mut CursorStreamState) -> Ve
 
     match kind {
         "assistant" => parse_cursor_assistant_message(value, state, at),
-        "tool_call" => parse_cursor_tool_call(value, at.clone())
-            .into_iter()
-            .chain(parse_cursor_goal(value, at))
-            .collect(),
+        "tool_call" => {
+            state.text_break = true;
+            parse_cursor_tool_call(value, at.clone())
+                .into_iter()
+                .chain(parse_cursor_goal(value, at))
+                .collect()
+        }
         "result" => parse_cursor_result(value, state, at),
         "system" => {
             if value.get("subtype").and_then(Value::as_str) == Some("init") {
@@ -492,6 +500,18 @@ fn parse_cursor_stream_value(value: &Value, state: &mut CursorStreamState) -> Ve
         }
         "user" => Vec::new(),
         _ => Vec::new(),
+    }
+}
+
+/// What goes before text that resumes after a tool call so it starts a new
+/// paragraph; nothing when one is already there.
+fn paragraph_gap(shown: &str, next: &str) -> &'static str {
+    if shown.trim().is_empty() || shown.ends_with("\n\n") || next.starts_with('\n') {
+        ""
+    } else if shown.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
     }
 }
 
@@ -520,6 +540,11 @@ fn parse_cursor_assistant_message(
     if delta.is_empty() {
         return Vec::new();
     }
+    state.raw_text.push_str(&delta);
+    if std::mem::take(&mut state.text_break) {
+        delta.insert_str(0, paragraph_gap(&state.shown_text, &delta));
+    }
+    state.shown_text.push_str(&delta);
     let id = state
         .assistant_message_id
         .get_or_insert_with(|| "cursor:assistant:0".to_string())
@@ -878,7 +903,13 @@ fn parse_cursor_result(
         .get("result")
         .and_then(Value::as_str)
         .filter(|content| !content.is_empty())
-        .map(str::to_string)
+        .map(|content| {
+            if content == state.raw_text {
+                state.shown_text.clone()
+            } else {
+                content.to_string()
+            }
+        })
     {
         events.push(ProviderEvent::AssistantMessageCompleted {
             id: state
@@ -892,6 +923,8 @@ fn parse_cursor_result(
         });
         state.assistant_message_started = false;
     }
+    state.raw_text.clear();
+    state.shown_text.clear();
     events.push(ProviderEvent::Completed { at });
     events
 }
@@ -1808,5 +1841,33 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(answer.as_deref(), Some("port=41030"));
+    }
+
+    #[test]
+    fn cursor_text_after_a_tool_call_starts_a_new_paragraph() {
+        let mut state = CursorStreamState::default();
+        let events = [
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"I will run it."}]}}"#,
+            r#"{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"a"}}}}"#,
+            r#"{"type":"tool_call","subtype":"completed","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"a"},"result":{"success":{"content":"x"}}}}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"It is empty."}]}}"#,
+            r#"{"type":"result","subtype":"success","result":"I will run it.It is empty."}"#,
+        ]
+        .iter()
+        .flat_map(|line| parse_cursor_stream_line(line, &mut state))
+        .collect::<Vec<_>>();
+        let deltas = events
+            .iter()
+            .filter_map(|event| match event {
+                ProviderEvent::AssistantMessageDelta { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(deltas, ["I will run it.", "\n\nIt is empty."]);
+        let completed = events.iter().find_map(|event| match event {
+            ProviderEvent::AssistantMessageCompleted { content, .. } => content.clone(),
+            _ => None,
+        });
+        assert_eq!(completed.as_deref(), Some("I will run it.\n\nIt is empty."));
     }
 }
