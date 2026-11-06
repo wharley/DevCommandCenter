@@ -2784,7 +2784,7 @@
         "copyFailed": "Não foi possível copiar.",
         "slack": {
           "intro": "O Slack só aceita apps criados no seu workspace. Leva um minuto e só precisa ser feito uma vez.",
-          "existingApp": "Já criou o app antes? Para o agente poder enviar mensagens (sempre com a sua aprovação), abra o app em api.slack.com/apps → OAuth & Permissions, adicione chat:write em User Token Scopes, reinstale no workspace e reconecte aqui.",
+          "existingApp": "Já tinha o app? Adicione chat:write em OAuth & Permissions → User Token Scopes e reconecte aqui.",
           "createTitle": "Crie o app do Slack",
           "createButton": "Criar app no Slack",
           "copyManifest": "Copiar manifesto",

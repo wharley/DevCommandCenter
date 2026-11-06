@@ -494,7 +494,15 @@ fn slacks_steps_link_to_the_apps_and_fit_the_dialog(cx: &mut TestAppContext) {
         )
     });
     cx.run_until_parked();
+    // However tall the steps, the dialog fits the window and its button
+    // stays in reach.
+    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(700.0)));
+    cx.run_until_parked();
+    let window = cx.update(|window, _| window.viewport_size());
     let dialog = cx.debug_bounds("connector-connect").expect("the dialog");
+    let button = cx.debug_bounds("connector-continue").expect("the button");
+    assert!(dialog.top() >= gpui::px(0.0), "{dialog:?}");
+    assert!(button.bottom() <= window.height, "{button:?} in {window:?}");
     for part in ["connector-slack-apps", "connector-slack-existing"] {
         let bounds = cx.debug_bounds(part).unwrap_or_else(|| panic!("{part}"));
         assert!(

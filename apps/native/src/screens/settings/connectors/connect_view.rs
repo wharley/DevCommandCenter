@@ -356,13 +356,12 @@ impl ConnectorConnect {
             ),
             _ => None,
         };
-        let disabled = self.primary_disabled(cx);
         div()
             .flex()
             .flex_col()
             .gap(px(16.0))
             .px(px(24.0))
-            .pb(px(24.0))
+            .pb(px(8.0))
             .child(point(
                 "shield-check",
                 cx.t("settings.connectors.connect.controlTitle"),
@@ -386,29 +385,36 @@ impl ConnectorConnect {
             .children(token)
             .children((auth == Auth::SlackApp).then(|| self.slack_steps(cx)))
             .children(failed)
+            .into_any_element()
+    }
+
+    /// The intro's step on (sign in, or connect with the token), kept under
+    /// the part that scrolls so it never leaves the window.
+    fn continue_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let auth = self.target.auth();
+        let name = Args::default().with("name", self.target.name.clone());
+        let disabled = self.primary_disabled(cx);
+        Button::new("connector-continue")
+            .stretch()
+            .height(36.0)
+            .disabled(disabled)
+            .on_click(cx.listener(|this, _, window, cx| this.primary(window, cx)))
             .child(
-                Button::new("connector-continue")
-                    .stretch()
-                    .height(36.0)
-                    .disabled(disabled)
-                    .on_click(cx.listener(|this, _, window, cx| this.primary(window, cx)))
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .gap(px(6.0))
-                            .text_size(px(13.0))
-                            .child(if auth == Auth::Token {
-                                cx.t("settings.connectors.connect.connectWithToken")
-                            } else {
-                                cx.t_with("settings.connectors.connect.continue", &name)
-                            })
-                            .when(auth != Auth::Token, |row| {
-                                row.child(Icon::new("arrow-up-right").size(16.0))
-                            }),
-                    ),
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(6.0))
+                    .text_size(px(13.0))
+                    .child(if auth == Auth::Token {
+                        cx.t("settings.connectors.connect.connectWithToken")
+                    } else {
+                        cx.t_with("settings.connectors.connect.continue", &name)
+                    })
+                    .when(auth != Auth::Token, |row| {
+                        row.child(Icon::new("arrow-up-right").size(16.0))
+                    }),
             )
             .into_any_element()
     }
@@ -570,7 +576,7 @@ impl ConnectorConnect {
 }
 
 impl Render for ConnectorConnect {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
         let logo = self.target.preset.and_then(|preset| preset.logo);
         let glow = logo.and_then(brand_color).map(hex);
@@ -581,10 +587,22 @@ impl Render for ConnectorConnect {
         };
         let logo_uri = self.logo_uri();
         let close = cx.entity().downgrade();
+        // The intro's button stays under the part that scrolls.
+        let footer = (!matches!(self.phase, Phase::Waiting | Phase::NeedsApp)).then(|| {
+            div()
+                .flex_none()
+                .px(px(24.0))
+                .pt(px(12.0))
+                .pb(px(24.0))
+                .child(self.continue_button(cx))
+        });
+        // Never taller than the window: the middle scrolls instead.
+        let max_height = (f32::from(window.viewport_size().height) * 0.9).min(820.0);
         Dialog::new("connector-connect", move |_, cx| {
             let _ = close.update(cx, |this, cx| this.close(cx));
         })
         .max_width(440.0)
+        .max_height(max_height)
         .padding(0.0)
         .gap(0.0)
         .child(
@@ -592,6 +610,8 @@ impl Render for ConnectorConnect {
                 .id("connector-connect-body")
                 .debug_selector(|| "connector-connect".into())
                 .w_full()
+                .flex_1()
+                .min_h_0()
                 .overflow_y_scroll()
                 .child(
                     div()
@@ -631,5 +651,6 @@ impl Render for ConnectorConnect {
                 )
                 .child(body),
         )
+        .children(footer)
     }
 }
