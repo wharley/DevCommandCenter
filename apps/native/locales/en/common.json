@@ -2759,6 +2759,7 @@
         "netlify": "Netlify sites, deploys, and logs.",
         "posthog": "Events, insights, and feature flags.",
         "revenuecat": "Your apps’ products, offerings, and subscriptions.",
+        "resend": "Emails, domains, contacts, and broadcasts.",
         "atlassian": "Jira issues and Confluence pages."
       },
       "connect": {

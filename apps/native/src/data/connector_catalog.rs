@@ -90,7 +90,7 @@ pub struct Preset {
 }
 
 /// `CONNECTOR_PRESETS`
-pub const PRESETS: [Preset; 15] = [
+pub const PRESETS: [Preset; 16] = [
     Preset {
         id: "clickup",
         name: "ClickUp",
@@ -232,6 +232,17 @@ pub const PRESETS: [Preset; 15] = [
         url: "https://mcp.revenuecat.ai/mcp",
         docs_url: "https://www.revenuecat.com/docs/tools/mcp",
         logo: Some("revenuecat"),
+        auth: Auth::OAuth,
+        token_help_url: None,
+        hidden: false,
+    },
+    Preset {
+        id: "resend",
+        name: "Resend",
+        category: Category::Developer,
+        url: "https://mcp.resend.com/mcp",
+        docs_url: "https://resend.com/docs/mcp-server",
+        logo: Some("resend"),
         auth: Auth::OAuth,
         token_help_url: None,
         hidden: false,
