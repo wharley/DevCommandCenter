@@ -212,6 +212,36 @@
     }
   },
   "agents": {
+    "memory": {
+      "title": "Memória",
+      "usage": "{{percent}}% cheia",
+      "history": "Histórico",
+      "all": "Todas",
+      "learned": "Aprendidas",
+      "mine": "Suas",
+      "search": "Buscar na memória",
+      "learnedBadge": "aprendida",
+      "empty": "Nada guardado ainda. Quando você corrigir o agente ou disser uma regra (“sempre…”, “nunca…”), ele guarda aqui, e cada nota vai junto em todos os turnos dele. Você pode editar ou apagar qualquer uma.",
+      "noMatch": "Nenhuma nota com esse filtro.",
+      "add": "Ensine uma regra ao agente…",
+      "addButton": "Guardar",
+      "edit": "Editar",
+      "remove": "Apagar",
+      "save": "Salvar",
+      "full": "A memória está cheia. Edite ou apague uma nota antes.",
+      "historyTitle": "Histórico da memória",
+      "historyDescription": "Cada mudança guarda a memória inteira. Voltar para uma versão também vira uma versão, então dá para desfazer.",
+      "restore": "Voltar para esta",
+      "noteCount_one": "{{count}} nota",
+      "noteCount_other": "{{count}} notas",
+      "changes": {
+        "learned": "Aprendeu",
+        "added": "Você adicionou",
+        "edited": "Você editou",
+        "removed": "Você apagou",
+        "restored": "Voltou para a versão de {{when}}"
+      }
+    },
     "review": {
       "noAuthor": "Não há uma conversa do agente autor nesta tarefa para receber o achado.",
       "noAuthorForChange": "Esta conversa é do Revisor, que não altera código. Abra uma conversa nesta tarefa para pedir a mudança.",

@@ -56,6 +56,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+mod agent_memory;
 mod agents;
 mod ai_memory;
 mod ai_memory_settings;
@@ -990,6 +991,18 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(agents::bind_session),
         )
         .route("/api/v1/agents/:agent_id", post(agents::save))
+        .route(
+            "/api/v1/agents/:agent_id/memory",
+            get(agent_memory::show).post(agent_memory::add),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/memory/:note_id",
+            post(agent_memory::edit).delete(agent_memory::remove),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/memory/versions/:version_id/restore",
+            post(agent_memory::restore),
+        )
         .route("/api/v1/research/ideas", post(research::create_idea))
         .route(
             "/api/v1/research/ideas/publish",
@@ -1904,6 +1917,11 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/skills/compile",
             "POST /api/v1/sessions/:session_id/agent",
             "POST /api/v1/agents/:agent_id",
+            "GET /api/v1/agents/:agent_id/memory",
+            "POST /api/v1/agents/:agent_id/memory",
+            "POST /api/v1/agents/:agent_id/memory/:note_id",
+            "DELETE /api/v1/agents/:agent_id/memory/:note_id",
+            "POST /api/v1/agents/:agent_id/memory/versions/:version_id/restore",
             "POST /api/v1/research/ideas",
             "POST /api/v1/research/ideas/publish",
             "POST /api/v1/research/ideas/discard",
@@ -6711,6 +6729,61 @@ mod tests {
         assert!(!crate::remote_connector::remote_path_allowed(
             "/api/v1/research/ideas"
         ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_agents_memory_is_edited_from_its_page() {
+        let fixture = embedded_fixture().await;
+        let reviewer = fixture
+            .backend
+            .sessions
+            .list_resident_agents(
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+            )
+            .unwrap()
+            .remove(0);
+        let base = format!("/api/v1/agents/{}/memory", reviewer.id);
+        let (status, empty) = get_json(&fixture.app, &base).await;
+        assert_eq!(status, StatusCode::OK, "{empty}");
+        assert_eq!(empty["notes"], json!([]));
+        assert_eq!(empty["usage"], 0);
+
+        let (status, added) =
+            post_json(&fixture.app, &base, json!({ "body": "Responder em pt-BR" })).await;
+        assert_eq!(status, StatusCode::OK, "{added}");
+        assert_eq!(added["notes"][0]["source"], "person");
+        let note = added["notes"][0]["id"].as_str().unwrap().to_string();
+        let (status, edited) = post_json(
+            &fixture.app,
+            &format!("{base}/{note}"),
+            json!({ "body": "Sempre em pt-BR" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{edited}");
+        assert_eq!(edited["notes"][0]["body"], "Sempre em pt-BR");
+        let (status, removed) =
+            send_json(&fixture.app, "DELETE", &format!("{base}/{note}"), json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{removed}");
+        assert_eq!(removed["notes"], json!([]));
+        // Newest first: removed, edited, added. Back to the added one.
+        assert_eq!(removed["versions"][2]["change"], "added");
+        let version = removed["versions"][2]["id"].as_i64().unwrap();
+        let (status, restored) = post_json(
+            &fixture.app,
+            &format!("{base}/versions/{version}/restore"),
+            json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{restored}");
+        assert_eq!(restored["notes"][0]["body"], "Responder em pt-BR");
+        assert_eq!(restored["versions"][0]["change"], "restored");
+
+        let (status, refused) =
+            post_json(&fixture.app, &base, json!({ "body": "x".repeat(301) })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+        assert!(!crate::remote_connector::remote_path_allowed(&base));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

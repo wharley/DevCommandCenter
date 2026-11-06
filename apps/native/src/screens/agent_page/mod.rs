@@ -23,9 +23,13 @@ use crate::ui::{Icon, Tracked};
 
 mod editor;
 mod idea;
+mod memory;
+mod memory_history;
 mod picker;
 mod pr_reviews;
 mod recap;
+#[cfg(test)]
+mod memory_tests;
 #[cfg(test)]
 mod tests;
 
@@ -60,6 +64,8 @@ pub struct AgentPage {
     pub(crate) starting_idea: bool,
     /// The desktop the idea goes through (tests point it elsewhere).
     pub(crate) api: Option<crate::data::desktop_api::DesktopApi>,
+    /// "Memória", made on the first render (its fields need the window).
+    pub(crate) memory: Option<Entity<memory::MemoryCard>>,
     _sidebar: Subscription,
 }
 
@@ -122,6 +128,7 @@ impl AgentPage {
             } else {
                 crate::data::desktop_api::DesktopApi::load()
             },
+            memory: None,
             _sidebar: observe,
         }
     }
@@ -131,6 +138,10 @@ impl AgentPage {
             self.agent_id = agent_id;
             self.role_open = false;
             self.editor = None;
+        }
+        if let Some(memory) = &self.memory {
+            let agent_id = self.agent_id.clone();
+            memory.update(cx, |memory, cx| memory.show(&agent_id, cx));
         }
         cx.notify();
     }
@@ -159,6 +170,14 @@ impl AgentPage {
         });
         self.editor = Some((editor, events));
         cx.notify();
+    }
+
+    fn memory_card(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let (agent_id, api) = (self.agent_id.clone(), self.api.clone());
+        self.memory
+            .get_or_insert_with(|| cx.new(|cx| memory::MemoryCard::new(agent_id, api, window, cx)))
+            .clone()
+            .into_any_element()
     }
 
     fn section_title(text: SharedString, cx: &gpui::App) -> AnyElement {
@@ -333,7 +352,7 @@ impl AgentPage {
 }
 
 impl Render for AgentPage {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
         let Some(data) = self.sidebar.read(cx).agent_page(&self.agent_id) else {
             return div()
@@ -422,6 +441,8 @@ impl Render for AgentPage {
         let pr_reviews = self.pr_reviews(&data, cx);
         // The Reporter has no conversations: its page is the recap.
         let recap = chronicler.then(|| self.recap_card(&data, cx));
+        // It runs no model either, so it has no memory.
+        let memory = (!chronicler).then(|| self.memory_card(window, cx));
         let extra = (!agent.extra_instructions.is_empty()).then(|| {
             div()
                 .child(Self::section_title(cx.t("agents.editor.extra"), cx))
@@ -510,6 +531,7 @@ impl Render for AgentPage {
                     .children(how_to_call)
                     .children(sessions)
                     .children(pr_reviews)
+                    .children(memory)
                     .children(extra)
                     .child(role),
             )

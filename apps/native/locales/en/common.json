@@ -212,6 +212,36 @@
     }
   },
   "agents": {
+    "memory": {
+      "title": "Memory",
+      "usage": "{{percent}}% full",
+      "history": "History",
+      "all": "All",
+      "learned": "Learned",
+      "mine": "Yours",
+      "search": "Search the memory",
+      "learnedBadge": "learned",
+      "empty": "Nothing saved yet. When you correct the agent or state a rule (“always…”, “never…”), it saves it here, and every note goes with each of its turns. You can edit or delete any of them.",
+      "noMatch": "No note matches this filter.",
+      "add": "Teach the agent a rule…",
+      "addButton": "Save",
+      "edit": "Edit",
+      "remove": "Delete",
+      "save": "Save",
+      "full": "The memory is full. Edit or delete a note first.",
+      "historyTitle": "Memory history",
+      "historyDescription": "Each change keeps the whole memory. Going back to a version is a version too, so it can be undone.",
+      "restore": "Go back to this",
+      "noteCount_one": "{{count}} note",
+      "noteCount_other": "{{count}} notes",
+      "changes": {
+        "learned": "Learned",
+        "added": "You added",
+        "edited": "You edited",
+        "removed": "You deleted",
+        "restored": "Went back to the version of {{when}}"
+      }
+    },
     "review": {
       "noAuthor": "There is no author agent conversation in this task to receive the finding.",
       "noAuthorForChange": "This conversation belongs to the Reviewer, which does not change code. Open a conversation in this task to ask for the change.",

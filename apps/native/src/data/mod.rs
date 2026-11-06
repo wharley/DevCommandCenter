@@ -4,6 +4,7 @@
 pub mod account_selection;
 pub mod actions;
 pub mod activity;
+pub mod agent_memory;
 pub mod agents;
 pub mod ai_memory;
 pub mod ai_memory_settings;

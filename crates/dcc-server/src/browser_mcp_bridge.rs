@@ -100,7 +100,7 @@ const DELEGATION_MCP_TOOL_NAMES: [&str; 6] = [
 ];
 #[cfg(test)]
 const DCC_MCP_TOOL_COUNT: usize =
-    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len();
+    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 1;
 /// Starting a delegation prepares a worktree and a child thread before it
 /// returns the task id; the child's turn itself runs in the background.
 const DELEGATE_TASK_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
@@ -1540,6 +1540,9 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
         "dcc_computer_key" => call.arguments.as_ref().is_some_and(|arguments| {
             serde_json::from_value::<ComputerKeyArgs>(arguments.clone()).is_ok()
         }),
+        name if crate::agent_memory_tools::is_agent_memory_tool(name) => {
+            crate::agent_memory_tools::call_is_well_formed(&call.arguments)
+        }
         name if crate::device_tools::is_device_tool(name) => {
             crate::device_tools::call_is_well_formed(name, &call.arguments)
         }
@@ -1684,6 +1687,27 @@ async fn dispatch_tool(
         );
     }
     match call.name.as_str() {
+        name if crate::agent_memory_tools::is_agent_memory_tool(name) => {
+            if !bridge.lease_is_current(binding) {
+                return ToolDispatch::computer_error(
+                    "the agent's memory is unavailable for this provider session",
+                );
+            }
+            let response = crate::agent_memory_tools::dispatch(
+                &bridge.sessions,
+                &binding.session_id,
+                call.arguments,
+            );
+            if response["isError"] == true {
+                ToolDispatch {
+                    response,
+                    outcome: BrowserAuditOutcome::Failed,
+                    grant_state: BrowserAuditGrantState::NotApplicable,
+                }
+            } else {
+                ToolDispatch::executed(response, BrowserAuditGrantState::NotApplicable)
+            }
+        }
         name if crate::device_tools::is_device_tool(name) => {
             if !bridge.lease_is_current(binding) {
                 return ToolDispatch::computer_error(
@@ -3067,6 +3091,8 @@ fn tools() -> Vec<Value> {
         json!({"name":"dcc_task_cancel","description":"Cancel a task you delegated that is still running. Its partial work is discarded.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":64},"reason":{"type":"string","maxLength":2000}},"required":["taskId"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}}),
     ]
     .into_iter()
+    // A resident agent's memory.
+    .chain([crate::agent_memory_tools::definition()])
     // The iOS Simulator, where the app offers one.
     .chain(crate::device_tools::tools())
     .collect()
@@ -4430,6 +4456,7 @@ mod tests {
                 "dcc_task_status",
                 "dcc_task_wait",
                 "dcc_task_cancel",
+                "dcc_agent_remember",
             ]
         );
         for tool in &schema_tools {

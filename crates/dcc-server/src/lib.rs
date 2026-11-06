@@ -19,6 +19,7 @@ pub mod daemon_runtime;
 pub mod decision_provider_settings;
 pub mod delta_compaction_worker;
 pub mod desktop_agent_requests;
+pub mod agent_memory_tools;
 pub mod device_tools;
 pub mod embedded_http;
 pub mod host;

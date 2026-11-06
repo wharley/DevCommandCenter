@@ -213,6 +213,10 @@ impl DesktopApi {
         self.request("PUT", path, Some(body))
     }
 
+    pub(crate) fn delete(&self, path: &str) -> Result<Value, ApiError> {
+        self.request("DELETE", path, None)
+    }
+
     /// A long-lived `GET` (server-sent events): the response's body, past
     /// its head, and whether it comes chunked. `read_timeout` bounds the
     /// wait between two reads (the server's keep-alive is every 15s).

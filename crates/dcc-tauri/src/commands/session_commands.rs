@@ -534,8 +534,14 @@ pub async fn run_pull_request_review_agent_with_state(
                 .resident_agent(agent_id)
                 .map_err(|error| error.to_string())?
                 .ok_or_else(|| "The reviewing agent no longer exists.".to_string())?;
+            // Its memory goes along; a one-shot review cannot save a note.
+            let memory = state
+                .agent_memory_block(&agent.id, false)
+                .map_err(|error| error.to_string())?
+                .map(|memory| format!("\n\n{memory}"))
+                .unwrap_or_default();
             format!(
-                "{}\n\nThis review is of a pull request, from the patches below. You cannot run, edit or publish anything; judge only what the patches show.\n\n{prompt}",
+                "{}{memory}\n\nThis review is of a pull request, from the patches below. You cannot run, edit or publish anything; judge only what the patches show.\n\n{prompt}",
                 agent.review_brief()
             )
         }

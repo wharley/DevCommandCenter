@@ -1,4 +1,6 @@
 use dcc_core::domain::decision::DecisionEvaluation;
+
+mod agent_memory;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     path::{Component, Path, PathBuf},
@@ -7537,10 +7539,18 @@ impl SessionCommandState {
     ) -> Result<Option<String>> {
         let objective = self.session_repo.load_session_objective(session_id)?;
         let agent = self.session_repo.load_session_agent(session_id)?;
-        Ok(dcc_core::domain::agent::merge_agent_instructions(
+        let memory = match &agent {
+            Some(agent) => self.agent_memory_block(&agent.id, true)?,
+            None => None,
+        };
+        let merged = dcc_core::domain::agent::merge_agent_instructions(
             merge_objective_instructions(base, objective.as_ref()),
             agent.as_ref(),
-        ))
+        );
+        Ok(match (merged, memory) {
+            (Some(merged), Some(memory)) => Some(format!("{merged}\n\n{memory}")),
+            (merged, memory) => merged.or(memory),
+        })
     }
 
     // ---- Resident agents ----------------------------------------------------
@@ -9464,7 +9474,18 @@ mod tests {
             .unwrap()
             .expect("merged instructions");
         assert!(instructions.starts_with("<dcc_agent_role name=\"Revisor\">"));
-        assert!(instructions.ends_with("base"));
+        // Its memory comes last, with when to save a note.
+        assert!(instructions.contains("\n\nbase\n\n<dcc_agent_memory>"));
+        assert!(instructions.ends_with("</dcc_agent_memory>"));
+        assert!(instructions.contains("dcc_agent_remember"));
+        state
+            .remember_for_session(&session.id, "Responder em pt-BR")
+            .expect("remember");
+        let instructions = state
+            .objective_tool_instructions(&session.id, Some("base".to_string()))
+            .unwrap()
+            .unwrap();
+        assert!(instructions.contains("- Responder em pt-BR"));
         assert_eq!(state.list_agent_session_bindings().unwrap().len(), 1);
 
         assert!(state.delete_resident_agent(&reviewer.id).unwrap());
