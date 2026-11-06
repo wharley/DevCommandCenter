@@ -90,7 +90,7 @@ pub struct Preset {
 }
 
 /// `CONNECTOR_PRESETS`
-pub const PRESETS: [Preset; 16] = [
+pub const PRESETS: [Preset; 17] = [
     Preset {
         id: "clickup",
         name: "ClickUp",
@@ -254,6 +254,17 @@ pub const PRESETS: [Preset; 16] = [
         url: "https://mcp.atlassian.com/v1/mcp",
         docs_url: "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/",
         logo: Some("atlassian"),
+        auth: Auth::OAuth,
+        token_help_url: None,
+        hidden: false,
+    },
+    Preset {
+        id: "trello",
+        name: "Trello",
+        category: Category::Productivity,
+        url: "https://mcp.trello.com/v1",
+        docs_url: "https://github.com/atlassian/trello-mcp-server",
+        logo: Some("trello"),
         auth: Auth::OAuth,
         token_help_url: None,
         hidden: false,

@@ -2760,7 +2760,8 @@
         "posthog": "Events, insights, and feature flags.",
         "revenuecat": "Your apps’ products, offerings, and subscriptions.",
         "resend": "Emails, domains, contacts, and broadcasts.",
-        "atlassian": "Jira issues and Confluence pages."
+        "atlassian": "Jira issues and Confluence pages.",
+        "trello": "Boards, lists, and cards."
       },
       "connect": {
         "title": "Connect {{name}}",

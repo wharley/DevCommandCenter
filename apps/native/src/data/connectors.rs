@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn the_catalog_and_the_slack_app() {
-        assert_eq!(visible_presets().count(), 15);
+        assert_eq!(visible_presets().count(), 16);
         // Every visible one shows its brand mark and its line, in both
         // languages.
         for locale in [crate::i18n::Locale::PtBr, crate::i18n::Locale::En] {
