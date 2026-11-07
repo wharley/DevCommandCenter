@@ -1,8 +1,7 @@
 //! The agents' mascots as the agents are: the mood each shows (`Mood`) and
 //! the blink of the ones watching. The blink is one face swap of 160 ms
 //! every few seconds, only while DCC is in front and some agent watches;
-//! it redraws the faces alone (`Pieces::notify_faces`) and the agent's
-//! page, never the task rows.
+//! only the team's screen follows it (`MascotBlink`), never the sidebar.
 
 use std::time::Duration;
 
@@ -45,12 +44,7 @@ pub fn agent_mood(
 }
 
 impl Sidebar {
-    /// Faces follow the triggers turned on or off on an agent's page.
-    pub(super) fn observe_triggers(cx: &mut Context<Self>) -> gpui::Subscription {
-        cx.observe_global::<AgentTriggers>(|sidebar, cx| sidebar.pieces.notify_faces(cx))
-    }
-
-    /// The mood of the agent `id` (the strip's faces, the agent's page).
+    /// The mood of the agent `id` (the team's screen).
     pub fn mood(&self, id: &str, cx: &App) -> Option<Mood> {
         let views = self.agent_views();
         let view = views.iter().find(|view| view.agent.id == id)?;
@@ -79,10 +73,7 @@ impl Sidebar {
                     continue;
                 }
                 for shut in [true, false] {
-                    let alive = this.update(cx, |sidebar, cx| {
-                        cx.set_global(MascotBlink(shut));
-                        sidebar.pieces.notify_faces(cx);
-                    });
+                    let alive = this.update(cx, |_, cx| cx.set_global(MascotBlink(shut)));
                     if alive.is_err() {
                         return;
                     }

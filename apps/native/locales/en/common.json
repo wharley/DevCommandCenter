@@ -446,6 +446,10 @@
         "nothingSafe": "Nothing is ready to delete safely right now."
       }
     },
+    "team": {
+      "title": "Team",
+      "new": "New agent"
+    },
     "editor": {
       "extra": "Extra instructions",
       "extraHint": "Added to DCC's role on every turn. For example: your project's conventions or folders to ignore.",
@@ -478,6 +482,12 @@
       "projectsHint": "Where it shows in tasks and where its triggers act.",
       "projectsAll": "All",
       "back": "Back to {{agent}}",
+      "newTitle": "New agent",
+      "backToTeam": "Back",
+      "role": "Role",
+      "roleHint": "Who it is and what it does. Sent with each of its turns, as instructions.",
+      "kickoff": "When called",
+      "kickoffHint": "What it does first when you call it in a task. Empty: it waits for your request.",
       "runsOnWithSelection": "Runs on: {{selection}}",
       "cancel": "Cancel",
       "save": "Save",
@@ -503,6 +513,7 @@
       "terminate": "Stop and continue"
     },
     "title": "Projects",
+    "agents": "Agents",
     "pullRequests": "Pull Requests",
     "running": "Running",
     "runningTasks_one": "{{count}} running task",

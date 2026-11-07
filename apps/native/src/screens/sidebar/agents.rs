@@ -1,23 +1,17 @@
-//! `AgentsSidebarSection`: the resident agents as a row of mascots above the
-//! task list, the one that needs the person speaking for the row. In the
-//! collapsed rail, one button per agent.
+//! The resident agents as the sidebar knows them: each one's state across its
+//! sessions, what the agent's page reads, and what "Agentes" counts.
 
 use std::path::Path;
 
-use gpui::{AnyElement, ClickEvent, Context, Hsla, SharedString, Window, div, prelude::*, px};
+use gpui::Context;
 
-use super::{Sidebar, SidebarEvent};
+use super::Sidebar;
 use crate::data::agents::{
     AgentRecord, AgentState, CHRONICLER_PRESET, REVIEWER_PRESET, aggregate, lead,
 };
 use crate::data::daily_recap::DailyRecap;
 use crate::data::pr_review_jobs::{JobStatus, PrReviewJob};
 use crate::data::seen::SeenResults;
-use crate::i18n::Translate;
-use crate::theme::tailwind as tw;
-use crate::theme::{ActiveTheme, Appearance};
-use crate::ui::tooltip::Side;
-use crate::ui::{Button, ButtonSize, ButtonVariant, Tooltip};
 
 /// The reading markers the agents' states depend on.
 pub struct AgentMarkers {
@@ -209,198 +203,24 @@ impl Sidebar {
         self.state.task(id).map(|task| task.project_id.clone())
     }
 
-    pub fn set_active_agent(&mut self, id: Option<String>, cx: &mut Context<Self>) {
-        self.active_agent_id = id;
-        cx.notify();
+    /// Beside "Agentes": how many agents need the person or left a result
+    /// unread, and whether one needs the person (amber).
+    pub(super) fn agents_waiting(&self) -> (usize, bool) {
+        let views = self.agent_views();
+        let waiting = views
+            .iter()
+            .filter(|view| matches!(view.state, AgentState::NeedsYou | AgentState::Done))
+            .count();
+        let needs_you = views.iter().any(|view| view.state == AgentState::NeedsYou);
+        (waiting, needs_you)
     }
-}
 
-fn state_text(state: AgentState, cx: &Context<Sidebar>) -> SharedString {
-    cx.t(state.i18n_key())
-}
-
-/// `amber-500` for "needs you", `sky-500` for an unread result.
-fn dot_color(state: AgentState) -> Option<Hsla> {
-    match state {
-        AgentState::NeedsYou => Some(tw::AMBER_500.hsla()),
-        AgentState::Done => Some(tw::SKY_500.hsla()),
-        _ => None,
+    /// The agent the team's screen opens on: the one that needs the person,
+    /// else one with a result unread, else the first.
+    pub fn lead_agent(&self) -> Option<String> {
+        let views = self.agent_views();
+        lead(&views, |view| view.state)
+            .or(views.first())
+            .map(|view| view.agent.id.clone())
     }
-}
-
-fn open(
-    id: String,
-    cx: &mut Context<Sidebar>,
-) -> impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static {
-    cx.listener(move |_, _: &ClickEvent, _, cx| cx.emit(SidebarEvent::OpenAgent(id.clone())))
-}
-
-pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> Option<AnyElement> {
-    let views = sidebar.agent_views();
-    if views.is_empty() {
-        return None;
-    }
-    let theme = cx.theme();
-    let colors = theme.colors.clone();
-    let radius = theme.radius;
-    let dark = theme.appearance == Appearance::Dark;
-    let ring = colors.sidebar;
-    let mut buttons = Vec::new();
-    for view in &views {
-        let agent = view.agent;
-        let active = sidebar.active_agent_id.as_deref() == Some(agent.id.as_str());
-        let hover = colors.accent.opacity(0.5);
-        let tip = if view.state == AgentState::Idle {
-            SharedString::from(agent.name.clone())
-        } else {
-            SharedString::from(format!("{} · {}", agent.name, state_text(view.state, cx)))
-        };
-        let button = div()
-            .id(SharedString::from(format!("agent-{}", agent.id)))
-            .relative()
-            .flex()
-            .flex_shrink_0()
-            .items_center()
-            .justify_center()
-            .size(px(32.0))
-            .rounded(radius.lg)
-            .cursor_pointer()
-            .when(active, |button| button.bg(colors.accent))
-            .when(!active, |button| button.hover(move |style| style.bg(hover)))
-            .on_click(open(agent.id.clone(), cx))
-            .child(face_piece(sidebar, &agent.id, false, cx))
-            .when_some(dot_color(view.state), |button, dot| {
-                button.child(
-                    div()
-                        .absolute()
-                        .right(px(2.0))
-                        .top(px(2.0))
-                        .size(px(8.0))
-                        .rounded_full()
-                        .border_2()
-                        .border_color(ring)
-                        .bg(dot),
-                )
-            });
-        buttons.push(
-            Tooltip::text(
-                SharedString::from(format!("tip-agent-{}", agent.id)),
-                button,
-                tip,
-            )
-            .side(Side::Bottom)
-            .into_any_element(),
-        );
-    }
-    let speaker = lead(&views, |view| view.state).map(|view| {
-        let color = match (view.state, dark) {
-            (AgentState::NeedsYou, false) => tw::AMBER_700.hsla(),
-            (AgentState::NeedsYou, true) => tw::AMBER_300.hsla(),
-            (AgentState::Done, false) => tw::SKY_700.hsla(),
-            (AgentState::Done, true) => tw::SKY_300.hsla(),
-            _ => colors.muted_foreground,
-        };
-        let text = format!(
-            "{}: {}",
-            view.agent.name,
-            state_text(view.state, cx).to_lowercase()
-        );
-        div()
-            .id("agents-lead")
-            .ml(px(4.0))
-            .min_w_0()
-            .truncate()
-            .cursor_pointer()
-            .text_size(px(11.0))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(color)
-            .on_click(open(view.agent.id.clone(), cx))
-            .child(SharedString::from(text))
-    });
-    Some(
-        div()
-            .flex()
-            .flex_shrink_0()
-            .items_center()
-            .gap(px(2.0))
-            .px(px(10.0))
-            .pb(px(12.0))
-            .children(buttons)
-            .children(speaker)
-            .into_any_element(),
-    )
-}
-
-/// The collapsed rail: a ghost button per agent, its name beside it.
-pub fn rail_buttons(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> Vec<AnyElement> {
-    let views = sidebar.agent_views();
-    let mut buttons = Vec::new();
-    for view in &views {
-        let agent = view.agent;
-        let active = sidebar.active_agent_id.as_deref() == Some(agent.id.as_str());
-        let button = Button::new(SharedString::from(format!("rail-agent-{}", agent.id)))
-            .variant(ButtonVariant::Ghost)
-            .size(ButtonSize::IconXs)
-            .current(active)
-            .child(face_piece(sidebar, &agent.id, true, cx))
-            .on_click(open(agent.id.clone(), cx));
-        buttons.push(
-            Tooltip::text(
-                SharedString::from(format!("tip-rail-agent-{}", agent.id)),
-                button,
-                agent.name.clone(),
-            )
-            .side(Side::Right)
-            .into_any_element(),
-        );
-    }
-    buttons
-}
-
-fn face_size(rail: bool) -> f32 {
-    if rail { 20.0 } else { 22.0 }
-}
-
-/// The agent's face in its own piece: its bob while it works repaints only it.
-fn face_piece(
-    sidebar: &Sidebar,
-    agent_id: &str,
-    rail: bool,
-    cx: &mut Context<Sidebar>,
-) -> AnyElement {
-    let side = px(face_size(rail));
-    sidebar.pieces.element(
-        super::piece::Piece::AgentFace {
-            agent_id: agent_id.to_string(),
-            rail,
-        },
-        gpui::StyleRefinement::default().size(side).flex_shrink_0(),
-        cx,
-    )
-}
-
-/// The agent's face, as its piece draws it.
-pub(super) fn face(
-    sidebar: &Sidebar,
-    agent_id: &str,
-    rail: bool,
-    cx: &mut Context<Sidebar>,
-) -> AnyElement {
-    let views = sidebar.agent_views();
-    let Some(view) = views.iter().find(|view| view.agent.id == agent_id) else {
-        return div().into_any_element();
-    };
-    let mood = super::mascot::agent_mood(view.agent, view.state, &sidebar.pr_reviews, cx);
-    let prefix = if rail {
-        "rail-agent-face"
-    } else {
-        "agent-face"
-    };
-    crate::agent::MoodAvatarView::new(
-        SharedString::from(format!("{prefix}-{agent_id}")),
-        &view.agent.avatar,
-        mood,
-        face_size(rail),
-    )
-    .into_any_element()
 }

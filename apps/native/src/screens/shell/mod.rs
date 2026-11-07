@@ -637,14 +637,11 @@ impl Shell {
         let page = match surface {
             Surface::NewTask => Some(NavPage::NewTask),
             Surface::PullRequests => Some(NavPage::PullRequests),
+            Surface::Agent => Some(NavPage::Agents),
             _ => None,
         };
-        self.sidebar.update(cx, |sidebar, cx| {
-            sidebar.set_current_page(page, cx);
-            if surface != Surface::Agent {
-                sidebar.set_active_agent(None, cx);
-            }
-        });
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.set_current_page(page, cx));
         cx.notify();
     }
 

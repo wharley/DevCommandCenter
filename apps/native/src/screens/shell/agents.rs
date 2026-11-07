@@ -66,9 +66,19 @@ impl Shell {
                 self.agent_page = Some((page, events));
             }
         }
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.set_active_agent(Some(id), cx));
         self.show(Surface::Agent, cx);
+    }
+
+    /// "Agentes": the team's screen, on the agent it showed last, else the
+    /// one that needs the person.
+    pub(super) fn open_agents(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = self
+            .agent_page
+            .as_ref()
+            .map(|(page, _)| page.read(cx).agent_id.clone());
+        if let Some(id) = shown.or_else(|| self.sidebar.read(cx).lead_agent()) {
+            self.open_agent(id, window, cx);
+        }
     }
 
     pub(super) fn agent_page_element(&self) -> AnyElement {

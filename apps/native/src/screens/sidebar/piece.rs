@@ -18,7 +18,7 @@ use gpui::{
     WeakEntity, Window, div, prelude::*,
 };
 
-use super::{Sidebar, agents, child_task_row, row, tasks_header};
+use super::{Sidebar, child_task_row, row, tasks_header};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Piece {
@@ -32,11 +32,6 @@ pub enum Piece {
         last: bool,
     },
     RunningPulse,
-    AgentFace {
-        agent_id: String,
-        /// The collapsed rail's (20px) rather than the list's (22px).
-        rail: bool,
-    },
 }
 
 impl Piece {
@@ -49,7 +44,6 @@ impl Piece {
                 last,
             } => child_task_row::render(sidebar, task_id, child_id, *last, cx),
             Piece::RunningPulse => tasks_header::running_pulse(cx),
-            Piece::AgentFace { agent_id, rail } => agents::face(sidebar, agent_id, *rail, cx),
         }
     }
 }
@@ -114,22 +108,8 @@ impl Pieces {
     pub fn retain_rows(&self, listed: &HashSet<Piece>) {
         self.0.borrow_mut().retain(|piece, _| match piece {
             Piece::Row { .. } | Piece::Child { .. } => listed.contains(piece),
-            Piece::RunningPulse | Piece::AgentFace { .. } => true,
+            Piece::RunningPulse => true,
         });
-    }
-
-    /// Redraws only the agents' faces (a blink).
-    pub fn notify_faces(&self, cx: &mut App) {
-        let views: Vec<Entity<PieceView>> = self
-            .0
-            .borrow()
-            .iter()
-            .filter(|(piece, _)| matches!(piece, Piece::AgentFace { .. }))
-            .map(|(_, view)| view.clone())
-            .collect();
-        for view in views {
-            view.update(cx, |_, cx| cx.notify());
-        }
     }
 
     /// Redraws only these tasks' rows (a mascot step, a seconds tick).

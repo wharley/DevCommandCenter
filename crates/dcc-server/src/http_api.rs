@@ -1002,6 +1002,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/sessions/:session_id/agent",
             post(agents::bind_session),
         )
+        .route("/api/v1/agents", post(agents::create))
         .route("/api/v1/agents/:agent_id", post(agents::save))
         .route(
             "/api/v1/agents/:agent_id/conversation",

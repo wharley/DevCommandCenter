@@ -61,6 +61,78 @@ fn pull_requests_with_news_are_counted_open_and_dotted_collapsed(cx: &mut TestAp
     }
 }
 
+/// "Agentes" counts the agents that need the person (amber) or left a
+/// result; the rail shows a dot instead. The old row of mascots is gone.
+#[gpui::test]
+fn agents_waiting_are_counted_beside_agentes(cx: &mut TestAppContext) {
+    use crate::data::agents::{AgentRecord, AgentSession, AgentState};
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let agent = |id: &str, state: Option<AgentState>| AgentRecord {
+        id: id.into(),
+        name: id.into(),
+        preset: None,
+        avatar: dcc_core::domain::agent::AgentAvatar {
+            color: "blue".into(),
+            arms: 3,
+            eyes: "round".into(),
+            shape: "octopus".into(),
+            accessory: "none".into(),
+        },
+        provider_id: None,
+        model: None,
+        effort: None,
+        kickoff_prompt: String::new(),
+        role: "r".into(),
+        offer_prompt: String::new(),
+        extra_instructions: String::new(),
+        projects: Vec::new(),
+        sessions: state
+            .map(|state| AgentSession {
+                session_id: format!("s-{id}"),
+                workspace_id: "w".into(),
+                state,
+                completed_at: None,
+                project_id: "p".into(),
+                title: None,
+                updated_at: String::new(),
+            })
+            .into_iter()
+            .collect(),
+    };
+    for collapsed in [false, true] {
+        let seen = dir.path().join(format!("agents-{collapsed}.json"));
+        let (sidebar, cx) =
+            cx.add_window_view(|_, cx| Sidebar::new(collapsed, false, false, seen, cx));
+        let data = SidebarData {
+            agents: vec![
+                agent("calm", None),
+                agent("asks", Some(AgentState::NeedsYou)),
+                agent("works", Some(AgentState::Working)),
+            ],
+            ..SidebarData::default()
+        };
+        sidebar.update(cx, |sidebar, cx| sidebar.apply_for_tests(data, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.agents_waiting()),
+            (1, true)
+        );
+        assert_eq!(
+            sidebar.read_with(cx, |sidebar, _| sidebar.lead_agent()),
+            Some("asks".to_string())
+        );
+        if collapsed {
+            assert!(cx.debug_bounds("rail-agents-news").is_some());
+        } else {
+            assert!(cx.debug_bounds("nav-agents-count").is_some());
+        }
+    }
+}
+
 /// The rail drawn by Metal, saved to look at:
 /// `DCC_RAIL_PICTURE=/tmp/x.png cargo test rail_picture -- --ignored`.
 #[test]

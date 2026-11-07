@@ -37,7 +37,7 @@ impl Sidebar {
     }
 
     /// Re-reads the rail right away after a write.
-    pub(super) fn reload_now(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn reload_now(&mut self, cx: &mut Context<Self>) {
         let db_path = loader::database_path();
         let untitled = cx.t("sidebar.newWorkspace").to_string();
         cx.spawn(async move |this, cx| {

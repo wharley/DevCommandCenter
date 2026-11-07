@@ -446,6 +446,10 @@
         "nothingSafe": "Nada está pronto para apagar com segurança agora."
       }
     },
+    "team": {
+      "title": "Equipe",
+      "new": "Novo agente"
+    },
     "editor": {
       "extra": "Instruções extras",
       "extraHint": "Somadas ao papel do DCC a cada turno. Exemplo: convenções do seu projeto ou pastas a ignorar.",
@@ -478,6 +482,12 @@
       "projectsHint": "Onde ele aparece nas tarefas e onde os gatilhos agem.",
       "projectsAll": "Todos",
       "back": "Voltar para {{agent}}",
+      "newTitle": "Novo agente",
+      "backToTeam": "Voltar",
+      "role": "Papel",
+      "roleHint": "Quem ele é e o que faz. Vai com cada turno dele, como instrução.",
+      "kickoff": "Ao chamar",
+      "kickoffHint": "O que ele faz primeiro quando você o chama numa tarefa. Em branco: ele espera seu pedido.",
       "runsOnWithSelection": "Roda em: {{selection}}",
       "cancel": "Cancelar",
       "save": "Salvar",
@@ -503,6 +513,7 @@
       "terminate": "Encerrar e continuar"
     },
     "title": "Projetos",
+    "agents": "Agentes",
     "pullRequests": "Pull Requests",
     "running": "Em execução",
     "runningTasks_one": "{{count}} tarefa em execução",

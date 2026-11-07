@@ -31,6 +31,8 @@ pub enum EditorEvent {
     Closed,
     /// Saved: the agents are read again.
     Saved,
+    /// "Novo agente" saved: its id, for the page to show it.
+    Created(String),
 }
 
 impl DesktopApi {
@@ -39,12 +41,24 @@ impl DesktopApi {
         self.post(&format!("/api/v1/agents/{}", encode(id)), draft)
             .map(|_| ())
     }
+
+    /// "Novo agente": the new agent's id.
+    pub fn create_agent(&self, draft: &serde_json::Value) -> Result<String, ApiError> {
+        let answer = self.post("/api/v1/agents", draft)?;
+        answer["agent"]["id"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| ApiError::Failed("the new agent has no id".to_string()))
+    }
 }
 
 pub struct AgentEditor {
     pub(crate) agent: AgentRecord,
     pub(crate) name: Entity<TextInput>,
     pub(crate) extra: Entity<TextArea>,
+    /// The role and what a call asks first, for an agent of the person's.
+    pub(crate) role: Entity<TextArea>,
+    pub(crate) kickoff: Entity<TextArea>,
     pub(crate) avatar: AgentAvatar,
     pub(crate) provider_id: Option<String>,
     pub(crate) model: Option<String>,
@@ -65,7 +79,7 @@ pub struct AgentEditor {
 
 impl EventEmitter<EditorEvent> for AgentEditor {}
 
-fn label(text: SharedString, cx: &gpui::App) -> AnyElement {
+pub(super) fn label(text: SharedString, cx: &gpui::App) -> AnyElement {
     div()
         .text_size(px(12.0))
         .font_weight(FontWeight::MEDIUM)
@@ -84,7 +98,7 @@ fn hint(text: SharedString, cx: &gpui::App) -> AnyElement {
 }
 
 /// `Field`: the label, the control, the hint.
-fn field(
+pub(super) fn field(
     label_text: SharedString,
     hint_text: Option<SharedString>,
     control: AnyElement,
@@ -100,7 +114,7 @@ fn field(
         .into_any_element()
 }
 
-fn boxed(input: AnyElement, cx: &gpui::App) -> gpui::Div {
+pub(super) fn boxed(input: AnyElement, cx: &gpui::App) -> gpui::Div {
     let colors = &cx.theme().colors;
     div()
         .w_full()
@@ -124,6 +138,10 @@ impl AgentEditor {
         name.update(cx, |input, cx| input.set_text(agent.name.clone(), cx));
         let extra = cx.new(|cx| TextArea::new(window, cx));
         extra.update(cx, |area, cx| area.set_text(&agent.extra_instructions, cx));
+        let role = cx.new(|cx| TextArea::new(window, cx));
+        role.update(cx, |area, cx| area.set_text(&agent.role, cx));
+        let kickoff = cx.new(|cx| TextArea::new(window, cx));
+        kickoff.update(cx, |area, cx| area.set_text(&agent.kickoff_prompt, cx));
         let alert = if cfg!(test) && !cleanup_path.exists() {
             CleanupAlert::default()
         } else {
@@ -133,7 +151,20 @@ impl AgentEditor {
         threshold.update(cx, |input, cx| {
             input.set_text(alert.threshold_gb.to_string(), cx)
         });
+        let multiline = |_: &mut Self,
+                         area: Entity<TextArea>,
+                         event: &TextAreaEvent,
+                         cx: &mut Context<Self>| {
+            match event {
+                // Instructions run over lines: Enter is a new one.
+                TextAreaEvent::Submitted => area.update(cx, |area, cx| area.insert("\n", cx)),
+                TextAreaEvent::Changed => cx.notify(),
+                _ => {}
+            }
+        };
         let inputs = vec![
+            cx.subscribe(&role, multiline),
+            cx.subscribe(&kickoff, multiline),
             cx.subscribe(&name, |_, _, event, cx| {
                 if matches!(event, TextInputEvent::Changed) {
                     cx.notify();
@@ -158,6 +189,8 @@ impl AgentEditor {
             agent,
             name,
             extra,
+            role,
+            kickoff,
             threshold,
             cleanup_path,
             catalog,
@@ -191,10 +224,19 @@ impl AgentEditor {
             String::new()
         };
         let extra: String = self.extra.read(cx).text().chars().take(2000).collect();
+        // A built-in agent's role is DCC's; the person writes their own's.
+        let (role, kickoff) = if self.agent.preset.is_none() {
+            (
+                self.role.read(cx).text().trim().to_string(),
+                self.kickoff.read(cx).text().trim().to_string(),
+            )
+        } else {
+            (self.agent.role.clone(), self.agent.kickoff_prompt.clone())
+        };
         json!({
             "name": self.name.read(cx).text().trim(),
-            "role": self.agent.role,
-            "kickoffPrompt": self.agent.kickoff_prompt,
+            "role": role,
+            "kickoffPrompt": kickoff,
             "offerPrompt": offer,
             "extraInstructions": extra,
             "providerId": self.provider_id,
@@ -206,7 +248,7 @@ impl AgentEditor {
     }
 
     pub(crate) fn save(&mut self, cx: &mut Context<Self>) {
-        if self.saving || self.name.read(cx).text().trim().is_empty() {
+        if self.saving || !self.can_save(cx) {
             return;
         }
         let Some(api) = self.api.clone() else {
@@ -225,16 +267,25 @@ impl AgentEditor {
         cx.spawn(async move |this, cx| {
             let saved = cx
                 .background_executor()
-                .spawn(async move { api.save_agent(&id, &draft) })
+                .spawn(async move {
+                    if id.is_empty() {
+                        api.create_agent(&draft).map(Some)
+                    } else {
+                        api.save_agent(&id, &draft).map(|_| None)
+                    }
+                })
                 .await;
             let _ = this.update(cx, |editor, cx| {
                 editor.saving = false;
                 match saved {
-                    Ok(()) => {
+                    Ok(created) => {
                         if chronicler {
                             let _ = CleanupAlert::save_settings(&path, cleanup.0, cleanup.1);
                         }
-                        cx.emit(EditorEvent::Saved);
+                        cx.emit(match created {
+                            Some(id) => EditorEvent::Created(id),
+                            None => EditorEvent::Saved,
+                        });
                         cx.emit(EditorEvent::Closed);
                     }
                     Err(error) => Toaster::error(error.to_string(), cx),
@@ -296,7 +347,7 @@ impl Render for AgentEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
         let preset = self.agent.preset.clone();
-        let name_empty = self.name.read(cx).text().trim().is_empty();
+        let cannot_save = !self.can_save(cx);
         let mut body = div()
             .flex()
             .flex_col()
@@ -326,6 +377,7 @@ impl Render for AgentEditor {
                         )),
                     ),
             )
+            .children(self.role_fields(cx))
             .child(field(
                 cx.t("agents.editor.avatar"),
                 None,
@@ -402,10 +454,22 @@ impl Render for AgentEditor {
         let back = cx.entity().downgrade();
         let cancel = back.clone();
         let saving = self.saving;
-        let title = cx.t_with(
-            "agents.editor.title",
-            &Args::default().with("agent", self.agent.name.clone()),
-        );
+        let title = if self.is_new() {
+            cx.t("agents.editor.newTitle")
+        } else {
+            cx.t_with(
+                "agents.editor.title",
+                &Args::default().with("agent", self.agent.name.clone()),
+            )
+        };
+        let back_label = if self.is_new() {
+            cx.t("agents.editor.backToTeam")
+        } else {
+            cx.t_with(
+                "agents.editor.back",
+                &Args::default().with("agent", self.agent.name.clone()),
+            )
+        };
         div()
             .debug_selector(|| "agent-editor".into())
             .flex()
@@ -427,10 +491,7 @@ impl Render for AgentEditor {
                         let _ = back.update(cx, |_, cx| cx.emit(EditorEvent::Closed));
                     })
                     .child(Icon::new("arrow-left").size(14.0))
-                    .child(cx.t_with(
-                        "agents.editor.back",
-                        &Args::default().with("agent", self.agent.name.clone()),
-                    )),
+                    .child(back_label),
             )
             .child(
                 div()
@@ -462,7 +523,7 @@ impl Render for AgentEditor {
                     Button::new("agent-editor-save")
                         .size(ButtonSize::Default)
                         .text_size(14.0)
-                        .disabled(name_empty || saving)
+                        .disabled(cannot_save || saving)
                         .on_click(cx.listener(|editor, _, _, cx| editor.save(cx)))
                         .child(
                             div()

@@ -171,6 +171,8 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
         let composer = cx.new(|cx| Composer::new(window, cx));
         AgentPage::new("a-1".into(), sidebar, composer, cx)
     });
+    // Tall enough for the whole editor.
+    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(2000.0)));
     cx.run_until_parked();
     let reporter = AgentRecord {
         name: "Repórter".into(),
@@ -496,4 +498,83 @@ fn the_reviewers_pull_request_reviews_show_and_open(cx: &mut TestAppContext) {
     cx.simulate_click(bounds.center(), Modifiers::none());
     cx.run_until_parked();
     assert_eq!(opened.borrow().as_slice(), ["pr-7"]);
+}
+
+#[gpui::test]
+fn the_team_lists_the_agents_and_makes_a_new_one(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (port, desktop) = fake_desktop_routes(vec![(
+        "/api/v1/agents",
+        200,
+        r#"{"agent":{"id":"a-new"}}"#.into(),
+    )]);
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("a-1".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(2000.0)));
+    cx.run_until_parked();
+    let researcher = AgentRecord {
+        name: "Pesquisador".into(),
+        ..agent("a-2", "researcher", Vec::new())
+    };
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![agent("a-1", "reviewer", Vec::new()), researcher],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    // The team down the left; a pick shows that agent's page.
+    assert!(cx.debug_bounds("team-column").is_some());
+    assert!(cx.debug_bounds("team-agent-1").is_some());
+    let researcher = cx.debug_bounds("team-agent-1").unwrap();
+    cx.simulate_click(researcher.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(page.read_with(cx, |page, _| page.agent_id.clone()), "a-2");
+
+    // "Novo agente": the editor on a blank agent, with its role to write.
+    let new_agent = cx.debug_bounds("team-new-agent").unwrap();
+    cx.simulate_click(new_agent.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-editor").is_some());
+    assert!(cx.debug_bounds("agent-editor-role").is_some());
+    assert!(cx.debug_bounds("agent-editor-kickoff").is_some());
+    let editor = page.read_with(cx, |page, _| page.editor.as_ref().unwrap().0.clone());
+    editor.update(cx, |editor, cx| {
+        assert!(editor.is_new());
+        editor.name.update(cx, |input, cx| input.set_text("QA", cx));
+        // No role yet: nothing to save.
+        assert!(!editor.can_save(cx));
+        editor
+            .role
+            .update(cx, |area, cx| area.set_text("Teste o caminho mudado.", cx));
+        assert!(editor.can_save(cx));
+        editor.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
+        editor.save(cx);
+    });
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    assert_eq!(seen[0].0, "POST /api/v1/agents");
+    let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();
+    assert_eq!(body["name"], "QA");
+    assert_eq!(body["role"], "Teste o caminho mudado.");
+    // Saved, the page goes to the new agent.
+    page.read_with(cx, |page, _| {
+        assert_eq!(page.agent_id, "a-new");
+        assert!(page.editor.is_none());
+    });
 }

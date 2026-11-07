@@ -1,5 +1,5 @@
-//! New task, Pull Requests and Notes (`.dcc-sidebar-navigation`): a soft
-//! rounded panel with 34px rows.
+//! New task, Pull Requests, Agents and Notes (`.dcc-sidebar-navigation`): a
+//! soft rounded panel with 34px rows.
 
 use gpui::{
     BoxShadow, ClickEvent, Context, Hsla, SharedString, Window, div, point, prelude::*, px,
@@ -15,6 +15,8 @@ use crate::ui::{Icon, tabular_nums};
 pub enum NavPage {
     NewTask,
     PullRequests,
+    /// The team's screen (an agent's page).
+    Agents,
 }
 
 pub use crate::ui::surface_edge;
@@ -65,6 +67,7 @@ impl Sidebar {
 pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
     let theme = cx.theme();
     let current = sidebar.current_page;
+    let agents_waiting = sidebar.agents_waiting();
     let entries = [
         Entry {
             id: "nav-new-task",
@@ -89,6 +92,18 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
             count: sidebar.pr_news,
             urgent: true,
             event: SidebarEvent::OpenPullRequests,
+        },
+        Entry {
+            id: "nav-agents",
+            icon: "users-round",
+            stroke: 1.9,
+            icon_color: None,
+            label: cx.t("sidebar.agents"),
+            primary: false,
+            current: current == Some(NavPage::Agents),
+            count: agents_waiting.0,
+            urgent: agents_waiting.1,
+            event: SidebarEvent::OpenAgents,
         },
         Entry {
             id: "nav-notes",

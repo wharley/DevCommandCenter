@@ -6,8 +6,8 @@
 //! its recap, and the Researcher's starts a new idea.
 
 use gpui::{
-    AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, Render, SharedString,
-    Subscription, Window, div, prelude::*, px,
+    AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, SharedString, Subscription,
+    Window, div, prelude::*, px,
 };
 
 use crate::agent::AgentAvatarView;
@@ -27,6 +27,7 @@ mod conversation_tests;
 mod editor;
 mod editor_look;
 mod editor_projects;
+mod editor_role;
 mod idea;
 mod memory;
 mod memory_history;
@@ -36,6 +37,7 @@ mod memory_tests;
 mod picker;
 mod pr_reviews;
 mod recap;
+mod team;
 #[cfg(test)]
 mod tests;
 mod triggers;
@@ -171,6 +173,23 @@ impl AgentPage {
         let Some(data) = self.sidebar.read(cx).agent_page(&self.agent_id) else {
             return;
         };
+        self.edit(data.agent, window, cx);
+    }
+
+    /// The sidebar reads DCC's database again (tests feed it themselves).
+    fn reload_agents(&mut self, cx: &mut Context<Self>) {
+        if !cfg!(test) {
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.reload_now(cx));
+        }
+    }
+
+    /// "Novo agente": the editor on a blank agent of the person's.
+    pub(crate) fn open_new_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit(editor_role::blank_agent(), window, cx);
+    }
+
+    fn edit(&mut self, agent: AgentRecord, window: &mut Window, cx: &mut Context<Self>) {
         let catalog = self
             .composer
             .read(cx)
@@ -181,15 +200,21 @@ impl AgentPage {
         let path = self.cleanup_path.clone();
         let options = editor_projects::project_options(self.sidebar.read(cx).projects());
         let editor = cx.new(|cx| {
-            editor::AgentEditor::new(data.agent, catalog, path, window, cx).with_projects(options)
+            editor::AgentEditor::new(agent, catalog, path, window, cx).with_projects(options)
         });
         let events = cx.subscribe(&editor, |page, _, event, cx| match event {
             editor::EditorEvent::Closed => {
                 page.editor = None;
                 cx.notify();
             }
-            // The sidebar reads the agents again within its next pass.
-            editor::EditorEvent::Saved => cx.notify(),
+            // The sidebar reads the agents again right away.
+            editor::EditorEvent::Saved => page.reload_agents(cx),
+            // The new agent's page, once the sidebar has read it.
+            editor::EditorEvent::Created(id) => {
+                let id = id.clone();
+                page.reload_agents(cx);
+                page.show(id, cx);
+            }
         });
         self.editor = Some((editor, events));
         cx.notify();
@@ -393,8 +418,9 @@ impl AgentPage {
     }
 }
 
-impl Render for AgentPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl AgentPage {
+    /// The agent's page, or its editor, beside the team (`team`).
+    fn page_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let Some(data) = self.sidebar.read(cx).agent_page(&self.agent_id) else {
             return div()

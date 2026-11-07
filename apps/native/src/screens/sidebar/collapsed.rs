@@ -140,6 +140,34 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         "notes.headingShort",
         cx,
     );
+    // A dot while an agent needs the person (amber) or left a result (sky).
+    let (waiting, needs_you) = sidebar.agents_waiting();
+    let agents = div()
+        .relative()
+        .child(icon_button(
+            "rail-agents",
+            "users-round",
+            1.9,
+            SidebarEvent::OpenAgents,
+            "sidebar.agents",
+            cx,
+        ))
+        .when(waiting > 0, |button| {
+            button.child(
+                div()
+                    .debug_selector(|| "rail-agents-news".into())
+                    .absolute()
+                    .top(px(2.0))
+                    .right(px(2.0))
+                    .size(px(6.0))
+                    .rounded_full()
+                    .bg(if needs_you {
+                        crate::theme::tailwind::AMBER_500.hsla()
+                    } else {
+                        crate::theme::tailwind::SKY_500.hsla()
+                    }),
+            )
+        });
     div()
         .size_full()
         .flex()
@@ -169,8 +197,8 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
                     )
                 }),
         )
+        .child(agents)
         .child(notes)
-        .children(super::agents::rail_buttons(sidebar, cx))
         .children(project_buttons.into_iter().flatten())
         .child(
             div()

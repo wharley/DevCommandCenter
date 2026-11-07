@@ -87,7 +87,8 @@ pub enum SidebarEvent {
     /// Tasks just completed (a bundle's members, or the task): their notes may be done.
     TasksCompleted(Vec<String>),
     /// A resident agent's page.
-    OpenAgent(String),
+    /// "Agentes": the team's screen.
+    OpenAgents,
     /// One conversation of a task (a child task's, or its parent's proposal).
     OpenSession {
         task_id: String,
@@ -136,8 +137,6 @@ pub struct Sidebar {
     /// The reviewer's pull request reviews from the hub.
     pr_reviews: Vec<crate::data::pr_review_jobs::PrReviewJob>,
     _pr_reviews: gpui::Subscription,
-    /// The agent whose page is on screen.
-    active_agent_id: Option<String>,
     /// The conversation on screen, when the task has several.
     selected_session_id: Option<String>,
     /// Skills and instruction files the open task's agents get (footer badge).
@@ -157,7 +156,6 @@ pub struct Sidebar {
     _git: Task<()>,
     /// The watching mascots' blink (`mascot`).
     _blink: Task<()>,
-    _triggers: gpui::Subscription,
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
@@ -217,7 +215,6 @@ impl Sidebar {
                     cx.notify();
                 },
             ),
-            active_agent_id: None,
             selected_session_id: None,
             skill_count: 0,
             terminals: Default::default(),
@@ -231,7 +228,6 @@ impl Sidebar {
             _clock: Self::clock_loop(cx),
             _git: Self::git_loop(cx),
             _blink: Self::blink_loop(cx),
-            _triggers: Self::observe_triggers(cx),
         }
     }
 
@@ -645,7 +641,6 @@ impl Render for Sidebar {
         root.on_hover(cx.listener(|this, hovered: &bool, _, cx| this.hold_attention(*hovered, cx)))
             .child(header::render(self, cx))
             .child(navigation::render(self, cx))
-            .children(agents::render(self, cx))
             .children(attention::render(self, cx))
             .child(tasks_header::render(self, cx))
             .child(body)
