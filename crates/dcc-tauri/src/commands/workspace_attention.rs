@@ -244,6 +244,11 @@ pub async fn workspace_attention_with_state(
         ) {
             continue;
         }
+        // A resident agent's own conversation is not a task: the phone
+        // shows it under "Agentes".
+        if dcc_core::domain::agent_conversation::home_agent_id(&workspace.project_id.0).is_some() {
+            continue;
+        }
         let summaries = repo
             .list_workspace_sessions(&workspace.id)
             .map_err(|error| error.to_string())?;

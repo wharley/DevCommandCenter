@@ -80,6 +80,7 @@ mod local_branches;
 mod mcp;
 mod menu_bar;
 mod mobile;
+mod mobile_agents;
 mod provider_accounts;
 mod provider_usage;
 mod providers;
@@ -688,6 +689,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/mobile/task-proposals",
             get(attention::list_task_proposals),
         )
+        .route("/api/v1/mobile/agents", get(mobile_agents::agents))
         .route(
             "/api/v1/task-proposals/:proposal_id/start",
             post(task_proposals::start),

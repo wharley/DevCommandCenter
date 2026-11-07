@@ -467,10 +467,16 @@ impl PushNotifier {
             {
                 continue;
             }
-            let (title, body) = notification_text(
+            let (title, mut body) = notification_text(
                 attention.kind,
                 info.and_then(|info| info.project.as_deref()),
             );
+            if let Some(text) = info
+                .and_then(|info| info.agent.as_deref())
+                .and_then(|agent| agent_text(attention.kind, agent))
+            {
+                body = text;
+            }
             for target in &targets {
                 if self.presence.device_in_foreground(&target.device_id) {
                     continue;
@@ -687,6 +693,8 @@ impl PushNotifier {
 struct SessionInfo {
     project: Option<String>,
     delegated: bool,
+    /// The resident agent whose own conversation this is.
+    agent: Option<String>,
 }
 
 fn open(db_path: &std::path::Path) -> Result<Connection, String> {
@@ -722,6 +730,7 @@ fn lookup(
             SessionInfo {
                 project: project_name(&conn, session),
                 delegated: is_delegated(&conn, session),
+                agent: conversation_agent(&conn, session),
             },
         );
     }
@@ -738,6 +747,35 @@ fn is_pending_task_proposal(conn: &Connection, delegation_id: &str) -> bool {
         |row| row.get(0),
     )
     .unwrap_or(false)
+}
+
+/// The resident agent whose own conversation `session_id` is
+/// (`agent_conversation`), by its name.
+fn conversation_agent(conn: &Connection, session_id: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT a.name FROM dcc_sessions s
+         JOIN dcc_agents a ON s.project_id = 'dcc-agent-' || a.id
+         WHERE s.id = ?1",
+        params![session_id],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+/// What an agent's own conversation says: it answered, it stopped, it
+/// waits on the person.
+pub fn agent_text(kind: AttentionKind, agent: &str) -> Option<String> {
+    let agent = display_project(agent)?;
+    match kind {
+        AttentionKind::Completed => Some(format!("{agent} respondeu")),
+        AttentionKind::Interrupted => Some(format!("{agent} parou")),
+        AttentionKind::Permission | AttentionKind::Question | AttentionKind::AgentRequest => {
+            Some(format!("{agent} precisa de você"))
+        }
+        _ => None,
+    }
 }
 
 /// The project's display name. A missing table (a bare `dccd-http`
@@ -1137,6 +1175,20 @@ mod tests {
             .map(|m| m["body"].as_str().unwrap())
             .collect();
         assert_eq!(bodies, ["Uma tarefa precisa de você", "Tarefa concluída"]);
+    }
+
+    #[test]
+    fn an_agents_own_conversation_speaks_as_the_agent() {
+        assert_eq!(
+            agent_text(AttentionKind::Completed, "Revisor").as_deref(),
+            Some("Revisor respondeu")
+        );
+        assert_eq!(
+            agent_text(AttentionKind::Permission, "Revisor").as_deref(),
+            Some("Revisor precisa de você")
+        );
+        assert_eq!(agent_text(AttentionKind::ChecksFailing, "Revisor"), None);
+        assert_eq!(agent_text(AttentionKind::Completed, "a/b"), None);
     }
 
     #[test]

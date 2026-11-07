@@ -54,7 +54,7 @@ export const DESKTOP_PT_BR = {
 	"sidebar.attention.reason.setup": "Setup pendente",
 	"sidebar.attention.reason.aborted": "Interrompido",
 	"sidebar.attention.reason.completed": "Resultado novo",
-	"composer.executionDock.actions.syncBase": "Atualizar branch",
+	"composer.executionDock.actions.syncBase": "Atualizar com a base",
 	"composer.executionDock.actions.commit": "Commitar",
 	"composer.executionDock.actions.createDraft": "Criar draft {{requestLabel}}",
 	"composer.executionDock.actions.noLocalChanges": "Não há mudanças locais para commitar.",

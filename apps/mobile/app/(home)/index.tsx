@@ -9,6 +9,7 @@ import {
 import { useAgentRequests } from "@/backend/agentRequests";
 import { useBackend } from "@/backend/session";
 import { useTaskProposals } from "@/backend/taskProposals";
+import { AgentsStrip } from "@/screens/agentsStrip";
 import { pendingKey, useHomeData } from "@/screens/homeData";
 import { useHomeScope, useProjectDiff } from "@/screens/homeScope";
 import { AgentRequestHeader, AttentionCard, NeedsYouCard, openNewTask, RecentRow, RunningRow } from "@/screens/rows";
@@ -99,6 +100,8 @@ export default function HomeScreen() {
 					</Text>
 					<Summary needsYou={needsYouCount} running={runningCount} loaded={!!groups} />
 				</View>
+
+				<AgentsStrip />
 
 				{!groups ? (
 					<Loading />

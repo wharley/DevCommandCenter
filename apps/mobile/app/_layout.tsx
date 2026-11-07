@@ -1,4 +1,5 @@
 import { AgentRequestsProvider } from "@/backend/agentRequests";
+import { ResidentAgentsProvider } from "@/backend/residentAgents";
 import { TaskProposalsProvider } from "@/backend/taskProposals";
 import { SessionProvider, useSession } from "@/backend/session";
 import { isPairingLink, stashPairingLink } from "@/backend/offerLink";
@@ -38,7 +39,9 @@ export default function RootLayout() {
 						<OfferNotifications />
 						<AgentRequestsProvider>
 							<TaskProposalsProvider>
-								<Routes />
+								<ResidentAgentsProvider>
+									<Routes />
+								</ResidentAgentsProvider>
 							</TaskProposalsProvider>
 						</AgentRequestsProvider>
 						<UpdateBanner />

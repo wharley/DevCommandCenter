@@ -4,6 +4,7 @@
  * encrypted relay channel.
  */
 import type { AttentionEntry, RunningTask } from "./attention.ts";
+import { isAgentHome } from "./residentAgents.ts";
 import { pendingQuestions } from "./questions.ts";
 import { permissionQuestion, type RawSessionEvent } from "./threadEvents.ts";
 
@@ -91,6 +92,8 @@ export function liveSessions(
 			: null;
 	return sessions.filter((s) => {
 		if (s.archivedAt) return false;
+		// An agent's own conversation is not a task: it is under "Agentes".
+		if (isAgentHome(s.projectId)) return false;
 		if (activeWorkspaces && s.workspaceId && !activeWorkspaces.has(s.workspaceId))
 			return false;
 		return true;

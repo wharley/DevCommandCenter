@@ -315,7 +315,7 @@ pub(super) async fn workspace_attention(
 }
 
 /// `value` with its `snapshotId`, or only that when it is `after`.
-fn conditional_snapshot(mut value: Value, after: Option<&str>) -> Value {
+pub(super) fn conditional_snapshot(mut value: Value, after: Option<&str>) -> Value {
     let digest = Sha256::digest(value.to_string().as_bytes());
     let snapshot_id: String = digest[..12].iter().map(|byte| format!("{byte:02x}")).collect();
     if after == Some(snapshot_id.as_str()) {
