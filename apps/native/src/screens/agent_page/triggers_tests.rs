@@ -77,6 +77,15 @@ fn the_reviewers_trigger_is_off_until_turned_on(cx: &mut TestAppContext) {
         })
     };
     assert!(!on(cx));
+    let mood = |cx: &mut gpui::VisualTestContext| {
+        page.update(cx, |page, cx| page.sidebar.read(cx).mood("a-1", cx))
+    };
+    assert_eq!(
+        mood(cx),
+        Some(crate::agent::Mood::Asleep),
+        "nothing wakes it"
+    );
+    assert!(cx.debug_bounds("agent-page-mood").is_some());
 
     let switch = cx.debug_bounds("agent-trigger-prUpdated").unwrap();
     cx.simulate_click(switch.center(), Modifiers::none());
@@ -87,6 +96,11 @@ fn the_reviewers_trigger_is_off_until_turned_on(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("agent-trigger-reviewReceived").is_some());
     assert!(cx.update(|_, cx| !cx.global::<AgentTriggers>().is_on("a-1", Trigger::CiFailed)));
     assert!(AgentTriggers::load(file).is_on("a-1", Trigger::PrUpdated));
+    assert_eq!(
+        mood(cx),
+        Some(crate::agent::Mood::Watching),
+        "a trigger is on"
+    );
 
     page.update(cx, |page, cx| page.show("a-2".into(), cx));
     cx.run_until_parked();

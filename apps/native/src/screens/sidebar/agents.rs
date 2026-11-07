@@ -7,7 +7,6 @@ use std::path::Path;
 use gpui::{AnyElement, ClickEvent, Context, Hsla, SharedString, Window, div, prelude::*, px};
 
 use super::{Sidebar, SidebarEvent};
-use crate::agent::AgentAvatarView;
 use crate::data::agents::{
     AgentRecord, AgentState, CHRONICLER_PRESET, REVIEWER_PRESET, aggregate, lead,
 };
@@ -381,20 +380,26 @@ fn face_piece(
 }
 
 /// The agent's face, as its piece draws it.
-pub(super) fn face(sidebar: &Sidebar, agent_id: &str, rail: bool) -> AnyElement {
+pub(super) fn face(
+    sidebar: &Sidebar,
+    agent_id: &str,
+    rail: bool,
+    cx: &mut Context<Sidebar>,
+) -> AnyElement {
     let views = sidebar.agent_views();
     let Some(view) = views.iter().find(|view| view.agent.id == agent_id) else {
         return div().into_any_element();
     };
+    let mood = super::mascot::agent_mood(view.agent, view.state, &sidebar.pr_reviews, cx);
     let prefix = if rail {
         "rail-agent-face"
     } else {
         "agent-face"
     };
-    AgentAvatarView::new(
+    crate::agent::MoodAvatarView::new(
         SharedString::from(format!("{prefix}-{agent_id}")),
         &view.agent.avatar,
-        Some(view.state),
+        mood,
         face_size(rail),
     )
     .into_any_element()

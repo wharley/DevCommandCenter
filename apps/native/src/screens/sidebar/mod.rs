@@ -18,6 +18,7 @@ mod identity_card;
 mod labels;
 pub use labels::reason_label;
 mod list;
+pub mod mascot;
 mod meta_chips;
 mod navigation;
 #[cfg(test)]
@@ -154,6 +155,9 @@ pub struct Sidebar {
     _refresh: Task<()>,
     _clock: Task<()>,
     _git: Task<()>,
+    /// The watching mascots' blink (`mascot`).
+    _blink: Task<()>,
+    _triggers: gpui::Subscription,
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
@@ -226,6 +230,8 @@ impl Sidebar {
             _refresh: Self::refresh_loop(cx),
             _clock: Self::clock_loop(cx),
             _git: Self::git_loop(cx),
+            _blink: Self::blink_loop(cx),
+            _triggers: Self::observe_triggers(cx),
         }
     }
 

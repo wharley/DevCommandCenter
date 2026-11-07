@@ -2,7 +2,9 @@
 //! eyes, showing what it is doing.
 
 mod avatar;
+mod mood;
 mod robot;
 
 pub use avatar::AgentAvatarView;
+pub use mood::{MascotBlink, Mood, MoodAvatarView};
 pub use robot::{AgentMascot, RobotState, robot_key};

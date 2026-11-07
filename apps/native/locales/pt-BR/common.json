@@ -241,6 +241,11 @@
         "failed": "a revisão não terminou"
       }
     },
+    "mood": {
+      "asleep": "Dormindo",
+      "watching": "De olho",
+      "reading": "Lendo um PR"
+    },
     "conversation": {
       "title": "Conversa",
       "hint": "Pergunte o que precisa de você, como foi o dia ou onde está uma tarefa. Código se mexe numa tarefa do projeto.",

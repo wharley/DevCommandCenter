@@ -75,6 +75,8 @@ pub struct AgentPage {
     /// "Memória", made on the first render (its fields need the window).
     pub(crate) memory: Option<Entity<memory::MemoryCard>>,
     _sidebar: Subscription,
+    /// Its mascot follows the blink and the triggers turned on or off.
+    _mascot: [Subscription; 2],
 }
 
 impl EventEmitter<AgentPageEvent> for AgentPage {}
@@ -139,6 +141,12 @@ impl AgentPage {
             },
             memory: None,
             _sidebar: observe,
+            _mascot: [
+                cx.observe_global::<crate::agent::MascotBlink>(|_, cx| cx.notify()),
+                cx.observe_global::<crate::data::agent_triggers::AgentTriggers>(|_, cx| {
+                    cx.notify()
+                }),
+            ],
         }
     }
 
@@ -383,14 +391,19 @@ impl Render for AgentPage {
         let runs_on = runs_on(&agent, self.composer.read(cx), cx);
         let chronicler = agent.preset.as_deref() == Some(CHRONICLER_PRESET);
         let researcher = agent.preset.as_deref() == Some(RESEARCHER_PRESET);
+        let mood = self
+            .sidebar
+            .read(cx)
+            .mood(&agent.id, cx)
+            .unwrap_or_else(|| crate::agent::Mood::of(data.state, false, false));
         let header = div()
             .flex()
             .items_center()
             .gap(px(20.0))
-            .child(AgentAvatarView::new(
+            .child(crate::agent::MoodAvatarView::new(
                 "agent-page-avatar",
                 &agent.avatar,
-                Some(data.state),
+                mood,
                 88.0,
             ))
             .child(
@@ -410,7 +423,8 @@ impl Render for AgentPage {
                             .mt(px(4.0))
                             .text_size(px(12.0))
                             .text_color(colors.muted_foreground)
-                            .child(format!("{} · {runs_on}", cx.t(data.state.i18n_key()))),
+                            .debug_selector(|| "agent-page-mood".into())
+                            .child(format!("{} · {runs_on}", cx.t(mood.i18n_key()))),
                     ),
             )
             .child(

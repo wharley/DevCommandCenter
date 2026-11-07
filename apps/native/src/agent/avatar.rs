@@ -24,7 +24,7 @@ fn color(name: &str) -> &'static str {
     }
 }
 
-fn eyes(style: &str) -> String {
+pub(super) fn eyes(style: &str) -> String {
     match style {
         "smile" => format!(
             r##"<path d="M32 48q7 -9 14 0M54 48q7 -9 14 0" fill="none" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>"##
@@ -50,21 +50,24 @@ fn eyes(style: &str) -> String {
     }
 }
 
-/// The desktop's SVG, element for element.
-pub fn avatar_svg(avatar: &AgentAvatar, state: Option<AgentState>) -> String {
+/// What sets one face apart: its eyes, how faint it is, the raised arm
+/// and the badge, and anything drawn over it (`mood`'s "z").
+pub(super) struct Face {
+    pub eyes: String,
+    pub opacity: f32,
+    pub raised_arm: bool,
+    pub badge: String,
+    pub extra: String,
+}
+
+/// The mascot's body in the agent's color and arms, with `face` on it.
+pub(super) fn draw(avatar: &AgentAvatar, face: Face) -> String {
     let fill = color(&avatar.color);
     let arms = avatar.arms.clamp(3, 5) as usize;
     let gap = 3.0;
     let width = (68.0 - gap * (arms as f32 - 1.0)) / arms as f32;
-    let eye_style = match state {
-        Some(AgentState::Idle) => "resting",
-        Some(AgentState::Working) => "focus",
-        Some(AgentState::Done) => "smile",
-        Some(AgentState::NeedsYou) => "round",
-        None => avatar.eyes.as_str(),
-    };
     let mut body = String::new();
-    if state == Some(AgentState::NeedsYou) {
+    if face.raised_arm {
         body.push_str(&format!(
             r##"<rect x="78" y="14" width="13" height="40" rx="6.5" fill="{fill}" transform="rotate(24 84 52)"/>"##
         ));
@@ -81,13 +84,16 @@ pub fn avatar_svg(avatar: &AgentAvatar, state: Option<AgentState>) -> String {
         r##"<path d="M16 60V52C16 29 32 14 50 14s34 15 34 38v8z" fill="{fill}"/>"##
     ));
     body.push_str(r##"<ellipse cx="36" cy="27" rx="9" ry="5" fill="#fff" opacity="0.22" transform="rotate(-28 36 27)"/>"##);
-    body.push_str(&eyes(eye_style));
-    let opacity = if state == Some(AgentState::Idle) {
-        0.6
-    } else {
-        1.0
-    };
-    let badge = match state {
+    body.push_str(&face.eyes);
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><g opacity="{}">{body}</g>{}{}</svg>"##,
+        face.opacity, face.badge, face.extra
+    )
+}
+
+/// The badge of a finished result or of a wait on the person.
+pub(super) fn badge(state: Option<AgentState>) -> String {
+    match state {
         Some(AgentState::NeedsYou) => format!(
             r##"<circle cx="82" cy="80" r="15" fill="#F2A93B"/><path d="M82 72v9" stroke="{INK}" stroke-width="4" stroke-linecap="round"/><circle cx="82" cy="87" r="2.3" fill="{INK}"/>"##
         ),
@@ -95,14 +101,36 @@ pub fn avatar_svg(avatar: &AgentAvatar, state: Option<AgentState>) -> String {
             r##"<circle cx="82" cy="80" r="15" fill="#34C28A"/><path d="M75.5 80.5l4.5 4.5 8-9" fill="none" stroke="{INK}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>"##
         ),
         _ => String::new(),
+    }
+}
+
+/// The desktop's SVG, element for element.
+pub fn avatar_svg(avatar: &AgentAvatar, state: Option<AgentState>) -> String {
+    let eye_style = match state {
+        Some(AgentState::Idle) => "resting",
+        Some(AgentState::Working) => "focus",
+        Some(AgentState::Done) => "smile",
+        Some(AgentState::NeedsYou) => "round",
+        None => avatar.eyes.as_str(),
     };
-    format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><g opacity="{opacity}">{body}</g>{badge}</svg>"##
+    draw(
+        avatar,
+        Face {
+            eyes: eyes(eye_style),
+            opacity: if state == Some(AgentState::Idle) {
+                0.6
+            } else {
+                1.0
+            },
+            raised_arm: state == Some(AgentState::NeedsYou),
+            badge: badge(state),
+            extra: String::new(),
+        },
     )
 }
 
 /// One image per distinct face, kept for the app's life (a handful).
-fn image(svg: String) -> Arc<Image> {
+pub(super) fn image(svg: String) -> Arc<Image> {
     static CACHE: OnceLock<Mutex<HashMap<String, Arc<Image>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     let mut cache = cache.lock().expect("avatar cache");

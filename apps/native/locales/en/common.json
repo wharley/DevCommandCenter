@@ -241,6 +241,11 @@
         "failed": "the review did not finish"
       }
     },
+    "mood": {
+      "asleep": "Asleep",
+      "watching": "Watching",
+      "reading": "Reading a PR"
+    },
     "conversation": {
       "title": "Conversation",
       "hint": "Ask what needs you, how the day went or where a task stands. Code changes happen in a project's task.",
