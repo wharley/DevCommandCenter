@@ -39,6 +39,7 @@ mod picker;
 mod pr_reviews;
 mod recap;
 mod room;
+mod room_cards;
 #[cfg(test)]
 mod room_tests;
 mod room_view;

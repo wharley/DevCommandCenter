@@ -447,6 +447,19 @@
       }
     },
     "room": {
+      "unread": "{{count}} novas",
+      "markRead": "Marcar tudo como lido",
+      "card": {
+        "done": "{{agent}} terminou em {{task}}",
+        "waiting": "{{agent}} precisa de você em {{task}}",
+        "reviewed": "{{agent}} revisou {{task}}",
+        "reviewFailed": "{{agent}} não conseguiu revisar {{task}}",
+        "trigger": {
+          "prUpdated": "Gatilho · PR atualizado",
+          "ciFailed": "Gatilho · CI falhou",
+          "reviewReceived": "Gatilho · review recebido"
+        }
+      },
       "title": "Sala da equipe",
       "subtitle": "Escreva para a equipe. Com @ você escolhe quem responde; sem @, o DCC escolhe pela regra.",
       "placeholder": "Pergunte o que precisa de você, peça uma revisão, uma pesquisa…",

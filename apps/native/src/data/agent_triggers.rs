@@ -249,6 +249,11 @@ impl AgentTriggers {
         }
     }
 
+    /// The runs of the last week, oldest first.
+    pub fn runs(&self) -> &[Run] {
+        &self.stored.runs
+    }
+
     /// A run started; runs older than a week go.
     pub fn record(&mut self, agent_id: &str, trigger: Trigger, target: &str, now: DateTime<Utc>) {
         let cutoff = now - Duration::days(KEEP_DAYS);

@@ -15,6 +15,7 @@ mod empty;
 mod footer;
 mod header;
 mod identity_card;
+mod inbox;
 mod labels;
 pub use labels::reason_label;
 mod list;

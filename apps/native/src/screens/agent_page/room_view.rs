@@ -353,8 +353,34 @@ impl Render for TeamRoom {
         let colors = cx.theme().colors.clone();
         let agents: Vec<AgentRecord> = self.sidebar.read(cx).agents().to_vec();
         let lines: Vec<RoomLine> = self.lines().into_iter().cloned().collect();
+        let cards = self.cards(cx);
+        let unread = cards.iter().filter(|card| card.unread).count();
+        // The room's lines and the inbox's cards, in time order.
+        let mut timeline: Vec<(&str, Option<usize>, Option<usize>)> = lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| (line.at.as_str(), Some(index), None))
+            .chain(
+                cards
+                    .iter()
+                    .enumerate()
+                    .map(|(index, card)| (card.at.as_str(), None, Some(index))),
+            )
+            .collect();
+        timeline.sort_by(|left, right| left.0.cmp(right.0));
         let mut rows: Vec<AnyElement> = Vec::new();
-        for (index, line) in lines.iter().enumerate() {
+        for (_, line, card) in timeline {
+            if let Some(index) = card {
+                let card = &cards[index];
+                if let Some(agent) = Self::agent(&agents, &card.agent_id) {
+                    rows.push(self.card_row(index, card, agent, cx));
+                }
+                continue;
+            }
+            let Some(index) = line else {
+                continue;
+            };
+            let line = &lines[index];
             let Some(agent) = Self::agent(&agents, &line.agent_id) else {
                 continue;
             };
@@ -366,6 +392,7 @@ impl Render for TeamRoom {
                 Speaker::Agent => self.agent_line(index, line, agent, window, cx),
             });
         }
+        let unread_bar = self.unread_bar(unread, cx);
         let pending: Vec<Pending> = self.pending.clone();
         for (index, sent) in pending.iter().enumerate() {
             let name = Self::agent(&agents, &sent.agent_id)
@@ -428,7 +455,8 @@ impl Render for TeamRoom {
                             .text_size(px(12.0))
                             .text_color(colors.muted_foreground)
                             .child(cx.t("agents.room.subtitle")),
-                    ),
+                    )
+                    .children(unread_bar),
             )
             .child(
                 div()

@@ -30,6 +30,8 @@ use crate::ui::{TextArea, TextAreaEvent, Toaster};
 pub enum RoomEvent {
     /// An agent's whole conversation, with its tools.
     OpenSession { task_id: String, session_id: String },
+    /// A pull request review's code tab.
+    OpenPullRequest(String),
 }
 
 /// A message on its way: shown until the agent's conversation has it.
@@ -80,7 +82,11 @@ impl TeamRoom {
         let input = cx
             .new(|cx| TextArea::new(window, cx).with_placeholder(cx.t("agents.room.placeholder")));
         let subscriptions = [
-            cx.observe(&sidebar, |room, _, cx| room.sync(cx)),
+            // Who works and the inbox's cards follow the sidebar as it reads.
+            cx.observe(&sidebar, |room, _, cx| {
+                room.sync(cx);
+                cx.notify();
+            }),
             cx.subscribe(&input, |room, _, event, cx| match event {
                 TextAreaEvent::Submitted => room.send(cx),
                 TextAreaEvent::Changed => cx.notify(),

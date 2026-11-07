@@ -203,18 +203,6 @@ impl Sidebar {
         self.state.task(id).map(|task| task.project_id.clone())
     }
 
-    /// Beside "Agentes": how many agents need the person or left a result
-    /// unread, and whether one needs the person (amber).
-    pub(super) fn agents_waiting(&self) -> (usize, bool) {
-        let views = self.agent_views();
-        let waiting = views
-            .iter()
-            .filter(|view| matches!(view.state, AgentState::NeedsYou | AgentState::Done))
-            .count();
-        let needs_you = views.iter().any(|view| view.state == AgentState::NeedsYou);
-        (waiting, needs_you)
-    }
-
     /// The agent the team's screen opens on: the one that needs the person,
     /// else one with a result unread, else the first.
     pub fn lead_agent(&self) -> Option<String> {

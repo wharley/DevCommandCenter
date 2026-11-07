@@ -29,6 +29,10 @@ pub struct PrReviewJob {
     pub finished: Option<u64>,
     /// The person has been on the pull request's code tab since it finished.
     pub seen: bool,
+    /// When it finished (RFC 3339), for the team room's inbox.
+    pub finished_at: Option<String>,
+    /// The Reviewer's trigger started it, not the person.
+    pub by_trigger: bool,
 }
 
 impl PrReviewJob {
@@ -89,6 +93,8 @@ impl PrReviewJobs {
                 error: None,
                 finished: None,
                 seen: false,
+                finished_at: None,
+                by_trigger: false,
             },
         );
         true
@@ -110,6 +116,19 @@ impl PrReviewJobs {
                 }
             }
             job.finished = Some(finished);
+            job.finished_at = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+
+    /// The job of `pr_id` was started by the Reviewer's trigger.
+    pub fn started_by_trigger(cx: &mut App, pr_id: &str) {
+        if let Some(job) = cx
+            .default_global::<Self>()
+            .jobs
+            .iter_mut()
+            .find(|job| job.pr_id == pr_id)
+        {
+            job.by_trigger = true;
         }
     }
 

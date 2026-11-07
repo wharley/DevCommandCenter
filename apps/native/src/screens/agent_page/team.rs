@@ -43,6 +43,9 @@ impl AgentPage {
                         task_id: task_id.clone(),
                         session_id: session_id.clone(),
                     }),
+                    room::RoomEvent::OpenPullRequest(pr_id) => {
+                        cx.emit(AgentPageEvent::OpenPullRequest(pr_id.clone()))
+                    }
                 });
                 self.room = Some((room.clone(), events));
                 room

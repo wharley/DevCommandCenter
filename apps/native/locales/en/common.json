@@ -447,6 +447,19 @@
       }
     },
     "room": {
+      "unread": "{{count}} new",
+      "markRead": "Mark all as read",
+      "card": {
+        "done": "{{agent}} finished in {{task}}",
+        "waiting": "{{agent}} needs you in {{task}}",
+        "reviewed": "{{agent}} reviewed {{task}}",
+        "reviewFailed": "{{agent}} could not review {{task}}",
+        "trigger": {
+          "prUpdated": "Trigger · PR updated",
+          "ciFailed": "Trigger · CI failed",
+          "reviewReceived": "Trigger · review received"
+        }
+      },
       "title": "Team room",
       "subtitle": "Write to the team. With @ you pick who answers; without it, DCC picks by rule.",
       "placeholder": "Ask what needs you, ask for a review, a research…",

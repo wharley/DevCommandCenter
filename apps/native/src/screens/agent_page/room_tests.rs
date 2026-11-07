@@ -211,3 +211,67 @@ fn the_room_shows_the_team_together_and_sends_to_who_answers(cx: &mut TestAppCon
         assert!(room.pending.is_empty());
     });
 }
+
+#[gpui::test]
+fn what_an_agent_finished_in_a_task_is_a_card_until_it_is_read(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("rev".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(1400.0)));
+    // Finished now: after the reading markers' baseline, so unread.
+    let done = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let task = AgentSession {
+        session_id: "s-task".into(),
+        workspace_id: "w-1".into(),
+        state: AgentState::Done,
+        completed_at: Some(done.clone()),
+        project_id: "p-1".into(),
+        title: Some("Checkout".into()),
+        updated_at: done,
+    };
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![agent("rev", "Revisor", "reviewer", vec![task])],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.open_room(None, cx);
+    });
+    cx.run_until_parked();
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = events.clone();
+    page.update(cx, |_, cx| {
+        cx.subscribe_self(move |_, event: &AgentPageEvent, _| {
+            if let AgentPageEvent::OpenSession {
+                task_id,
+                session_id,
+            } = event
+            {
+                sink.borrow_mut().push(format!("{task_id} {session_id}"));
+            }
+        })
+        .detach();
+    });
+    assert!(cx.debug_bounds("room-card-0").is_some());
+    assert!(cx.debug_bounds("room-unread").is_some());
+    let card = cx.debug_bounds("room-card-0").unwrap();
+    cx.simulate_click(card.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(events.borrow().as_slice(), ["w-1 s-task"]);
+    // Read now: the card stays, the count goes.
+    assert!(cx.debug_bounds("room-card-0").is_some());
+    assert!(cx.debug_bounds("room-unread").is_none());
+}

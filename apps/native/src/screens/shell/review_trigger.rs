@@ -219,6 +219,7 @@ impl Shell {
             if !PrReviewJobs::start(cx, &item.id, label, item.title.clone()) {
                 continue;
             }
+            PrReviewJobs::started_by_trigger(cx, &item.id);
             cx.update_global::<AgentTriggers, _>(|triggers, _| {
                 triggers.record(&reviewer.id, Trigger::PrUpdated, &pr.url, now)
             });

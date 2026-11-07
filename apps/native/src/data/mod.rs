@@ -87,6 +87,7 @@ pub mod rewind;
 #[cfg(target_os = "macos")]
 pub mod device;
 pub mod video;
+pub mod room_inbox;
 pub mod seen;
 pub mod session_activity;
 pub mod session_list;
