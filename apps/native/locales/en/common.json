@@ -247,10 +247,10 @@
       "reading": "Reading a PR"
     },
     "conversation": {
+      "inRoom": "Talk in the room",
       "title": "Conversation",
-      "hint": "Ask what needs you, how the day went or where a task stands. Code changes happen in a project's task.",
-      "start": "Talk",
-      "continue": "Continue talking",
+      "hint": "Talk to it in the team room. Its whole conversation, with its tools, opens from here.",
+      "continue": "Open conversation",
       "taskName": "Conversation with {{agent}}"
     },
     "memory": {
@@ -444,6 +444,28 @@
         "checking": "Checking…",
         "cleaning": "Cleaning {{done}} of {{total}}…",
         "nothingSafe": "Nothing is ready to delete safely right now."
+      }
+    },
+    "room": {
+      "title": "Team room",
+      "subtitle": "Write to the team. With @ you pick who answers; without it, DCC picks by rule.",
+      "placeholder": "Ask what needs you, ask for a review, a research…",
+      "send": "Send",
+      "hint": "Without @: who you named, the request's role, who answered last, or the Reviewer.",
+      "next": "Goes to {{agent}} · {{reason}}",
+      "to": "→ {{agent}}",
+      "sending": "sending…",
+      "open": "Open conversation",
+      "working": "{{agent}} is working…",
+      "needsYou": "{{agent}} needs you in its conversation",
+      "tokens": "{{count}} tokens",
+      "noAgent": "No agent can answer now.",
+      "empty": "Nobody spoke yet. Ask what needs you today, ask @Reviewer to look at a PR or @Researcher to compare options.",
+      "reason": {
+        "mention": "you named it",
+        "role": "by role",
+        "continues": "same subject",
+        "default": "default"
       }
     },
     "team": {

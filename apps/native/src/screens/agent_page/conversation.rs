@@ -1,18 +1,18 @@
-//! "Conversa" on an agent's page: one ongoing conversation with the agent,
-//! in its home (`data::agent_conversation`), where it answers about the
-//! person's tasks with DCC's tools. The first "Conversar" makes the home
-//! and its task; later ones open the latest conversation there.
+//! "Conversa" on an agent's page: the person talks to the agent in the team
+//! room ("Falar na Sala", with its name addressed); its own conversation, in
+//! its home (`data::agent_conversation`), opens whole from here once it has
+//! one. The room makes the home, its task and the conversation the first
+//! time.
 
 use dcc_core::domain::agent_conversation::home_project_id;
 use gpui::{AnyElement, Context, FontWeight, div, prelude::*, px};
 
 use super::{AgentPage, AgentPageEvent};
-use crate::data::agent_conversation::ConversationStart;
 use crate::data::agents::{AgentRecord, AgentSession};
-use crate::i18n::{Args, Translate};
+use crate::i18n::Translate;
 use crate::screens::sidebar::AgentPageData;
 use crate::theme::ActiveTheme;
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Toaster, spinner};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon};
 
 /// The agent's latest conversation in its home, if it has one.
 pub(crate) fn home_session(agent: &AgentRecord) -> Option<&AgentSession> {
@@ -25,10 +25,8 @@ pub(crate) fn home_session(agent: &AgentRecord) -> Option<&AgentSession> {
 }
 
 impl AgentPage {
+    /// The agent's own conversation, whole, with its tools.
     pub(crate) fn open_conversation(&mut self, cx: &mut Context<Self>) {
-        if self.starting_conversation {
-            return;
-        }
         let Some(data) = self.sidebar.read(cx).agent_page(&self.agent_id) else {
             return;
         };
@@ -37,57 +35,7 @@ impl AgentPage {
                 task_id: session.workspace_id.clone(),
                 session_id: session.session_id.clone(),
             });
-            return;
         }
-        let agent = data.agent;
-        let (provider, model) = match self.agent_execution(&agent, cx) {
-            Ok(execution) => execution,
-            Err(reason) => {
-                Toaster::error(reason, cx);
-                return;
-            }
-        };
-        let Some(api) = self.api.clone() else {
-            Toaster::error(cx.t("native.desktopClosed"), cx);
-            return;
-        };
-        let title = cx
-            .t_with(
-                "agents.conversation.taskName",
-                &Args::default().with("agent", agent.name.clone()),
-            )
-            .to_string();
-        let home_task = data.home_task;
-        self.starting_conversation = true;
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let started = cx
-                .background_executor()
-                .spawn(async move {
-                    api.start_agent_conversation(&ConversationStart {
-                        agent_id: &agent.id,
-                        agent_name: &agent.name,
-                        home_task: home_task.as_deref(),
-                        title: &title,
-                        provider: &provider,
-                        model: model.as_deref(),
-                    })
-                })
-                .await;
-            let _ = this.update(cx, |page, cx| {
-                page.starting_conversation = false;
-                match started {
-                    // A new conversation opens with the composer in focus.
-                    Ok((task_id, session_id)) => cx.emit(AgentPageEvent::IdeaStarted {
-                        task_id,
-                        session_id,
-                    }),
-                    Err(error) => Toaster::error(error.to_string(), cx),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     pub(super) fn conversation_card(
@@ -96,8 +44,8 @@ impl AgentPage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
-        let starting = self.starting_conversation;
         let existing = home_session(&data.agent).is_some();
+        let name = data.agent.name.clone();
         Self::card(cx)
             .debug_selector(|| "agent-conversation".into())
             .flex()
@@ -131,31 +79,24 @@ impl AgentPage {
                             .child(cx.t("agents.conversation.hint")),
                     ),
             )
+            .when(existing, |card| {
+                card.child(
+                    Button::new("agent-conversation-open")
+                        .variant(ButtonVariant::Outline)
+                        .size(ButtonSize::Default)
+                        .text_size(14.0)
+                        .on_click(cx.listener(|page, _, _, cx| page.open_conversation(cx)))
+                        .child(cx.t("agents.conversation.continue")),
+                )
+            })
             .child(
-                Button::new("agent-conversation-open")
-                    .variant(if existing {
-                        ButtonVariant::Outline
-                    } else {
-                        ButtonVariant::Default
-                    })
+                Button::new("agent-conversation-room")
                     .size(ButtonSize::Default)
                     .text_size(14.0)
-                    .disabled(starting)
-                    .on_click(cx.listener(|page, _, _, cx| page.open_conversation(cx)))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .when(starting, |label| {
-                                label.child(spinner("agent-conversation-starting", 16.0))
-                            })
-                            .child(cx.t(if existing {
-                                "agents.conversation.continue"
-                            } else {
-                                "agents.conversation.start"
-                            })),
-                    ),
+                    .on_click(cx.listener(move |page, _, _, cx| {
+                        page.open_room(Some(format!("@{name} ")), cx)
+                    }))
+                    .child(cx.t("agents.conversation.inRoom")),
             )
             .into_any_element()
     }

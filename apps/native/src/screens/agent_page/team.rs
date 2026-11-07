@@ -1,10 +1,12 @@
 //! The team's screen ("Agentes" in the sidebar): the agents down the left,
 //! each with its mascot as it is and its mood, and "Novo agente"; the page
-//! of the one picked in the center. The Sala comes in this column next.
+//! of the one picked in the center, or the team room (`room`) on top.
 
-use gpui::{AnyElement, Context, IntoElement, Render, SharedString, Window, div, prelude::*, px};
+use gpui::{
+    AnyElement, AppContext, Context, IntoElement, Render, SharedString, Window, div, prelude::*, px,
+};
 
-use super::AgentPage;
+use super::{AgentPage, AgentPageEvent, room};
 use crate::agent::{Mood, MoodAvatarView};
 use crate::data::agents::AgentState;
 use crate::i18n::Translate;
@@ -15,6 +17,46 @@ use crate::ui::Icon;
 const TEAM_WIDTH: f32 = 224.0;
 
 impl AgentPage {
+    /// The team room, with `draft` in its field when given.
+    pub fn open_room(&mut self, draft: Option<String>, cx: &mut Context<Self>) {
+        self.room_open = true;
+        self.editor = None;
+        self.room_draft = draft;
+        cx.notify();
+    }
+
+    pub(super) fn room_element(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let room = match &self.room {
+            Some((room, _)) => room.clone(),
+            None => {
+                let (sidebar, composer) = (self.sidebar.clone(), self.composer.clone());
+                let room = cx.new(|cx| room::TeamRoom::new(sidebar, composer, window, cx));
+                let events = cx.subscribe(&room, |_, _, event, cx| match event {
+                    room::RoomEvent::OpenSession {
+                        task_id,
+                        session_id,
+                    } => cx.emit(AgentPageEvent::OpenSession {
+                        task_id: task_id.clone(),
+                        session_id: session_id.clone(),
+                    }),
+                });
+                self.room = Some((room.clone(), events));
+                room
+            }
+        };
+        if let Some(draft) = self.room_draft.take() {
+            let input = room.read(cx).input.clone();
+            input.update(cx, |area, cx| area.set_text(&draft, cx));
+            let handle = gpui::Focusable::focus_handle(input.read(cx), cx);
+            window.focus(&handle, cx);
+        }
+        room.into_any_element()
+    }
+
     fn team_row(
         &self,
         index: usize,
@@ -25,7 +67,7 @@ impl AgentPage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
-        let current = self.agent_id == id && self.editor_is_for_agent(cx);
+        let current = !self.room_open && self.agent_id == id && self.editor_is_for_agent(cx);
         let mood_text = cx.t(mood.i18n_key());
         let urgent = mood == Mood::NeedsYou;
         div()
@@ -74,6 +116,40 @@ impl AgentPage {
                             .child(mood_text),
                     ),
             )
+            .into_any_element()
+    }
+
+    /// "Sala da equipe", first in the column.
+    fn room_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors.clone();
+        let current = self.room_open && self.editor.is_none();
+        div()
+            .id("team-room-row")
+            .debug_selector(|| "team-room-row".into())
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .px(px(8.0))
+            .h(px(40.0))
+            .rounded(cx.theme().radius.control)
+            .cursor_pointer()
+            .text_size(px(13.0))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(colors.foreground)
+            .when(current, |row| row.bg(colors.accent))
+            .when(!current, |row| {
+                row.hover(move |style| style.bg(colors.accent.opacity(0.5)))
+            })
+            .on_click(cx.listener(|page, _, _, cx| page.open_room(None, cx)))
+            .child(
+                div()
+                    .flex()
+                    .size(px(30.0))
+                    .items_center()
+                    .justify_center()
+                    .child(Icon::new("messages-square").size(16.0)),
+            )
+            .child(cx.t("agents.room.title"))
             .into_any_element()
     }
 
@@ -157,9 +233,11 @@ impl AgentPage {
             .py(px(16.0))
             .border_r_1()
             .border_color(colors.border.opacity(0.7))
+            .child(self.room_row(cx))
             .child(
                 div()
                     .px(px(8.0))
+                    .pt(px(16.0))
                     .child(AgentPage::section_title(cx.t("agents.team.title"), cx)),
             )
             .children(rows)

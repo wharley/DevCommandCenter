@@ -24,6 +24,7 @@ use crate::ui::{Icon, Tracked};
 mod conversation;
 #[cfg(test)]
 mod conversation_tests;
+mod editing;
 mod editor;
 mod editor_look;
 mod editor_projects;
@@ -37,6 +38,10 @@ mod memory_tests;
 mod picker;
 mod pr_reviews;
 mod recap;
+mod room;
+#[cfg(test)]
+mod room_tests;
+mod room_view;
 mod team;
 #[cfg(test)]
 mod tests;
@@ -73,12 +78,16 @@ pub struct AgentPage {
     pub(crate) db_path: std::path::PathBuf,
     /// "Nova ideia" while it runs.
     pub(crate) starting_idea: bool,
-    /// The first "Conversar" while it makes the conversation.
-    pub(crate) starting_conversation: bool,
     /// The desktop the idea goes through (tests point it elsewhere).
     pub(crate) api: Option<crate::data::desktop_api::DesktopApi>,
     /// "Memória", made on the first render (its fields need the window).
     pub(crate) memory: Option<Entity<memory::MemoryCard>>,
+    /// The team room, made the first time it shows.
+    pub(crate) room: Option<(Entity<room::TeamRoom>, Subscription)>,
+    /// The room is on screen instead of an agent's page.
+    pub(crate) room_open: bool,
+    /// What the room's field starts with when it opens ("@Revisor ").
+    room_draft: Option<String>,
     _sidebar: Subscription,
     /// Its mascot follows the blink and the triggers turned on or off.
     _mascot: [Subscription; 2],
@@ -138,13 +147,15 @@ impl AgentPage {
             recap: recap::RecapRead::default(),
             db_path: crate::data::loader::database_path(),
             starting_idea: false,
-            starting_conversation: false,
             api: if cfg!(test) {
                 None
             } else {
                 crate::data::desktop_api::DesktopApi::load()
             },
             memory: None,
+            room: None,
+            room_open: false,
+            room_draft: None,
             _sidebar: observe,
             _mascot: [
                 cx.observe_global::<crate::agent::MascotBlink>(|_, cx| cx.notify()),
@@ -156,6 +167,7 @@ impl AgentPage {
     }
 
     pub fn show(&mut self, agent_id: String, cx: &mut Context<Self>) {
+        self.room_open = false;
         if self.agent_id != agent_id {
             self.agent_id = agent_id;
             self.role_open = false;
@@ -165,58 +177,6 @@ impl AgentPage {
             let agent_id = self.agent_id.clone();
             memory.update(cx, |memory, cx| memory.show(&agent_id, cx));
         }
-        cx.notify();
-    }
-
-    /// "Editar": the stored values, read when it opens.
-    pub(crate) fn open_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(data) = self.sidebar.read(cx).agent_page(&self.agent_id) else {
-            return;
-        };
-        self.edit(data.agent, window, cx);
-    }
-
-    /// The sidebar reads DCC's database again (tests feed it themselves).
-    fn reload_agents(&mut self, cx: &mut Context<Self>) {
-        if !cfg!(test) {
-            self.sidebar
-                .update(cx, |sidebar, cx| sidebar.reload_now(cx));
-        }
-    }
-
-    /// "Novo agente": the editor on a blank agent of the person's.
-    pub(crate) fn open_new_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.edit(editor_role::blank_agent(), window, cx);
-    }
-
-    fn edit(&mut self, agent: AgentRecord, window: &mut Window, cx: &mut Context<Self>) {
-        let catalog = self
-            .composer
-            .read(cx)
-            .catalog
-            .as_deref()
-            .cloned()
-            .unwrap_or_default();
-        let path = self.cleanup_path.clone();
-        let options = editor_projects::project_options(self.sidebar.read(cx).projects());
-        let editor = cx.new(|cx| {
-            editor::AgentEditor::new(agent, catalog, path, window, cx).with_projects(options)
-        });
-        let events = cx.subscribe(&editor, |page, _, event, cx| match event {
-            editor::EditorEvent::Closed => {
-                page.editor = None;
-                cx.notify();
-            }
-            // The sidebar reads the agents again right away.
-            editor::EditorEvent::Saved => page.reload_agents(cx),
-            // The new agent's page, once the sidebar has read it.
-            editor::EditorEvent::Created(id) => {
-                let id = id.clone();
-                page.reload_agents(cx);
-                page.show(id, cx);
-            }
-        });
-        self.editor = Some((editor, events));
         cx.notify();
     }
 
@@ -421,6 +381,9 @@ impl AgentPage {
 impl AgentPage {
     /// The agent's page, or its editor, beside the team (`team`).
     fn page_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.room_open && self.editor.is_none() {
+            return self.room_element(window, cx);
+        }
         let colors = cx.theme().colors.clone();
         let Some(data) = self.sidebar.read(cx).agent_page(&self.agent_id) else {
             return div()

@@ -197,6 +197,16 @@ pub fn choose_session<'a>(
         .or(first)
 }
 
+/// The events of `session_id` after `after` (the team room reads its
+/// agents' conversations this way).
+pub fn events_after(
+    sessions: &SqliteSessionRepo,
+    session_id: &str,
+    after: u64,
+) -> anyhow::Result<Vec<SessionEventRecord>> {
+    read_events(sessions, &SessionId(session_id.to_string()), after)
+}
+
 fn read_events(
     sessions: &SqliteSessionRepo,
     session_id: &SessionId,

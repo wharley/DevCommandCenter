@@ -99,6 +99,7 @@ pub(crate) mod sse;
 pub mod system_terminal;
 pub mod task_proposal;
 pub mod tasks;
+pub mod team_room;
 pub mod terminal_api;
 pub mod text_match;
 pub mod time;

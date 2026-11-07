@@ -69,15 +69,19 @@ impl Shell {
         self.show(Surface::Agent, cx);
     }
 
-    /// "Agentes": the team's screen, on the agent it showed last, else the
-    /// one that needs the person.
+    /// "Agentes": the team's screen as it was left, the first time on the
+    /// team room.
     pub(super) fn open_agents(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let shown = self
-            .agent_page
-            .as_ref()
-            .map(|(page, _)| page.read(cx).agent_id.clone());
-        if let Some(id) = shown.or_else(|| self.sidebar.read(cx).lead_agent()) {
-            self.open_agent(id, window, cx);
+        if self.agent_page.is_some() {
+            self.show(Surface::Agent, cx);
+            return;
+        }
+        let Some(id) = self.sidebar.read(cx).lead_agent() else {
+            return;
+        };
+        self.open_agent(id, window, cx);
+        if let Some((page, _)) = &self.agent_page {
+            page.update(cx, |page, cx| page.open_room(None, cx));
         }
     }
 
