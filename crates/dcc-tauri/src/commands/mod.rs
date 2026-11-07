@@ -19,6 +19,7 @@ pub mod workspace_commands;
 pub mod workspace_delivery;
 pub mod delivery_draft;
 pub mod pr_hub_failing;
+pub mod pr_hub_received;
 pub mod pr_hub_since;
 pub(crate) mod workspace_support;
 

@@ -11,7 +11,7 @@ use std::time::Duration;
 use gpui::{App, BorrowAppContext, Context, Entity, EventEmitter, Subscription, Task};
 
 use crate::data::desktop_api::DesktopApi;
-use crate::data::pr_hub::{Failing, Reviewed};
+use crate::data::pr_hub::{Failing, Received, Reviewed};
 use crate::data::pr_news::{PrNews, news_text};
 use crate::screens::sidebar::Sidebar;
 
@@ -23,6 +23,8 @@ const EVERY: Duration = Duration::from_secs(5 * 60);
 pub struct PrNewsArrived {
     pub news: Vec<Reviewed>,
     pub failing: Vec<Failing>,
+    /// The person's own pull requests with reviews from someone else.
+    pub received: Vec<Received>,
 }
 
 pub struct PrWatch {
@@ -50,13 +52,17 @@ impl PrWatch {
                             if !cx.has_global::<PrNews>() {
                                 return;
                             }
-                            let failing = list.failing;
+                            let (failing, received) = (list.failing, list.received);
                             let news =
                                 cx.update_global::<PrNews, _>(|news, _| news.read(list.items));
                             for pr in &news {
                                 announce(pr, cx);
                             }
-                            cx.emit(PrNewsArrived { news, failing });
+                            cx.emit(PrNewsArrived {
+                                news,
+                                failing,
+                                received,
+                            });
                         });
                         if alive.is_err() {
                             break;

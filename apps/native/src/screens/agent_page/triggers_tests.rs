@@ -84,6 +84,7 @@ fn the_reviewers_trigger_is_off_until_turned_on(cx: &mut TestAppContext) {
     assert!(on(cx));
     // The CI trigger has its own switch, still off.
     assert!(cx.debug_bounds("agent-trigger-ciFailed").is_some());
+    assert!(cx.debug_bounds("agent-trigger-reviewReceived").is_some());
     assert!(cx.update(|_, cx| !cx.global::<AgentTriggers>().is_on("a-1", Trigger::CiFailed)));
     assert!(AgentTriggers::load(file).is_on("a-1", Trigger::PrUpdated));
 

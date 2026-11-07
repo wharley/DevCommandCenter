@@ -27,16 +27,23 @@ pub enum Trigger {
     PrUpdated,
     /// The checks of a task's pull request failed.
     CiFailed,
+    /// Someone reviewed or commented on a task's pull request.
+    ReviewReceived,
 }
 
 impl Trigger {
-    pub const ALL: [Trigger; 2] = [Trigger::PrUpdated, Trigger::CiFailed];
+    pub const ALL: [Trigger; 3] = [
+        Trigger::PrUpdated,
+        Trigger::CiFailed,
+        Trigger::ReviewReceived,
+    ];
 
     /// `agents.triggers.<id>.*`
     pub fn id(self) -> &'static str {
         match self {
             Self::PrUpdated => "prUpdated",
             Self::CiFailed => "ciFailed",
+            Self::ReviewReceived => "reviewReceived",
         }
     }
 }
@@ -60,6 +67,9 @@ struct Stored {
     /// The failing commit each pull request was last looked at for, by
     /// `<agent>|<url>`: one failure wakes the agent once, a new push again.
     failures: BTreeMap<String, String>,
+    /// The latest review activity seen on each pull request, by
+    /// `<agent>|<url>`: only what comes after it wakes the agent.
+    received: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
@@ -137,6 +147,13 @@ impl AgentTriggers {
         if triggers.is_empty() {
             self.stored.on.remove(agent_id);
         }
+        // Turned on again: what came while it was off is not news.
+        if on && trigger == Trigger::ReviewReceived {
+            let prefix = format!("{agent_id}|");
+            self.stored
+                .received
+                .retain(|key, _| !key.starts_with(&prefix));
+        }
         self.save();
     }
 
@@ -187,6 +204,28 @@ impl AgentTriggers {
             .failures
             .get(&format!("{agent_id}|{url}"))
             .is_none_or(|seen| seen != sha)
+    }
+
+    /// A review activity seen on `url`: true when it came after the one
+    /// seen before. The first sight only sets where it starts, so old
+    /// reviews never wake the agent.
+    pub fn advance_received(&mut self, agent_id: &str, url: &str, latest: &str) -> bool {
+        let key = format!("{agent_id}|{url}");
+        let news = match self.stored.received.get(&key) {
+            None => false,
+            Some(seen) => match (
+                DateTime::parse_from_rfc3339(latest),
+                DateTime::parse_from_rfc3339(seen),
+            ) {
+                (Ok(latest), Ok(seen)) => latest > seen,
+                _ => false,
+            },
+        };
+        if news || !self.stored.received.contains_key(&key) {
+            self.stored.received.insert(key, latest.to_string());
+            self.save();
+        }
+        news
     }
 
     /// The failure on `sha` is handled (looked at, or held by a ceiling).
@@ -289,6 +328,16 @@ mod tests {
         assert!(later.is_new_failure("other", "pr-1", "abc"), "per agent");
         later.keep_failures("rev", &["pr-2"]);
         assert!(later.is_new_failure("rev", "pr-1", "abc"), "it recovered");
+
+        // Reviews: the first sight is where it starts; only later ones wake.
+        assert!(!later.advance_received("rev", "pr-1", "2026-11-06T10:00:00Z"));
+        assert!(!later.advance_received("rev", "pr-1", "2026-11-06T10:00:00Z"));
+        assert!(later.advance_received("rev", "pr-1", "2026-11-06T11:00:00Z"));
+        assert!(!later.advance_received("rev", "pr-1", "2026-11-06T11:00:00Z"));
+        // Turned on again: it starts over, so the time off is not news.
+        later.set("rev", Trigger::ReviewReceived, true);
+        assert!(!later.advance_received("rev", "pr-1", "2026-11-06T12:00:00Z"));
+        later.set("rev", Trigger::ReviewReceived, false);
 
         later.set("rev", Trigger::PrUpdated, false);
         assert!(!AgentTriggers::load(path).any_on("rev"));

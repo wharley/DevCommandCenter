@@ -13,10 +13,9 @@ use gpui::{App, BorrowAppContext, Context};
 
 use super::Shell;
 use super::review_trigger::review_run;
+use super::reviewer_in_task::TaskAsk;
 use crate::data::agent_triggers::{AgentTriggers, Trigger};
-use crate::data::agents::AgentRecord;
-use crate::data::conversation::ThreadStart;
-use crate::data::desktop_api::{DesktopApi, TurnOptions};
+use crate::data::desktop_api::DesktopApi;
 use crate::data::pr_hub::Failing;
 use crate::i18n::{Args, Translate};
 
@@ -32,16 +31,6 @@ pub(super) fn diagnosis_prompt(pr: &Failing, checks: Option<&str>) -> String {
         "[DCC] The checks of this task's pull request {}#{} failed on {sha} (branch {}).\n\nAs the Reviewer, find the cause: say what broke, where, and the smallest fix. Work read-only: do not edit files, commit or push; the person decides who fixes it. Answer in the person's language, short.\n\n{evidence}",
         pr.repository, pr.number, pr.head_branch
     )
-}
-
-/// The Reviewer's conversation in `task`, when it has one (one per task).
-fn conversation_in(reviewer: &AgentRecord, task: &str) -> Option<String> {
-    reviewer
-        .sessions
-        .iter()
-        .filter(|session| session.workspace_id == task)
-        .max_by(|left, right| left.updated_at.cmp(&right.updated_at))
-        .map(|session| session.session_id.clone())
 }
 
 fn announce(reviewer: &str, pr: &Failing, done: &Result<(), String>, cx: &App) {
@@ -109,31 +98,13 @@ impl Shell {
             if allowed.is_err() {
                 continue;
             }
-            let existing = conversation_in(&reviewer, &task);
-            let start = ThreadStart {
-                workspace_id: task,
-                project_id: project,
-                additional_workspace_ids: Vec::new(),
-                name: None,
-                auto_named: false,
-            };
-            let options = TurnOptions {
-                provider_id: Some(run.provider_id.clone()),
-                model: run.model.clone(),
-                effort: run.effort.clone().or_else(|| Some("medium".into())),
-                approval_policy: Some("read_only".into()),
-                plan_mode: false,
-                fast_mode: false,
-                tool_instructions: None,
-                provider_runtime: run.provider_runtime.clone(),
-            };
-            let (agent_id, name, pr) = (reviewer.id.clone(), reviewer.name.clone(), pr.clone());
+            let ask = TaskAsk::new(&reviewer, &task, &project, run);
+            let (name, pr) = (reviewer.name.clone(), pr.clone());
             cx.spawn(async move |_, cx| {
                 let done = cx
                     .background_executor()
                     .spawn({
                         let pr = pr.clone();
-                        let name = name.clone();
                         async move {
                             let api = DesktopApi::load()
                                 .ok_or_else(|| "DCC is not running".to_string())?;
@@ -146,27 +117,7 @@ impl Shell {
                                     .map(|failure| failure.agent_prompt())
                                     .as_deref(),
                             );
-                            let session = match existing {
-                                Some(session) => session,
-                                None => {
-                                    let session = api
-                                        .start_thread(
-                                            &start,
-                                            &run.provider_id,
-                                            run.model.as_deref(),
-                                            Some(&name),
-                                        )
-                                        .map_err(|error| error.to_string())?;
-                                    if let Err(error) = api.bind_session_agent(&session, &agent_id)
-                                    {
-                                        let _ = api.close_session(&session, true);
-                                        return Err(error.to_string());
-                                    }
-                                    session
-                                }
-                            };
-                            api.send_turn(&session, &prompt, None, &options)
-                                .map_err(|error| error.to_string())
+                            ask.ask(&api, &prompt)
                         }
                     })
                     .await;
@@ -179,8 +130,9 @@ impl Shell {
 
 #[cfg(test)]
 mod tests {
+    use super::super::reviewer_in_task::conversation_in;
     use super::*;
-    use crate::data::agents::{AgentSession, AgentState};
+    use crate::data::agents::{AgentRecord, AgentSession, AgentState};
 
     #[test]
     fn the_reviewer_is_asked_read_only_in_its_one_conversation_of_the_task() {

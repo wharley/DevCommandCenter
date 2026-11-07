@@ -70,9 +70,66 @@ fn path_of(workspace: &Workspace) -> String {
         .unwrap_or_else(|| workspace.root_path.clone())
 }
 
-/// Fills in each pull request's task. `branch_of` reads a checkout's current
-/// branch; it only runs for the repository's tasks the saved branch did not
-/// settle.
+/// A pull request's task: the one made from it or on its branch, else the
+/// repository's active task whose checkout is on that branch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskLink {
+    pub workspace_id: String,
+    pub project_id: String,
+    pub workspace_path: String,
+}
+
+/// The task of `repository#number` on `head_branch`. `branch_of` reads a
+/// checkout's current branch; it only runs for the repository's tasks the
+/// saved branch did not settle.
+pub fn find_task(
+    repositories: &[Repository],
+    workspaces: &[Workspace],
+    repository: &str,
+    number: u32,
+    head_branch: &str,
+    branch_of: &impl Fn(&str) -> Option<String>,
+) -> Option<TaskLink> {
+    let wanted = repository.to_lowercase();
+    let repository = repositories.iter().find(|repository| {
+        repository
+            .remote_url
+            .as_deref()
+            .and_then(github_slug)
+            .as_deref()
+            == Some(wanted.as_str())
+    })?;
+    let active: Vec<&Workspace> = workspaces
+        .iter()
+        .filter(|workspace| {
+            workspace.root_path == repository.root_path
+                && !matches!(
+                    workspace.state,
+                    WorkspaceState::Archived | WorkspaceState::Completed
+                )
+        })
+        .collect();
+    let saved = active.iter().find(|workspace| {
+        workspace.source.as_ref().is_some_and(|source| {
+            (source.kind == WorkspaceSourceKind::PullRequest
+                && source.change_request_number == Some(number))
+                || source.head_branch == head_branch
+        })
+    });
+    let found = saved.copied().or_else(|| {
+        active
+            .iter()
+            .find(|workspace| branch_of(&path_of(workspace)).as_deref() == Some(head_branch))
+            .copied()
+    })?;
+    Some(TaskLink {
+        workspace_id: found.id.0.clone(),
+        project_id: found.project_id.0.clone(),
+        workspace_path: path_of(found),
+    })
+}
+
+/// Fills in each failing pull request's task (`find_task`).
 pub fn link(
     failing: &mut [PullRequestHubFailing],
     repositories: &[Repository],
@@ -80,46 +137,17 @@ pub fn link(
     branch_of: impl Fn(&str) -> Option<String>,
 ) {
     for pr in failing.iter_mut() {
-        let wanted = pr.repository.to_lowercase();
-        let Some(repository) = repositories.iter().find(|repository| {
-            repository
-                .remote_url
-                .as_deref()
-                .and_then(github_slug)
-                .as_deref()
-                == Some(wanted.as_str())
-        }) else {
-            continue;
-        };
-        let active: Vec<&Workspace> = workspaces
-            .iter()
-            .filter(|workspace| {
-                workspace.root_path == repository.root_path
-                    && !matches!(
-                        workspace.state,
-                        WorkspaceState::Archived | WorkspaceState::Completed
-                    )
-            })
-            .collect();
-        let saved = active.iter().find(|workspace| {
-            workspace.source.as_ref().is_some_and(|source| {
-                (source.kind == WorkspaceSourceKind::PullRequest
-                    && source.change_request_number == Some(pr.number))
-                    || source.head_branch == pr.head_branch
-            })
-        });
-        let found = saved.copied().or_else(|| {
-            active
-                .iter()
-                .find(|workspace| {
-                    branch_of(&path_of(workspace)).as_deref() == Some(&pr.head_branch)
-                })
-                .copied()
-        });
-        if let Some(workspace) = found {
-            pr.workspace_id = Some(workspace.id.0.clone());
-            pr.project_id = Some(workspace.project_id.0.clone());
-            pr.workspace_path = Some(path_of(workspace));
+        if let Some(task) = find_task(
+            repositories,
+            workspaces,
+            &pr.repository,
+            pr.number,
+            &pr.head_branch,
+            &branch_of,
+        ) {
+            pr.workspace_id = Some(task.workspace_id);
+            pr.project_id = Some(task.project_id);
+            pr.workspace_path = Some(task.workspace_path);
         }
     }
 }

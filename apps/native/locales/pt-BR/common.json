@@ -226,6 +226,13 @@
         "ready": "diagnóstico na tarefa",
         "failed": "não consegui pedir o diagnóstico"
       },
+      "reviewReceived": {
+        "title": "Review chegou num PR de tarefa",
+        "hint": "Quando alguém revisa ou comenta o PR de uma tarefa sua, o Revisor lê as conversas abertas e diz, na conversa dele nessa tarefa, se cada ponto procede e o que mudar. Ele só lê e não responde no PR.",
+        "done": "{{agent}} leu o review",
+        "ready": "análise na tarefa",
+        "failed": "não consegui pedir a análise"
+      },
       "prUpdated": {
         "title": "PR que você revisou foi atualizado",
         "hint": "Quando chegam commits ou respostas depois da sua revisão, o Revisor revisa de novo. Os comentários ficam como rascunho no PR; nada é publicado.",

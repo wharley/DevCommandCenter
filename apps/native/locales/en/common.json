@@ -226,6 +226,13 @@
         "ready": "diagnosis in the task",
         "failed": "could not ask for the diagnosis"
       },
+      "reviewReceived": {
+        "title": "A review came on a task's PR",
+        "hint": "When someone reviews or comments on one of your tasks' PRs, the Reviewer reads the open conversations and says, in its conversation in that task, whether each point holds and what to change. It only reads and does not reply on the PR.",
+        "done": "{{agent}} read the review",
+        "ready": "analysis in the task",
+        "failed": "could not ask for the analysis"
+      },
       "prUpdated": {
         "title": "A PR you reviewed was updated",
         "hint": "When commits or replies arrive after your review, the Reviewer reviews it again. Its comments wait as drafts on the PR; nothing is published.",

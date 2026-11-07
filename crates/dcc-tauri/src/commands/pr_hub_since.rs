@@ -51,6 +51,10 @@ pub struct PullRequestHubReviewedOutput {
     /// task when DCC has one; read in the same call (`pr_hub_failing`).
     #[serde(default)]
     pub failing: Vec<super::pr_hub_failing::PullRequestHubFailing>,
+    /// The person's own open pull requests someone else reviewed or
+    /// commented on, each with its task (`pr_hub_received`).
+    #[serde(default)]
+    pub received: Vec<super::pr_hub_received::PullRequestHubReceived>,
 }
 
 fn at(value: Option<&Value>) -> Option<DateTime<Utc>> {
@@ -168,6 +172,9 @@ pub async fn pull_request_hub_reviewed_with_state(
                 output
                     .failing
                     .extend(super::pr_hub_failing::from_search(&answer));
+                output
+                    .received
+                    .extend(super::pr_hub_received::from_search(&answer));
                 viewer
             }
             Err(error) => {
@@ -194,25 +201,27 @@ pub async fn pull_request_hub_reviewed_with_state(
                             output.failing.push(pr);
                         }
                     }
+                    for pr in super::pr_hub_received::from_search(&answer) {
+                        if !output.received.iter().any(|known| known.url == pr.url) {
+                            output.received.push(pr);
+                        }
+                    }
                 }
                 Err(error) => output.warnings.push(error),
             }
         }
-        link_failing(&db_path, &mut output.failing);
+        link_tasks(&db_path, &mut output);
         output
     })
     .await
     .map_err(|error| error.to_string())
 }
 
-/// Each failing pull request's task, from DCC's database and, only for
-/// what the saved branches do not settle, the checkouts' local git.
-fn link_failing(
-    db_path: &std::path::Path,
-    failing: &mut [super::pr_hub_failing::PullRequestHubFailing],
-) {
+/// Each failing or reviewed pull request's task, from DCC's database and,
+/// only for what the saved branches do not settle, the checkouts' local git.
+fn link_tasks(db_path: &std::path::Path, output: &mut PullRequestHubReviewedOutput) {
     use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
-    if failing.is_empty() {
+    if output.failing.is_empty() && output.received.is_empty() {
         return;
     }
     let Ok(repo) = dcc_infra::db::SqliteWorkspaceRepo::open(db_path) else {
@@ -220,11 +229,13 @@ fn link_failing(
     };
     let repositories = futures::executor::block_on(repo.list_repositories()).unwrap_or_default();
     let workspaces = futures::executor::block_on(repo.list_workspaces()).unwrap_or_default();
-    super::pr_hub_failing::link(failing, &repositories, &workspaces, |path| {
+    let branch_of = |path: &str| {
         dcc_infra::workspace_git::read_branch_and_conflicts(path)
             .ok()
             .and_then(|(branch, _)| branch)
-    });
+    };
+    super::pr_hub_failing::link(&mut output.failing, &repositories, &workspaces, branch_of);
+    super::pr_hub_received::link(&mut output.received, &repositories, &workspaces, branch_of);
 }
 
 #[cfg(test)]

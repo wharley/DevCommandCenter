@@ -26,7 +26,9 @@ mod palette;
 mod pr_watch;
 mod quick_open;
 mod regions;
+mod review_received;
 mod review_trigger;
+mod reviewer_in_task;
 mod session_search;
 mod settings;
 mod sidebar_events;
@@ -328,6 +330,7 @@ impl Shell {
                 let news = cx.subscribe(&watch, |shell, _, event: &pr_watch::PrNewsArrived, cx| {
                     shell.pr_news_arrived(&event.news, cx);
                     shell.checks_failing(&event.failing, cx);
+                    shell.reviews_received(&event.received, cx);
                 });
                 (watch, news)
             },

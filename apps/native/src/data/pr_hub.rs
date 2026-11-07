@@ -94,6 +94,25 @@ pub struct Failing {
     pub workspace_path: Option<String>,
 }
 
+/// `PullRequestHubReceived`: one of the person's own open pull requests
+/// someone else reviewed or commented on, read in the same search.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Received {
+    pub url: String,
+    pub number: u32,
+    /// `owner/name`
+    pub repository: String,
+    pub title: String,
+    pub head_branch: String,
+    pub last_activity: String,
+    /// Who it came from, latest first.
+    pub from: Vec<String>,
+    pub workspace_id: Option<String>,
+    pub project_id: Option<String>,
+    pub workspace_path: Option<String>,
+}
+
 /// `PullRequestHubReviewedOutput`
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -101,6 +120,7 @@ pub struct ReviewedList {
     pub items: Vec<Reviewed>,
     pub warnings: Vec<String>,
     pub failing: Vec<Failing>,
+    pub received: Vec<Received>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]

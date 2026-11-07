@@ -57,6 +57,8 @@ fn the_memory_lists_filters_edits_and_shows_its_history(cx: &mut TestAppContext)
         let composer = cx.new(|cx| Composer::new(window, cx));
         AgentPage::new("a-1".into(), sidebar, composer, cx)
     });
+    // Tall enough for the whole page, the memory below the triggers.
+    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(2000.0)));
     cx.run_until_parked();
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {
