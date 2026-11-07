@@ -26,9 +26,12 @@ impl AgentPage {
             .justify_between()
             .gap(px(16.0))
             .child(
+                // The text gives way and wraps; the switch keeps its place.
                 div()
                     .flex()
                     .flex_col()
+                    .flex_1()
+                    .min_w_0()
                     .gap(px(4.0))
                     .child(
                         div()
@@ -45,7 +48,7 @@ impl AgentPage {
                             .child(cx.t(&format!("agents.triggers.{key}.hint"))),
                     ),
             )
-            .child(
+            .child(div().flex_shrink_0().child(
                 Switch::new(SharedString::from(format!("agent-trigger-{key}")), on).on_toggle(
                     move |on, _, cx| {
                         if cx.has_global::<AgentTriggers>() {
@@ -56,7 +59,7 @@ impl AgentPage {
                         let _ = page.update(cx, |_, cx| cx.notify());
                     },
                 ),
-            )
+            ))
             .into_any_element()
     }
 
