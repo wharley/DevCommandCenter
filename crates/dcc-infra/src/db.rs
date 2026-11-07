@@ -12287,6 +12287,7 @@ mod tests {
                 allow_file_edits: false,
                 approval_policy: None,
                 shared_checkout: false,
+                new_task: None,
             },
             result_summary: Some("No blocking issues.".to_string()),
             touched_files: vec!["src/lib.rs".to_string()],

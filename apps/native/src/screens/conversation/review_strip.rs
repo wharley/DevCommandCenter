@@ -154,6 +154,8 @@ mod tests {
             implement,
             parent_session_id: parent.into(),
             worktree: Some("/tmp/w".into()),
+            shared_checkout: false,
+            new_task: None,
         }
     }
 

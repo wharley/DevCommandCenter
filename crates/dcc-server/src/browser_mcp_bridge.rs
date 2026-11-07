@@ -100,7 +100,7 @@ const DELEGATION_MCP_TOOL_NAMES: [&str; 6] = [
 ];
 #[cfg(test)]
 const DCC_MCP_TOOL_COUNT: usize =
-    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 2;
+    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 3;
 /// Starting a delegation prepares a worktree and a child thread before it
 /// returns the task id; the child's turn itself runs in the background.
 const DELEGATE_TASK_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
@@ -839,7 +839,11 @@ fn rpc_timeout(value: &Value) -> Duration {
         .filter(|call| {
             matches!(
                 call.name.as_str(),
-                "dcc_delegate_task" | "dcc_propose_task" | "dcc_task_message" | "dcc_task_wait"
+                "dcc_delegate_task"
+                    | "dcc_propose_task"
+                    | "dcc_open_task"
+                    | "dcc_task_message"
+                    | "dcc_task_wait"
             ) && tool_call_is_well_formed(call)
         });
     if is_control_request {
@@ -1543,6 +1547,9 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
         name if crate::agent_memory_tools::is_agent_memory_tool(name) => {
             crate::agent_memory_tools::call_is_well_formed(&call.arguments)
         }
+        name if crate::open_task_tool::is_open_task_tool(name) => {
+            crate::open_task_tool::call_is_well_formed(&call.arguments)
+        }
         name if crate::overview_tool::is_overview_tool(name) => {
             crate::overview_tool::call_is_well_formed(&call.arguments)
         }
@@ -1747,8 +1754,8 @@ async fn dispatch_tool(
                 ToolDispatch::executed(response, BrowserAuditGrantState::NotApplicable)
             }
         }
-        "dcc_delegate_task" | "dcc_propose_task" | "dcc_task_message" | "dcc_task_status"
-        | "dcc_task_wait" | "dcc_task_cancel" => {
+        "dcc_delegate_task" | "dcc_propose_task" | "dcc_open_task" | "dcc_task_message"
+        | "dcc_task_status" | "dcc_task_wait" | "dcc_task_cancel" => {
             if !bridge.lease_is_current(binding) {
                 return ToolDispatch::computer_error(
                     "delegation is unavailable for this provider session",
@@ -2559,6 +2566,7 @@ async fn dispatch_delegation_tool(
                     proposal_id: None,
                     // implement edits this conversation's checkout directly.
                     shared_checkout: true,
+                    new_task: None,
                 },
             )
             .await;
@@ -2603,6 +2611,7 @@ async fn dispatch_delegation_tool(
                     target_provider_id: args.provider,
                     target_model_id: args.model,
                     start_now,
+                    new_task: None,
                 },
             )
             .await
@@ -2626,6 +2635,27 @@ async fn dispatch_delegation_tool(
                 Err(error) => {
                     ToolDispatch::computer_error(&format!("Task proposal rejected: {error}"))
                 }
+            }
+        }
+        "dcc_open_task" => {
+            let Some(args) = crate::open_task_tool::parse(call.arguments) else {
+                return ToolDispatch::computer_error("invalid dcc_open_task arguments");
+            };
+            let start_now = args.starts_now();
+            match crate::open_task_tool::open(&bridge.sessions, parent, args).await {
+                Ok(task) => {
+                    let mut view = delegation_task_view(&task);
+                    view["delivery"] = json!(crate::open_task_tool::delivery(start_now, &task));
+                    reply(
+                        if start_now {
+                            "Task started."
+                        } else {
+                            "Task proposed."
+                        },
+                        view,
+                    )
+                }
+                Err(error) => ToolDispatch::computer_error(&format!("Task rejected: {error}")),
             }
         }
         "dcc_task_message" => {
@@ -3116,6 +3146,8 @@ fn tools() -> Vec<Value> {
     .chain([crate::agent_memory_tools::definition()])
     // The person's tasks, in an agent's own conversation.
     .chain([crate::overview_tool::definition()])
+    // A task in one of the person's projects, from that conversation.
+    .chain([crate::open_task_tool::definition()])
     // The iOS Simulator, where the app offers one.
     .chain(crate::device_tools::tools())
     .collect()
@@ -4481,6 +4513,7 @@ mod tests {
                 "dcc_task_cancel",
                 "dcc_agent_remember",
                 "dcc_overview",
+                "dcc_open_task",
             ]
         );
         for tool in &schema_tools {

@@ -1,3 +1,4 @@
+pub mod agent_task;
 pub(crate) mod antigravity_account_state;
 pub mod antigravity_installation;
 pub mod app_events;

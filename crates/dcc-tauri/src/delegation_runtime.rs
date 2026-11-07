@@ -134,6 +134,10 @@ pub struct RunDelegationInput {
     /// edits are there when it reports back: no worktree, no review step.
     #[serde(default)]
     pub shared_checkout: bool,
+    /// A resident agent's task in one of the person's projects
+    /// (`agent_task`): a task of its own instead of a child conversation.
+    #[serde(default)]
+    pub new_task: Option<dcc_core::domain::agent_conversation::NewTaskTarget>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -185,6 +189,7 @@ async fn child_editing_the_checkout(
         if except == Some(&child.id)
             || !is_edit_capable(&child)
             || !child.budget.shared_checkout
+            || child.budget.new_task.is_some()
             || !matches!(
                 child.status,
                 DelegationStatus::Queued | DelegationStatus::Running
@@ -349,7 +354,10 @@ pub fn delegation_result_turn(delegation: &Delegation, failure_reason: Option<&s
             ));
         }
     }
-    if delegation.budget.shared_checkout && !delegation.touched_files.is_empty() {
+    if delegation.budget.shared_checkout
+        && delegation.budget.new_task.is_none()
+        && !delegation.touched_files.is_empty()
+    {
         lines.extend([
             String::new(),
             "These edits are already in your workspace — do not redo them.".to_string(),
@@ -1053,8 +1061,10 @@ pub async fn run_delegation(
         allow_file_edits,
         approval_policy: None,
         shared_checkout: allow_file_edits && input.shared_checkout,
+        new_task: input.new_task.clone(),
     };
-    if budget.shared_checkout {
+    // A task of its own edits its own folder, not the parent's checkout.
+    if budget.shared_checkout && budget.new_task.is_none() {
         if let Some(busy) =
             child_editing_the_checkout(state, &parent.id, input.proposal_id.as_ref()).await?
         {
@@ -1103,6 +1113,23 @@ pub async fn run_delegation(
             .and_then(|summary| summary.session.provider_runtime.clone())
     });
 
+    // A resident agent's task becomes a task of its own in the project the
+    // person named; its conversation and brief live there.
+    let (workspace, workspace_path) = match &input.new_task {
+        Some(target) => {
+            let name = input.title.as_deref().unwrap_or(&instruction);
+            let created = crate::agent_task::create_task_workspace(state, target, name).await?;
+            if let Some(target) = budget.new_task.as_mut() {
+                target.workspace_id = Some(created.id.0.clone());
+            }
+            let path = created
+                .worktree_path
+                .clone()
+                .unwrap_or_else(|| created.root_path.clone());
+            (created, path)
+        }
+        None => (workspace, workspace_path),
+    };
     let workspace_state = WorkspaceCommandState::from_session(state);
     let prepared = if allow_file_edits && !budget.shared_checkout {
         Some(
@@ -1132,6 +1159,7 @@ pub async fn run_delegation(
                 workspace_path: &workspace_path,
                 parent_title: &parent_title,
                 scope: match (allow_file_edits, budget.shared_checkout) {
+                    _ if budget.new_task.is_some() => TaskScope::OwnTask,
                     (false, _) => TaskScope::ReadOnly,
                     (true, false) => TaskScope::OwnWorktree,
                     (true, true) => TaskScope::SharedCheckout,
@@ -1163,10 +1191,15 @@ pub async fn run_delegation(
             }
         };
 
+        let (child_workspace_id, child_project_id) = if budget.new_task.is_some() {
+            (workspace.id.clone(), workspace.project_id.clone())
+        } else {
+            (parent.workspace_id.clone(), parent.project_id.clone())
+        };
         let start_input = StartThreadInput {
-            workspace_id: parent.workspace_id.clone(),
+            workspace_id: child_workspace_id,
             additional_workspace_ids: Vec::new(),
-            project_id: parent.project_id.clone(),
+            project_id: child_project_id,
             provider_id: target_provider_id.clone(),
             model: input.target_model_id.clone(),
             provider_runtime: provider_runtime.clone(),
@@ -1252,6 +1285,13 @@ pub async fn run_delegation(
         Ok(launched) => launched,
         Err(error) => {
             remove_delegation_worktree(state, None, operation_id.as_deref(), true).await;
+            if let Some(task) = budget
+                .new_task
+                .as_ref()
+                .and_then(|t| t.workspace_id.as_deref())
+            {
+                crate::agent_task::set_aside_unstarted_task(state, task).await;
+            }
             return Err(error);
         }
     };
@@ -1499,6 +1539,8 @@ pub enum TaskScope {
     ReadOnly,
     OwnWorktree,
     SharedCheckout,
+    /// A task of its own in one of the person's projects (`agent_task`).
+    OwnTask,
 }
 
 /// The first message of a task: the brief, framed as a conversation the
@@ -1532,6 +1574,13 @@ pub fn build_task_prompt(context: &TaskPromptContext<'_>) -> String {
         TaskScope::ReadOnly => {
             lines.push("- Work read-only. Do not edit files or run destructive commands.".to_string())
         }
+        TaskScope::OwnTask => lines.extend(
+            [
+                "- This is a task of its own in the human's project, in their task list like any other; edit freely in its folder.",
+                "- Do not push, open pull requests or merge unless the human asks you to in this conversation.",
+            ]
+            .map(str::to_string),
+        ),
     }
     lines.extend([
         "- This is your own conversation: the human may follow up here.".to_string(),
@@ -1590,7 +1639,12 @@ pub fn task_result_turn(
     if !delegation.touched_files.is_empty() {
         lines.extend([
             String::new(),
-            if delegation.budget.shared_checkout {
+            if delegation.budget.new_task.is_some() {
+                format!(
+                    "It has changed {} file(s) in its own task; the human looks at them there.",
+                    delegation.touched_files.len()
+                )
+            } else if delegation.budget.shared_checkout {
                 format!(
                     "It has changed {} file(s) directly in your checkout; they are already in your workspace — do not redo them.",
                     delegation.touched_files.len()
@@ -1850,6 +1904,8 @@ pub struct ProposeTaskInput {
     pub target_model_id: Option<String>,
     /// Start without a card; only for a turn the person started.
     pub start_now: bool,
+    /// A task of its own in one of the person's projects (`agent_task`).
+    pub new_task: Option<dcc_core::domain::agent_conversation::NewTaskTarget>,
 }
 
 /// Records a task the parent agent suggests. It waits as a card in the
@@ -1874,6 +1930,15 @@ pub async fn propose_task(
         .is_some()
     {
         return Err("a task or delegated agent cannot propose tasks; report back instead".to_string());
+    }
+    // The agent's own conversation has no code to split off: its tasks go
+    // to a project the person names.
+    if input.new_task.is_none()
+        && state
+            .is_agent_conversation(&parent.id)
+            .map_err(|error| error.to_string())?
+    {
+        return Err("this is your own conversation, not a project: open the task in one of the person's projects with dcc_open_task".to_string());
     }
     let events = SessionEventRepo::list_events_by_session(state, &parent.id)
         .await
@@ -1928,8 +1993,10 @@ pub async fn propose_task(
         allow_file_edits: input.edits,
         approval_policy: None,
         // Like a Claude Code subagent: the parent hears back with the edits
-        // already in its checkout, never through a review of a copy.
+        // already in its checkout, never through a review of a copy. A task
+        // of its own keeps its edits in its own folder, also with no review.
         shared_checkout: input.edits,
+        new_task: input.new_task.clone(),
     };
     let target_provider_id = input
         .target_provider_id
@@ -1997,13 +2064,18 @@ pub async fn start_task_proposal(
             context_policy: DelegationContextPolicy::Minimal,
             origin: DelegationOrigin::Agent,
             prebuilt_prompt: None,
-            effort: None,
+            effort: proposal
+                .budget
+                .new_task
+                .as_ref()
+                .and_then(|target| target.effort.clone()),
             fast_mode: None,
             provider_runtime: None,
             title: proposal.title.clone(),
             kind: DelegationKind::Task,
             proposal_id: Some(proposal.id.clone()),
             shared_checkout: proposal.budget.shared_checkout,
+            new_task: proposal.budget.new_task.clone(),
         },
     )
     .await
@@ -3025,6 +3097,7 @@ mod tests {
                     kind: Default::default(),
                     proposal_id: None,
                     shared_checkout: false,
+                    new_task: None,
                 },
             )
             .await
@@ -3051,6 +3124,7 @@ mod tests {
                 kind: Default::default(),
                 proposal_id: None,
                 shared_checkout: false,
+                new_task: None,
             }
         }
 
@@ -3140,6 +3214,7 @@ mod tests {
                 target_provider_id: Some("not-a-provider".to_string()),
                 target_model_id: None,
                 start_now: false,
+                new_task: None,
             }
         }
 
@@ -3184,6 +3259,88 @@ mod tests {
                 .await
                 .expect_err("stops at the unknown provider");
             assert!(!error.contains("start=now"), "{error}");
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_task_an_agent_opened_keeps_its_conversation_in_its_own_project() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            SqliteWorkspaceRepo::open(state.db_path())
+                .expect("workspace repo")
+                .save_workspace(&Workspace {
+                    id: WorkspaceId("own-task".to_string()),
+                    project_id: ProjectId("p-loja".to_string()),
+                    name: Some("Fase 2".to_string()),
+                    root_path: "/loja".to_string(),
+                    base_branch: "main".to_string(),
+                    worktree_path: None,
+                    source: None,
+                    state: WorkspaceState::Ready,
+                    setup_report: None,
+                    pinned_at: None,
+                    snoozed_until: None,
+                    created_at: "2026-11-06T10:00:00Z".to_string(),
+                    updated_at: "2026-11-06T10:00:00Z".to_string(),
+                })
+                .await
+                .expect("save the task");
+            let mut child = session("own-child", "codex");
+            child.workspace_id = WorkspaceId("own-task".to_string());
+            child.project_id = ProjectId("p-loja".to_string());
+            SessionRepo::save_session(state, &child)
+                .await
+                .expect("save the task's conversation");
+            let target = dcc_core::domain::agent_conversation::NewTaskTarget {
+                project_id: "p-loja".to_string(),
+                project: "Checkout".to_string(),
+                root_path: "/loja".to_string(),
+                base_branch: "main".to_string(),
+                worktree: false,
+                effort: None,
+                workspace_id: Some("own-task".to_string()),
+            };
+            let input = |new_task| CreateDelegationInput {
+                parent_session_id: SessionId("parent".to_string()),
+                parent_turn_id: None,
+                child_session_id: Some(SessionId("own-child".to_string())),
+                delegation_worktree_operation_id: None,
+                workspace_id: WorkspaceId("workspace".to_string()),
+                target_provider_id: dcc_core::domain::provider::ProviderId("codex".to_string()),
+                target_model_id: None,
+                mode: DelegationMode::Implement,
+                prompt: "Implement it.".to_string(),
+                context_policy: DelegationContextPolicy::Minimal,
+                budget: DelegationBudget {
+                    turn_limit: None,
+                    timeout_seconds: None,
+                    allow_file_edits: true,
+                    approval_policy: None,
+                    shared_checkout: true,
+                    new_task,
+                },
+                origin: DelegationOrigin::Agent,
+                instruction: None,
+                kind: DelegationKind::Task,
+                title: Some("Fase 2".to_string()),
+                proposal_id: None,
+            };
+            let error = create_delegation_with_state(state, input(None))
+                .await
+                .expect_err("a child elsewhere is refused");
+            assert!(error.contains("child session must belong"), "{error}");
+            let created = create_delegation_with_state(state, input(Some(target)))
+                .await
+                .expect("the agent's task keeps its conversation in its project")
+                .delegation;
+            assert_eq!(created.workspace_id.0, "workspace");
+            start_delegation_with_state(
+                state,
+                StartDelegationInput {
+                    delegation_id: created.id.clone(),
+                },
+            )
+            .await
+            .expect("and it starts");
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -3356,6 +3513,7 @@ mod tests {
                 allow_file_edits: false,
                 approval_policy: None,
                 shared_checkout: false,
+                new_task: None,
             };
             DelegationRepo::save_delegation(state, &task).await.expect("save task");
             task
@@ -3630,6 +3788,7 @@ mod tests {
                     kind: Default::default(),
                     proposal_id: None,
                     shared_checkout: false,
+                    new_task: None,
                 },
             )
             .await

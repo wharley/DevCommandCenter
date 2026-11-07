@@ -86,6 +86,10 @@ pub struct DelegationBudget {
     /// choice (it follows a parent that runs without a worktree).
     #[serde(default)]
     pub shared_checkout: bool,
+    /// A task a resident agent opens from its own conversation: it becomes
+    /// a task of its own in this project, not a conversation of the caller.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_task: Option<super::agent_conversation::NewTaskTarget>,
 }
 
 impl Default for DelegationBudget {
@@ -96,6 +100,7 @@ impl Default for DelegationBudget {
             allow_file_edits: false,
             approval_policy: None,
             shared_checkout: false,
+            new_task: None,
         }
     }
 }

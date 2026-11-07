@@ -333,6 +333,8 @@ fn the_lineage_lists_the_childs_delegation_and_cancels_it(cx: &mut TestAppContex
                 implement: true,
                 parent_session_id: "a".into(),
                 worktree: None,
+                shared_checkout: false,
+                new_task: None,
             },
         );
         next.last_sequence = 9;

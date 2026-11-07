@@ -149,8 +149,10 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         .collect();
 
     let delegations = block_on(sessions.list_delegations(None, None))?;
+    // A task an agent opened in a project is that task's own conversation.
     let delegated: HashSet<String> = delegations
         .iter()
+        .filter(|delegation| delegation.budget.new_task.is_none())
         .filter_map(|delegation| delegation.child_session_id.as_ref().map(|id| id.0.clone()))
         .collect();
     let child_tasks = super::child_tasks::by_workspace(&delegations);

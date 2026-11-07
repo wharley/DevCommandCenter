@@ -96,6 +96,7 @@ pub mod skills;
 pub mod snooze;
 pub(crate) mod sse;
 pub mod system_terminal;
+pub mod task_proposal;
 pub mod tasks;
 pub mod terminal_api;
 pub mod text_match;

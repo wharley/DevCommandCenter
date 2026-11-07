@@ -174,6 +174,7 @@ pub(super) async fn list_task_proposals(
                 "edits": matches!(proposal.mode, DelegationMode::Implement)
                     || proposal.budget.allow_file_edits,
                 "sharedCheckout": proposal.budget.shared_checkout,
+                "project": proposal.budget.new_task.as_ref().map(|target| target.project.clone()),
                 "createdAt": proposal.created_at,
             })
         })
@@ -218,7 +219,7 @@ pub(super) async fn answer_task_proposal(
 }
 
 /// Only a waiting task proposal; this route never cancels running work.
-async fn dismiss_task_proposal(
+pub(super) async fn dismiss_task_proposal(
     sessions: &dcc_tauri::state::SessionCommandState,
     id: dcc_core::domain::delegation::DelegationId,
 ) -> Result<(), String> {

@@ -22,6 +22,9 @@ mod idea;
 mod image;
 mod paced;
 mod permission_panel;
+mod proposal_card;
+#[cfg(test)]
+mod proposal_card_tests;
 mod requests;
 mod review_strip;
 mod rewind;
@@ -160,6 +163,8 @@ pub struct ConversationView {
     rewind: rewind::RewindState,
     /// The research progress and publish card of an idea's task.
     idea: Option<(Entity<idea::IdeaPanel>, gpui::Subscription)>,
+    /// Task proposals waiting on the person: briefs being edited, answers.
+    proposals: proposal_card::ProposalCards,
     _clock: Task<()>,
 }
 
@@ -237,6 +242,7 @@ impl ConversationView {
             trail: trail::TrailState::default(),
             new_activity: false,
             idea: None,
+            proposals: Default::default(),
             rewind: Default::default(),
             _clock: Self::clock_loop(cx),
         }

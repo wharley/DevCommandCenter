@@ -217,6 +217,22 @@ fn validate_child_provider_target(
     Ok(())
 }
 
+/// The child's conversation lives in the delegation's workspace, or in the
+/// task a resident agent opened for it in one of the person's projects
+/// (`agent_task`), once that task exists.
+fn child_workspace_allowed(
+    child: &dcc_core::domain::workspace::WorkspaceId,
+    workspace: &dcc_core::domain::workspace::WorkspaceId,
+    budget: &dcc_core::domain::delegation::DelegationBudget,
+) -> bool {
+    child == workspace
+        || budget
+            .new_task
+            .as_ref()
+            .and_then(|target| target.workspace_id.as_deref())
+            == Some(child.0.as_str())
+}
+
 /// Rechecks the current provider authority before a legacy delegation is
 /// allowed to transition. Older durable rows may have predated capability
 /// validation, so this must run before status persistence or event fanout.
@@ -248,7 +264,11 @@ async fn validate_stored_delegation_target(
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("child session not found: {}", child_session_id.0))?;
-        if child_session.workspace_id != delegation.workspace_id {
+        if !child_workspace_allowed(
+            &child_session.workspace_id,
+            &delegation.workspace_id,
+            &delegation.budget,
+        ) {
             return Err("child session must belong to delegation workspace_id".to_string());
         }
         validate_child_provider_target(&child_session, &delegation.target_provider_id)?;
@@ -282,7 +302,8 @@ pub async fn create_delegation_with_state(
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("child session not found: {}", child_session_id.0))?;
-        if child_session.workspace_id != input.workspace_id {
+        if !child_workspace_allowed(&child_session.workspace_id, &input.workspace_id, &input.budget)
+        {
             return Err("child session must belong to workspace_id".to_string());
         }
         validate_child_provider_target(&child_session, &input.target_provider_id)?;

@@ -97,6 +97,10 @@ pub(super) fn delegation_card(
         |record| record.status.clone(),
     );
     let is_task = record.is_some_and(|record| record.is_task);
+    // A proposal waits for the person: its own card, with Start.
+    if let Some(record) = record.filter(|_| is_task && status == DelegationStatus::Draft) {
+        return super::proposal_card::proposal_card(view, record, window, cx);
+    }
     let theme = cx.theme();
     let colors = theme.colors.clone();
     let mono = theme.fonts.mono.clone();
@@ -177,8 +181,13 @@ pub(super) fn delegation_card(
         })
         .map(SharedString::from)
         .unwrap_or_else(|| cx.t("delegation.card.title"));
+    // A task of its own in another project says which.
+    let project = record
+        .and_then(|record| record.new_task.as_ref())
+        .map(|target| target.project.clone());
     let subtitle = [
         mode_label.map(|label| label.to_string()),
+        project,
         agent_label.clone(),
     ]
     .into_iter()
@@ -494,6 +503,11 @@ pub(super) fn delegation_card(
                 )
             })
             .children(child_session.clone().map(|session| {
+                // A task opened from an agent's conversation is a task of its
+                // own: the button opens that task, not a conversation here.
+                let own_task = record
+                    .and_then(|record| record.new_task.as_ref())
+                    .and_then(|target| target.workspace_id.clone());
                 let label = if waiting {
                     cx.t("delegation.card.openToAnswer")
                 } else {
@@ -521,8 +535,9 @@ pub(super) fn delegation_card(
                             .when(!waiting, |button| {
                                 button.text_color(colors.muted_foreground)
                             })
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                view.open_session(session.clone(), cx)
+                            .on_click(cx.listener(move |view, _, _, cx| match &own_task {
+                                Some(task) => view.open(task, Some(session.clone()), cx),
+                                None => view.open_session(session.clone(), cx),
                             }))
                             .child(div().text_size(px(11.5)).child(label)),
                     )

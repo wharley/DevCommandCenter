@@ -33,6 +33,10 @@ pub struct DelegationRecord {
     /// The child's own folder (`workingDirectoryOverride`): an isolated
     /// worktree waiting for review, when it has one.
     pub worktree: Option<String>,
+    /// A task's edits land straight in the parent's checkout.
+    pub shared_checkout: bool,
+    /// A task of its own in one of the person's projects (`dcc_open_task`).
+    pub new_task: Option<dcc_core::domain::agent_conversation::NewTaskTarget>,
 }
 
 impl Default for DelegationRecord {
@@ -59,6 +63,8 @@ impl Default for DelegationRecord {
             implement: false,
             parent_session_id: String::new(),
             worktree: None,
+            shared_checkout: false,
+            new_task: None,
         }
     }
 }
@@ -136,6 +142,8 @@ impl DelegationRecord {
             implement: delegation.mode == dcc_core::domain::delegation::DelegationMode::Implement,
             parent_session_id: delegation.parent_session_id.0.clone(),
             worktree: None,
+            shared_checkout: delegation.budget.shared_checkout,
+            new_task: delegation.budget.new_task.clone(),
         }
     }
 }

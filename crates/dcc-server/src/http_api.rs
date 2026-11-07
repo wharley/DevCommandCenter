@@ -88,6 +88,7 @@ mod remote_devices;
 mod research;
 mod shortcuts;
 mod skills;
+mod task_proposals;
 mod terminals;
 mod turn_review;
 
@@ -686,6 +687,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/mobile/task-proposals",
             get(attention::list_task_proposals),
+        )
+        .route(
+            "/api/v1/task-proposals/:proposal_id/start",
+            post(task_proposals::start),
+        )
+        .route(
+            "/api/v1/task-proposals/:proposal_id/dismiss",
+            post(task_proposals::dismiss),
         )
         .route(
             "/api/v1/mobile/task-proposals/:proposal_id/:action",
@@ -1923,6 +1932,8 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/sessions/:session_id/agent",
             "POST /api/v1/agents/:agent_id",
             "POST /api/v1/agents/:agent_id/conversation",
+            "POST /api/v1/task-proposals/:proposal_id/start",
+            "POST /api/v1/task-proposals/:proposal_id/dismiss",
             "GET /api/v1/agents/:agent_id/memory",
             "POST /api/v1/agents/:agent_id/memory",
             "POST /api/v1/agents/:agent_id/memory/:note_id",
@@ -5270,6 +5281,48 @@ mod tests {
         let (_, listed) =
             call(&fixture.app, "GET", "/api/v1/mobile/task-proposals", None, Some("phone-1"), false).await;
         assert_eq!(listed["proposals"], json!([]));
+
+        // The desktop's card answers the same proposals.
+        let card = dcc_tauri::commands::delegation_commands::create_task_proposal_with_state(
+            &fixture.state,
+            dcc_tauri::commands::delegation_commands::CreateTaskProposalInput {
+                parent_session_id: fixture.session_id.clone(),
+                parent_turn_id: None,
+                workspace_id: WorkspaceId("workspace".to_string()),
+                target_provider_id: dcc_core::domain::provider::ProviderId("codex".to_string()),
+                target_model_id: None,
+                mode: DelegationMode::Implement,
+                title: "Fase 3".to_string(),
+                instruction: "Implement it.".to_string(),
+                budget: DelegationBudget::default(),
+            },
+        )
+        .await
+        .unwrap();
+        let dismiss = format!("/api/v1/task-proposals/{}/dismiss", card.id.0);
+        let (status, body) = call(&fixture.app, "POST", &dismiss, None, None, true).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let start = format!("/api/v1/task-proposals/{}/start", card.id.0);
+        let (status, _) = call(
+            &fixture.app,
+            "POST",
+            &start,
+            Some(json!({"brief": "Edited."})),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        let (status, _) = call(
+            &fixture.app,
+            "POST",
+            "/api/v1/task-proposals/missing/start",
+            Some(json!({})),
+            None,
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test(flavor = "current_thread")]

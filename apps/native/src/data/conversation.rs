@@ -355,6 +355,12 @@ pub fn load(
             )
         })
         .collect();
+    conversation
+        .children
+        .extend(super::task_proposal::own_task_children(
+            &sessions,
+            &delegations,
+        ));
     for record in conversation.delegations.values_mut() {
         record.worktree = record.child_session_id.as_ref().and_then(|child| {
             summaries

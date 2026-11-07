@@ -6689,6 +6689,7 @@ mod editor_workspace_file_tests {
                 allow_file_edits: false,
                 approval_policy: None,
                 shared_checkout: false,
+                new_task: None,
             },
             result_summary: Some("done".to_string()),
             touched_files: Vec::new(),

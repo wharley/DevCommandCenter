@@ -2236,6 +2236,7 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_device_install"
                 | "dcc_agent_remember"
                 | "dcc_overview"
+                | "dcc_open_task"
         )
 }
 

@@ -97,6 +97,8 @@ mod tests {
             implement: true,
             parent_session_id: parent.into(),
             worktree: None,
+            shared_checkout: false,
+            new_task: None,
         }
     }
 
