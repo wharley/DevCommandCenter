@@ -1,5 +1,6 @@
 use dcc_core::domain::decision::DecisionEvaluation;
 
+mod agent_conversation;
 mod agent_memory;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -7540,7 +7541,7 @@ impl SessionCommandState {
         let objective = self.session_repo.load_session_objective(session_id)?;
         let agent = self.session_repo.load_session_agent(session_id)?;
         let memory = match &agent {
-            Some(agent) => self.agent_memory_block(&agent.id, true)?,
+            Some(agent) => self.agent_turn_context(session_id, &agent.id)?,
             None => None,
         };
         let merged = dcc_core::domain::agent::merge_agent_instructions(
@@ -9486,7 +9487,29 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(instructions.contains("- Responder em pt-BR"));
+        assert!(!instructions.contains("<dcc_agent_conversation>"));
+        assert!(!state.is_agent_conversation(&session.id).unwrap());
         assert_eq!(state.list_agent_session_bindings().unwrap().len(), 1);
+
+        // In its own conversation (its home's project) it also hears where it is.
+        let mut home = sample_session("agent-home");
+        home.project_id = dcc_core::domain::project::ProjectId(
+            dcc_core::domain::agent_conversation::home_project_id(&reviewer.id),
+        );
+        SessionRepo::save_session(&state, &home)
+            .await
+            .expect("save home session");
+        state
+            .bind_session_agent(&home.id, &reviewer.id)
+            .expect("bind home");
+        assert!(state.is_agent_conversation(&home.id).unwrap());
+        let instructions = state
+            .objective_tool_instructions(&home.id, Some("base".to_string()))
+            .unwrap()
+            .unwrap();
+        assert!(instructions.contains("\n\nbase\n\n<dcc_agent_conversation>"));
+        assert!(instructions.contains("dcc_overview"));
+        assert!(instructions.ends_with("</dcc_agent_memory>"));
 
         assert!(state.delete_resident_agent(&reviewer.id).unwrap());
         assert_eq!(

@@ -30,6 +30,7 @@ pub mod http_rpc_handler;
 pub mod keep_awake;
 pub mod menu_bar_snapshot;
 pub mod named_events;
+pub mod overview_tool;
 pub mod pairing;
 pub mod prompt_attachments;
 pub mod quick_composer_journal;

@@ -57,9 +57,10 @@ pub fn idea_project_id(root: &str, now_ms: u64) -> String {
 }
 
 impl AgentPage {
-    /// What the Researcher runs on: its own provider and model, else the
-    /// composer's (`handleCallAgent` with a target, no kickoff).
-    fn idea_execution(
+    /// What an agent runs on here (an idea, its conversation): its own
+    /// provider and model, else the composer's (`handleCallAgent` with a
+    /// target, no kickoff).
+    pub(super) fn agent_execution(
         &self,
         agent: &AgentRecord,
         cx: &gpui::App,
@@ -119,7 +120,7 @@ impl AgentPage {
             Toaster::error(cx.t("agents.research.missing"), cx);
             return;
         };
-        let (provider, model) = match self.idea_execution(&agent, cx) {
+        let (provider, model) = match self.agent_execution(&agent, cx) {
             Ok(execution) => execution,
             Err(reason) => {
                 Toaster::error(reason, cx);

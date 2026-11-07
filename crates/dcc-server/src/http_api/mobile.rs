@@ -21,8 +21,13 @@ pub(super) async fn catalog(
             .map_err(HttpApiError::internal)?;
     let repo = SqliteWorkspaceRepo::open(&config.read().await.db_path)
         .map_err(|e| HttpApiError::internal(e.to_string()))?;
-    let repositories = repo.list_repositories().await.map_err(core_error)?;
-    let workspaces = repo.list_workspaces().await.map_err(core_error)?;
+    // The agents' own conversations (their homes) are not projects or tasks.
+    let home =
+        |project: &str| dcc_core::domain::agent_conversation::home_agent_id(project).is_some();
+    let mut repositories = repo.list_repositories().await.map_err(core_error)?;
+    repositories.retain(|repository| !home(&repository.project_id.0));
+    let mut workspaces = repo.list_workspaces().await.map_err(core_error)?;
+    workspaces.retain(|workspace| !home(&workspace.project_id.0));
     Ok(Json(
         json!({ "providers": providers.catalog.providers, "repositories": repositories, "workspaces": workspaces }),
     ))

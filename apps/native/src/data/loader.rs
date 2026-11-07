@@ -11,6 +11,8 @@ use dcc_core::ports::{DelegationRepo, RepositoryRepo, WorkspaceBundleRepo, Works
 use dcc_infra::db::{SqliteSessionRepo, SqliteWorkspaceRepo};
 use futures::executor::block_on;
 
+use dcc_core::domain::agent_conversation::home_agent_id;
+
 use super::activity::{TaskActivity, provider_id, task_activity};
 use super::tasks::{Project, TaskSummary, fold_bundles};
 
@@ -48,6 +50,9 @@ pub struct SidebarData {
     /// The tasks that are still ideas, by id with their name (the
     /// Researcher's page lists only those).
     pub idea_tasks: HashMap<String, String>,
+    /// Each agent's own conversation task (its home), by agent id; not in
+    /// `tasks` nor `projects`.
+    pub agent_homes: HashMap<String, String>,
     /// Tasks an agent proposed or started, by the task they hang under.
     pub child_tasks: HashMap<String, Vec<super::child_tasks::ChildTask>>,
     /// The folders each project links, by repository id, and which of them
@@ -69,6 +74,9 @@ pub fn project_names(db_path: &Path) -> Vec<(String, String)> {
     };
     let mut projects: Vec<(String, String)> = Vec::new();
     for repository in block_on(workspaces.list_repositories()).unwrap_or_default() {
+        if home_agent_id(&repository.project_id.0).is_some() {
+            continue;
+        }
         if !projects
             .iter()
             .any(|(id, _)| *id == repository.project_id.0)
@@ -100,6 +108,7 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
     let projects: Vec<Project> = block_on(workspaces.list_repositories())?
         .iter()
         .filter(|repository| !ideas.contains(&repository.root_path))
+        .filter(|repository| home_agent_id(&repository.project_id.0).is_none())
         .map(|repository| Project {
             missing: !std::path::Path::new(&repository.root_path).is_dir(),
             ..Project::from_repository(repository)
@@ -122,10 +131,21 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         .filter(|task| ideas.contains(&task.root_path))
         .map(|task| (task.id.clone(), task.name.clone()))
         .collect();
+    let agent_homes: HashMap<String, String> = tasks
+        .iter()
+        .filter(|task| task.status.is_selectable())
+        .filter_map(|task| {
+            Some((
+                home_agent_id(&task.project_id)?.to_string(),
+                task.id.clone(),
+            ))
+        })
+        .collect();
     let bundles = block_on(workspaces.list_workspace_bundles())?;
     let tasks: Vec<TaskSummary> = fold_bundles(tasks, &bundles, &projects)
         .into_iter()
         .filter(|task| !ideas.contains(&task.root_path))
+        .filter(|task| home_agent_id(&task.project_id).is_none())
         .collect();
 
     let delegations = block_on(sessions.list_delegations(None, None))?;
@@ -189,6 +209,7 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         review_pending,
         agents,
         idea_tasks,
+        agent_homes,
         child_tasks,
     })
 }

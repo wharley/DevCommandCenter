@@ -147,6 +147,9 @@ fn task_port(port: u16, cx: &mut Context<Composer>) -> AnyElement {
 }
 
 pub(super) fn context_rail(composer: &Composer, cx: &mut Context<Composer>) -> Option<AnyElement> {
+    if crate::data::agent_conversation::is_agent_home(composer.session.project_id.as_deref()) {
+        return None;
+    }
     let context = composer.session.context.clone()?;
     let colors = cx.theme().colors.clone();
     let dark = cx.theme().appearance == Appearance::Dark;

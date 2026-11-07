@@ -214,6 +214,32 @@ impl ConversationView {
     }
 }
 
+/// The task's tools: the editor, terminals, Browser, device, delivery,
+/// ai-memory, delegations, calling agents and "Nova sessão" — none in an
+/// agent's own conversation.
+fn code_tools(
+    view: &ConversationView,
+    home: bool,
+    cx: &mut Context<ConversationView>,
+) -> Vec<AnyElement> {
+    if home {
+        return Vec::new();
+    }
+    let mut tools = vec![
+        view.editor_picker(cx).into_any_element(),
+        view.terminal_button(cx).into_any_element(),
+        view.browser_button(cx).into_any_element(),
+    ];
+    tools.extend(view.device_button(cx).map(IntoElement::into_any_element));
+    tools.push(view.delivery.clone().into_any_element());
+    tools.extend(view.ai_memory_export(cx).map(IntoElement::into_any_element));
+    tools.extend(view.ai_memory_menu(cx).map(IntoElement::into_any_element));
+    tools.extend(view.lineage_menu(cx).map(IntoElement::into_any_element));
+    tools.push(view.call_agents.clone().into_any_element());
+    tools.push(view.new_session_button(cx).into_any_element());
+    tools
+}
+
 /// The header over the conversation of a task.
 pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>) -> AnyElement {
     let colors = cx.theme().colors.clone();
@@ -230,6 +256,11 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
         Some(project) => format!("{project} / {title}").into(),
         None => title.clone().into(),
     };
+    // A resident agent's own conversation has no code: none of the task's
+    // tools, only resume, find and the history.
+    let home = crate::data::agent_conversation::is_agent_home(
+        data.and_then(|data| data.project_id.as_deref()),
+    );
     // `SessionAgentBadge`: the mascot of the agent this conversation runs as.
     let badge = view.session_agent_badge(
         "header-agent",
@@ -290,16 +321,7 @@ pub(crate) fn header(view: &ConversationView, cx: &mut Context<ConversationView>
                         .justify_end()
                         .gap(px(4.0))
                         .child(view.resume_button(cx))
-                        .child(view.editor_picker(cx))
-                        .child(view.terminal_button(cx))
-                        .child(view.browser_button(cx))
-                        .children(view.device_button(cx))
-                        .child(view.delivery.clone())
-                        .children(view.ai_memory_export(cx))
-                        .children(view.ai_memory_menu(cx))
-                        .children(view.lineage_menu(cx))
-                        .child(view.call_agents.clone())
-                        .child(view.new_session_button(cx))
+                        .children(code_tools(view, home, cx))
                         .child(view.find_buttons(cx))
                         .child(view.history_menu(cx)),
                 ),

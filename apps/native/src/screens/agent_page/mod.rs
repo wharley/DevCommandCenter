@@ -21,15 +21,18 @@ use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
 use crate::ui::{Icon, Tracked};
 
+mod conversation;
+#[cfg(test)]
+mod conversation_tests;
 mod editor;
 mod idea;
 mod memory;
 mod memory_history;
+#[cfg(test)]
+mod memory_tests;
 mod picker;
 mod pr_reviews;
 mod recap;
-#[cfg(test)]
-mod memory_tests;
 #[cfg(test)]
 mod tests;
 
@@ -62,6 +65,8 @@ pub struct AgentPage {
     pub(crate) db_path: std::path::PathBuf,
     /// "Nova ideia" while it runs.
     pub(crate) starting_idea: bool,
+    /// The first "Conversar" while it makes the conversation.
+    pub(crate) starting_conversation: bool,
     /// The desktop the idea goes through (tests point it elsewhere).
     pub(crate) api: Option<crate::data::desktop_api::DesktopApi>,
     /// "Memória", made on the first render (its fields need the window).
@@ -123,6 +128,7 @@ impl AgentPage {
             recap: recap::RecapRead::default(),
             db_path: crate::data::loader::database_path(),
             starting_idea: false,
+            starting_conversation: false,
             api: if cfg!(test) {
                 None
             } else {
@@ -205,10 +211,13 @@ impl AgentPage {
         let english = cx.global::<I18n>().locale() == Locale::En;
         let agent = &data.agent;
         let researcher = agent.preset.as_deref() == Some(RESEARCHER_PRESET);
+        let home = dcc_core::domain::agent_conversation::home_project_id(&agent.id);
         let rows: Vec<AnyElement> = agent
             .sessions
             .iter()
             .zip(&data.unread)
+            // Its own conversation has the card above.
+            .filter(|(session, _)| session.project_id != home)
             // The Researcher's list is its ideas in progress.
             .filter(|(session, _)| !researcher || data.idea_tasks.contains(&session.workspace_id))
             .enumerate()
@@ -437,6 +446,7 @@ impl Render for AgentPage {
                 )
         });
         let new_idea = researcher.then(|| self.new_idea_card(cx));
+        let conversation = (!chronicler).then(|| self.conversation_card(&data, cx));
         let sessions = (!chronicler).then(|| self.sessions(&data, cx));
         let pr_reviews = self.pr_reviews(&data, cx);
         // The Reporter has no conversations: its page is the recap.
@@ -528,6 +538,7 @@ impl Render for AgentPage {
                     .child(header)
                     .children(recap)
                     .children(new_idea)
+                    .children(conversation)
                     .children(how_to_call)
                     .children(sessions)
                     .children(pr_reviews)

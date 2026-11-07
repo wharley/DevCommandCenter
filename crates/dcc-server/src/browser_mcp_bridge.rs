@@ -100,7 +100,7 @@ const DELEGATION_MCP_TOOL_NAMES: [&str; 6] = [
 ];
 #[cfg(test)]
 const DCC_MCP_TOOL_COUNT: usize =
-    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 1;
+    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 2;
 /// Starting a delegation prepares a worktree and a child thread before it
 /// returns the task id; the child's turn itself runs in the background.
 const DELEGATE_TASK_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
@@ -1543,6 +1543,9 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
         name if crate::agent_memory_tools::is_agent_memory_tool(name) => {
             crate::agent_memory_tools::call_is_well_formed(&call.arguments)
         }
+        name if crate::overview_tool::is_overview_tool(name) => {
+            crate::overview_tool::call_is_well_formed(&call.arguments)
+        }
         name if crate::device_tools::is_device_tool(name) => {
             crate::device_tools::call_is_well_formed(name, &call.arguments)
         }
@@ -1698,6 +1701,24 @@ async fn dispatch_tool(
                 &binding.session_id,
                 call.arguments,
             );
+            if response["isError"] == true {
+                ToolDispatch {
+                    response,
+                    outcome: BrowserAuditOutcome::Failed,
+                    grant_state: BrowserAuditGrantState::NotApplicable,
+                }
+            } else {
+                ToolDispatch::executed(response, BrowserAuditGrantState::NotApplicable)
+            }
+        }
+        name if crate::overview_tool::is_overview_tool(name) => {
+            if !bridge.lease_is_current(binding) {
+                return ToolDispatch::computer_error(
+                    "DCC's overview is unavailable for this provider session",
+                );
+            }
+            let response =
+                crate::overview_tool::dispatch(&bridge.sessions, &binding.session_id).await;
             if response["isError"] == true {
                 ToolDispatch {
                     response,
@@ -3093,6 +3114,8 @@ fn tools() -> Vec<Value> {
     .into_iter()
     // A resident agent's memory.
     .chain([crate::agent_memory_tools::definition()])
+    // The person's tasks, in an agent's own conversation.
+    .chain([crate::overview_tool::definition()])
     // The iOS Simulator, where the app offers one.
     .chain(crate::device_tools::tools())
     .collect()
@@ -4457,6 +4480,7 @@ mod tests {
                 "dcc_task_wait",
                 "dcc_task_cancel",
                 "dcc_agent_remember",
+                "dcc_overview",
             ]
         );
         for tool in &schema_tools {

@@ -33,12 +33,12 @@ pub struct Metrics {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
-    workspace_id: String,
-    session_id: String,
-    title: String,
-    project: String,
-    status: String,
-    updated_at: String,
+    pub(crate) workspace_id: String,
+    pub(crate) session_id: String,
+    pub(crate) title: String,
+    pub(crate) project: String,
+    pub(crate) status: String,
+    pub(crate) updated_at: String,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +59,15 @@ fn priority(status: &str) -> u8 {
 // Read a consistent snapshot without loading prompts, deltas or full histories.
 // An active session alone is NOT evidence that a turn is running.
 fn read_tasks(conn: &mut Connection) -> Result<Vec<Task>, rusqlite::Error> {
+    read_tasks_with(conn, 5)
+}
+
+/// Every task that needs the person or runs, and the `recent` latest others.
+/// The agents' own conversations (their homes) are not tasks.
+pub(crate) fn read_tasks_with(
+    conn: &mut Connection,
+    recent_limit: usize,
+) -> Result<Vec<Task>, rusqlite::Error> {
     let tx = conn.transaction()?;
     let mut tasks = HashMap::<String, Task>::new();
     let mut sessions = tx.prepare(
@@ -67,7 +76,8 @@ fn read_tasks(conn: &mut Connection) -> Result<Vec<Task>, rusqlite::Error> {
          FROM dcc_sessions s JOIN dcc_threads t ON t.session_id = s.id
          JOIN dcc_workspaces w ON w.id = s.workspace_id
          LEFT JOIN dcc_repositories r ON r.project_id = w.project_id
-         WHERE t.archived_at IS NULL AND w.state NOT IN ('archived','completed')",
+         WHERE t.archived_at IS NULL AND w.state NOT IN ('archived','completed')
+         AND w.project_id NOT LIKE 'dcc-agent-%'",
     )?;
     let candidates = sessions
         .query_map([], |row| {
@@ -182,7 +192,7 @@ fn read_tasks(conn: &mut Connection) -> Result<Vec<Task>, rusqlite::Error> {
             true
         } else {
             recent += 1;
-            recent <= 5
+            recent <= recent_limit
         }
     });
     Ok(tasks)

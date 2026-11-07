@@ -108,6 +108,8 @@ pub struct AgentPageData {
     pub idea_tasks: std::collections::HashSet<String>,
     /// The reviewer's pull request reviews (`prReviews`).
     pub pr_reviews: Vec<PrReviewJob>,
+    /// The agent's own conversation task, once it has one.
+    pub home_task: Option<String>,
 }
 
 impl Sidebar {
@@ -146,6 +148,7 @@ impl Sidebar {
                 .map(|project| (project.project_id.clone(), project.display_name.clone()))
                 .collect(),
             idea_tasks: data.idea_tasks.keys().cloned().collect(),
+            home_task: data.agent_homes.get(id).cloned(),
             pr_reviews: if view.agent.preset.as_deref() == Some(REVIEWER_PRESET) {
                 self.pr_reviews.clone()
             } else {

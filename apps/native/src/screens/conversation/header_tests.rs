@@ -575,3 +575,39 @@ fn away_from_the_end_a_button_takes_the_thread_back_down(cx: &mut TestAppContext
     });
     assert!(cx.debug_bounds("conversation-scroll-jump").is_none());
 }
+
+#[gpui::test]
+fn an_agents_own_conversation_shows_no_code_tools(cx: &mut TestAppContext) {
+    let (view, cx, _, _server) = open(cx, vec![]);
+    let context = crate::data::conversation::ExecutionContext {
+        project_label: Some("Revisor".into()),
+        current_branch: Some("main".into()),
+        port: Some(41070),
+        ..Default::default()
+    };
+    let task = |project: &str| Conversation {
+        project_id: Some(project.into()),
+        context: Some(context.clone()),
+        ..data()
+    };
+    view.update(cx, |view, cx| view.apply(Rc::new(task("loja")), cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("header-terminal").is_some());
+    assert!(cx.debug_bounds("task-port").is_some(), "a task's rail");
+    assert_eq!(
+        cx.update(|_, cx| view.read(cx).composer.read(cx).placeholder_key(false)),
+        "composer.placeholder.default"
+    );
+
+    view.update(cx, |view, cx| view.apply(Rc::new(task("dcc-agent-a")), cx));
+    cx.run_until_parked();
+    for tool in ["header-terminal", "header-browser", "task-port"] {
+        assert!(cx.debug_bounds(tool).is_none(), "{tool} hidden");
+    }
+    assert!(cx.debug_bounds("header-resume").is_some());
+    assert!(cx.debug_bounds("header-history").is_some());
+    let composer = cx.update(|_, cx| view.read(cx).composer.read(cx).placeholder_key(false));
+    assert_eq!(composer, "composer.placeholder.agent");
+    let plan = cx.update(|_, cx| view.read(cx).composer.read(cx).placeholder_key(true));
+    assert_eq!(plan, "composer.placeholder.plan");
+}

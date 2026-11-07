@@ -56,6 +56,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+mod agent_conversation;
 mod agent_memory;
 mod agents;
 mod ai_memory;
@@ -992,6 +993,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         )
         .route("/api/v1/agents/:agent_id", post(agents::save))
         .route(
+            "/api/v1/agents/:agent_id/conversation",
+            post(agent_conversation::home),
+        )
+        .route(
             "/api/v1/agents/:agent_id/memory",
             get(agent_memory::show).post(agent_memory::add),
         )
@@ -1917,6 +1922,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/skills/compile",
             "POST /api/v1/sessions/:session_id/agent",
             "POST /api/v1/agents/:agent_id",
+            "POST /api/v1/agents/:agent_id/conversation",
             "GET /api/v1/agents/:agent_id/memory",
             "POST /api/v1/agents/:agent_id/memory",
             "POST /api/v1/agents/:agent_id/memory/:note_id",
@@ -6784,6 +6790,41 @@ mod tests {
             post_json(&fixture.app, &base, json!({ "body": "x".repeat(301) })).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
         assert!(!crate::remote_connector::remote_path_allowed(&base));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_agents_conversation_lives_in_its_home() {
+        let fixture = embedded_fixture().await;
+        let reviewer = fixture
+            .backend
+            .sessions
+            .list_resident_agents(
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+            )
+            .unwrap()
+            .remove(0);
+        let path = format!("/api/v1/agents/{}/conversation", reviewer.id);
+        let (status, home) = post_json(&fixture.app, &path, json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{home}");
+        assert_eq!(home["projectId"], format!("dcc-agent-{}", reviewer.id));
+        let root = home["rootPath"].as_str().unwrap();
+        assert!(
+            root.ends_with(&format!("agent-homes/{}", reviewer.id)),
+            "{root}"
+        );
+        let (status, again) = post_json(&fixture.app, &path, json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{again}");
+        assert_eq!(again["rootPath"], home["rootPath"]);
+        let (status, missing) = post_json(
+            &fixture.app,
+            "/api/v1/agents/nobody/conversation",
+            json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{missing}");
+        assert!(!crate::remote_connector::remote_path_allowed(&path));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

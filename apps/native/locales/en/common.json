@@ -212,6 +212,13 @@
     }
   },
   "agents": {
+    "conversation": {
+      "title": "Conversation",
+      "hint": "Ask what needs you, how the day went or where a task stands. Code changes happen in a project's task.",
+      "start": "Talk",
+      "continue": "Continue talking",
+      "taskName": "Conversation with {{agent}}"
+    },
     "memory": {
       "title": "Memory",
       "usage": "{{percent}}% full",
@@ -2049,6 +2056,7 @@
     },
     "placeholder": {
       "default": "Ask for changes, @mention files, and run /commands",
+      "agent": "Ask what needs you or how a task is going",
       "plan": "Describe what to change, then click Request Changes"
     },
     "controls": {

@@ -205,6 +205,19 @@ impl Composer {
             .plan(self.task(), self.session.session_id.as_deref())
     }
 
+    /// The input's hint: planning, a resident agent's own conversation
+    /// (no code there), or asking for changes.
+    pub(crate) fn placeholder_key(&self, plan: bool) -> &'static str {
+        if plan {
+            "composer.placeholder.plan"
+        } else if crate::data::agent_conversation::is_agent_home(self.session.project_id.as_deref())
+        {
+            "composer.placeholder.agent"
+        } else {
+            "composer.placeholder.default"
+        }
+    }
+
     pub(crate) fn plan_is_prompt_fallback(&self) -> bool {
         self.provider().is_some_and(|provider| {
             provider.capabilities.plan_mode_support == TurnControlSupport::PromptFallback
@@ -221,11 +234,7 @@ impl Composer {
         let session = self.session.session_id.clone();
         self.settings.set_plan(&task, session.as_deref(), on);
         self.save_settings();
-        let placeholder = if on {
-            cx_t(cx, "composer.placeholder.plan")
-        } else {
-            cx_t(cx, "composer.placeholder.default")
-        };
+        let placeholder = cx_t(cx, self.placeholder_key(on));
         self.input
             .update(cx, |input, cx| input.set_placeholder(placeholder, cx));
         cx.notify();

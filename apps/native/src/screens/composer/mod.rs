@@ -295,11 +295,7 @@ impl Composer {
         }
         self.sync_objective(switched, cx);
         let disabled = !self.session.usable();
-        let placeholder = if self.plan_mode() {
-            cx.t("composer.placeholder.plan")
-        } else {
-            cx.t("composer.placeholder.default")
-        };
+        let placeholder = cx.t(self.placeholder_key(self.plan_mode()));
         self.input.update(cx, |input, cx| {
             input.set_disabled(disabled, cx);
             input.set_placeholder(placeholder, cx);
