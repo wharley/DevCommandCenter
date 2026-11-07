@@ -218,7 +218,14 @@
   "agents": {
     "triggers": {
       "title": "Triggers",
-      "limits": "Up to {{daily}} runs a day and {{target}} per PR. Today: {{today}}.",
+      "limits": "Up to {{daily}} runs a day and {{target}} per PR or task. Today: {{today}}.",
+      "ciFailed": {
+        "title": "A task's CI failed",
+        "hint": "When the checks of one of your tasks' PRs fail, the Reviewer reads what failed and says the cause and the smallest fix in its conversation in that task. It only reads; who fixes it is up to you.",
+        "done": "{{agent}} looked at the CI",
+        "ready": "diagnosis in the task",
+        "failed": "could not ask for the diagnosis"
+      },
       "prUpdated": {
         "title": "A PR you reviewed was updated",
         "hint": "When commits or replies arrive after your review, the Reviewer reviews it again. Its comments wait as drafts on the PR; nothing is published.",

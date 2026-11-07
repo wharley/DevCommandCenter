@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use dcc_core::domain::provider::ProviderDescriptor;
-use dcc_core::domain::repository::Repository;
+use dcc_core::domain::repository::{Repository, github_slug};
 use dcc_core::ports::RepositoryRepo;
 use dcc_infra::db::SqliteWorkspaceRepo;
 use gpui::{App, BorrowAppContext, Context};
@@ -29,21 +29,6 @@ use crate::data::pr_review::AgentRun;
 use crate::data::pr_review_agent::review_prompt;
 use crate::data::pr_review_jobs::PrReviewJobs;
 use crate::i18n::{Args, Translate};
-
-/// `owner/name` of a GitHub remote, lowercased; other forges are not read.
-pub(super) fn repo_slug(remote_url: &str) -> Option<String> {
-    let rest = remote_url
-        .trim()
-        .split_once("github.com")
-        .map(|(_, rest)| rest)?;
-    let rest = rest.trim_start_matches([':', '/']);
-    let rest = rest.trim_end_matches('/');
-    let rest = rest.strip_suffix(".git").unwrap_or(rest);
-    let mut parts = rest.split('/');
-    let (owner, name) = (parts.next()?, parts.next()?);
-    (!owner.is_empty() && !name.is_empty() && parts.next().is_none())
-        .then(|| format!("{owner}/{name}").to_lowercase())
-}
 
 /// The host of a pull request's URL (`github.com`).
 fn url_host(url: &str) -> Option<String> {
@@ -67,7 +52,7 @@ pub(super) fn pick_repository(
             candidate
                 .remote_url
                 .as_deref()
-                .and_then(repo_slug)
+                .and_then(github_slug)
                 .as_deref()
                 == Some(wanted.as_str())
         })
@@ -264,17 +249,6 @@ mod tests {
 
     #[test]
     fn a_pull_request_finds_the_persons_checkout_and_the_hubs_id() {
-        for (remote, slug) in [
-            ("git@github.com:Acme/App.git", Some("acme/app")),
-            ("https://github.com/acme/app", Some("acme/app")),
-            ("https://github.com/acme/app.git/", Some("acme/app")),
-            ("ssh://git@github.com/acme/app.git", Some("acme/app")),
-            ("https://gitlab.com/acme/app.git", None),
-            ("https://github.com/acme", None),
-        ] {
-            assert_eq!(repo_slug(remote).as_deref(), slug, "{remote}");
-        }
-
         let repository =
             |root: &str, login: Option<&str>, remote: Option<&str>, at: &str| Repository {
                 id: dcc_core::domain::repository::RepositoryId(root.into()),

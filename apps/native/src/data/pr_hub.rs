@@ -77,12 +77,30 @@ pub struct Reviewed {
     pub since: SinceViewerReview,
 }
 
+/// `PullRequestHubFailing`: one of the person's own open pull requests whose
+/// checks fail, read in the same search, with its task when DCC has one.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Failing {
+    pub url: String,
+    pub number: u32,
+    /// `owner/name`
+    pub repository: String,
+    pub title: String,
+    pub head_branch: String,
+    pub head_sha: String,
+    pub workspace_id: Option<String>,
+    pub project_id: Option<String>,
+    pub workspace_path: Option<String>,
+}
+
 /// `PullRequestHubReviewedOutput`
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ReviewedList {
     pub items: Vec<Reviewed>,
     pub warnings: Vec<String>,
+    pub failing: Vec<Failing>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]

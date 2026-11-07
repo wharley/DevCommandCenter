@@ -1054,7 +1054,9 @@ pub fn create_change_request(
 /// The open pull requests the account reviewed, across every repository, in
 /// one search (the hub's "since your review"): each with the account's
 /// reviews, its last 100 commits and last 50 comments. `viewer` names whose.
-const REVIEWED_QUERY: &str = "query { viewer { login } search(query: \"is:pr is:open reviewed-by:@me archived:false\", type: ISSUE, first: 50) { nodes { ... on PullRequest { url number title repository { nameWithOwner } author { login } latestReviews(first: 30) { nodes { author { login } state submittedAt } } commits(last: 100) { nodes { commit { committedDate } } } comments(last: 50) { nodes { author { login } createdAt } } } } } }";
+/// `failing`, in the same call, is the account's own open pull requests whose
+/// checks fail, with the commit they fail on (the Reviewer's CI trigger).
+const REVIEWED_QUERY: &str = "query { viewer { login } search(query: \"is:pr is:open reviewed-by:@me archived:false\", type: ISSUE, first: 50) { nodes { ... on PullRequest { url number title repository { nameWithOwner } author { login } latestReviews(first: 30) { nodes { author { login } state submittedAt } } commits(last: 100) { nodes { commit { committedDate } } } comments(last: 50) { nodes { author { login } createdAt } } } } } failing: search(query: \"is:pr is:open author:@me status:failure archived:false\", type: ISSUE, first: 30) { nodes { ... on PullRequest { url number title headRefName repository { nameWithOwner } commits(last: 1) { nodes { commit { oid } } } } } } }";
 
 /// One `gh` for every repository; `login` only for an account that is not
 /// the CLI's active one (it costs two more calls for its token).

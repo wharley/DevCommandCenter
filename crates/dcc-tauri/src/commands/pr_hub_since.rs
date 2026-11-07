@@ -47,6 +47,10 @@ pub struct PullRequestHubReviewed {
 pub struct PullRequestHubReviewedOutput {
     pub items: Vec<PullRequestHubReviewed>,
     pub warnings: Vec<String>,
+    /// The person's own open pull requests whose checks fail, each with its
+    /// task when DCC has one; read in the same call (`pr_hub_failing`).
+    #[serde(default)]
+    pub failing: Vec<super::pr_hub_failing::PullRequestHubFailing>,
 }
 
 fn at(value: Option<&Value>) -> Option<DateTime<Utc>> {
@@ -150,6 +154,7 @@ pub(crate) fn from_search(answer: &Value) -> (Option<String>, Vec<PullRequestHub
 pub async fn pull_request_hub_reviewed_with_state(
     state: &WorkspaceCommandState,
 ) -> Result<PullRequestHubReviewedOutput, String> {
+    let db_path = state.db_path.clone();
     let chosen = dcc_infra::db::SqliteWorkspaceRepo::open(&state.db_path)
         .ok()
         .and_then(|repo| repo.get_forge_login_preference("github", HOST).ok())
@@ -160,6 +165,9 @@ pub async fn pull_request_hub_reviewed_with_state(
             Ok(answer) => {
                 let (viewer, items) = from_search(&answer);
                 output.items.extend(items);
+                output
+                    .failing
+                    .extend(super::pr_hub_failing::from_search(&answer));
                 viewer
             }
             Err(error) => {
@@ -181,14 +189,42 @@ pub async fn pull_request_hub_reviewed_with_state(
                             output.items.push(item);
                         }
                     }
+                    for pr in super::pr_hub_failing::from_search(&answer) {
+                        if !output.failing.iter().any(|known| known.url == pr.url) {
+                            output.failing.push(pr);
+                        }
+                    }
                 }
                 Err(error) => output.warnings.push(error),
             }
         }
+        link_failing(&db_path, &mut output.failing);
         output
     })
     .await
     .map_err(|error| error.to_string())
+}
+
+/// Each failing pull request's task, from DCC's database and, only for
+/// what the saved branches do not settle, the checkouts' local git.
+fn link_failing(
+    db_path: &std::path::Path,
+    failing: &mut [super::pr_hub_failing::PullRequestHubFailing],
+) {
+    use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
+    if failing.is_empty() {
+        return;
+    }
+    let Ok(repo) = dcc_infra::db::SqliteWorkspaceRepo::open(db_path) else {
+        return;
+    };
+    let repositories = futures::executor::block_on(repo.list_repositories()).unwrap_or_default();
+    let workspaces = futures::executor::block_on(repo.list_workspaces()).unwrap_or_default();
+    super::pr_hub_failing::link(failing, &repositories, &workspaces, |path| {
+        dcc_infra::workspace_git::read_branch_and_conflicts(path)
+            .ok()
+            .and_then(|(branch, _)| branch)
+    });
 }
 
 #[cfg(test)]

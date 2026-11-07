@@ -10,6 +10,7 @@ mod browser;
 mod device;
 mod browser_opens;
 mod cached;
+mod ci_trigger;
 mod cli_updates;
 mod computer;
 mod delivery;
@@ -325,7 +326,8 @@ impl Shell {
                 let watch = cx.new(|cx| pr_watch::PrWatch::new(sidebar, cx));
                 // News may wake the Reviewer (its trigger, `review_trigger`).
                 let news = cx.subscribe(&watch, |shell, _, event: &pr_watch::PrNewsArrived, cx| {
-                    shell.pr_news_arrived(&event.0, cx)
+                    shell.pr_news_arrived(&event.news, cx);
+                    shell.checks_failing(&event.failing, cx);
                 });
                 (watch, news)
             },

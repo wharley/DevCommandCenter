@@ -25,15 +25,18 @@ const KEEP_DAYS: i64 = 7;
 pub enum Trigger {
     /// A pull request the person reviewed got commits or replies.
     PrUpdated,
+    /// The checks of a task's pull request failed.
+    CiFailed,
 }
 
 impl Trigger {
-    pub const ALL: [Trigger; 1] = [Trigger::PrUpdated];
+    pub const ALL: [Trigger; 2] = [Trigger::PrUpdated, Trigger::CiFailed];
 
     /// `agents.triggers.<id>.*`
     pub fn id(self) -> &'static str {
         match self {
             Self::PrUpdated => "prUpdated",
+            Self::CiFailed => "ciFailed",
         }
     }
 }
@@ -54,6 +57,9 @@ struct Stored {
     /// The triggers turned on, by agent.
     on: BTreeMap<String, Vec<Trigger>>,
     runs: Vec<Run>,
+    /// The failing commit each pull request was last looked at for, by
+    /// `<agent>|<url>`: one failure wakes the agent once, a new push again.
+    failures: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
@@ -175,6 +181,35 @@ impl AgentTriggers {
         Ok(())
     }
 
+    /// The checks failing on `sha` were not looked at yet for this agent.
+    pub fn is_new_failure(&self, agent_id: &str, url: &str, sha: &str) -> bool {
+        self.stored
+            .failures
+            .get(&format!("{agent_id}|{url}"))
+            .is_none_or(|seen| seen != sha)
+    }
+
+    /// The failure on `sha` is handled (looked at, or held by a ceiling).
+    pub fn mark_failure(&mut self, agent_id: &str, url: &str, sha: &str) {
+        self.stored
+            .failures
+            .insert(format!("{agent_id}|{url}"), sha.to_string());
+        self.save();
+    }
+
+    /// Pull requests no longer failing are forgotten, so failing again later
+    /// is news.
+    pub fn keep_failures(&mut self, agent_id: &str, failing: &[&str]) {
+        let before = self.stored.failures.len();
+        self.stored.failures.retain(|key, _| {
+            key.split_once('|')
+                .is_none_or(|(agent, url)| agent != agent_id || failing.contains(&url))
+        });
+        if self.stored.failures.len() != before {
+            self.save();
+        }
+    }
+
     /// A run started; runs older than a week go.
     pub fn record(&mut self, agent_id: &str, trigger: Trigger, target: &str, now: DateTime<Utc>) {
         let cutoff = now - Duration::days(KEEP_DAYS);
@@ -245,6 +280,15 @@ mod tests {
         let mut later = again;
         later.record("rev", Trigger::PrUpdated, "pr-9", now + Duration::days(8));
         assert_eq!(later.stored.runs.len(), 1);
+
+        // A failure is news once per commit, and again after it recovers.
+        assert!(later.is_new_failure("rev", "pr-1", "abc"));
+        later.mark_failure("rev", "pr-1", "abc");
+        assert!(!later.is_new_failure("rev", "pr-1", "abc"));
+        assert!(later.is_new_failure("rev", "pr-1", "def"), "a new push");
+        assert!(later.is_new_failure("other", "pr-1", "abc"), "per agent");
+        later.keep_failures("rev", &["pr-2"]);
+        assert!(later.is_new_failure("rev", "pr-1", "abc"), "it recovered");
 
         later.set("rev", Trigger::PrUpdated, false);
         assert!(!AgentTriggers::load(path).any_on("rev"));

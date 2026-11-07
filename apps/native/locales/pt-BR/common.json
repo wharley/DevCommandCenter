@@ -218,7 +218,14 @@
   "agents": {
     "triggers": {
       "title": "Gatilhos",
-      "limits": "Até {{daily}} execuções por dia e {{target}} por PR. Hoje: {{today}}.",
+      "limits": "Até {{daily}} execuções por dia e {{target}} por PR ou tarefa. Hoje: {{today}}.",
+      "ciFailed": {
+        "title": "CI de uma tarefa falhou",
+        "hint": "Quando os checks do PR de uma tarefa sua falham, o Revisor lê o que falhou e diz a causa e a menor correção na conversa dele nessa tarefa. Ele só lê; você decide quem corrige.",
+        "done": "{{agent}} olhou o CI",
+        "ready": "diagnóstico na tarefa",
+        "failed": "não consegui pedir o diagnóstico"
+      },
       "prUpdated": {
         "title": "PR que você revisou foi atualizado",
         "hint": "Quando chegam commits ou respostas depois da sua revisão, o Revisor revisa de novo. Os comentários ficam como rascunho no PR; nada é publicado.",

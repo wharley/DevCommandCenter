@@ -57,3 +57,34 @@ pub fn path_leaf(path: &str) -> Option<String> {
         .find(|part| !part.is_empty())
         .map(str::to_string)
 }
+
+/// `owner/name` of a GitHub remote, lowercased (`git@github.com:Acme/App.git`
+/// → `acme/app`); other forges and malformed remotes give none.
+pub fn github_slug(remote_url: &str) -> Option<String> {
+    let (_, rest) = remote_url.trim().split_once("github.com")?;
+    let rest = rest.trim_start_matches([':', '/']).trim_end_matches('/');
+    let rest = rest.strip_suffix(".git").unwrap_or(rest);
+    let mut parts = rest.split('/');
+    let (owner, name) = (parts.next()?, parts.next()?);
+    (!owner.is_empty() && !name.is_empty() && parts.next().is_none())
+        .then(|| format!("{owner}/{name}").to_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_github_remote_names_its_repository() {
+        for (remote, slug) in [
+            ("git@github.com:Acme/App.git", Some("acme/app")),
+            ("https://github.com/acme/app", Some("acme/app")),
+            ("https://github.com/acme/app.git/", Some("acme/app")),
+            ("ssh://git@github.com/acme/app.git", Some("acme/app")),
+            ("https://gitlab.com/acme/app.git", None),
+            ("https://github.com/acme", None),
+        ] {
+            assert_eq!(github_slug(remote).as_deref(), slug, "{remote}");
+        }
+    }
+}
