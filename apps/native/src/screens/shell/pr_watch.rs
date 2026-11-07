@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use gpui::{App, BorrowAppContext, Context, Entity, Subscription, Task};
+use gpui::{App, BorrowAppContext, Context, Entity, EventEmitter, Subscription, Task};
 
 use crate::data::desktop_api::DesktopApi;
 use crate::data::pr_hub::Reviewed;
@@ -17,6 +17,9 @@ use crate::screens::sidebar::Sidebar;
 
 const FIRST_CHECK: Duration = Duration::from_secs(20);
 const EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// Pull requests with news just announced, for the Reviewer's trigger.
+pub struct PrNewsArrived(pub Vec<Reviewed>);
 
 pub struct PrWatch {
     _count: Subscription,
@@ -48,6 +51,9 @@ impl PrWatch {
                             for pr in &news {
                                 announce(pr, cx);
                             }
+                            if !news.is_empty() {
+                                cx.emit(PrNewsArrived(news));
+                            }
                         });
                         if alive.is_err() {
                             break;
@@ -63,6 +69,8 @@ impl PrWatch {
         }
     }
 }
+
+impl EventEmitter<PrNewsArrived> for PrWatch {}
 
 /// "perf(checkout): L1 em memória" — "acme/app #1014 · 1 commit novo".
 fn announce(pr: &Reviewed, cx: &App) {

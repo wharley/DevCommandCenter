@@ -216,6 +216,17 @@
     }
   },
   "agents": {
+    "triggers": {
+      "title": "Triggers",
+      "limits": "Up to {{daily}} runs a day and {{target}} per PR. Today: {{today}}.",
+      "prUpdated": {
+        "title": "A PR you reviewed was updated",
+        "hint": "When commits or replies arrive after your review, the Reviewer reviews it again. Its comments wait as drafts on the PR; nothing is published.",
+        "done": "{{agent}} reviewed again",
+        "ready": "drafts ready for you",
+        "failed": "the review did not finish"
+      }
+    },
     "conversation": {
       "title": "Conversation",
       "hint": "Ask what needs you, how the day went or where a task stands. Code changes happen in a project's task.",

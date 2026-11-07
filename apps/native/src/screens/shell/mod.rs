@@ -25,6 +25,7 @@ mod palette;
 mod pr_watch;
 mod quick_open;
 mod regions;
+mod review_trigger;
 mod session_search;
 mod settings;
 mod sidebar_events;
@@ -170,7 +171,7 @@ pub struct Shell {
     browser_approvals: Entity<crate::screens::browser::approval::BrowserApprovals>,
     /// "Atualização dos agentes", top right while a CLI has a newer release.
     cli_updates: Entity<cli_updates::CliUpdates>,
-    _pr_watch: Entity<pr_watch::PrWatch>,
+    _pr_watch: (Entity<pr_watch::PrWatch>, gpui::Subscription),
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
@@ -321,7 +322,12 @@ impl Shell {
             cli_updates: cx.new(cli_updates::CliUpdates::new),
             _pr_watch: {
                 let sidebar = sidebar.clone();
-                cx.new(|cx| pr_watch::PrWatch::new(sidebar, cx))
+                let watch = cx.new(|cx| pr_watch::PrWatch::new(sidebar, cx));
+                // News may wake the Reviewer (its trigger, `review_trigger`).
+                let news = cx.subscribe(&watch, |shell, _, event: &pr_watch::PrNewsArrived, cx| {
+                    shell.pr_news_arrived(&event.0, cx)
+                });
+                (watch, news)
             },
             notes,
             _notes: notes_follow,

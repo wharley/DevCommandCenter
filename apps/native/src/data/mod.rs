@@ -6,6 +6,7 @@ pub mod actions;
 pub mod activity;
 pub mod agent_conversation;
 pub mod agent_memory;
+pub mod agent_triggers;
 pub mod agents;
 pub mod ai_memory;
 pub mod ai_memory_settings;

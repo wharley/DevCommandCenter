@@ -35,6 +35,9 @@ mod pr_reviews;
 mod recap;
 #[cfg(test)]
 mod tests;
+mod triggers;
+#[cfg(test)]
+mod triggers_tests;
 
 pub const RESEARCHER_PRESET: &str = "researcher";
 
@@ -447,6 +450,7 @@ impl Render for AgentPage {
         });
         let new_idea = researcher.then(|| self.new_idea_card(cx));
         let conversation = (!chronicler).then(|| self.conversation_card(&data, cx));
+        let triggers = self.triggers_card(&data, cx);
         let sessions = (!chronicler).then(|| self.sessions(&data, cx));
         let pr_reviews = self.pr_reviews(&data, cx);
         // The Reporter has no conversations: its page is the recap.
@@ -539,6 +543,7 @@ impl Render for AgentPage {
                     .children(recap)
                     .children(new_idea)
                     .children(conversation)
+                    .children(triggers)
                     .children(how_to_call)
                     .children(sessions)
                     .children(pr_reviews)
