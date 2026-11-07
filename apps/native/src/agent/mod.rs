@@ -4,6 +4,7 @@
 mod avatar;
 mod mood;
 mod robot;
+mod shapes;
 
 pub use avatar::AgentAvatarView;
 pub use mood::{MascotBlink, Mood, MoodAvatarView};

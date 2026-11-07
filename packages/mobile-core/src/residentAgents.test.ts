@@ -50,13 +50,21 @@ describe("resident agents", () => {
 	});
 
 	it("draws the desktop's octopus for each state", () => {
-		const avatar = { color: "violet", arms: 9, eyes: "round" };
+		const avatar = { color: "violet", arms: 9, eyes: "round", shape: "octopus", accessory: "none" };
 		const asleep = residentMascotSvg(avatar, "asleep");
 		expect(asleep).toContain('opacity="0.6"');
 		expect(asleep).toContain("M78 14h8");
 		expect(asleep.match(/y="56"/g)?.length).toBe(5);
 		expect(residentMascotSvg(avatar, "needsYou")).toContain("#F2A93B");
 		expect(residentMascotSvg(avatar, "watching")).not.toEqual(residentMascotSvg(avatar, "working"));
+		const drop = residentMascotSvg({ ...avatar, shape: "drop", accessory: "magnifier" }, "needsYou");
+		expect(drop).toContain("M50 8C64");
+		expect(drop).toContain('translate(0 16)');
+		expect(drop).not.toContain("rotate(24 84 52)");
+		expect(residentMascotSvg({ ...avatar, accessory: "glasses" }, "watching")).toContain('r="10.5"');
+		const parsed = parseResidentAgents(answer, null);
+		if (!parsed || parsed.unchanged) throw new Error("expected agents");
+		expect(parsed.agents[0].avatar).toMatchObject({ shape: "octopus", accessory: "none" });
 	});
 
 	it("keeps the agents' conversations out of the task lists", () => {

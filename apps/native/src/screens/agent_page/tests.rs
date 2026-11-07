@@ -30,6 +30,8 @@ fn agent(id: &str, preset: &str, sessions: Vec<AgentSession>) -> AgentRecord {
         name: "Revisor".into(),
         preset: Some(preset.into()),
         avatar: dcc_core::domain::agent::AgentAvatar {
+            shape: "octopus".to_string(),
+            accessory: "none".to_string(),
             color: "violet".into(),
             arms: 3,
             eyes: "round".into(),
@@ -196,6 +198,14 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
     let bounds = cx.debug_bounds("agent-editor-color-pink").unwrap();
     cx.simulate_click(bounds.center(), Modifiers::none());
     cx.run_until_parked();
+    // Arms are the octopus': another shape drops that row.
+    assert!(cx.debug_bounds("agent-editor-arms-4").is_some());
+    for tile in ["agent-editor-shape-ghost", "agent-editor-accessory-cap"] {
+        let bounds = cx.debug_bounds(tile).unwrap();
+        cx.simulate_click(bounds.center(), Modifiers::none());
+        cx.run_until_parked();
+    }
+    assert!(cx.debug_bounds("agent-editor-arms-4").is_none());
     editor.update(cx, |editor, cx| {
         editor.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
         editor
@@ -229,6 +239,8 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
     let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();
     assert_eq!(body["name"], "Crítico");
     assert_eq!(body["avatar"]["color"], "pink");
+    assert_eq!(body["avatar"]["shape"], "ghost");
+    assert_eq!(body["avatar"]["accessory"], "cap");
     assert_eq!(body["providerId"], "codex");
     assert_eq!(body["offerPrompt"], "");
     assert_eq!(body["role"], "Revise o diff.");

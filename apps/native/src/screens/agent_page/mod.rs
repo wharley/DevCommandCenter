@@ -25,6 +25,7 @@ mod conversation;
 #[cfg(test)]
 mod conversation_tests;
 mod editor;
+mod editor_look;
 mod idea;
 mod memory;
 mod memory_history;

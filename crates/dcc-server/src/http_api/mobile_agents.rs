@@ -107,6 +107,8 @@ pub(super) fn agents_view(
                     "color": agent.avatar.color,
                     "arms": agent.avatar.arms,
                     "eyes": agent.avatar.eyes,
+                    "shape": agent.avatar.shape,
+                    "accessory": agent.avatar.accessory,
                 },
                 "state": state,
                 "conversationSessionId": home_session,
@@ -188,6 +190,8 @@ mod tests {
             model: None,
             effort: None,
             avatar: AgentAvatar {
+                shape: "octopus".to_string(),
+                accessory: "none".to_string(),
                 color: "violet".into(),
                 arms: 3,
                 eyes: "round".into(),

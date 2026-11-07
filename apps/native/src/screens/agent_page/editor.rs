@@ -6,10 +6,7 @@
 
 use std::path::PathBuf;
 
-use dcc_core::domain::agent::{
-    AGENT_AVATAR_COLORS, AGENT_AVATAR_EYES, AGENT_AVATAR_MAX_ARMS, AGENT_AVATAR_MIN_ARMS,
-    AgentAvatar, CHRONICLER_PRESET, REVIEWER_PRESET,
-};
+use dcc_core::domain::agent::{AgentAvatar, CHRONICLER_PRESET, REVIEWER_PRESET};
 use dcc_core::domain::provider::ProviderDescriptor;
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FontWeight, IntoElement, Render,
@@ -242,46 +239,6 @@ impl AgentEditor {
     }
 
     /// `Choice`: a 44px tile, its ring when chosen.
-    fn choice(
-        &self,
-        id: String,
-        selected: bool,
-        avatar: AgentAvatar,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        let chosen = avatar.clone();
-        div()
-            .id(SharedString::from(id.clone()))
-            .debug_selector(move || id.clone())
-            .flex()
-            .size(px(44.0))
-            .items_center()
-            .justify_center()
-            .rounded(px(8.0))
-            .border_1()
-            .cursor_pointer()
-            .map(|tile| {
-                if selected {
-                    tile.border_color(colors.ring).bg(colors.accent)
-                } else {
-                    tile.border_color(colors.border.opacity(0.7))
-                        .hover(|tile| tile.bg(colors.accent.opacity(0.5)))
-                }
-            })
-            .on_click(cx.listener(move |editor, _, _, cx| {
-                editor.avatar = chosen.clone();
-                cx.notify();
-            }))
-            .child(AgentAvatarView::new(
-                SharedString::from(format!("{}-{}-{}", avatar.color, avatar.arms, avatar.eyes)),
-                &avatar,
-                None,
-                28.0,
-            ))
-            .into_any_element()
-    }
-
     fn switch_row(
         &self,
         id: &'static str,
@@ -318,43 +275,6 @@ impl AgentEditor {
 impl Render for AgentEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
-        let colors_row: Vec<AnyElement> = AGENT_AVATAR_COLORS
-            .iter()
-            .map(|color| {
-                let avatar = AgentAvatar {
-                    color: (*color).into(),
-                    ..self.avatar.clone()
-                };
-                self.choice(
-                    format!("agent-editor-color-{color}"),
-                    self.avatar.color == *color,
-                    avatar,
-                    cx,
-                )
-            })
-            .collect();
-        let mut shapes: Vec<AnyElement> = (AGENT_AVATAR_MIN_ARMS..=AGENT_AVATAR_MAX_ARMS)
-            .map(|arms| {
-                let avatar = AgentAvatar {
-                    arms,
-                    ..self.avatar.clone()
-                };
-                self.choice(
-                    format!("agent-editor-arms-{arms}"),
-                    self.avatar.arms == arms,
-                    avatar,
-                    cx,
-                )
-            })
-            .collect();
-        for eyes in AGENT_AVATAR_EYES {
-            let avatar = AgentAvatar {
-                eyes: (*eyes).into(),
-                ..self.avatar.clone()
-            };
-            let selected = self.avatar.eyes == *eyes;
-            shapes.push(self.choice(format!("agent-editor-eyes-{eyes}"), selected, avatar, cx));
-        }
         let preset = self.agent.preset.clone();
         let name_empty = self.name.read(cx).text().trim().is_empty();
         let mut body = div()
@@ -389,13 +309,7 @@ impl Render for AgentEditor {
             .child(field(
                 cx.t("agents.editor.avatar"),
                 None,
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.0))
-                    .child(div().flex().flex_wrap().gap(px(6.0)).children(colors_row))
-                    .child(div().flex().flex_wrap().gap(px(6.0)).children(shapes))
-                    .into_any_element(),
+                self.look_rows(cx),
                 cx,
             ))
             .child(field(

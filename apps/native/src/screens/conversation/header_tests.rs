@@ -342,6 +342,8 @@ fn the_lineage_lists_the_childs_delegation_and_cancels_it(cx: &mut TestAppContex
         let agent = SessionAgent {
             name: "Revisor".into(),
             avatar: dcc_core::domain::agent::AgentAvatar {
+                shape: "octopus".to_string(),
+                accessory: "none".to_string(),
                 color: "violet".into(),
                 arms: 2,
                 eyes: "round".into(),
@@ -417,6 +419,8 @@ fn agent(id: &str, name: &str, preset: Option<&str>) -> crate::data::agents::Age
         name: name.into(),
         preset: preset.map(str::to_string),
         avatar: dcc_core::domain::agent::AgentAvatar {
+            shape: "octopus".to_string(),
+            accessory: "none".to_string(),
             color: "violet".into(),
             arms: 2,
             eyes: "round".into(),

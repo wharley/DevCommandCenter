@@ -166,6 +166,8 @@ mod tests {
             name: "Revisor".into(),
             preset: Some("reviewer".into()),
             avatar: dcc_core::domain::agent::AgentAvatar {
+                shape: "octopus".to_string(),
+                accessory: "none".to_string(),
                 color: "violet".into(),
                 arms: 3,
                 eyes: "round".into(),

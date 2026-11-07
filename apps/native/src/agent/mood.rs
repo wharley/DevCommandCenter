@@ -195,6 +195,8 @@ mod tests {
 
     fn avatar() -> AgentAvatar {
         AgentAvatar {
+            shape: "octopus".to_string(),
+            accessory: "none".to_string(),
             color: "violet".into(),
             arms: 3,
             eyes: "round".into(),

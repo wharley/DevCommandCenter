@@ -63,28 +63,24 @@ pub(super) struct Face {
 /// The mascot's body in the agent's color and arms, with `face` on it.
 pub(super) fn draw(avatar: &AgentAvatar, face: Face) -> String {
     let fill = color(&avatar.color);
-    let arms = avatar.arms.clamp(3, 5) as usize;
-    let gap = 3.0;
-    let width = (68.0 - gap * (arms as f32 - 1.0)) / arms as f32;
+    let shape = super::shapes::silhouette(&avatar.shape, avatar.arms, fill);
     let mut body = String::new();
-    if face.raised_arm {
+    if face.raised_arm && shape.raises_arm {
         body.push_str(&format!(
             r##"<rect x="78" y="14" width="13" height="40" rx="6.5" fill="{fill}" transform="rotate(24 84 52)"/>"##
         ));
     }
-    for index in 0..arms {
-        let height = if index % 2 == 0 { 26 } else { 20 };
-        body.push_str(&format!(
-            r##"<rect x="{}" y="56" width="{width}" height="{height}" rx="{}" fill="{fill}"/>"##,
-            16.0 + index as f32 * (width + gap),
-            width / 2.0
-        ));
-    }
+    body.push_str(&shape.body);
+    // Eyes are drawn for the octopus' head; other shapes carry them lower.
     body.push_str(&format!(
-        r##"<path d="M16 60V52C16 29 32 14 50 14s34 15 34 38v8z" fill="{fill}"/>"##
+        r##"<g transform="translate(0 {})">{}</g>"##,
+        shape.eyes_dy, face.eyes
     ));
-    body.push_str(r##"<ellipse cx="36" cy="27" rx="9" ry="5" fill="#fff" opacity="0.22" transform="rotate(-28 36 27)"/>"##);
-    body.push_str(&face.eyes);
+    body.push_str(&super::shapes::accessory(
+        &avatar.accessory,
+        &avatar.shape,
+        shape.eyes_dy,
+    ));
     format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><g opacity="{}">{body}</g>{}{}</svg>"##,
         face.opacity, face.badge, face.extra
@@ -196,6 +192,8 @@ mod tests {
 
     fn avatar(arms: u8) -> AgentAvatar {
         AgentAvatar {
+            shape: "octopus".to_string(),
+            accessory: "none".to_string(),
             color: "violet".into(),
             arms,
             eyes: "round".into(),

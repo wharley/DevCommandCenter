@@ -18,7 +18,15 @@ export function isAgentHome(projectId: string | null | undefined): boolean {
 
 export type ResidentAgentState = "needsYou" | "working" | "watching" | "asleep";
 
-export type ResidentAgentAvatar = { color: string; arms: number; eyes: string };
+export type ResidentAgentAvatar = {
+	color: string;
+	arms: number;
+	eyes: string;
+	/** `octopus` | `drop` | `block` | `ghost` */
+	shape: string;
+	/** `none` | `glasses` | `magnifier` | `antenna` | `cap` */
+	accessory: string;
+};
 
 export type ResidentAgent = {
 	id: string;
@@ -61,6 +69,8 @@ function parseAgent(raw: unknown): ResidentAgent | null {
 			color: text(avatar.color) ?? "blue",
 			arms: typeof avatar.arms === "number" ? avatar.arms : 3,
 			eyes: text(avatar.eyes) ?? "round",
+			shape: text(avatar.shape) ?? "octopus",
+			accessory: text(avatar.accessory) ?? "none",
 		},
 		state,
 		conversationSessionId: text(value.conversationSessionId),
@@ -164,24 +174,81 @@ const SLEEPING_EYES = `<path d="M32 45q7 6 14 0M54 45q7 6 14 0" fill="none" stro
 const ZZ = `<path d="M78 14h8l-8 9h8M88 4h5l-5 6h5" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
 const WAIT_BADGE = `<circle cx="82" cy="80" r="15" fill="#F2A93B"/><path d="M82 72v9" stroke="${INK}" stroke-width="4" stroke-linecap="round"/><circle cx="82" cy="87" r="2.3" fill="${INK}"/>`;
 
+const CAP = "#1f2937";
+const ANTENNA_TIP = "#F2545B";
+
+/** `apps/native/src/agent/shapes.rs`: a shape's body, where its eyes sit
+ *  (down from the octopus' 46) and whether it raises an arm. */
+function silhouette(shape: string, arms: number, fill: string): { body: string; eyesDy: number; raisesArm: boolean } {
+	const shine = (x: number, y: number) =>
+		`<ellipse cx="${x}" cy="${y}" rx="9" ry="5" fill="#fff" opacity="0.22" transform="rotate(-28 ${x} ${y})"/>`;
+	switch (shape) {
+		case "drop":
+			return {
+				body: `<path d="M50 8C64 30 82 46 82 64a32 32 0 0 1-64 0C18 46 36 30 50 8z" fill="${fill}"/>${shine(40, 46)}`,
+				eyesDy: 16,
+				raisesArm: false,
+			};
+		case "block":
+			return { body: `<rect x="17" y="18" width="66" height="66" rx="18" fill="${fill}"/>${shine(32, 30)}`, eyesDy: 6, raisesArm: false };
+		case "ghost":
+			return {
+				body: `<path d="M16 86V50C16 29 32 14 50 14s34 15 34 36v36l-8.5-7-8.5 7-8.5-7-8.5 7-8.5-7-8.5 7-8.5-7z" fill="${fill}"/>${shine(36, 27)}`,
+				eyesDy: 0,
+				raisesArm: false,
+			};
+		default: {
+			const count = Math.min(5, Math.max(3, Math.round(arms)));
+			const gap = 3;
+			const width = (68 - gap * (count - 1)) / count;
+			let body = "";
+			for (let index = 0; index < count; index++) {
+				const height = index % 2 === 0 ? 26 : 20;
+				body += `<rect x="${16 + index * (width + gap)}" y="56" width="${width}" height="${height}" rx="${width / 2}" fill="${fill}"/>`;
+			}
+			body += `<path d="M16 60V52C16 29 32 14 50 14s34 15 34 38v8z" fill="${fill}"/>${shine(36, 27)}`;
+			return { body, eyesDy: 0, raisesArm: true };
+		}
+	}
+}
+
+function accessory(item: string, shape: string, eyesDy: number): string {
+	const head =
+		shape === "drop"
+			? { capTop: 22, capHalf: 15, antenna: 14 }
+			: shape === "block"
+				? { capTop: 16, capHalf: 27, antenna: 19 }
+				: { capTop: 12, capHalf: 24, antenna: 15 };
+	const eyes = 46 + eyesDy;
+	switch (item) {
+		case "glasses":
+			return `<g fill="none" stroke="${INK}" stroke-width="3.5"><circle cx="39" cy="${eyes}" r="10.5"/><circle cx="61" cy="${eyes}" r="10.5"/><path d="M49.5 ${eyes}h1" stroke-linecap="round"/></g>`;
+		case "magnifier":
+			return `<circle cx="20" cy="24" r="9" fill="#fff" fill-opacity="0.45" stroke="${INK}" stroke-width="4"/><path d="M13.5 30.5l-7 7" stroke="${INK}" stroke-width="5" stroke-linecap="round"/>`;
+		case "antenna":
+			return `<path d="M50 ${head.antenna}v-9" stroke="${INK}" stroke-width="3.5" stroke-linecap="round"/><circle cx="50" cy="${head.antenna - 11}" r="4.5" fill="${ANTENNA_TIP}"/>`;
+		case "cap": {
+			const { capTop: top, capHalf: half } = head;
+			return `<path d="M${50 - half} ${top + 15}Q50 ${top - 12} ${50 + half} ${top + 15}z" fill="${CAP}"/><path d="M${50 + half - 6} ${top + 15}h14" stroke="${CAP}" stroke-width="4" stroke-linecap="round"/>`;
+		}
+		default:
+			return "";
+	}
+}
+
 /** The mascot of `avatar` as the agent is, as an SVG document. */
 export function residentMascotSvg(avatar: ResidentAgentAvatar, state: ResidentAgentState): string {
 	const fill = color(avatar.color);
-	const arms = Math.min(5, Math.max(3, Math.round(avatar.arms)));
-	const gap = 3;
-	const width = (68 - gap * (arms - 1)) / arms;
+	const shape = silhouette(avatar.shape, avatar.arms, fill);
 	let body = "";
-	if (state === "needsYou") {
+	if (state === "needsYou" && shape.raisesArm) {
 		body += `<rect x="78" y="14" width="13" height="40" rx="6.5" fill="${fill}" transform="rotate(24 84 52)"/>`;
 	}
-	for (let index = 0; index < arms; index++) {
-		const height = index % 2 === 0 ? 26 : 20;
-		body += `<rect x="${16 + index * (width + gap)}" y="56" width="${width}" height="${height}" rx="${width / 2}" fill="${fill}"/>`;
-	}
-	body += `<path d="M16 60V52C16 29 32 14 50 14s34 15 34 38v8z" fill="${fill}"/>`;
-	body += `<ellipse cx="36" cy="27" rx="9" ry="5" fill="#fff" opacity="0.22" transform="rotate(-28 36 27)"/>`;
-	body +=
+	body += shape.body;
+	const eyes =
 		state === "asleep" ? SLEEPING_EYES : state === "watching" ? looking(3, 0) : state === "working" ? focusEyes() : roundEyes();
+	body += `<g transform="translate(0 ${shape.eyesDy})">${eyes}</g>`;
+	body += accessory(avatar.accessory, avatar.shape, shape.eyesDy);
 	const opacity = state === "asleep" ? 0.6 : 1;
 	const badge = state === "needsYou" ? WAIT_BADGE : "";
 	const extra = state === "asleep" ? ZZ : "";

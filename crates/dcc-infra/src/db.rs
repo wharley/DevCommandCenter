@@ -2752,6 +2752,8 @@ impl SqliteSessionRepo {
         Self::migrate_ai_memory_export_history(&mut conn)?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "offer_prompt", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "effort", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "avatar_shape", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "avatar_accessory", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
             "dcc_agents",
@@ -7810,10 +7812,11 @@ impl SqliteSessionRepo {
 
     // ---- Resident agents ---------------------------------------------------
 
-    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions, a.effort";
+    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions, a.effort, a.avatar_shape, a.avatar_accessory";
 
     fn resident_agent_from_row(row: &Row<'_>) -> rusqlite::Result<ResidentAgent> {
         let preset: Option<String> = row.get(9)?;
+        let look = dcc_core::domain::agent::default_look(preset.as_deref());
         // A preset row created before the offer existed has no value: it offers.
         let offer_prompt = row.get::<_, Option<String>>(12)?.unwrap_or_else(|| {
             if preset.is_some() {
@@ -7833,6 +7836,13 @@ impl SqliteSessionRepo {
                 color: row.get(6)?,
                 arms: row.get(7)?,
                 eyes: row.get(8)?,
+                // Stored before shapes existed: the look its preset gives it.
+                shape: row
+                    .get::<_, Option<String>>(15)?
+                    .unwrap_or_else(|| look.0.to_string()),
+                accessory: row
+                    .get::<_, Option<String>>(16)?
+                    .unwrap_or_else(|| look.1.to_string()),
             },
             preset,
             created_at: row.get(10)?,
@@ -7898,7 +7908,7 @@ impl SqliteSessionRepo {
             let draft = draft.map_err(dcc_core::CoreError::InvalidInput)?;
             let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
             conn.execute(
-                "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt) VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
+                "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, avatar_shape, avatar_accessory) VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11, ?12)",
                 params![
                     uuid::Uuid::new_v4().to_string(),
                     draft.name,
@@ -7910,6 +7920,8 @@ impl SqliteSessionRepo {
                     preset,
                     now,
                     draft.offer_prompt,
+                    draft.avatar.shape,
+                    draft.avatar.accessory,
                 ],
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -8006,8 +8018,8 @@ impl SqliteSessionRepo {
             Some(id) => {
                 let updated = conn
                     .execute(
-                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12, effort = ?13 WHERE id = ?1 AND deleted_at IS NULL",
-                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions, draft.effort],
+                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12, effort = ?13, avatar_shape = ?14, avatar_accessory = ?15 WHERE id = ?1 AND deleted_at IS NULL",
+                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory],
                     )
                     .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 if updated != 1 {
@@ -8018,8 +8030,8 @@ impl SqliteSessionRepo {
             None => {
                 let id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
-                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions, effort) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11, ?12)",
-                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions, draft.effort],
+                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions, effort, avatar_shape, avatar_accessory) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11, ?12, ?13, ?14)",
+                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory],
                 )
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 id
@@ -15335,6 +15347,66 @@ mod tests {
             .recover_orphaned_running_turns("2026-09-02T12:00:00Z")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn each_agent_keeps_its_shape_and_older_rows_get_their_presets() {
+        use dcc_core::domain::agent::{
+            ChroniclerPresetText, ResearcherPresetText, ResidentAgentDraft, ReviewerPresetText,
+        };
+        let repo = SqliteSessionRepo::from_connection(in_memory_conn()).unwrap();
+        let (reviewer, research, chronicle) = (
+            ReviewerPresetText::default(),
+            ResearcherPresetText::default(),
+            ChroniclerPresetText::default(),
+        );
+        let agents = repo
+            .list_resident_agents(&reviewer, &research, &chronicle)
+            .unwrap();
+        let looks: Vec<(&str, &str)> = agents
+            .iter()
+            .map(|agent| (agent.avatar.shape.as_str(), agent.avatar.accessory.as_str()))
+            .collect();
+        assert_eq!(
+            looks,
+            [
+                ("octopus", "glasses"),
+                ("drop", "magnifier"),
+                ("block", "antenna")
+            ]
+        );
+        // Rows stored before shapes existed read as their preset's look.
+        repo.conn
+            .lock()
+            .unwrap()
+            .execute_batch("UPDATE dcc_agents SET avatar_shape = NULL, avatar_accessory = NULL")
+            .unwrap();
+        let agents = repo
+            .list_resident_agents(&reviewer, &research, &chronicle)
+            .unwrap();
+        assert_eq!(agents[1].avatar.shape, "drop");
+        assert_eq!(agents[2].avatar.accessory, "antenna");
+
+        let mut draft = ResidentAgentDraft::reviewer(&reviewer);
+        draft.name = "QA".to_string();
+        draft.role = "Test it.".to_string();
+        draft.avatar.shape = "ghost".to_string();
+        draft.avatar.accessory = "cap".to_string();
+        let qa = repo.save_resident_agent(None, draft.clone()).unwrap();
+        assert_eq!(qa.avatar.shape, "ghost");
+        draft.avatar.shape = "triangle".to_string();
+        assert!(repo.save_resident_agent(Some(&qa.id), draft).is_err());
+        let stored = repo
+            .list_resident_agents(&reviewer, &research, &chronicle)
+            .unwrap()
+            .into_iter()
+            .find(|agent| agent.id == qa.id)
+            .unwrap();
+        let stored_look = (
+            stored.avatar.shape.as_str(),
+            stored.avatar.accessory.as_str(),
+        );
+        assert_eq!(stored_look, ("ghost", "cap"));
     }
 
     #[test]

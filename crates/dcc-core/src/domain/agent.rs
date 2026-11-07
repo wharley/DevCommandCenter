@@ -24,6 +24,10 @@ pub const AGENT_AVATAR_COLORS: &[&str] = &["blue", "cyan", "violet", "amber", "g
 pub const AGENT_AVATAR_EYES: &[&str] = &["round", "smile", "visor"];
 pub const AGENT_AVATAR_MIN_ARMS: u8 = 3;
 pub const AGENT_AVATAR_MAX_ARMS: u8 = 5;
+/// The mascot's silhouette: the octopus (arms count), a drop, a block, a ghost.
+pub const AGENT_AVATAR_SHAPES: &[&str] = &["octopus", "drop", "block", "ghost"];
+/// What it wears or holds.
+pub const AGENT_AVATAR_ACCESSORIES: &[&str] = &["none", "glasses", "magnifier", "antenna", "cap"];
 pub const REVIEWER_PRESET: &str = "reviewer";
 pub const RESEARCHER_PRESET: &str = "researcher";
 /// Shown as the Reporter; the preset keeps the id it was first stored with.
@@ -216,6 +220,31 @@ pub struct AgentAvatar {
     pub color: String,
     pub arms: u8,
     pub eyes: String,
+    /// `AGENT_AVATAR_SHAPES`; older clients send none: the octopus.
+    #[serde(default = "default_shape")]
+    pub shape: String,
+    /// `AGENT_AVATAR_ACCESSORIES`; older clients send none.
+    #[serde(default = "default_accessory")]
+    pub accessory: String,
+}
+
+fn default_shape() -> String {
+    "octopus".to_string()
+}
+
+fn default_accessory() -> String {
+    "none".to_string()
+}
+
+/// The silhouette and accessory a stored agent shows when it has none yet:
+/// each built-in agent its own, a person's agent the plain octopus.
+pub fn default_look(preset: Option<&str>) -> (&'static str, &'static str) {
+    match preset {
+        Some(REVIEWER_PRESET) => ("octopus", "glasses"),
+        Some(RESEARCHER_PRESET) => ("drop", "magnifier"),
+        Some(CHRONICLER_PRESET) => ("block", "antenna"),
+        _ => ("octopus", "none"),
+    }
 }
 
 /// Person-authored fields. Identity and timestamps are owned by the backend.
@@ -310,6 +339,8 @@ impl ResidentAgentDraft {
         if !AGENT_AVATAR_COLORS.contains(&self.avatar.color.as_str())
             || !AGENT_AVATAR_EYES.contains(&self.avatar.eyes.as_str())
             || !(AGENT_AVATAR_MIN_ARMS..=AGENT_AVATAR_MAX_ARMS).contains(&self.avatar.arms)
+            || !AGENT_AVATAR_SHAPES.contains(&self.avatar.shape.as_str())
+            || !AGENT_AVATAR_ACCESSORIES.contains(&self.avatar.accessory.as_str())
         {
             return Err("agent avatar is not a supported variation".to_string());
         }
@@ -345,9 +376,11 @@ impl ResidentAgentDraft {
             model: None,
             effort: None,
             avatar: AgentAvatar {
-                color: "violet".to_string(),
+                color: "green".to_string(),
                 arms: 5,
                 eyes: "smile".to_string(),
+                shape: "drop".to_string(),
+                accessory: "magnifier".to_string(),
             },
         }
     }
@@ -367,6 +400,8 @@ impl ResidentAgentDraft {
                 color: "amber".to_string(),
                 arms: 3,
                 eyes: "round".to_string(),
+                shape: "block".to_string(),
+                accessory: "antenna".to_string(),
             },
         }
     }
@@ -386,6 +421,8 @@ impl ResidentAgentDraft {
                 color: "blue".to_string(),
                 arms: 4,
                 eyes: "round".to_string(),
+                shape: "octopus".to_string(),
+                accessory: "glasses".to_string(),
             },
         }
     }
