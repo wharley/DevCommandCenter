@@ -215,16 +215,13 @@ impl CodeColumn {
         // Only while the pull request's checks fail (or a failure from them
         // is still shown, so it clears once they pass): a green one costs
         // nothing, and the logs are read once per commit.
-        let checks_failing = self
-            .delivery
-            .pr
+        let checks_failing = self.delivery.pr.as_ref().is_some_and(|pr| {
+            pr.merge_state_status.as_deref() == Some("UNSTABLE") && pr.checks_failing != Some(false)
+        }) || self
+            .review
+            .failure
             .as_ref()
-            .is_some_and(|pr| pr.merge_state_status.as_deref() == Some("UNSTABLE"))
-            || self
-                .review
-                .failure
-                .as_ref()
-                .is_some_and(|failure| failure.operation == "pipeline");
+            .is_some_and(|failure| failure.operation == "pipeline");
         let read_checks = checks_failing
             && (force
                 || self

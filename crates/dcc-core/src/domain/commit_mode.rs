@@ -117,10 +117,15 @@ pub fn resolve_commit_mode(
                 return CommitMode::ResolveConflicts;
             }
             let merge_state = pr.merge_state_status.as_deref().map(str::to_uppercase);
+            // UNSTABLE also covers a check still running: only a failure
+            // needs a fix, when the checks are known.
+            let checks_running =
+                merge_state.as_deref() == Some("UNSTABLE") && pr.checks_failing == Some(false);
             if matches!(
                 merge_state.as_deref(),
                 Some("DIRTY" | "BLOCKED" | "UNSTABLE")
-            ) {
+            ) && !checks_running
+            {
                 return CommitMode::Fix;
             }
             return CommitMode::Merge;
@@ -211,6 +216,7 @@ mod tests {
         merge_state: Option<&str>,
     ) -> WorkspacePrStatusOutput {
         WorkspacePrStatusOutput {
+            checks_failing: None,
             provider: Some("github".into()),
             host: None,
             number: Some(1),
@@ -304,6 +310,27 @@ mod tests {
         assert_eq!(
             mode(Some(&git(0, 0, 2, 0, false)), Some(&clean)),
             CommitMode::Push
+        );
+    }
+
+    #[test]
+    fn a_check_still_running_does_not_ask_for_a_fix() {
+        let unstable = |failing| WorkspacePrStatusOutput {
+            checks_failing: failing,
+            ..pr("open", Some("MERGEABLE"), Some("UNSTABLE"))
+        };
+        let clean_git = git(0, 0, 0, 0, false);
+        assert_eq!(
+            mode(Some(&clean_git), Some(&unstable(Some(false)))),
+            CommitMode::Merge
+        );
+        assert_eq!(
+            mode(Some(&clean_git), Some(&unstable(Some(true)))),
+            CommitMode::Fix
+        );
+        assert_eq!(
+            mode(Some(&clean_git), Some(&unstable(None))),
+            CommitMode::Fix
         );
     }
 

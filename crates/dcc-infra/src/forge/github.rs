@@ -805,6 +805,10 @@ pub fn resolve_change_request_json(
     let auth = resolve_auth_context(host, login)?;
 
     let json_fields = "number,title,url,state,mergeable,mergeStateStatus,isDraft,headRefName,headRefOid,baseRefName";
+    // The one pull request viewed also says which checks failed, so a
+    // check still running is not taken for a failure; the list fallback
+    // keeps without it (it would read every pull request's checks).
+    let view_fields = format!("{json_fields},statusCheckRollup");
 
     let mut view_output = Command::new(&gh);
     view_output.current_dir(root);
@@ -812,7 +816,7 @@ pub fn resolve_change_request_json(
         view_output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
     }
     let view_output = view_output
-        .args(["pr", "view", "--json", json_fields])
+        .args(["pr", "view", "--json", &view_fields])
         .output();
     if let Ok(output) = view_output {
         if output.status.success() {
@@ -831,7 +835,7 @@ pub fn resolve_change_request_json(
             output.envs(auth.envs.iter().map(|(key, value)| (key, value)));
         }
         let output = output
-            .args(["pr", "view", hint, "--json", json_fields])
+            .args(["pr", "view", hint, "--json", &view_fields])
             .output();
         if let Ok(output) = output {
             if output.status.success() {

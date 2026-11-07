@@ -21,6 +21,9 @@ pub struct PrSnapshot {
     pub state: Option<String>,
     pub mergeable: Option<String>,
     pub merge_state_status: Option<String>,
+    /// Whether a check failed, when known; `UNSTABLE` alone also covers a
+    /// check still running.
+    pub checks_failing: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
@@ -117,14 +120,17 @@ pub fn classify_git_blockers(
     {
         return Some((WorkspaceBlockerKind::PrConflicts, number));
     }
-    // UNSTABLE is GitHub's "failing commit status". BLOCKED also covers
-    // "review required", which is not a failure, so it is left out.
+    // UNSTABLE is GitHub's "non-passing commit status": a check that
+    // failed, or one still running — only a failure blocks, when the checks
+    // are known. BLOCKED also covers "review required", which is not a
+    // failure, so it is left out.
     if pr
         .merge_state_status
         .as_deref()
         .map(str::to_uppercase)
         .as_deref()
         == Some("UNSTABLE")
+        && pr.checks_failing != Some(false)
     {
         return Some((WorkspaceBlockerKind::ChecksFailing, number));
     }
@@ -557,7 +563,27 @@ mod tests {
             state: Some(state.to_string()),
             mergeable: mergeable.map(str::to_string),
             merge_state_status: merge_state.map(str::to_string),
+            checks_failing: None,
         }
+    }
+
+    #[test]
+    fn a_check_still_running_is_not_a_failure() {
+        let unstable = |failing| PrSnapshot {
+            checks_failing: failing,
+            ..pr("open", Some("MERGEABLE"), Some("UNSTABLE"))
+        };
+        let classify = |pr: &PrSnapshot| classify_git_blockers(0, false, Some("feature"), Some(pr));
+        assert_eq!(classify(&unstable(Some(false))), None);
+        assert_eq!(
+            classify(&unstable(Some(true))),
+            Some((WorkspaceBlockerKind::ChecksFailing, Some(12)))
+        );
+        // Without the checks (another forge, the list fallback): as before.
+        assert_eq!(
+            classify(&unstable(None)),
+            Some((WorkspaceBlockerKind::ChecksFailing, Some(12)))
+        );
     }
 
     #[test]

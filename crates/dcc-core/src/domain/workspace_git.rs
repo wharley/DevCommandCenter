@@ -53,6 +53,10 @@ pub struct WorkspacePrStatusOutput {
     pub is_draft: bool,
     pub mergeable: Option<String>,
     pub merge_state_status: Option<String>,
+    /// Whether a check failed, when the forge said which ran (GitHub's
+    /// `UNSTABLE` also covers checks still running).
+    #[serde(default)]
+    pub checks_failing: Option<bool>,
 }
 
 /// A remote branch a deletion may also remove, as it was when the dialog

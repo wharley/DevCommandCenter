@@ -16,11 +16,9 @@ impl CodeColumn {
             self.review.forge.as_ref().is_some_and(|forge| {
                 forge.connected() && forge.provider.as_deref() == Some("github")
             });
-        let checks_failing = self
-            .delivery
-            .pr
-            .as_ref()
-            .is_some_and(|pr| pr.merge_state_status.as_deref() == Some("UNSTABLE"));
+        let checks_failing = self.delivery.pr.as_ref().is_some_and(|pr| {
+            pr.merge_state_status.as_deref() == Some("UNSTABLE") && pr.checks_failing != Some(false)
+        });
         let (true, Some(root), Ok(api)) = (
             github && checks_failing,
             self.root.clone(),

@@ -30,6 +30,7 @@ fn git(changes: &[(&str, u32, u32)], ahead: u32) -> WorkspaceGitStatusOutput {
 
 fn pr(number: u32, state: &str, merge_state: Option<&str>) -> WorkspacePrStatusOutput {
     WorkspacePrStatusOutput {
+        checks_failing: None,
         provider: Some("github".into()),
         host: Some("github.com".into()),
         number: Some(number),

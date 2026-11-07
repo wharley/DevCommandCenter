@@ -342,6 +342,7 @@ fn open_routed<'a>(
     cx.run_until_parked();
     column.update(cx, |column, cx| {
         column.delivery.pr = Some(WorkspacePrStatusOutput {
+            checks_failing: None,
             provider: Some("github".into()),
             host: None,
             number: Some(12),
@@ -656,6 +657,7 @@ fn fixing_ci_on_github_puts_the_failing_checks_in_the_composer(cx: &mut TestAppC
     );
     column.update(cx, |column, cx| {
         column.delivery.pr = Some(WorkspacePrStatusOutput {
+            checks_failing: None,
             provider: Some("github".into()),
             host: Some("github.com".into()),
             number: Some(12),

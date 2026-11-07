@@ -28,6 +28,28 @@ pub struct ResolvedChangeRequestStatus {
     pub is_draft: bool,
     pub mergeable: Option<String>,
     pub merge_state_status: Option<String>,
+    /// Whether a check failed, when the forge said which checks ran.
+    pub checks_failing: Option<bool>,
+}
+
+/// Whether any check of a GitHub `statusCheckRollup` failed (the conclusions
+/// the code column's "fix checks" reads as failures); `None` without one. A
+/// check still running is not a failure.
+pub fn rollup_has_failure(rollup: Option<&serde_json::Value>) -> Option<bool> {
+    let checks = rollup?.as_array()?;
+    Some(checks.iter().any(|check| {
+        let field = |key: &str| {
+            check
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+        };
+        matches!(
+            field("conclusion").as_str(),
+            "failure" | "timed_out" | "cancelled" | "action_required" | "startup_failure"
+        ) || matches!(field("state").as_str(), "failure" | "error")
+    }))
 }
 
 #[derive(Debug, Clone)]
@@ -171,6 +193,7 @@ pub fn resolve_workspace_change_request_status(
                     .and_then(|value| value.as_str())
                     .or_else(|| raw_mr.get("merge_status").and_then(|value| value.as_str()))
                     .map(ToString::to_string),
+                checks_failing: None,
             }))
         }
         _ => {
@@ -235,6 +258,7 @@ pub fn resolve_workspace_change_request_status(
                     .get("mergeStateStatus")
                     .and_then(|value| value.as_str())
                     .map(ToString::to_string),
+                checks_failing: rollup_has_failure(raw_pr.get("statusCheckRollup")),
             }))
         }
     }
@@ -338,5 +362,30 @@ pub fn create_workspace_change_request(
             "github.com",
             login,
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_failed_check_is_a_failure() {
+        let rollup = |checks: serde_json::Value| rollup_has_failure(Some(&checks));
+        assert_eq!(rollup_has_failure(None), None);
+        assert_eq!(
+            rollup(serde_json::json!([
+                {"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": ""},
+                {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},
+                {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SKIPPED"},
+                {"__typename": "StatusContext", "state": "PENDING"}
+            ])),
+            Some(false)
+        );
+        assert_eq!(
+            rollup(serde_json::json!([{"conclusion": "TIMED_OUT"}])),
+            Some(true)
+        );
+        assert_eq!(rollup(serde_json::json!([{"state": "ERROR"}])), Some(true));
     }
 }

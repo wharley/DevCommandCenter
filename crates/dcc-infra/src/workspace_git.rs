@@ -612,6 +612,7 @@ fn empty_pr_status(
     head_branch: Option<String>,
 ) -> WorkspacePrStatusOutput {
     WorkspacePrStatusOutput {
+        checks_failing: None,
         provider,
         host,
         number: None,
@@ -687,6 +688,7 @@ pub async fn workspace_pr_status(
         ));
     };
     Ok(WorkspacePrStatusOutput {
+        checks_failing: resolved.checks_failing,
         provider: Some(resolved.provider),
         host: resolved.host,
         number: resolved.number,

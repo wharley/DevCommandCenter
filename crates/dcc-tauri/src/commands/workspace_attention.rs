@@ -73,6 +73,7 @@ async fn cached_pr_status(
     .await
     .ok()?;
     let view = PrSnapshot {
+        checks_failing: output.checks_failing,
         number: output.number.map(u64::from),
         head_branch: output.head_branch,
         state: output.state,

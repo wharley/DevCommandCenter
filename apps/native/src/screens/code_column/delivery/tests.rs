@@ -85,6 +85,7 @@ pub(super) fn toasts(cx: &mut gpui::VisualTestContext) -> Vec<String> {
 
 fn open_pr(state: &str) -> WorkspacePrStatusOutput {
     WorkspacePrStatusOutput {
+        checks_failing: None,
         provider: Some("github".into()),
         host: Some("github.com".into()),
         number: Some(12),

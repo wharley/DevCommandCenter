@@ -168,6 +168,7 @@ pub fn blockers(
             .as_ref()
             .filter(|_| git.conflict_count == 0 && git.current_branch.is_some())
             .map(|pr| PrSnapshot {
+                checks_failing: pr.checks_failing,
                 number: pr.number.map(u64::from),
                 head_branch: pr.head_branch.clone(),
                 state: pr.state.clone(),
@@ -210,6 +211,7 @@ mod tests {
                 has_remote: true,
             }),
             pr: pr_merge_state.map(|state| WorkspacePrStatusOutput {
+                checks_failing: None,
                 provider: Some("github".into()),
                 host: None,
                 number: Some(9),
