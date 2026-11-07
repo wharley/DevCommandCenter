@@ -1,8 +1,9 @@
-//! The agent page's "Memória": the rules and preferences that go with every
-//! turn the agent runs. The agent saves one when the person corrects it or
-//! states a rule (`dcc_agent_remember`); the person adds, edits and deletes
-//! notes here, filters learned from their own, searches, sees how full the
-//! memory is, and brings an earlier version back from "Histórico".
+//! The agent page's "Memória": the rules and preferences that go with the
+//! agent's turns — the person's, everywhere, and each project's, in its
+//! tasks (`memory_layers`). The agent saves one when the person corrects it
+//! or states a rule (`dcc_agent_remember`); the person adds, edits and
+//! deletes notes here, filters learned from their own, searches, sees how
+//! full the layer is, and brings an earlier version back from "Histórico".
 
 use dcc_core::domain::agent_memory::{MAX_MEMORY_CHARS, MAX_NOTE_CHARS};
 use gpui::{
@@ -28,6 +29,10 @@ pub struct MemoryCard {
     /// `None` until the first read answers.
     pub(crate) memory: Option<AgentMemory>,
     pub(crate) filter: NoteFilter,
+    /// The layer shown: `None` the person's, else a project's.
+    pub(crate) layer: Option<String>,
+    /// The projects the agent works in, offered as layers.
+    pub(crate) layers: Vec<super::memory_layers::Layer>,
     pub(crate) search: Entity<TextInput>,
     pub(crate) new_note: Entity<TextInput>,
     /// The note being edited, and its field.
@@ -66,6 +71,8 @@ impl MemoryCard {
             api,
             memory: None,
             filter: NoteFilter::All,
+            layer: None,
+            layers: Vec::new(),
             search,
             new_note,
             editing: None,
@@ -84,6 +91,7 @@ impl MemoryCard {
             self.agent_id = agent_id.to_string();
             self.memory = None;
             self.filter = NoteFilter::All;
+            self.layer = None;
             self.editing = None;
             self.history_open = false;
             self.search.update(cx, |input, cx| input.set_text("", cx));
@@ -134,6 +142,7 @@ impl MemoryCard {
             memory
                 .notes
                 .iter()
+                .filter(|note| note.project_id == self.layer)
                 .filter(|note| Some(note.id.as_str()) != without)
                 .map(|note| note.body.chars().count())
                 .sum()
@@ -155,7 +164,11 @@ impl MemoryCard {
             return;
         }
         self.new_note.update(cx, |input, cx| input.set_text("", cx));
-        self.run(move |api, agent| api.add_memory_note(agent, &body), cx);
+        let layer = self.layer.clone();
+        self.run(
+            move |api, agent| api.add_memory_note(agent, &body, layer.as_deref()),
+            cx,
+        );
     }
 
     pub(crate) fn start_edit(
@@ -321,13 +334,21 @@ impl Render for MemoryCard {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
         let memory = self.memory.clone().unwrap_or_default();
-        let has_notes = !memory.notes.is_empty();
+        let layer = self.layer.clone();
+        let in_layer = memory
+            .notes
+            .iter()
+            .filter(|note| note.project_id == layer)
+            .count();
+        let has_notes = in_layer > 0;
         let query = self.search.read(cx).text().to_string();
-        let shown = visible(&memory.notes, self.filter, &query);
+        let shown = visible(&memory.notes, layer.as_deref(), self.filter, &query);
         let usage = cx.t_with(
             "agents.memory.usage",
-            &Args::default().with("percent", memory.usage.to_string()),
+            &Args::default().with("percent", memory.usage_of(layer.as_deref()).to_string()),
         );
+        // Layers only once the agent works in a project or keeps a project's note.
+        let layered = !self.layer_choices().is_empty();
         let history = (!memory.versions.is_empty()).then(|| {
             Button::new("agent-memory-history")
                 .variant(ButtonVariant::Ghost)
@@ -359,7 +380,8 @@ impl Render for MemoryCard {
                     .children(history),
             );
         let card = cx.entity().downgrade();
-        let tools = has_notes.then(|| {
+        let layer_menu = layered.then(|| self.layer_menu(cx));
+        let tools = (has_notes || layered).then(|| {
             div()
                 .flex()
                 .items_center()
@@ -367,33 +389,36 @@ impl Render for MemoryCard {
                 .px(px(16.0))
                 .pt(px(12.0))
                 .pb(px(4.0))
-                .child(
-                    ToggleGroup::new(
-                        "agent-memory-filter",
-                        vec![
-                            cx.t("agents.memory.all"),
-                            cx.t("agents.memory.learned"),
-                            cx.t("agents.memory.mine"),
-                        ],
-                        Some(match self.filter {
-                            NoteFilter::All => 0,
-                            NoteFilter::Learned => 1,
-                            NoteFilter::Person => 2,
+                .children(layer_menu)
+                .when(has_notes, |row| {
+                    row.child(
+                        ToggleGroup::new(
+                            "agent-memory-filter",
+                            vec![
+                                cx.t("agents.memory.all"),
+                                cx.t("agents.memory.learned"),
+                                cx.t("agents.memory.mine"),
+                            ],
+                            Some(match self.filter {
+                                NoteFilter::All => 0,
+                                NoteFilter::Learned => 1,
+                                NoteFilter::Person => 2,
+                            }),
+                        )
+                        .accent()
+                        .on_select(move |index, _, cx| {
+                            let _ = card.update(cx, |card, cx| {
+                                card.filter = match index {
+                                    1 => NoteFilter::Learned,
+                                    2 => NoteFilter::Person,
+                                    _ => NoteFilter::All,
+                                };
+                                cx.notify();
+                            });
                         }),
                     )
-                    .accent()
-                    .on_select(move |index, _, cx| {
-                        let _ = card.update(cx, |card, cx| {
-                            card.filter = match index {
-                                1 => NoteFilter::Learned,
-                                2 => NoteFilter::Person,
-                                _ => NoteFilter::All,
-                            };
-                            cx.notify();
-                        });
-                    }),
-                )
-                .when(memory.notes.len() > SEARCH_FROM, |row| {
+                })
+                .when(in_layer > SEARCH_FROM, |row| {
                     row.child(field(self.search.clone(), "agent-memory-search", cx))
                 })
         });
@@ -402,7 +427,9 @@ impl Render for MemoryCard {
             .enumerate()
             .map(|(index, note)| self.note_row(index, note, cx))
             .collect();
-        let hint = if !has_notes {
+        let hint = if !has_notes && layer.is_some() {
+            Some(cx.t("agents.memory.layerEmpty"))
+        } else if !has_notes {
             Some(cx.t("agents.memory.empty"))
         } else if rows.is_empty() {
             Some(cx.t("agents.memory.noMatch"))

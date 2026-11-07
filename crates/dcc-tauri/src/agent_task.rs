@@ -127,6 +127,18 @@ pub async fn open_task(
         tokio::task::spawn_blocking(move || find_project(&db_path, &project, worktree, effort))
             .await
             .map_err(|error| error.to_string())??;
+    // An agent narrowed to some projects opens tasks only there.
+    if let Some(agent) = state
+        .session_agent(&input.parent_session_id)
+        .map_err(|error| error.to_string())?
+    {
+        if !agent.works_in(&target.project_id) {
+            return Err(format!(
+                "{} works only in some of the person's projects, and \"{}\" is not one of them; the person can add it under Projects on {}'s page.",
+                agent.name, target.project, agent.name
+            ));
+        }
+    }
     propose_task(
         state,
         ProposeTaskInput {

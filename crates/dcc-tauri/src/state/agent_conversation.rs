@@ -13,11 +13,16 @@ impl SessionCommandState {
         session_id: &SessionId,
         agent_id: &str,
     ) -> Result<Option<String>> {
-        let memory = self.agent_memory_block(agent_id, true)?;
-        if !self
+        let home = self
             .session_repo
-            .is_agent_home_session(session_id, agent_id)?
-        {
+            .is_agent_home_session(session_id, agent_id)?;
+        let project = if home {
+            None
+        } else {
+            self.memory_project_of_session(session_id)?
+        };
+        let memory = self.agent_memory_block(agent_id, project.as_deref(), true)?;
+        if !home {
             return Ok(memory);
         }
         let conversation = conversation_block();
@@ -25,6 +30,14 @@ impl SessionCommandState {
             Some(memory) => format!("{conversation}\n\n{memory}"),
             None => conversation,
         }))
+    }
+
+    /// The agent `session_id` runs as, if any.
+    pub fn session_agent(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<dcc_core::domain::agent::ResidentAgent>> {
+        self.session_repo.load_session_agent(session_id)
     }
 
     /// Whether `session_id` is the conversation of the agent it runs as.

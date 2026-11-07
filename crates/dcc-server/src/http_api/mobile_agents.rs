@@ -196,6 +196,7 @@ mod tests {
                 arms: 3,
                 eyes: "round".into(),
             },
+            projects: Vec::new(),
             preset: Some(preset.into()),
             created_at: String::new(),
             updated_at: String::new(),

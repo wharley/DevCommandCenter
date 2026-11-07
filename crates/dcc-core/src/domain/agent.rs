@@ -272,6 +272,9 @@ pub struct ResidentAgentDraft {
     #[serde(default)]
     pub effort: Option<String>,
     pub avatar: AgentAvatar,
+    /// The projects it works in (`agent_projects`); empty: every project.
+    #[serde(default)]
+    pub projects: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -287,9 +290,19 @@ pub struct ResidentAgent {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub avatar: AgentAvatar,
+    /// The projects it works in; empty: every project.
+    #[serde(default)]
+    pub projects: Vec<String>,
     pub preset: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl ResidentAgent {
+    /// Whether it works in `project_id` (`agent_projects::works_in`).
+    pub fn works_in(&self, project_id: &str) -> bool {
+        crate::domain::agent_projects::works_in(&self.projects, project_id)
+    }
 }
 
 fn one_line(value: &str) -> bool {
@@ -361,6 +374,7 @@ impl ResidentAgentDraft {
             model: optional(self.model),
             effort,
             avatar: self.avatar,
+            projects: crate::domain::agent_projects::clean_projects(self.projects)?,
         })
     }
 
@@ -382,6 +396,7 @@ impl ResidentAgentDraft {
                 shape: "drop".to_string(),
                 accessory: "magnifier".to_string(),
             },
+            projects: Vec::new(),
         }
     }
 
@@ -403,6 +418,7 @@ impl ResidentAgentDraft {
                 shape: "block".to_string(),
                 accessory: "antenna".to_string(),
             },
+            projects: Vec::new(),
         }
     }
 
@@ -424,6 +440,7 @@ impl ResidentAgentDraft {
                 shape: "octopus".to_string(),
                 accessory: "glasses".to_string(),
             },
+            projects: Vec::new(),
         }
     }
 }
@@ -537,6 +554,7 @@ mod tests {
             model: None,
             effort: None,
             avatar: draft.avatar,
+            projects: Vec::new(),
             preset: Some(REVIEWER_PRESET.to_string()),
             created_at: "now".to_string(),
             updated_at: "now".to_string(),

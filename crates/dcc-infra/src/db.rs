@@ -2750,6 +2750,8 @@ impl SqliteSessionRepo {
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::drop_redundant_event_sequence_index(&conn)?;
         Self::migrate_ai_memory_export_history(&mut conn)?;
+        agent_memory::migrate_agent_memory(&conn)?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "projects_json", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "offer_prompt", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "effort", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "avatar_shape", "TEXT NULL")?;
@@ -7812,7 +7814,7 @@ impl SqliteSessionRepo {
 
     // ---- Resident agents ---------------------------------------------------
 
-    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions, a.effort, a.avatar_shape, a.avatar_accessory";
+    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions, a.effort, a.avatar_shape, a.avatar_accessory, a.projects_json";
 
     fn resident_agent_from_row(row: &Row<'_>) -> rusqlite::Result<ResidentAgent> {
         let preset: Option<String> = row.get(9)?;
@@ -7844,6 +7846,10 @@ impl SqliteSessionRepo {
                     .get::<_, Option<String>>(16)?
                     .unwrap_or_else(|| look.1.to_string()),
             },
+            projects: row
+                .get::<_, Option<String>>(17)?
+                .and_then(|json| from_str(&json).ok())
+                .unwrap_or_default(),
             preset,
             created_at: row.get(10)?,
             updated_at: row.get(11)?,
@@ -8014,12 +8020,17 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        // Every project is stored as nothing, like rows saved before.
+        let projects_json = (!draft.projects.is_empty())
+            .then(|| to_string(&draft.projects))
+            .transpose()
+            .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let id = match id {
             Some(id) => {
                 let updated = conn
                     .execute(
-                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12, effort = ?13, avatar_shape = ?14, avatar_accessory = ?15 WHERE id = ?1 AND deleted_at IS NULL",
-                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory],
+                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12, effort = ?13, avatar_shape = ?14, avatar_accessory = ?15, projects_json = ?16 WHERE id = ?1 AND deleted_at IS NULL",
+                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json],
                     )
                     .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 if updated != 1 {
@@ -8030,8 +8041,8 @@ impl SqliteSessionRepo {
             None => {
                 let id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
-                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions, effort, avatar_shape, avatar_accessory) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11, ?12, ?13, ?14)",
-                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory],
+                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions, effort, avatar_shape, avatar_accessory, projects_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11, ?12, ?13, ?14, ?15)",
+                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json],
                 )
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 id
@@ -15394,6 +15405,21 @@ mod tests {
         draft.avatar.accessory = "cap".to_string();
         let qa = repo.save_resident_agent(None, draft.clone()).unwrap();
         assert_eq!(qa.avatar.shape, "ghost");
+        assert!(qa.projects.is_empty() && qa.works_in("checkout"));
+        // Narrowed to some projects, it works only in those.
+        let mut narrowed = draft.clone();
+        narrowed.projects = vec!["checkout".to_string(), " checkout ".to_string()];
+        let qa = repo.save_resident_agent(Some(&qa.id), narrowed).unwrap();
+        assert_eq!(qa.projects, ["checkout"]);
+        assert!(!qa.works_in("site"));
+        assert_eq!(
+            repo.load_resident_agent(&qa.id).unwrap().unwrap().projects,
+            ["checkout"]
+        );
+        let qa = repo
+            .save_resident_agent(Some(&qa.id), draft.clone())
+            .unwrap();
+        assert!(qa.projects.is_empty());
         draft.avatar.shape = "triangle".to_string();
         assert!(repo.save_resident_agent(Some(&qa.id), draft).is_err());
         let stored = repo

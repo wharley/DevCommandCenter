@@ -137,7 +137,8 @@ impl Shell {
             let news = cx.update_global::<AgentTriggers, _>(|triggers, _| {
                 triggers.advance_received(&reviewer.id, &pr.url, &pr.last_activity)
             });
-            if !news {
+            // Outside the agent's projects the news is only marked seen.
+            if !news || !reviewer.works_in(&project) {
                 continue;
             }
             let now = Utc::now();

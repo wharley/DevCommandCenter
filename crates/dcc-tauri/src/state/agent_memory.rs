@@ -5,14 +5,41 @@ use dcc_core::domain::agent_memory::{
     memory_block, AgentMemoryNote, AgentMemoryVersion, NoteSource,
 };
 
+use dcc_core::domain::agent_call::called_in_a_task;
+
 use super::*;
 
 impl SessionCommandState {
-    /// The memory block for a turn of `agent_id`; `can_remember` when the
-    /// session can call DCC's tools to save a note.
-    pub fn agent_memory_block(&self, agent_id: &str, can_remember: bool) -> Result<Option<String>> {
+    /// The memory block for a turn of `agent_id` in `project_id` (`None`:
+    /// its own conversation); `can_remember` when the session can call DCC's
+    /// tools to save a note.
+    pub fn agent_memory_block(
+        &self,
+        agent_id: &str,
+        project_id: Option<&str>,
+        can_remember: bool,
+    ) -> Result<Option<String>> {
         let notes = self.session_repo.agent_memory(agent_id)?;
-        Ok(memory_block(&notes, can_remember))
+        Ok(memory_block(&notes, project_id, can_remember))
+    }
+
+    /// The project whose notes a turn of `session_id` carries. An agent
+    /// that is not called in tasks (the Researcher, in an idea's folder)
+    /// keeps the person's notes only.
+    pub fn memory_project_of_session(&self, session_id: &SessionId) -> Result<Option<String>> {
+        let in_tasks = self
+            .session_repo
+            .load_session_agent(session_id)?
+            .is_some_and(|agent| called_in_a_task(agent.preset.as_deref()));
+        if !in_tasks {
+            return Ok(None);
+        }
+        self.session_repo.memory_project_of_session(&session_id.0)
+    }
+
+    /// The project of a checkout, for a pull request review run there.
+    pub fn memory_project_of_root(&self, root: &str) -> Result<Option<String>> {
+        self.session_repo.memory_project_of_root(root)
     }
 
     pub fn agent_memory(&self, agent_id: &str) -> Result<Vec<AgentMemoryNote>> {
@@ -23,10 +50,16 @@ impl SessionCommandState {
         self.session_repo.agent_memory_versions(agent_id)
     }
 
-    /// A note the person writes on the agent's page.
-    pub fn add_agent_memory_note(&self, agent_id: &str, body: &str) -> Result<AgentMemoryNote> {
+    /// A note the person writes on the agent's page, for them (`None`) or
+    /// for a project.
+    pub fn add_agent_memory_note(
+        &self,
+        agent_id: &str,
+        body: &str,
+        project_id: Option<&str>,
+    ) -> Result<AgentMemoryNote> {
         self.session_repo
-            .add_agent_memory_note(agent_id, body, NoteSource::Person)
+            .add_agent_memory_note(agent_id, body, NoteSource::Person, project_id)
     }
 
     pub fn edit_agent_memory_note(
@@ -54,11 +87,15 @@ impl SessionCommandState {
     }
 
     /// A note the agent of `session_id` learned (`dcc_agent_remember`), with
-    /// the agent's name. A session that runs as no agent cannot remember.
+    /// the agent's name and the project's, if it went to one. In a task it
+    /// goes to the task's project unless `for_person`; in the agent's own
+    /// conversation, always to the person. A session that runs as no agent
+    /// cannot remember.
     pub fn remember_for_session(
         &self,
         session_id: &SessionId,
         body: &str,
+        for_person: bool,
     ) -> Result<(String, AgentMemoryNote)> {
         let agent = self
             .session_repo
@@ -69,9 +106,17 @@ impl SessionCommandState {
                         .to_string(),
                 )
             })?;
-        let note = self
-            .session_repo
-            .add_agent_memory_note(&agent.id, body, NoteSource::Learned)?;
+        let project = if for_person {
+            None
+        } else {
+            self.memory_project_of_session(session_id)?
+        };
+        let note = self.session_repo.add_agent_memory_note(
+            &agent.id,
+            body,
+            NoteSource::Learned,
+            project.as_deref(),
+        )?;
         Ok((agent.name, note))
     }
 }

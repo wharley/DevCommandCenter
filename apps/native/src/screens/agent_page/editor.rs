@@ -1,12 +1,13 @@
-//! "Editar …" (`AgentEditorDialog`): what the person can change on a DCC
-//! agent — its name, its mascot (color, arms, eyes), what it runs on
-//! (provider → model → effort in one menu), extra instructions, whether the
-//! Reviewer offers itself, and the Reporter's cleanup alert. The role is
-//! DCC's.
+//! "Editar …": a screen of the agent page, with "Voltar" to it, for what
+//! the person can change on a DCC agent — its name, its mascot (color, arms,
+//! eyes), what it runs on (provider → model → effort in one menu), the
+//! projects it works in, extra instructions, whether the Reviewer offers
+//! itself, and the Reporter's cleanup alert. The role is DCC's.
 
 use std::path::PathBuf;
 
 use dcc_core::domain::agent::{AgentAvatar, CHRONICLER_PRESET, REVIEWER_PRESET};
+use dcc_core::domain::agent_call::called_in_a_task;
 use dcc_core::domain::provider::ProviderDescriptor;
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FontWeight, IntoElement, Render,
@@ -22,8 +23,8 @@ use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::{
-    Button, ButtonSize, ButtonVariant, Dialog, Switch, TextArea, TextAreaEvent, Toaster,
-    dialog_footer, dialog_header, spinner,
+    Button, ButtonSize, ButtonVariant, Icon, Switch, TextArea, TextAreaEvent, Toaster,
+    dialog_footer, spinner,
 };
 
 pub enum EditorEvent {
@@ -48,6 +49,10 @@ pub struct AgentEditor {
     pub(crate) provider_id: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<String>,
+    /// The projects it works in; empty: every project.
+    pub(crate) projects: Vec<String>,
+    /// Every project to pick from: id and name.
+    pub(crate) project_options: Vec<(String, String)>,
     pub(crate) offer: bool,
     pub(crate) cleanup_enabled: bool,
     pub(crate) threshold: Entity<TextInput>,
@@ -146,6 +151,8 @@ impl AgentEditor {
             provider_id: agent.provider_id.clone(),
             model: agent.model.clone(),
             effort: agent.effort.clone(),
+            projects: agent.projects.clone(),
+            project_options: Vec::new(),
             offer: !agent.offer_prompt.trim().is_empty(),
             cleanup_enabled: alert.enabled,
             agent,
@@ -158,6 +165,18 @@ impl AgentEditor {
             api: if cfg!(test) { None } else { DesktopApi::load() },
             _inputs: inputs,
         }
+    }
+
+    /// The projects the person can pick; a project the agent keeps that is
+    /// no longer in DCC still shows, so it can be dropped.
+    pub(crate) fn with_projects(mut self, mut options: Vec<(String, String)>) -> Self {
+        for project in &self.projects {
+            if !options.iter().any(|(id, _)| id == project) {
+                options.push((project.clone(), project.clone()));
+            }
+        }
+        self.project_options = options;
+        self
     }
 
     /// `ResidentAgentDraft`: the role and the call stay as stored.
@@ -182,6 +201,7 @@ impl AgentEditor {
             "model": self.model,
             "effort": self.effort,
             "avatar": self.avatar,
+            "projects": self.projects,
         })
     }
 
@@ -318,6 +338,14 @@ impl Render for AgentEditor {
                 self.picker(cx),
                 cx,
             ))
+            .when(called_in_a_task(preset.as_deref()), |body| {
+                body.child(field(
+                    cx.t("agents.editor.projects"),
+                    Some(cx.t("agents.editor.projectsHint")),
+                    self.project_chips(cx),
+                    cx,
+                ))
+            })
             .child(field(
                 cx.t("agents.editor.extra"),
                 Some(cx.t("agents.editor.extraHint")),
@@ -371,59 +399,84 @@ impl Render for AgentEditor {
                     )
                 });
         }
-        let close = cx.entity().downgrade();
-        let cancel = close.clone();
+        let back = cx.entity().downgrade();
+        let cancel = back.clone();
         let saving = self.saving;
-        Dialog::new("agent-editor", move |_, cx| {
-            let _ = close.update(cx, |_, cx| cx.emit(EditorEvent::Closed));
-        })
-        .max_width(576.0)
-        .max_height(720.0)
-        .child(
-            div()
-                .debug_selector(|| "agent-editor".into())
-                .flex()
-                .flex_col()
-                .gap(px(16.0))
-                .child(dialog_header(
-                    cx.t_with(
-                        "agents.editor.title",
+        let title = cx.t_with(
+            "agents.editor.title",
+            &Args::default().with("agent", self.agent.name.clone()),
+        );
+        div()
+            .debug_selector(|| "agent-editor".into())
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .id("agent-editor-back")
+                    .debug_selector(|| "agent-editor-back".into())
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .py(px(4.0))
+                    .text_size(px(11.0))
+                    .text_color(colors.muted_foreground)
+                    .cursor_pointer()
+                    .hover(|row| row.text_color(colors.foreground))
+                    .on_click(move |_, _, cx| {
+                        let _ = back.update(cx, |_, cx| cx.emit(EditorEvent::Closed));
+                    })
+                    .child(Icon::new("arrow-left").size(14.0))
+                    .child(cx.t_with(
+                        "agents.editor.back",
                         &Args::default().with("agent", self.agent.name.clone()),
-                    ),
-                    Some(cx.t("agents.editor.description")),
-                    cx,
-                ))
-                .child(body)
-                .child(dialog_footer(
-                    [
-                        Button::new("agent-editor-cancel")
-                            .variant(ButtonVariant::Ghost)
-                            .size(ButtonSize::Default)
-                            .text_size(14.0)
-                            .on_click(move |_, _, cx| {
-                                let _ = cancel.update(cx, |_, cx| cx.emit(EditorEvent::Closed));
-                            })
-                            .child(cx.t("agents.editor.cancel"))
-                            .into_any_element(),
-                        Button::new("agent-editor-save")
-                            .size(ButtonSize::Default)
-                            .text_size(14.0)
-                            .disabled(name_empty || saving)
-                            .on_click(cx.listener(|editor, _, _, cx| editor.save(cx)))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .when(saving, |label| {
-                                        label.child(spinner("agent-editor-saving", 16.0))
-                                    })
-                                    .child(cx.t("agents.editor.save")),
-                            )
-                            .into_any_element(),
-                    ],
-                    cx,
-                )),
-        )
+                    )),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "agent-editor-heading".into())
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(20.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(colors.foreground)
+                            .child(title),
+                    )
+                    .child(hint(cx.t("agents.editor.description"), cx)),
+            )
+            .child(body)
+            .child(dialog_footer(
+                [
+                    Button::new("agent-editor-cancel")
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::Default)
+                        .text_size(14.0)
+                        .on_click(move |_, _, cx| {
+                            let _ = cancel.update(cx, |_, cx| cx.emit(EditorEvent::Closed));
+                        })
+                        .child(cx.t("agents.editor.cancel"))
+                        .into_any_element(),
+                    Button::new("agent-editor-save")
+                        .size(ButtonSize::Default)
+                        .text_size(14.0)
+                        .disabled(name_empty || saving)
+                        .on_click(cx.listener(|editor, _, _, cx| editor.save(cx)))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .when(saving, |label| {
+                                    label.child(spinner("agent-editor-saving", 16.0))
+                                })
+                                .child(cx.t("agents.editor.save")),
+                        )
+                        .into_any_element(),
+                ],
+                cx,
+            ))
     }
 }

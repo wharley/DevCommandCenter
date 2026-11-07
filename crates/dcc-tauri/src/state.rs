@@ -9479,14 +9479,23 @@ mod tests {
         assert!(instructions.contains("\n\nbase\n\n<dcc_agent_memory>"));
         assert!(instructions.ends_with("</dcc_agent_memory>"));
         assert!(instructions.contains("dcc_agent_remember"));
+        // In a task it learns for the task's project, unless it is the person's.
+        let (_, learned) = state
+            .remember_for_session(&session.id, "Usar pnpm", false)
+            .expect("remember");
+        assert_eq!(
+            Some(learned.project_id.clone().unwrap()),
+            Some(session.project_id.0.clone())
+        );
         state
-            .remember_for_session(&session.id, "Responder em pt-BR")
+            .remember_for_session(&session.id, "Responder em pt-BR", true)
             .expect("remember");
         let instructions = state
             .objective_tool_instructions(&session.id, Some("base".to_string()))
             .unwrap()
             .unwrap();
-        assert!(instructions.contains("- Responder em pt-BR"));
+        assert!(instructions.contains("Everywhere:\n- Responder em pt-BR"));
+        assert!(instructions.contains("In this project only:\n- Usar pnpm"));
         assert!(!instructions.contains("<dcc_agent_conversation>"));
         assert!(!state.is_agent_conversation(&session.id).unwrap());
         assert_eq!(state.list_agent_session_bindings().unwrap().len(), 1);
@@ -9510,6 +9519,13 @@ mod tests {
         assert!(instructions.contains("\n\nbase\n\n<dcc_agent_conversation>"));
         assert!(instructions.contains("dcc_overview"));
         assert!(instructions.ends_with("</dcc_agent_memory>"));
+        // Its own conversation has no project: the person's notes only.
+        assert!(instructions.contains("- Responder em pt-BR"));
+        assert!(!instructions.contains("Usar pnpm"));
+        let (_, home_note) = state
+            .remember_for_session(&home.id, "Resumir em tópicos", false)
+            .expect("remember at home");
+        assert!(home_note.project_id.is_none());
 
         assert!(state.delete_resident_agent(&reviewer.id).unwrap());
         assert_eq!(

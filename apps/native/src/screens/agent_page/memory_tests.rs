@@ -15,6 +15,7 @@ use crate::theme::{Theme, ThemePreference};
 
 fn agent(id: &str, preset: &str) -> AgentRecord {
     AgentRecord {
+        projects: Vec::new(),
         id: id.into(),
         name: "Revisor".into(),
         preset: Some(preset.into()),
@@ -41,6 +42,7 @@ fn note(id: &str, body: &str, source: &str) -> MemoryNote {
         id: id.into(),
         body: body.into(),
         source: source.into(),
+        project_id: None,
         updated_at: "2026-11-06T10:00:00Z".into(),
     }
 }
@@ -83,6 +85,7 @@ fn the_memory_lists_filters_edits_and_shows_its_history(cx: &mut TestAppContext)
     let mine = note("n-2", "Nunca fazer merge", "person");
     let memory = AgentMemory {
         usage: 1,
+        project_usage: Default::default(),
         notes: vec![learned.clone(), mine.clone()],
         versions: vec![
             MemoryVersion {
@@ -155,4 +158,101 @@ fn the_memory_lists_filters_edits_and_shows_its_history(cx: &mut TestAppContext)
     });
     cx.run_until_parked();
     assert!(cx.debug_bounds("agent-memory").is_none());
+}
+
+pub(super) fn project(id: &str, name: &str) -> crate::data::tasks::Project {
+    crate::data::tasks::Project {
+        id: format!("/w/{id}"),
+        root_path: format!("/w/{id}"),
+        display_name: name.into(),
+        icon: None,
+        color: None,
+        pinned_at: None,
+        project_id: id.into(),
+        name: name.into(),
+        base_branch: "main".into(),
+        missing: false,
+    }
+}
+
+#[gpui::test]
+fn each_project_keeps_its_own_layer(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("a-1".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(2000.0)));
+    cx.run_until_parked();
+    // It works in the Checkout only: the Site is not one of its layers.
+    let mut reviewer = agent("a-1", "reviewer");
+    reviewer.projects = vec!["p-loja".into()];
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![reviewer],
+                    projects: vec![project("p-loja", "Checkout"), project("p-site", "Site")],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    let pnpm = MemoryNote {
+        project_id: Some("p-loja".into()),
+        ..note("n-2", "Usar pnpm", "learned")
+    };
+    page.update(cx, |page, cx| {
+        page.memory.clone().unwrap().update(cx, |card, cx| {
+            card.memory = Some(AgentMemory {
+                usage: 1,
+                project_usage: [("p-loja".to_string(), 1)].into_iter().collect(),
+                notes: vec![note("n-1", "Responder em pt-BR", "learned"), pnpm.clone()],
+                versions: Vec::new(),
+            });
+            cx.notify();
+        })
+    });
+    cx.run_until_parked();
+    // The person's layer first: one note, and the layer menu.
+    assert!(cx.debug_bounds("agent-memory-layer").is_some());
+    assert!(cx.debug_bounds("agent-memory-note-0").is_some());
+    assert!(cx.debug_bounds("agent-memory-note-1").is_none());
+    page.update(cx, |page, cx| {
+        let card = page.memory.clone().unwrap();
+        let card = card.read(cx);
+        let layers: Vec<String> = card.layer_choices().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(layers, ["p-loja"]);
+    });
+    // The Checkout's layer lists its note, and a new note goes there.
+    page.update(cx, |page, cx| {
+        page.memory
+            .clone()
+            .unwrap()
+            .update(cx, |card, cx| card.pick_layer(Some("p-loja".into()), cx))
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-memory-note-0").is_some());
+    assert!(cx.debug_bounds("agent-memory-note-1").is_none());
+    page.update(cx, |page, cx| {
+        let card = page.memory.clone().unwrap();
+        let card = card.read(cx);
+        let memory = card.memory.as_ref().unwrap();
+        let shown = crate::data::agent_memory::visible(
+            &memory.notes,
+            card.layer.as_deref(),
+            crate::data::agent_memory::NoteFilter::All,
+            "",
+        );
+        assert_eq!(shown[0].body, "Usar pnpm");
+    });
 }

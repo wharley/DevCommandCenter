@@ -84,7 +84,14 @@ impl Shell {
                 continue;
             }
             let now = Utc::now();
-            let allowed = triggers.check(&reviewer.id, Trigger::CiFailed, &task, now);
+            // Outside the agent's projects the failure is only marked seen.
+            let allowed = if reviewer.works_in(&project) {
+                triggers
+                    .check(&reviewer.id, Trigger::CiFailed, &task, now)
+                    .map_err(|_| ())
+            } else {
+                Err(())
+            };
             let Some(run) = review_run(&reviewer, &providers, &pick, &path, String::new()) else {
                 continue;
             };
@@ -162,6 +169,7 @@ mod tests {
             updated_at: at.into(),
         };
         let reviewer = AgentRecord {
+            projects: Vec::new(),
             id: "rev".into(),
             name: "Revisor".into(),
             preset: Some("reviewer".into()),

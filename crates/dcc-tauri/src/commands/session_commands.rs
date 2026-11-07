@@ -534,9 +534,13 @@ pub async fn run_pull_request_review_agent_with_state(
                 .resident_agent(agent_id)
                 .map_err(|error| error.to_string())?
                 .ok_or_else(|| "The reviewing agent no longer exists.".to_string())?;
-            // Its memory goes along; a one-shot review cannot save a note.
+            // Its memory goes along, with the checkout's project's notes; a
+            // one-shot review cannot save a note.
+            let project = state
+                .memory_project_of_root(working_directory)
+                .map_err(|error| error.to_string())?;
             let memory = state
-                .agent_memory_block(&agent.id, false)
+                .agent_memory_block(&agent.id, project.as_deref(), false)
                 .map_err(|error| error.to_string())?
                 .map(|memory| format!("\n\n{memory}"))
                 .unwrap_or_default();

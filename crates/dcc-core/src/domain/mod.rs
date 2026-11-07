@@ -2,6 +2,7 @@ pub mod agent;
 pub mod agent_call;
 pub mod agent_conversation;
 pub mod agent_memory;
+pub mod agent_projects;
 pub mod attention;
 pub mod browser;
 pub mod browser_context;

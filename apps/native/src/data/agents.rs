@@ -67,7 +67,16 @@ pub struct AgentRecord {
     pub offer_prompt: String,
     /// The person's own instructions on top of the role.
     pub extra_instructions: String,
+    /// The projects it works in; empty: every project.
+    pub projects: Vec<String>,
     pub sessions: Vec<AgentSession>,
+}
+
+impl AgentRecord {
+    /// Whether it works in `project_id` (its call buttons, its triggers).
+    pub fn works_in(&self, project_id: &str) -> bool {
+        dcc_core::domain::agent_projects::works_in(&self.projects, project_id)
+    }
 }
 
 /// The agent a session runs as, for its mascot (`SessionAgentBadge`).
@@ -233,6 +242,7 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                 role: agent.role,
                 offer_prompt: agent.offer_prompt,
                 extra_instructions: agent.extra_instructions,
+                projects: agent.projects,
                 sessions,
             }
         })

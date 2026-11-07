@@ -470,8 +470,11 @@ impl ConversationView {
         });
         let shown = next.session_id.clone();
         let busy = next.sessions.iter().any(|row| row.running);
-        self.call_agents
-            .update(cx, |buttons, cx| buttons.set_busy(busy, cx));
+        let project = next.project_id.clone();
+        self.call_agents.update(cx, |buttons, cx| {
+            buttons.set_busy(busy, cx);
+            buttons.set_project(project, cx);
+        });
         self.data = Some(next);
         self.sync_idea(cx);
         self.follow_ai_memory(shown, cx);

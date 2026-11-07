@@ -415,6 +415,7 @@ fn ai_memory_shows_the_waiting_export_and_pins_a_source(cx: &mut TestAppContext)
 
 fn agent(id: &str, name: &str, preset: Option<&str>) -> crate::data::agents::AgentRecord {
     crate::data::agents::AgentRecord {
+        projects: Vec::new(),
         id: id.into(),
         name: name.into(),
         preset: preset.map(str::to_string),
@@ -491,6 +492,19 @@ fn calling_an_agent_starts_its_bound_session_with_the_kickoff(cx: &mut TestAppCo
         cx.update(|_, cx| buttons.read(cx).block_key(&reviewer)),
         Some("agents.call.nothingToReview")
     );
+    // Narrowed to another project, an agent leaves this task's team.
+    buttons.update(cx, |buttons, cx| {
+        let mut elsewhere = agent("writer", "Escritor", None);
+        elsewhere.projects = vec!["other".into()];
+        let mut agents = buttons.agents.clone();
+        agents[0] = elsewhere;
+        let all = buttons.agents.clone();
+        buttons.set_agents(agents, cx);
+        buttons.set_project(Some("p".into()), cx);
+        assert_eq!(buttons.team().count(), 1);
+        buttons.set_agents(all, cx);
+    });
+    cx.run_until_parked();
     click(cx, "call-agent-0");
     let requests = server.join().unwrap();
     let lines: Vec<&str> = requests.iter().map(|(line, _)| line.as_str()).collect();

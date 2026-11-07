@@ -1,10 +1,11 @@
 //! A resident agent's memory (`dcc_core::domain::agent_memory`): its notes,
-//! and a version of the whole memory after each change, so the person can
-//! bring an earlier one back. Kept in DCC's own database: the notes go with
-//! every turn the agent runs, in any project, so they are not the project's
-//! ai-memory recall.
+//! the person's or one project's, and a version of the whole memory after
+//! each change, so the person can bring an earlier one back. Kept in DCC's
+//! own database: the notes are rules the agent follows in every turn, not
+//! the project's ai-memory recall, which a turn gets as evidence only.
 
 use super::*;
+use dcc_core::domain::agent_conversation::home_agent_id;
 use dcc_core::domain::agent_memory::{
     clean_note, fits, AgentMemoryNote, AgentMemoryVersion, MemoryChange, NoteSource,
     MAX_MEMORY_CHARS, MAX_VERSIONS,
@@ -16,6 +17,7 @@ CREATE TABLE IF NOT EXISTS dcc_agent_memory_notes (
     agent_id TEXT NOT NULL,
     body TEXT NOT NULL,
     source TEXT NOT NULL,
+    project_id TEXT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES dcc_agents(id) ON DELETE CASCADE
@@ -43,10 +45,15 @@ fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
+/// Adds the layer column to a memory created before layers existed.
+pub(super) fn migrate_agent_memory(conn: &Connection) -> Result<()> {
+    SqliteWorkspaceRepo::ensure_column(conn, "dcc_agent_memory_notes", "project_id", "TEXT NULL")
+}
+
 fn notes_of(conn: &Connection, agent_id: &str) -> Result<Vec<AgentMemoryNote>> {
     let mut statement = conn
         .prepare(
-            "SELECT id, body, source, created_at, updated_at FROM dcc_agent_memory_notes
+            "SELECT id, body, source, created_at, updated_at, project_id FROM dcc_agent_memory_notes
              WHERE agent_id = ?1 ORDER BY created_at, id",
         )
         .map_err(repository_error)?;
@@ -58,6 +65,7 @@ fn notes_of(conn: &Connection, agent_id: &str) -> Result<Vec<AgentMemoryNote>> {
                 source: NoteSource::parse(&row.get::<_, String>(2)?),
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
+                project_id: row.get(5)?,
             })
         })
         .map_err(repository_error)?
@@ -113,6 +121,24 @@ fn record_version(
     Ok(())
 }
 
+fn insert_note(conn: &Connection, agent_id: &str, note: &AgentMemoryNote) -> Result<()> {
+    conn.execute(
+        "INSERT INTO dcc_agent_memory_notes (id, agent_id, body, source, created_at, updated_at, project_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            note.id,
+            agent_id,
+            note.body,
+            note.source.as_str(),
+            note.created_at,
+            note.updated_at,
+            note.project_id
+        ],
+    )
+    .map_err(repository_error)?;
+    Ok(())
+}
+
 fn full() -> dcc_core::CoreError {
     dcc_core::CoreError::InvalidInput(format!(
         "The memory is full ({MAX_MEMORY_CHARS} characters); edit or delete a note first."
@@ -126,26 +152,27 @@ impl SqliteSessionRepo {
         notes_of(&conn, agent_id)
     }
 
-    /// Saves a note. The same note again (ignoring case) returns the one
-    /// already there.
+    /// Saves a note in the person's layer (`project_id` `None`) or a
+    /// project's. The same note again in that layer (ignoring case) returns
+    /// the one already there.
     pub fn add_agent_memory_note(
         &self,
         agent_id: &str,
         body: &str,
         source: NoteSource,
+        project_id: Option<&str>,
     ) -> Result<AgentMemoryNote> {
         let body = clean_note(body).map_err(dcc_core::CoreError::InvalidInput)?;
         let mut conn = self.conn.lock().map_err(repository_error)?;
         let tx = conn.transaction().map_err(repository_error)?;
         ensure_live_agent(&tx, agent_id)?;
         let notes = notes_of(&tx, agent_id)?;
-        if let Some(same) = notes
-            .iter()
-            .find(|note| note.body.to_lowercase() == body.to_lowercase())
-        {
+        if let Some(same) = notes.iter().find(|note| {
+            note.in_layer(project_id) && note.body.to_lowercase() == body.to_lowercase()
+        }) {
             return Ok(same.clone());
         }
-        if !fits(&notes, None, &body) {
+        if !fits(&notes, project_id, None, &body) {
             return Err(full());
         }
         let stamp = now();
@@ -153,22 +180,11 @@ impl SqliteSessionRepo {
             id: uuid::Uuid::new_v4().to_string(),
             body,
             source,
+            project_id: project_id.map(str::to_string),
             created_at: stamp.clone(),
             updated_at: stamp,
         };
-        tx.execute(
-            "INSERT INTO dcc_agent_memory_notes (id, agent_id, body, source, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                note.id,
-                agent_id,
-                note.body,
-                note.source.as_str(),
-                note.created_at,
-                note.updated_at
-            ],
-        )
-        .map_err(repository_error)?;
+        insert_note(&tx, agent_id, &note)?;
         let change = match source {
             NoteSource::Learned => MemoryChange::Learned,
             NoteSource::Person => MemoryChange::Added,
@@ -197,7 +213,7 @@ impl SqliteSessionRepo {
         if note.body == body {
             return Ok(note.clone());
         }
-        if !fits(&notes, Some(note_id), &body) {
+        if !fits(&notes, note.project_id.as_deref(), Some(note_id), &body) {
             return Err(full());
         }
         let stamp = now();
@@ -307,23 +323,41 @@ impl SqliteSessionRepo {
         )
         .map_err(repository_error)?;
         for note in &notes {
-            tx.execute(
-                "INSERT INTO dcc_agent_memory_notes (id, agent_id, body, source, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    note.id,
-                    agent_id,
-                    note.body,
-                    note.source.as_str(),
-                    note.created_at,
-                    note.updated_at
-                ],
-            )
-            .map_err(repository_error)?;
+            insert_note(&tx, agent_id, note)?;
         }
         record_version(&tx, agent_id, MemoryChange::Restored, &created_at)?;
         tx.commit().map_err(repository_error)?;
         Ok(notes)
+    }
+
+    /// The project whose notes a turn of `session_id` carries: its task's
+    /// project; `None` in an agent's own conversation.
+    pub fn memory_project_of_session(&self, session_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(repository_error)?;
+        let project: Option<String> = conn
+            .query_row(
+                "SELECT project_id FROM dcc_sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(repository_error)?;
+        Ok(project.filter(|project| home_agent_id(project).is_none()))
+    }
+
+    /// The project of a checkout (a repository's root or a task's worktree),
+    /// for a pull request review run there.
+    pub fn memory_project_of_root(&self, root: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(repository_error)?;
+        conn.query_row(
+            "SELECT project_id FROM dcc_repositories WHERE root_path = ?1
+             UNION ALL SELECT project_id FROM dcc_workspaces WHERE root_path = ?1
+             LIMIT 1",
+            params![root],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(repository_error)
     }
 }
 
@@ -355,15 +389,15 @@ mod tests {
     fn notes_keep_a_version_after_each_change() {
         let (repo, agent) = repo_with_agent();
         let learned = repo
-            .add_agent_memory_note(&agent, "Responder em pt-BR", NoteSource::Learned)
+            .add_agent_memory_note(&agent, "Responder em pt-BR", NoteSource::Learned, None)
             .unwrap();
         // The same note again is the one already there.
         let again = repo
-            .add_agent_memory_note(&agent, "responder em PT-BR", NoteSource::Person)
+            .add_agent_memory_note(&agent, "responder em PT-BR", NoteSource::Person, None)
             .unwrap();
         assert_eq!(again.id, learned.id);
         let mine = repo
-            .add_agent_memory_note(&agent, "Nunca fazer merge", NoteSource::Person)
+            .add_agent_memory_note(&agent, "Nunca fazer merge", NoteSource::Person, None)
             .unwrap();
         let edited = repo
             .edit_agent_memory_note(&agent, &learned.id, "Sempre responder em pt-BR")
@@ -406,15 +440,25 @@ mod tests {
                 &agent,
                 &format!("{index:03}{}", "x".repeat(297)),
                 NoteSource::Person,
+                None,
             )
             .unwrap();
         }
         let error = repo
-            .add_agent_memory_note(&agent, &"y".repeat(200), NoteSource::Learned)
+            .add_agent_memory_note(&agent, &"y".repeat(200), NoteSource::Learned, None)
             .unwrap_err();
         assert!(error.to_string().contains("full"), "{error}");
+        // A project's layer has its own room.
         assert!(repo
-            .add_agent_memory_note("missing", "a rule", NoteSource::Person)
+            .add_agent_memory_note(
+                &agent,
+                &"y".repeat(200),
+                NoteSource::Learned,
+                Some("checkout")
+            )
+            .is_ok());
+        assert!(repo
+            .add_agent_memory_note("missing", "a rule", NoteSource::Person, None)
             .is_err());
     }
 
@@ -422,7 +466,7 @@ mod tests {
     fn only_the_latest_versions_stay() {
         let (repo, agent) = repo_with_agent();
         let note = repo
-            .add_agent_memory_note(&agent, "rule 0", NoteSource::Person)
+            .add_agent_memory_note(&agent, "rule 0", NoteSource::Person, None)
             .unwrap();
         for index in 1..=MAX_VERSIONS + 5 {
             repo.edit_agent_memory_note(&agent, &note.id, &format!("rule {index}"))
@@ -432,5 +476,30 @@ mod tests {
             repo.agent_memory_versions(&agent).unwrap().len(),
             MAX_VERSIONS
         );
+    }
+
+    #[test]
+    fn each_note_keeps_its_layer() {
+        let (repo, agent) = repo_with_agent();
+        let mine = repo
+            .add_agent_memory_note(&agent, "Usar pnpm", NoteSource::Person, None)
+            .unwrap();
+        // The same text in a project is a note of that project.
+        let project = repo
+            .add_agent_memory_note(&agent, "usar PNPM", NoteSource::Learned, Some("checkout"))
+            .unwrap();
+        assert_ne!(mine.id, project.id);
+        assert_eq!(project.project_id.as_deref(), Some("checkout"));
+        let edited = repo
+            .edit_agent_memory_note(&agent, &project.id, "Usar pnpm 9")
+            .unwrap();
+        assert_eq!(edited.project_id.as_deref(), Some("checkout"));
+        let versions = repo.agent_memory_versions(&agent).unwrap();
+        repo.remove_agent_memory_note(&agent, &project.id).unwrap();
+        let restored = repo
+            .restore_agent_memory_version(&agent, versions[0].id)
+            .unwrap();
+        assert_eq!(restored[1].project_id.as_deref(), Some("checkout"));
+        assert_eq!(repo.agent_memory(&agent).unwrap(), restored);
     }
 }

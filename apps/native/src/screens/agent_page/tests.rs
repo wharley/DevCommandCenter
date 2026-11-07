@@ -26,6 +26,7 @@ fn session(id: &str, task: &str, state: AgentState) -> AgentSession {
 
 fn agent(id: &str, preset: &str, sessions: Vec<AgentSession>) -> AgentRecord {
     AgentRecord {
+        projects: Vec::new(),
         id: id.into(),
         name: "Revisor".into(),
         preset: Some(preset.into()),
@@ -182,6 +183,10 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
             sidebar.apply_for_tests(
                 SidebarData {
                     agents: vec![agent("a-1", "reviewer", Vec::new()), reporter],
+                    projects: vec![
+                        super::memory_tests::project("p-loja", "Checkout"),
+                        super::memory_tests::project("p-site", "Site"),
+                    ],
                     ..SidebarData::default()
                 },
                 cx,
@@ -192,6 +197,9 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
     page.update_in(cx, |page, window, cx| page.open_editor(window, cx));
     cx.run_until_parked();
     assert!(cx.debug_bounds("agent-editor").is_some());
+    // It takes the page's place, with the way back on top.
+    assert!(cx.debug_bounds("agent-page").is_none());
+    assert!(cx.debug_bounds("agent-editor-back").is_some());
     assert!(cx.debug_bounds("agent-editor-offer").is_some());
     assert!(cx.debug_bounds("agent-editor-cleanup").is_none());
     let editor = page.read_with(cx, |page, _| page.editor.as_ref().unwrap().0.clone());
@@ -206,6 +214,15 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
         cx.run_until_parked();
     }
     assert!(cx.debug_bounds("agent-editor-arms-4").is_none());
+    // Every project at first; picking one narrows it, "Todos" brings all back.
+    assert!(cx.debug_bounds("agent-editor-project-all").is_some());
+    assert!(cx.debug_bounds("agent-editor-project-1").is_some());
+    editor.update(cx, |editor, _| {
+        assert!(editor.projects.is_empty());
+        editor.toggle_project("p-site");
+        editor.toggle_project("p-loja");
+        editor.toggle_project("p-site");
+    });
     editor.update(cx, |editor, cx| {
         editor.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
         editor
@@ -226,6 +243,16 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("agent-editor-cleanup").is_some());
     assert!(cx.debug_bounds("agent-editor-offer").is_none());
+    // The Reporter is not called in tasks: no projects to pick.
+    assert!(cx.debug_bounds("agent-editor-project-all").is_none());
+    // "Voltar" brings the page back without saving.
+    let back = cx.debug_bounds("agent-editor-back").unwrap();
+    cx.simulate_click(back.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(page.read_with(cx, |page, _| page.editor.is_none()));
+    assert!(cx.debug_bounds("agent-page").is_some());
+    page.update_in(cx, |page, window, cx| page.open_editor(window, cx));
+    cx.run_until_parked();
     let editor = page.read_with(cx, |page, _| page.editor.as_ref().unwrap().0.clone());
     editor.update(cx, |editor, cx| {
         editor.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
@@ -242,6 +269,7 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
     assert_eq!(body["avatar"]["shape"], "ghost");
     assert_eq!(body["avatar"]["accessory"], "cap");
     assert_eq!(body["providerId"], "codex");
+    assert_eq!(body["projects"], serde_json::json!(["p-loja"]));
     assert_eq!(body["offerPrompt"], "");
     assert_eq!(body["role"], "Revise o diff.");
     assert_eq!(body["extraInstructions"], "Seja breve.");

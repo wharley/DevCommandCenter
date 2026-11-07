@@ -26,9 +26,11 @@ mod conversation;
 mod conversation_tests;
 mod editor;
 mod editor_look;
+mod editor_projects;
 mod idea;
 mod memory;
 mod memory_history;
+mod memory_layers;
 #[cfg(test)]
 mod memory_tests;
 mod picker;
@@ -177,7 +179,10 @@ impl AgentPage {
             .cloned()
             .unwrap_or_default();
         let path = self.cleanup_path.clone();
-        let editor = cx.new(|cx| editor::AgentEditor::new(data.agent, catalog, path, window, cx));
+        let options = editor_projects::project_options(self.sidebar.read(cx).projects());
+        let editor = cx.new(|cx| {
+            editor::AgentEditor::new(data.agent, catalog, path, window, cx).with_projects(options)
+        });
         let events = cx.subscribe(&editor, |page, _, event, cx| match event {
             editor::EditorEvent::Closed => {
                 page.editor = None;
@@ -192,10 +197,26 @@ impl AgentPage {
 
     fn memory_card(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let (agent_id, api) = (self.agent_id.clone(), self.api.clone());
-        self.memory
+        let card = self
+            .memory
             .get_or_insert_with(|| cx.new(|cx| memory::MemoryCard::new(agent_id, api, window, cx)))
-            .clone()
-            .into_any_element()
+            .clone();
+        // An agent called in tasks keeps a layer per project it works in.
+        let sidebar = self.sidebar.read(cx);
+        let layers = sidebar
+            .agents()
+            .iter()
+            .find(|agent| agent.id == self.agent_id)
+            .filter(|agent| dcc_core::domain::agent_call::called_in_a_task(agent.preset.as_deref()))
+            .map(|agent| {
+                editor_projects::project_options(sidebar.projects())
+                    .into_iter()
+                    .filter(|(id, _)| agent.works_in(id))
+                    .collect()
+            })
+            .unwrap_or_default();
+        card.update(cx, |card, cx| card.set_layers(layers, cx));
+        card.into_any_element()
     }
 
     fn section_title(text: SharedString, cx: &gpui::App) -> AnyElement {
@@ -388,6 +409,24 @@ impl Render for AgentPage {
                 .child(cx.t("agents.page.missing"))
                 .into_any_element();
         };
+        // "Editar" takes the page, with a way back to it.
+        if let Some((editor, _)) = &self.editor {
+            return div()
+                .id("agent-editor-page")
+                .size_full()
+                .min_h_0()
+                .overflow_y_scroll()
+                .bg(colors.background)
+                .child(
+                    div()
+                        .mx_auto()
+                        .max_w(px(640.0))
+                        .px(px(32.0))
+                        .py(px(32.0))
+                        .child(editor.clone()),
+                )
+                .into_any_element();
+        }
         let agent = data.agent.clone();
         let runs_on = runs_on(&agent, self.composer.read(cx), cx);
         let chronicler = agent.preset.as_deref() == Some(CHRONICLER_PRESET);
@@ -565,11 +604,6 @@ impl Render for AgentPage {
                     .children(memory)
                     .children(extra)
                     .child(role),
-            )
-            .children(
-                self.editor
-                    .as_ref()
-                    .map(|(editor, _)| editor.clone().into_any_element()),
             )
             .into_any_element()
     }

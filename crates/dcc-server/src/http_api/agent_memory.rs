@@ -1,6 +1,6 @@
-//! A resident agent's memory for its page: the notes, how full it is and
-//! its versions; the person adds, edits and deletes notes and brings an
-//! earlier version back. The agent saves its own notes with
+//! A resident agent's memory for its page: the notes (the person's and each
+//! project's), how full each layer is and its versions; the person adds,
+//! edits and deletes notes and brings an earlier version back. The agent saves its own notes with
 //! `dcc_agent_remember` (`agent_memory_tools`).
 use super::*;
 use dcc_core::domain::agent_memory::usage_percent;
@@ -9,6 +9,9 @@ use dcc_core::domain::agent_memory::usage_percent;
 #[serde(rename_all = "camelCase")]
 pub(super) struct NoteInput {
     body: String,
+    /// Adding: the project the note holds in; none: the person's.
+    #[serde(default)]
+    project_id: Option<String>,
 }
 
 fn bad_request(error: impl ToString) -> HttpApiError {
@@ -24,8 +27,24 @@ fn memory(backend: &HttpBackend, agent_id: &str) -> Result<Json<Value>, HttpApiE
         .sessions
         .agent_memory_versions(agent_id)
         .map_err(bad_request)?;
+    let mut projects: Vec<&str> = notes
+        .iter()
+        .filter_map(|note| note.project_id.as_deref())
+        .collect();
+    projects.sort_unstable();
+    projects.dedup();
+    let project_usage: serde_json::Map<String, Value> = projects
+        .into_iter()
+        .map(|project| {
+            (
+                project.to_string(),
+                json!(usage_percent(&notes, Some(project))),
+            )
+        })
+        .collect();
     Ok(Json(json!({
-        "usage": usage_percent(&notes),
+        "usage": usage_percent(&notes, None),
+        "projectUsage": project_usage,
         "notes": notes,
         "versions": versions,
     })))
@@ -45,7 +64,15 @@ pub(super) async fn add(
 ) -> Result<Json<Value>, HttpApiError> {
     backend
         .sessions
-        .add_agent_memory_note(agent_id.trim(), &input.body)
+        .add_agent_memory_note(
+            agent_id.trim(),
+            &input.body,
+            input
+                .project_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|project| !project.is_empty()),
+        )
         .map_err(bad_request)?;
     memory(&backend, agent_id.trim())
 }

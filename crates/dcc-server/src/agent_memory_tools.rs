@@ -1,8 +1,9 @@
 //! `dcc_agent_remember`: a resident agent saves a rule or preference the
-//! person taught it to its memory (`dcc_core::domain::agent_memory`). The
-//! note goes with the agent's next turns, in any project, and shows on the
-//! agent's page, where the person edits or deletes it. A session that runs
-//! as no agent gets an error.
+//! person taught it to its memory (`dcc_core::domain::agent_memory`). In a
+//! task the note is the task's project's unless the agent passes scope
+//! `person`; in its own conversation it is the person's. It goes with the
+//! agent's next turns there and shows on the agent's page, where the person
+//! edits or deletes it. A session that runs as no agent gets an error.
 
 use dcc_core::domain::agent_memory::{MAX_NOTE_CHARS, REMEMBER_TOOL};
 use dcc_core::domain::session::SessionId;
@@ -14,6 +15,15 @@ use serde_json::{json, Value};
 #[serde(deny_unknown_fields)]
 struct RememberArgs {
     note: String,
+    #[serde(default)]
+    scope: Option<Scope>,
+}
+
+#[derive(Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum Scope {
+    Project,
+    Person,
 }
 
 pub fn is_agent_memory_tool(name: &str) -> bool {
@@ -23,12 +33,13 @@ pub fn is_agent_memory_tool(name: &str) -> bool {
 pub fn definition() -> Value {
     json!({
         "name": REMEMBER_TOOL,
-        "description": "Only when you run as a DCC resident agent (your instructions carry a dcc_agent_memory block): save to your memory a rule or preference the person stated or corrected you on, meant to hold in later sessions. One short sentence in the person's language. It goes with your next turns and the person can see, edit or delete it. Never save task details, code, file contents or secrets.",
+        "description": "Only when you run as a DCC resident agent (your instructions carry a dcc_agent_memory block): save to your memory a rule or preference the person stated or corrected you on, meant to hold in later sessions. One short sentence in the person's language. In a task it holds in that task's project (scope \"project\", the default) — use scope \"person\" only for how the person works everywhere; in your own conversation it is always the person's. It goes with your next turns and the person can see, edit or delete it. Never save task details, code, file contents or secrets.",
         "inputSchema": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "note": {"type": "string", "minLength": 1, "maxLength": MAX_NOTE_CHARS}
+                "note": {"type": "string", "minLength": 1, "maxLength": MAX_NOTE_CHARS},
+                "scope": {"type": "string", "enum": ["project", "person"]}
             },
             "required": ["note"]
         },
@@ -58,10 +69,16 @@ pub fn dispatch(
     else {
         return text("Pass the note to save.".to_string(), true);
     };
-    match sessions.remember_for_session(&SessionId(session_id.to_string()), &args.note) {
+    let for_person = args.scope == Some(Scope::Person);
+    match sessions.remember_for_session(&SessionId(session_id.to_string()), &args.note, for_person) {
         Ok((agent, note)) => text(
             format!(
-                "Saved to {agent}'s memory: \"{}\". The person sees it on your page and can edit or delete it.",
+                "Saved to {agent}'s memory{}: \"{}\". The person sees it on your page and can edit or delete it.",
+                if note.project_id.is_some() {
+                    " for this project"
+                } else {
+                    ", in every project"
+                },
                 note.body
             ),
             false,
@@ -85,6 +102,12 @@ mod tests {
         )));
         assert!(!call_is_well_formed(&Some(
             json!({"note": "a", "extra": 1})
+        )));
+        assert!(call_is_well_formed(&Some(
+            json!({"note": "a", "scope": "person"})
+        )));
+        assert!(!call_is_well_formed(&Some(
+            json!({"note": "a", "scope": "team"})
         )));
         assert!(!call_is_well_formed(&None));
         assert_eq!(definition()["name"], REMEMBER_TOOL);

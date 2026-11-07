@@ -39,12 +39,18 @@ fn url_host(url: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The person's checkout of `repository` (`owner/name`) and the forge login
-/// it uses; the first one added when there are several.
-pub(super) fn pick_repository(
-    repositories: &[Repository],
-    repository: &str,
-) -> Option<(String, Option<String>)> {
+/// A checkout of a pull request's repository: its root, its forge login
+/// and its project.
+#[derive(Debug, PartialEq)]
+pub(super) struct Checkout {
+    pub root: String,
+    pub login: Option<String>,
+    pub project_id: String,
+}
+
+/// The person's checkout of `repository` (`owner/name`); the first one added
+/// when there are several.
+pub(super) fn pick_repository(repositories: &[Repository], repository: &str) -> Option<Checkout> {
     let wanted = repository.to_lowercase();
     repositories
         .iter()
@@ -57,11 +63,15 @@ pub(super) fn pick_repository(
                 == Some(wanted.as_str())
         })
         .min_by(|left, right| left.created_at.cmp(&right.created_at))
-        .map(|found| (found.root_path.clone(), found.forge_login.clone()))
+        .map(|found| Checkout {
+            root: found.root_path.clone(),
+            login: found.forge_login.clone(),
+            project_id: found.project_id.0.clone(),
+        })
 }
 
 /// `pick_repository` over DCC's database.
-fn local_repository(db: &Path, repository: &str) -> Option<(String, Option<String>)> {
+fn local_repository(db: &Path, repository: &str) -> Option<Checkout> {
     let repo = SqliteWorkspaceRepo::open(db).ok()?;
     let repositories = futures::executor::block_on(repo.list_repositories()).ok()?;
     pick_repository(&repositories, repository)
@@ -192,7 +202,10 @@ impl Shell {
             if allowed.is_err() {
                 continue;
             }
-            let Some((root, login)) = local_repository(&db, &pr.repository) else {
+            // Only the pull requests of the agent's projects.
+            let Some(Checkout { root, login, .. }) = local_repository(&db, &pr.repository)
+                .filter(|checkout| reviewer.works_in(&checkout.project_id))
+            else {
                 continue;
             };
             let Some(item) = hub_item(pr, &root, login) else {
@@ -280,7 +293,11 @@ mod tests {
         ];
         assert_eq!(
             pick_repository(&repositories, "Acme/App"),
-            Some(("/w/app".to_string(), Some("me".to_string())))
+            Some(Checkout {
+                root: "/w/app".to_string(),
+                login: Some("me".to_string()),
+                project_id: "p".to_string(),
+            })
         );
         assert_eq!(pick_repository(&repositories, "acme/other"), None);
 
