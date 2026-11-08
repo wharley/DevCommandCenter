@@ -8,6 +8,7 @@ export * from "./labels.ts";
 export * from "./mentions.ts";
 export * from "./questions.ts";
 export * from "./residentAgents.ts";
+export * from "./teamRoom.ts";
 export * from "./taskProposals.ts";
 export * from "./threadEvents.ts";
 export * from "./threadSync.ts";

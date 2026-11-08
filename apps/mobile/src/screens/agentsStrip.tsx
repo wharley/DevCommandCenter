@@ -1,7 +1,7 @@
 /**
- * "Agentes" on the home: each resident agent that talks, with its octopus,
- * how it is and what it last did. Tapping opens its own conversation (the
- * one started on the Mac); until it has one the card says so.
+ * "Agentes" on the home: each resident agent with its mascot, how it is and
+ * what it last did. "Sala" opens the team room; a card opens it with that
+ * agent addressed ("@Revisor "), as "Falar na Sala" does on the Mac.
  */
 import { residentNews, residentStateLabel, type ResidentAgent } from "@dcc/mobile-core";
 import { useResidentAgents } from "@/backend/residentAgents";
@@ -28,28 +28,18 @@ function stateColor(agent: ResidentAgent, color: Palette): string {
 function AgentCard({ agent, now }: { agent: ResidentAgent; now: number }) {
 	const { color } = useTheme();
 	const styles = useStyles();
-	const session = agent.conversationSessionId;
 	const state = residentStateLabel(agent.state);
 	const news = residentNews(agent, now);
 	return (
 		<Pressable
 			accessibilityRole="button"
 			accessibilityLabel={`${agent.name}, ${state}. ${news}`}
-			accessibilityState={{ disabled: !session }}
+			accessibilityHint="Abre a Sala da equipe com este agente chamado"
 			onPress={() => {
-				if (!session) {
-					haptic("warning");
-					return;
-				}
 				haptic("tap");
-				router.push({ pathname: "/thread/[id]", params: { id: session } });
+				router.push({ pathname: "/room", params: { to: agent.name } });
 			}}
-			style={({ pressed }) => [
-				styles.card,
-				agent.state === "needsYou" && styles.waiting,
-				!session && styles.dim,
-				pressed && session ? styles.pressed : null,
-			]}
+			style={({ pressed }) => [styles.card, agent.state === "needsYou" && styles.waiting, pressed && styles.pressed]}
 		>
 			<ResidentMascot avatar={agent.avatar} state={agent.state} size={40} />
 			<View style={styles.text}>
@@ -73,7 +63,20 @@ export function AgentsStrip({ now = Date.now() }: { now?: number }) {
 	if (agents.length === 0) return null;
 	return (
 		<View style={styles.strip}>
-			<SectionLabel>Agentes</SectionLabel>
+			<View style={styles.head}>
+				<SectionLabel>Agentes</SectionLabel>
+				<Pressable
+					onPress={() => {
+						haptic("tap");
+						router.push("/room");
+					}}
+					accessibilityRole="button"
+					accessibilityLabel="Abrir a Sala da equipe"
+					hitSlop={8}
+				>
+					<Text style={styles.roomLink}>Sala ›</Text>
+				</Pressable>
+			</View>
 			<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.list}>
 				{agents.map((agent) => (
 					<AgentCard key={agent.id} agent={agent} now={now} />
@@ -86,6 +89,8 @@ export function AgentsStrip({ now = Date.now() }: { now?: number }) {
 const useStyles = makeStyles((color) =>
 	StyleSheet.create({
 		strip: { marginBottom: 26 },
+		head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+		roomLink: { color: color.accent, fontSize: 13, fontWeight: "500", marginBottom: 8 },
 		list: { gap: 10, paddingRight: 4 },
 		card: {
 			width: 196,
@@ -100,7 +105,6 @@ const useStyles = makeStyles((color) =>
 			backgroundColor: color.panel,
 		},
 		waiting: { borderColor: alpha(color.waitFill, 0.45), backgroundColor: alpha(color.waitFill, 0.06) },
-		dim: { opacity: 0.75 },
 		pressed: { opacity: 0.7 },
 		text: { flex: 1, minWidth: 0, gap: 1 },
 		name: { color: color.fg, fontSize: 14, fontWeight: "600" },

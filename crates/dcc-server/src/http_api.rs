@@ -81,6 +81,7 @@ mod mcp;
 mod menu_bar;
 mod mobile;
 mod mobile_agents;
+mod mobile_room;
 mod provider_accounts;
 mod provider_usage;
 mod providers;
@@ -689,6 +690,8 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             get(attention::list_task_proposals),
         )
         .route("/api/v1/mobile/agents", get(mobile_agents::agents))
+        .route("/api/v1/mobile/room", get(mobile_room::room))
+        .route("/api/v1/mobile/room/messages", post(mobile_room::send))
         .route(
             "/api/v1/task-proposals/:proposal_id/start",
             post(task_proposals::start),
@@ -6852,6 +6855,53 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{missing}");
         assert!(!crate::remote_connector::remote_path_allowed(&path));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_phone_reads_the_team_room_and_writes_to_it_once() {
+        let fixture = embedded_fixture().await;
+        // The Reviewer, seeded as the desktop does on its first list.
+        fixture
+            .backend
+            .sessions
+            .list_resident_agents(&Default::default())
+            .unwrap();
+        let (status, room) = get_json(&fixture.app, "/api/v1/mobile/room").await;
+        assert_eq!(status, StatusCode::OK, "{room}");
+        assert_eq!(room["lines"], json!([]));
+        let snapshot = room["snapshotId"].as_str().unwrap().to_string();
+        let (status, same) = get_json(
+            &fixture.app,
+            &format!("/api/v1/mobile/room?after={snapshot}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{same}");
+        assert_eq!(same["unchanged"], true);
+        // The Reviewer takes it, but its conversation starts on the desktop.
+        let (status, refused) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/messages",
+            json!({ "text": "o CI falhou" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert!(
+            refused.to_string().contains("roomNoConversation"),
+            "{refused}"
+        );
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/messages",
+            json!({ "text": "  " }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(crate::remote_connector::remote_path_allowed(
+            "/api/v1/mobile/room?after=x"
+        ));
+        assert!(crate::remote_connector::remote_path_allowed(
+            "/api/v1/mobile/room/messages"
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

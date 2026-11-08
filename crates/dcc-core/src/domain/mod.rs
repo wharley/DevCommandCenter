@@ -37,6 +37,7 @@ pub mod review_threads;
 pub mod task_title;
 pub mod session;
 pub mod team_room;
+pub mod team_room_lines;
 pub mod thread;
 pub mod timeline;
 pub mod turn_instructions;
