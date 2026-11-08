@@ -6,9 +6,7 @@ use std::path::Path;
 use gpui::Context;
 
 use super::Sidebar;
-use crate::data::agents::{
-    AgentRecord, AgentState, CHRONICLER_PRESET, REVIEWER_PRESET, aggregate, lead,
-};
+use crate::data::agents::{AgentRecord, AgentState, REVIEWER_PRESET, aggregate, lead};
 use crate::data::daily_recap::DailyRecap;
 use crate::data::pr_review_jobs::{JobStatus, PrReviewJob};
 use crate::data::seen::SeenResults;
@@ -17,7 +15,7 @@ use crate::data::seen::SeenResults;
 pub struct AgentMarkers {
     /// Finished agent results the person opened (`agent-seen-results.ts`).
     pub seen: SeenResults,
-    /// The Reporter's recap window (`daily-recap.ts`).
+    /// The daily recap's window (`daily-recap.ts`), a card in the team room.
     pub recap: DailyRecap,
 }
 
@@ -42,8 +40,7 @@ pub struct AgentView<'a> {
 
 impl Sidebar {
     /// `useAgentsQuery`: each agent's state across its sessions; the
-    /// reviewer's pull request reviews count too, and the Reporter's result
-    /// is the recap.
+    /// reviewer's pull request reviews count too.
     pub(super) fn agent_views(&self) -> Vec<AgentView<'_>> {
         self.state
             .data
@@ -72,11 +69,6 @@ impl Sidebar {
                         (state, job.unread())
                     }));
                 }
-                if agent.preset.as_deref() == Some(CHRONICLER_PRESET)
-                    && self.agent_markers.recap.is_unread()
-                {
-                    sessions.push((AgentState::Done, true));
-                }
                 AgentView {
                     agent,
                     state: aggregate(&sessions),
@@ -93,12 +85,10 @@ pub struct AgentPageData {
     pub state: AgentState,
     /// Per session, whether its finished result is unread.
     pub unread: Vec<bool>,
-    /// Task names by id (`workspaceNames`), idea tasks included.
+    /// Task names by id (`workspaceNames`).
     pub task_names: std::collections::HashMap<String, String>,
     /// Project names by project id (`projectLabels`).
     pub project_labels: std::collections::HashMap<String, String>,
-    /// The tasks that are still ideas (`ideaWorkspaceIds`).
-    pub idea_tasks: std::collections::HashSet<String>,
     /// The reviewer's pull request reviews (`prReviews`).
     pub pr_reviews: Vec<PrReviewJob>,
     /// The agent's own conversation task, once it has one.
@@ -124,12 +114,11 @@ impl Sidebar {
             })
             .collect();
         let data = &self.state.data;
-        let mut task_names: std::collections::HashMap<String, String> = data
+        let task_names: std::collections::HashMap<String, String> = data
             .tasks
             .iter()
             .map(|task| (task.id.clone(), task.name.clone()))
             .collect();
-        task_names.extend(data.idea_tasks.clone());
         Some(AgentPageData {
             agent: view.agent.clone(),
             state: view.state,
@@ -140,7 +129,6 @@ impl Sidebar {
                 .iter()
                 .map(|project| (project.project_id.clone(), project.display_name.clone()))
                 .collect(),
-            idea_tasks: data.idea_tasks.keys().cloned().collect(),
             home_task: data.agent_homes.get(id).cloned(),
             pr_reviews: if view.agent.preset.as_deref() == Some(REVIEWER_PRESET) {
                 self.pr_reviews.clone()
@@ -160,7 +148,7 @@ impl Sidebar {
             .cloned()
     }
 
-    /// The Reporter's current recap window.
+    /// The daily recap's current window.
     pub fn recap_window(&self) -> Option<crate::data::daily_recap::RecapWindow> {
         self.agent_markers.recap.current.clone()
     }
@@ -169,7 +157,7 @@ impl Sidebar {
         self.agent_markers.recap.is_unread()
     }
 
-    /// `markDailyRecapSeen`: its page is on screen.
+    /// `markDailyRecapSeen`: its card is open in the team room.
     pub fn mark_recap_seen(&mut self, cx: &mut Context<Self>) {
         if self.agent_markers.recap.mark_seen() {
             cx.notify();

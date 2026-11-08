@@ -1,6 +1,5 @@
-//! The phone's "Agentes": each resident agent that talks (the Reporter only
-//! writes the desktop's recap), with its mascot, how it is and its latest
-//! news, and its own conversation to open. Read from DCC's database like the
+//! The phone's "Agentes": each resident agent, with its mascot, how it is,
+//! its latest news and its own conversation to open. Read from DCC's database like the
 //! desktop's strip; whether a trigger is on comes from the desktop's own
 //! `agent-triggers.json` beside it. Like the attention snapshot, a phone
 //! that sends back the `snapshotId` it holds as `after` gets
@@ -9,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use dcc_core::domain::agent::{ResidentAgent, ReviewerPresetText, CHRONICLER_PRESET};
+use dcc_core::domain::agent::{ResidentAgent, ReviewerPresetText};
 use dcc_core::domain::agent_conversation::home_project_id;
 use dcc_core::domain::attention::SessionActivityInput;
 use dcc_core::domain::workspace::WorkspaceId;
@@ -55,7 +54,6 @@ pub(super) fn agents_view(
 ) -> Value {
     let list: Vec<Value> = agents
         .iter()
-        .filter(|agent| agent.preset.as_deref() != Some(CHRONICLER_PRESET))
         .map(|agent| {
             let sessions: Vec<&AgentSessionBinding> = bindings
                 .iter()
@@ -234,17 +232,13 @@ mod tests {
     }
 
     #[test]
-    fn each_talking_agent_with_its_state_conversation_and_news() {
-        let agents = [
-            agent("rev", "reviewer"),
-            agent("res", "researcher"),
-            agent("rep", "chronicler"),
-        ];
+    fn each_agent_with_its_state_conversation_and_news() {
+        let agents = [agent("rev", "reviewer"), agent("res", "")];
         let bindings = [
             binding("s-task", "rev", "p-loja", "2026-11-07T10:00:00Z"),
             binding("s-home-old", "rev", "dcc-agent-rev", "2026-11-06T10:00:00Z"),
             binding("s-home", "rev", "dcc-agent-rev", "2026-11-07T09:00:00Z"),
-            binding("s-idea", "res", "p-ideia", "2026-11-07T08:00:00Z"),
+            binding("s-idea", "res", "p-loja", "2026-11-07T08:00:00Z"),
         ];
         let activity = HashMap::from([
             (
@@ -260,7 +254,7 @@ mod tests {
         let watching = HashSet::from(["rev".to_string()]);
         let view = agents_view(&agents, &bindings, &activity, &watching);
         let list = view["agents"].as_array().unwrap();
-        assert_eq!(list.len(), 2, "the Reporter does not talk");
+        assert_eq!(list.len(), 2);
         assert_eq!(list[0]["state"], "watching");
         assert_eq!(list[0]["conversationSessionId"], "s-home");
         assert_eq!(list[0]["last"]["sessionId"], "s-task");

@@ -5,8 +5,6 @@ use dcc_core::domain::agent_memory::{
     memory_block, AgentMemoryNote, AgentMemoryVersion, NoteSource,
 };
 
-use dcc_core::domain::agent_call::called_in_a_task;
-
 use super::*;
 
 impl SessionCommandState {
@@ -23,17 +21,8 @@ impl SessionCommandState {
         Ok(memory_block(&notes, project_id, can_remember))
     }
 
-    /// The project whose notes a turn of `session_id` carries. An agent
-    /// that is not called in tasks (the Researcher, in an idea's folder)
-    /// keeps the person's notes only.
+    /// The project whose notes a turn of `session_id` carries.
     pub fn memory_project_of_session(&self, session_id: &SessionId) -> Result<Option<String>> {
-        let in_tasks = self
-            .session_repo
-            .load_session_agent(session_id)?
-            .is_some_and(|agent| called_in_a_task(agent.preset.as_deref()));
-        if !in_tasks {
-            return Ok(None);
-        }
         self.session_repo.memory_project_of_session(&session_id.0)
     }
 

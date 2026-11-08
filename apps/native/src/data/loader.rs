@@ -37,7 +37,7 @@ pub fn database_path() -> PathBuf {
 pub struct SidebarData {
     /// Tasks as the rail lists them, newest update first; idea tasks excluded.
     pub tasks: Vec<TaskSummary>,
-    /// Projects, idea folders excluded.
+    /// Projects, the agents' homes excluded.
     pub projects: Vec<Project>,
     pub activities: HashMap<String, TaskActivity>,
     pub provider_ids: HashMap<String, String>,
@@ -47,9 +47,6 @@ pub struct SidebarData {
     pub review_pending: HashMap<String, usize>,
     /// Resident agents with their sessions' state.
     pub agents: Vec<super::agents::AgentRecord>,
-    /// The tasks that are still ideas, by id with their name (the
-    /// Researcher's page lists only those).
-    pub idea_tasks: HashMap<String, String>,
     /// Each agent's own conversation task (its home), by agent id; not in
     /// `tasks` nor `projects`.
     pub agent_homes: HashMap<String, String>,
@@ -100,14 +97,8 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
     let workspaces = SqliteWorkspaceRepo::open(db_path)?;
     let sessions = SqliteSessionRepo::open_read_only(db_path)?;
 
-    let ideas: HashSet<String> = workspaces
-        .list_ideas()?
-        .into_iter()
-        .map(|idea| idea.root_path)
-        .collect();
     let projects: Vec<Project> = block_on(workspaces.list_repositories())?
         .iter()
-        .filter(|repository| !ideas.contains(&repository.root_path))
         .filter(|repository| home_agent_id(&repository.project_id.0).is_none())
         .map(|repository| Project {
             missing: !std::path::Path::new(&repository.root_path).is_dir(),
@@ -126,11 +117,6 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
             TaskSummary::from_workspace(workspace, folders, untitled)
         })
         .collect();
-    let idea_tasks: HashMap<String, String> = tasks
-        .iter()
-        .filter(|task| ideas.contains(&task.root_path))
-        .map(|task| (task.id.clone(), task.name.clone()))
-        .collect();
     let agent_homes: HashMap<String, String> = tasks
         .iter()
         .filter(|task| task.status.is_selectable())
@@ -144,7 +130,6 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
     let bundles = block_on(workspaces.list_workspace_bundles())?;
     let tasks: Vec<TaskSummary> = fold_bundles(tasks, &bundles, &projects)
         .into_iter()
-        .filter(|task| !ideas.contains(&task.root_path))
         .filter(|task| home_agent_id(&task.project_id).is_none())
         .collect();
 
@@ -210,7 +195,6 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         open_notes,
         review_pending,
         agents,
-        idea_tasks,
         agent_homes,
         child_tasks,
     })

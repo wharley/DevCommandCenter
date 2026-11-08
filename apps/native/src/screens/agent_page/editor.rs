@@ -1,13 +1,10 @@
 //! "Editar …": a screen of the agent page, with "Voltar" to it, for what
 //! the person can change on a DCC agent — its name, its mascot (color, arms,
 //! eyes), what it runs on (provider → model → effort in one menu), the
-//! projects it works in, extra instructions, whether the Reviewer offers
-//! itself, and the Reporter's cleanup alert. The role is DCC's.
+//! projects it works in, extra instructions and whether the Reviewer offers
+//! itself. The Reviewer's role is DCC's.
 
-use std::path::PathBuf;
-
-use dcc_core::domain::agent::{AgentAvatar, CHRONICLER_PRESET, REVIEWER_PRESET};
-use dcc_core::domain::agent_call::called_in_a_task;
+use dcc_core::domain::agent::{AgentAvatar, REVIEWER_PRESET};
 use dcc_core::domain::provider::ProviderDescriptor;
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FontWeight, IntoElement, Render,
@@ -17,7 +14,6 @@ use serde_json::json;
 
 use crate::agent::AgentAvatarView;
 use crate::data::agents::AgentRecord;
-use crate::data::cleanup_alert::{CleanupAlert, clamp_threshold};
 use crate::data::desktop_api::{ApiError, DesktopApi, encode};
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
@@ -68,9 +64,8 @@ pub struct AgentEditor {
     /// Every project to pick from: id and name.
     pub(crate) project_options: Vec<(String, String)>,
     pub(crate) offer: bool,
-    pub(crate) cleanup_enabled: bool,
-    pub(crate) threshold: Entity<TextInput>,
-    cleanup_path: PathBuf,
+    /// The template "Novo agente" started from, if any.
+    pub(crate) template: Option<&'static str>,
     pub(super) catalog: Vec<ProviderDescriptor>,
     pub(crate) saving: bool,
     pub(crate) api: Option<DesktopApi>,
@@ -130,7 +125,6 @@ impl AgentEditor {
     pub fn new(
         agent: AgentRecord,
         catalog: Vec<ProviderDescriptor>,
-        cleanup_path: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -142,15 +136,6 @@ impl AgentEditor {
         role.update(cx, |area, cx| area.set_text(&agent.role, cx));
         let kickoff = cx.new(|cx| TextArea::new(window, cx));
         kickoff.update(cx, |area, cx| area.set_text(&agent.kickoff_prompt, cx));
-        let alert = if cfg!(test) && !cleanup_path.exists() {
-            CleanupAlert::default()
-        } else {
-            CleanupAlert::load(&cleanup_path)
-        };
-        let threshold = cx.new(|cx| TextInput::new(window, cx).with_max_len(4));
-        threshold.update(cx, |input, cx| {
-            input.set_text(alert.threshold_gb.to_string(), cx)
-        });
         let multiline = |_: &mut Self,
                          area: Entity<TextArea>,
                          event: &TextAreaEvent,
@@ -185,14 +170,12 @@ impl AgentEditor {
             projects: agent.projects.clone(),
             project_options: Vec::new(),
             offer: !agent.offer_prompt.trim().is_empty(),
-            cleanup_enabled: alert.enabled,
+            template: None,
             agent,
             name,
             extra,
             role,
             kickoff,
-            threshold,
-            cleanup_path,
             catalog,
             saving: false,
             api: if cfg!(test) { None } else { DesktopApi::load() },
@@ -256,12 +239,6 @@ impl AgentEditor {
             return;
         };
         let (id, draft) = (self.agent.id.clone(), self.draft(cx));
-        let chronicler = self.agent.preset.as_deref() == Some(CHRONICLER_PRESET);
-        let cleanup = (
-            self.cleanup_enabled,
-            clamp_threshold(self.threshold.read(cx).text()),
-        );
-        let path = self.cleanup_path.clone();
         self.saving = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -279,9 +256,6 @@ impl AgentEditor {
                 editor.saving = false;
                 match saved {
                     Ok(created) => {
-                        if chronicler {
-                            let _ = CleanupAlert::save_settings(&path, cleanup.0, cleanup.1);
-                        }
                         cx.emit(match created {
                             Some(id) => EditorEvent::Created(id),
                             None => EditorEvent::Saved,
@@ -352,6 +326,7 @@ impl Render for AgentEditor {
             .flex()
             .flex_col()
             .gap(px(16.0))
+            .children(self.template_row(cx))
             .child(
                 div()
                     .flex()
@@ -390,14 +365,12 @@ impl Render for AgentEditor {
                 self.picker(cx),
                 cx,
             ))
-            .when(called_in_a_task(preset.as_deref()), |body| {
-                body.child(field(
-                    cx.t("agents.editor.projects"),
-                    Some(cx.t("agents.editor.projectsHint")),
-                    self.project_chips(cx),
-                    cx,
-                ))
-            })
+            .child(field(
+                cx.t("agents.editor.projects"),
+                Some(cx.t("agents.editor.projectsHint")),
+                self.project_chips(cx),
+                cx,
+            ))
             .child(field(
                 cx.t("agents.editor.extra"),
                 Some(cx.t("agents.editor.extraHint")),
@@ -408,7 +381,7 @@ impl Render for AgentEditor {
                     .into_any_element(),
                 cx,
             ));
-        // Only the Reviewer offers itself; the Researcher is always called.
+        // Only the Reviewer offers itself.
         if preset.as_deref() == Some(REVIEWER_PRESET) {
             body = body.child(self.switch_row(
                 "agent-editor-offer",
@@ -418,38 +391,6 @@ impl Render for AgentEditor {
                 |editor, on| editor.offer = on,
                 cx,
             ));
-        }
-        if preset.as_deref() == Some(CHRONICLER_PRESET) {
-            body = body
-                .child(self.switch_row(
-                    "agent-editor-cleanup",
-                    cx.t("agents.editor.cleanupSwitch"),
-                    cx.t("agents.editor.cleanupSwitchHint"),
-                    self.cleanup_enabled,
-                    |editor, on| editor.cleanup_enabled = on,
-                    cx,
-                ))
-                .when(self.cleanup_enabled, |body| {
-                    body.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .text_size(px(12.0))
-                            .text_color(colors.muted_foreground)
-                            .child(cx.t("agents.editor.cleanupThreshold"))
-                            .child(
-                                boxed(self.threshold.clone().into_any_element(), cx)
-                                    .debug_selector(|| "agent-editor-threshold".into())
-                                    .w(px(80.0))
-                                    .h(px(32.0))
-                                    .flex()
-                                    .items_center()
-                                    .font_features(crate::ui::tabular_nums()),
-                            )
-                            .child("GB"),
-                    )
-                });
         }
         let back = cx.entity().downgrade();
         let cancel = back.clone();

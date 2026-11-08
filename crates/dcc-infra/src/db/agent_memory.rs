@@ -372,14 +372,10 @@ mod tests {
         )))
         .unwrap();
         let agents = repo
-            .list_resident_agents(
-                &ReviewerPresetText {
-                    name: "Revisor".to_string(),
-                    ..ReviewerPresetText::default()
-                },
-                &Default::default(),
-                &Default::default(),
-            )
+            .list_resident_agents(&ReviewerPresetText {
+                name: "Revisor".to_string(),
+                ..ReviewerPresetText::default()
+            })
             .unwrap();
         let id = agents[0].id.clone();
         (repo, id)

@@ -4,14 +4,6 @@
 
 use super::workspace_git::WorkspaceGitStatusOutput;
 
-/// Built-in agents with a surface of their own (an idea, the daily recap):
-/// never called in a task.
-pub const NOT_CALLED_IN_A_TASK: [&str; 2] = ["researcher", "chronicler"];
-
-pub fn called_in_a_task(preset: Option<&str>) -> bool {
-    !NOT_CALLED_IN_A_TASK.contains(&preset.unwrap_or_default())
-}
-
 /// `hasReviewableChanges`: local changes or commits not pushed yet;
 /// `None` while the status is still read.
 pub fn has_reviewable_changes(status: Option<&WorkspaceGitStatusOutput>) -> Option<bool> {
@@ -50,8 +42,6 @@ mod tests {
             call_block_key(None, true, Some(true)),
             Some("agents.call.busy")
         );
-        assert!(!called_in_a_task(Some("researcher")));
-        assert!(called_in_a_task(Some("reviewer")) && called_in_a_task(None));
         assert_eq!(has_reviewable_changes(None), None);
     }
 }

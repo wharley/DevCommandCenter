@@ -5,6 +5,7 @@
 
 pub(crate) mod account;
 mod appearance;
+mod cleanup_alert;
 mod computer;
 mod connections;
 mod connectors;
@@ -165,6 +166,7 @@ pub struct Settings {
     metrics: std::collections::HashMap<String, crate::data::ux_metrics::Metric>,
     scroll: ScrollHandle,
     general: general::General,
+    cleanup: cleanup_alert::CleanupSettings,
     shortcuts: shortcuts::Shortcuts,
     providers: providers::Providers,
     decision: decision::Decision,
@@ -238,6 +240,7 @@ impl Settings {
             } else {
                 crate::data::desktop_api::DesktopApi::load()
             }),
+            cleanup: cleanup_alert::CleanupSettings::load(),
             shortcuts: shortcuts::Shortcuts::new(cx),
             providers: providers::Providers::new(state.default_pick, window, cx),
             decision: decision::Decision::new(window, cx),

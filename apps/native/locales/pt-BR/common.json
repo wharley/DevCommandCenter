@@ -315,61 +315,10 @@
       "lines": "linhas {{start}}–{{end}}"
     },
     "heading": "Agentes",
-    "research": {
-      "newIdea": "Nova ideia",
-      "newIdeaHint": "O DCC cria uma pasta em ~/dcc-ideias com um IDEIA.md e abre o chat com o Pesquisador. Você descreve a ideia ali, do seu jeito. Ela fica fora dos seus projetos até você publicar.",
-      "start": "Começar",
-      "missing": "O Pesquisador foi apagado. Recrie-o para começar uma ideia.",
-      "progress": "Investigando a ideia",
-      "progressCount": "{{count}} de {{total}}",
-      "milestones": {
-        "problem": "Problema",
-        "audience": "Para quem",
-        "references": "Referências",
-        "hypotheses": "Hipóteses",
-        "name": "Nome"
-      },
-      "card": "Ficha",
-      "cardTitle": "Ficha de {{idea}}",
-      "untitled": "uma ideia sem título",
-      "draft": "Rascunho",
-      "empty": "Ainda não preenchido",
-      "verdict": "Veredito",
-      "verdicts": {
-        "seguir": "Seguir",
-        "pivotar": "Pivotar",
-        "descartar": "Descartar"
-      },
-      "name": "Nome do repositório e da pasta",
-      "nameInvalid": "Use letras, números, '.', '_' ou '-'.",
-      "repository": "Repositório",
-      "visibility": {
-        "private": "Privado",
-        "public": "Público"
-      },
-      "publicWarning": "O IDEIA.md vai junto: pesquisa de concorrentes, hipóteses e decisões ficam visíveis para todos.",
-      "keepLocal": "Deixar o docs/IDEIA.md só no meu computador",
-      "folder": "Pasta",
-      "chooseFolder": "Escolher",
-      "warnVerdict": "O veredito ainda não é \"Seguir\".",
-      "warnArchitecture": "A seção Arquitetura e stack está vazia.",
-      "warnRoadmap": "O Roadmap está vazio: a primeira tarefa não terá por onde começar.",
-      "waitTurn": "Aguarde o Pesquisador terminar o turno.",
-      "changeLater": "Dá para mudar depois, é só falar",
-      "discard": "Descartar",
-      "adjust": "Ajustar",
-      "publish": "Publicar",
-      "published": "{{name}} publicado: {{url}}",
-      "discardTitle": "Descartar esta ideia?",
-      "discardDescription": "A conversa, a tarefa e a pasta {{folder}} serão apagadas. Não dá para desfazer.",
-      "discardConfirm": "Descartar e apagar"
-    },
     "presets": {
       "reviewerOffer": "Posso revisar essas mudanças?",
       "reviewerKickoff": "Revise as mudanças atuais desta tarefa.",
-      "reviewer": "Revisor",
-      "researcher": "Pesquisador",
-      "chronicler": "Repórter"
+      "reviewer": "Revisor"
     },
     "state": {
       "failed": "Falhou",
@@ -402,8 +351,9 @@
       "pullRequests": "Revisões de Pull Requests",
       "showRole": "Ver o papel deste agente",
       "roleHint": "O papel é mantido pelo DCC e melhora a cada versão. Para ajustá-lo ao seu projeto, use as instruções extras em “Editar”.",
-      "researcherSessions": "Em andamento",
-      "researcherNoSessions": "Nenhuma ideia em andamento. Comece uma acima."
+      "howToCallAgent": "Este agente trabalha numa tarefa: chame pelo ícone dele no cabeçalho da tarefa. Para perguntar ou pedir algo, fale com ele na Sala da equipe.",
+      "agentSessions": "Em tarefas",
+      "agentNoSessions": "Nenhuma tarefa ainda. Quando você o chamar numa tarefa, ela aparece aqui."
     },
     "recap": {
       "title": "Resumo desde {{from}}",
@@ -420,33 +370,15 @@
       "aborted_one": "{{count}} interrompido",
       "aborted_other": "{{count}} interrompidos",
       "removedTask": "Tarefa removida",
-      "since": "desde {{time}}",
-      "bubble": {
-        "lead": "Desde {{from}}: {{facts}}.",
-        "moved_one": "{{count}} tarefa andou",
-        "moved_other": "{{count}} tarefas andaram",
-        "completed_one": "{{count}} concluída",
-        "completed_other": "{{count}} concluídas",
-        "created_one": "{{count}} nova",
-        "created_other": "{{count}} novas",
-        "blocked_one": "{{count}} travada agora",
-        "blocked_other": "{{count}} travadas agora",
-        "open": "Ver resumo"
-      }
-    },
-    "cleanup": {
-      "bubble": {
-        "safe_one": "Suas concluídas ocupam {{total}}. {{count}} dá para apagar com segurança ({{safe}}).",
-        "safe_other": "Suas concluídas ocupam {{total}}. {{count}} dá para apagar com segurança ({{safe}}).",
-        "noneSafe": "Suas concluídas ocupam {{total}}, mas nenhuma está pronta para apagar com segurança.",
-        "review": "Revisar",
-        "cleanSafe": "Limpar as seguras",
-        "checking": "Verificando…",
-        "cleaning": "Limpando {{done}} de {{total}}…",
-        "nothingSafe": "Nada está pronto para apagar com segurança agora."
-      }
+      "since": "desde {{time}}"
     },
     "room": {
+      "handoff": {
+        "suggests": "{{agent}} sugere passar a vez para {{teammate}}",
+        "pass": "Passar a vez",
+        "ignore": "Ignorar",
+        "passed": "Passado para {{teammate}}"
+      },
       "unread": "{{count}} novas",
       "markRead": "Marcar tudo como lido",
       "card": {
@@ -462,7 +394,7 @@
       },
       "title": "Sala da equipe",
       "subtitle": "Escreva para a equipe. Com @ você escolhe quem responde; sem @, o DCC escolhe pela regra.",
-      "placeholder": "Pergunte o que precisa de você, peça uma revisão, uma pesquisa…",
+      "placeholder": "Escreva para a equipe · @ para chamar alguém",
       "send": "Enviar",
       "hint": "Sem @: quem você chamou, o papel do pedido, quem respondeu por último ou o Revisor.",
       "next": "Vai para {{agent}} · {{reason}}",
@@ -473,12 +405,21 @@
       "needsYou": "{{agent}} precisa de você na conversa dele",
       "tokens": "{{count}} tokens",
       "noAgent": "Nenhum agente pode responder agora.",
-      "empty": "Ninguém falou ainda. Pergunte o que precisa de você hoje, peça para @Revisor olhar um PR ou para @Pesquisador comparar opções.",
+      "empty": "Ninguém falou ainda. Pergunte o que precisa de você hoje ou peça para o @Revisor olhar um PR.",
       "reason": {
         "mention": "você chamou",
         "role": "pelo papel",
         "continues": "segue o assunto",
         "default": "padrão"
+      },
+      "cleanup": {
+        "text": "Suas concluídas ocupam {{total}}.",
+        "open": "Liberar espaço",
+        "dismiss": "Dispensar"
+      },
+      "mention": {
+        "title": "Equipe",
+        "reviewer": "Revisa as mudanças das tarefas e os PRs"
       }
     },
     "team": {
@@ -490,9 +431,6 @@
       "extraHint": "Somadas ao papel do DCC a cada turno. Exemplo: convenções do seu projeto ou pastas a ignorar.",
       "offerSwitch": "Oferecer ao terminar um turno",
       "offerSwitchHint": "Quando um turno termina com mudanças, o agente aparece acima do composer perguntando se pode agir.",
-      "cleanupSwitch": "Avisar quando as concluídas ocuparem muito espaço",
-      "cleanupSwitchHint": "O Repórter mostra quanto dá para liberar. Ele só apaga quando você pede, e só o que já está commitado e publicado.",
-      "cleanupThreshold": "Avisar a partir de",
       "name": "Nome",
       "avatar": "Avatar",
       "colors": {
@@ -528,6 +466,19 @@
       "save": "Salvar",
       "title": "Editar {{agent}}",
       "description": "Este agente é do DCC. Você escolhe o provider, o modelo e o avatar, e pode somar instruções suas ao papel."
+    },
+    "templates": {
+      "title": "Começar de",
+      "hint": "Um modelo preenche o nome, o papel, o que pedir ao chamar e o bichinho. Tudo continua seu para mudar antes de salvar.",
+      "blank": "Do zero",
+      "research": {
+        "label": "Pesquisa",
+        "name": "Pesquisador"
+      },
+      "qa": {
+        "label": "QA",
+        "name": "QA"
+      }
     }
   },
   "sidebar": {
@@ -877,14 +828,14 @@
     "description": "Ir para um workspace ou executar uma ação. Use @ seguido de pelo menos 2 caracteres para buscar conteúdo das sessões.",
     "searchPlaceholder": "Buscar ações, projetos e arquivos — @ busca sessões…",
     "empty": "Nenhum workspace ou ação encontrado.",
-	"actionDestination": "Abre a superfície selecionada do DCC",
-	"loadingSessions": "Carregando sessões recentes…",
-	"currentWorkspaceSessions": "Sessões no workspace atual",
-	"recentSessions": "Sessões recentes e resultados da busca",
-	"workspaceFiles": "Arquivos no workspace ativo",
-	"workspaceRoot": "Raiz do workspace",
+    "actionDestination": "Abre a superfície selecionada do DCC",
+    "loadingSessions": "Carregando sessões recentes…",
+    "currentWorkspaceSessions": "Sessões no workspace atual",
+    "recentSessions": "Sessões recentes e resultados da busca",
+    "workspaceFiles": "Arquivos no workspace ativo",
+    "workspaceRoot": "Raiz do workspace",
     "switchWorkspace": "Trocar workspace",
-	"workspacesAndProjects": "Workspaces e projetos",
+    "workspacesAndProjects": "Workspaces e projetos",
     "selected": "Selecionado",
     "actions": "Ações",
     "openProject": "Abrir projeto",
@@ -898,26 +849,26 @@
     "keyboardShortcuts": "Atalhos de teclado",
     "openUsage": "Abrir DCC Usage",
     "manageSkills": "Gerenciar skills",
-	"keywords": {
-		"openProject": "abrir projeto workspace",
-		"clone": "clonar repositório url",
-		"settings": "configurações preferências",
-		"skills": "habilidades skills gerenciar",
-		"usage": "uso análises provedores arena tokens modelos",
-		"onboarding": "onboarding boas-vindas",
-		"shortcuts": "atalhos teclado teclas",
-		"help": "ajuda documentação guia como funciona dúvida",
-		"focusComposer": "composer prompt foco",
-		"execution": "composer execução esforço rápido",
-		"plan": "composer modo plano",
-		"worktreeTerminal": "terminal worktree",
-		"projectTerminal": "terminal projeto raiz",
-		"newTerminal": "terminal nova aba",
-		"inspectorChanges": "inspector git mudanças diff diferenças",
-		"inspectorFiles": "inspector arquivos código",
-		"activity": "inspector atividade marcos",
-		"details": "inspector detalhes diagnósticos"
-	},
+    "keywords": {
+      "openProject": "abrir projeto workspace",
+      "clone": "clonar repositório url",
+      "settings": "configurações preferências",
+      "skills": "habilidades skills gerenciar",
+      "usage": "uso análises provedores arena tokens modelos",
+      "onboarding": "onboarding boas-vindas",
+      "shortcuts": "atalhos teclado teclas",
+      "help": "ajuda documentação guia como funciona dúvida",
+      "focusComposer": "composer prompt foco",
+      "execution": "composer execução esforço rápido",
+      "plan": "composer modo plano",
+      "worktreeTerminal": "terminal worktree",
+      "projectTerminal": "terminal projeto raiz",
+      "newTerminal": "terminal nova aba",
+      "inspectorChanges": "inspector git mudanças diff diferenças",
+      "inspectorFiles": "inspector arquivos código",
+      "activity": "inspector atividade marcos",
+      "details": "inspector detalhes diagnósticos"
+    },
     "workbench": {
       "title": "Workspace atual",
       "focusComposer": "Focar no composer",
@@ -2679,6 +2630,11 @@
         "keepAwakeWarning": "Seu Mac pode dormir antes do limite voltar, e aí nada retoma.",
         "enableKeepAwake": "Ativar \"Durante agentes\"",
         "saveFailed": "Não foi possível salvar: {{message}}"
+      },
+      "cleanup": {
+        "title": "Espaço das concluídas",
+        "body": "Avisa na Sala da equipe quando as tarefas concluídas passam do limite, com um atalho para liberar espaço. Nada é apagado sem o seu clique, e só o que já está commitado e publicado.",
+        "limit": "Avisar a partir de"
       }
     },
     "appearance": {
@@ -3292,7 +3248,13 @@
       "probabilityHint": "Os valores estimam a probabilidade de cada critério ser verdadeiro; não medem porcentagem de trabalho concluído.",
       "contextIncomplete": "Parte do contexto foi resumida ou omitida. Confira as evidências antes de concluir.",
       "reviewSignal": "menor sinal: {{score}}%",
-      "criteria": {"request_coverage": "Pedido atendido", "constraints": "Restrições respeitadas", "evidence_support": "Execução sustentada por evidências", "validation": "Validação adequada", "tool_guard": "Ação requer revisão"},
+      "criteria": {
+        "request_coverage": "Pedido atendido",
+        "constraints": "Restrições respeitadas",
+        "evidence_support": "Execução sustentada por evidências",
+        "validation": "Validação adequada",
+        "tool_guard": "Ação requer revisão"
+      },
       "pointsTitle": "Pontos de decisão",
       "pointsHint": "Cada ponto pode ser desativado separadamente. Os limiares controlam o tipo de sinal usado por cada classificação.",
       "points": {
@@ -3525,7 +3487,7 @@
     "badge": "Atalhos",
     "title": "Atalhos de teclado",
     "commandPalette": "Abrir paleta de comandos",
-	"commandPaletteLegacy": "Abrir paleta de comandos (legado)",
+    "commandPaletteLegacy": "Abrir paleta de comandos (legado)",
     "focusComposer": "Focar no composer",
     "toggleTerminal": "Alternar terminal",
     "quickOpen": "Abrir arquivo rapidamente",
@@ -3642,7 +3604,7 @@
       "agents": {
         "label": "Agente Revisor",
         "summary": "Confere as mudanças da tarefa e entrega achados prontos para corrigir.",
-        "whatIs": "Um agente do DCC tem um papel fixo e entra num momento definido do seu fluxo. São três, na seção [Agentes] da barra lateral: o [Revisor], o [Pesquisador] e o [Repórter]. O Revisor lê as mudanças da tarefa, lista os achados com arquivo e linha e deixa você mandá-los ao agente que escreveu o código. Ele não edita arquivos.",
+        "whatIs": "Os agentes ficam em [Agentes] na barra lateral. O DCC vem com o [Revisor], e você monta o resto da equipe em [Novo agente], do zero ou a partir de um modelo (Pesquisa, QA). Na [Sala da equipe] você escreve uma vez: com @ escolhe quem responde, sem @ o DCC escolhe pela regra. O Revisor lê as mudanças da tarefa, lista os achados com arquivo e linha e deixa você mandá-los ao agente que escreveu o código. Ele não edita arquivos.",
         "whenToUse": "Quando um turno termina com mudanças e você quer uma segunda leitura antes de commitar, ou quando pediram a sua revisão num PR.",
         "steps": [
           "Ao fim de um turno com mudanças, o mascote aparece acima do composer perguntando se pode revisar. Clique em [Sim, pode]. Você também pode chamá-lo pelo ícone dele no cabeçalho da tarefa.",
@@ -3654,37 +3616,6 @@
         ],
         "prompt": "Neste projeto, trate como achado importante qualquer consulta ao banco sem índice e ignore a pasta vendor.",
         "keywords": "agentes do dcc agente revisor review revisão achados mascote polvo balão oferta autor corrigir pull request"
-      },
-      "researcher": {
-        "label": "Agente Pesquisador",
-        "summary": "Investiga uma ideia de projeto antes de existir código.",
-        "whatIs": "O [Pesquisador] ajuda a decidir se uma ideia vale virar projeto: o problema, para quem, as referências e concorrentes, as hipóteses e o nome. Tudo que ele descobre e tudo que vocês decidem fica num IDEIA.md, numa pasta em ~/dcc-ideias, fora dos seus projetos.",
-        "whenToUse": "Quando você tem uma ideia solta e quer pesquisar antes de abrir um repositório, sem misturar com o trabalho dos projetos que já existem.",
-        "steps": [
-          "Em [Agentes], abra o [Pesquisador] e, em [Nova ideia], clique em [Começar]. O DCC cria a pasta com o IDEIA.md e abre o chat com ele.",
-          "Descreva a ideia do seu jeito e responda às perguntas. Acima do composer, a barra [Investigando a ideia] marca o que já está preenchido: [Problema], [Para quem], [Referências], [Hipóteses] e [Nome].",
-          "Clique em [Ficha] para ver o resumo da ideia e o [Veredito]. Quando todos os marcos estão preenchidos e o veredito é [Seguir], a ficha abre sozinha.",
-          "Para publicar, confira o nome do repositório, escolha [Privado] ou [Público] e a pasta, e clique em [Publicar]. A ideia vira um projeto normal, com o IDEIA.md como ponto de partida das tarefas.",
-          "Se a ideia não vingou, use [Descartar]: a conversa, a tarefa e a pasta são apagadas. Para continuar conversando, use [Ajustar]."
-        ],
-        "tip": "O Pesquisador só trabalha em ideias. Ele não é chamado dentro das tarefas de um projeto.",
-        "prompt": "Quero um app para pequenos restaurantes controlarem o estoque pelo celular. Veja quem já faz isso, o que reclamam dessas ferramentas e se ainda tem espaço.",
-        "keywords": "agentes do dcc agente pesquisador pesquisa ideia nova ideia ideia.md ficha veredito concorrentes hipóteses nome publicar repositório github descartar"
-      },
-      "reporter": {
-        "label": "Agente Repórter",
-        "summary": "Resume o que andou nas suas tarefas desde a última vez.",
-        "whatIs": "O [Repórter] monta um resumo do que aconteceu nas suas tarefas desde o resumo anterior: o que está travado agora, o que andou, o que foi concluído e o que é novo. Ele lê o que o DCC registrou e não usa modelo, então não gasta tokens.",
-        "whenToUse": "Ao começar o dia ou ao voltar depois de um tempo longe, para saber onde retomar sem abrir tarefa por tarefa.",
-        "steps": [
-          "Quando há um resumo novo, o Repórter sai da seção [Agentes] da barra lateral e avisa num balão acima do composer. Clique em [Ver resumo] para abrir o resumo na página dele.",
-          "Ou abra o [Repórter] em [Agentes] a qualquer momento para ver o resumo atual.",
-          "Comece por [Travado agora]: são as tarefas que esperam por você, com o tempo desde quando estão paradas. Depois veja [Andou], [Concluídas] e [Novas].",
-          "Clique numa tarefa do resumo para abri-la e retomar dali.",
-          "Se as concluídas passarem do limite que você escolhe em [Editar], o Repórter avisa acima do composer quanto elas ocupam. [Revisar] abre a lista e [Limpar as seguras] apaga só as que estão commitadas e publicadas."
-        ],
-        "tip": "Um resumo novo começa na primeira abertura depois das 4h e cobre tudo desde o anterior.",
-        "keywords": "agentes do dcc agente repórter resumo diário recap o que andou travado concluídas novas manhã retomar espaço disco limpar faxina worktrees liberar"
       },
       "terminal": {
         "label": "Terminal",
@@ -4321,10 +4252,10 @@
       "agentFallback": "agente"
     },
     "sessionStartup": {
-        "title": "Preparando o novo chat…",
-        "creating": "Criar sessão",
-        "starting": "Iniciar agente",
-        "description": "Estamos preparando a sessão e conectando o provedor selecionado."
+      "title": "Preparando o novo chat…",
+      "creating": "Criar sessão",
+      "starting": "Iniciar agente",
+      "description": "Estamos preparando a sessão e conectando o provedor selecionado."
     },
     "modelRouting": {
       "title": "Recomendação de modelo",

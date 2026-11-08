@@ -22,6 +22,10 @@ impl AgentPage {
         self.room_open = true;
         self.editor = None;
         self.room_draft = draft;
+        // The limit may have changed in Settings meanwhile.
+        if let Some((room, _)) = &self.room {
+            room.update(cx, |room, _| room.reload_cleanup());
+        }
         cx.notify();
     }
 
@@ -45,6 +49,9 @@ impl AgentPage {
                     }),
                     room::RoomEvent::OpenPullRequest(pr_id) => {
                         cx.emit(AgentPageEvent::OpenPullRequest(pr_id.clone()))
+                    }
+                    room::RoomEvent::OpenTask(task_id) => {
+                        cx.emit(AgentPageEvent::OpenTask(task_id.clone()))
                     }
                 });
                 self.room = Some((room.clone(), events));

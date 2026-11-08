@@ -1,7 +1,7 @@
-//! When the Reporter speaks up about the space completed tasks take
-//! (`cleanup-alert.ts`): only the limit is the person's to choose. Kept in
-//! the native app's own file (`cleanup-alert.json`, the desktop keeps it in
-//! the WebView), next to the recap's reading marker.
+//! When the team room shows how much space the completed tasks take
+//! (`cleanup-alert.ts`): only the switch and the limit are the person's to
+//! choose (Settings › General). Kept in the native app's own file
+//! (`cleanup-alert.json`), next to the recap's reading marker.
 
 use std::path::Path;
 
@@ -16,7 +16,7 @@ pub const MAX_THRESHOLD_GB: u32 = 1000;
 pub struct CleanupAlert {
     pub enabled: bool,
     pub threshold_gb: u32,
-    /// The total when the person closed the bubble.
+    /// The total when the person dismissed the card.
     pub dismissed_at_bytes: Option<u64>,
 }
 
@@ -30,19 +30,40 @@ impl Default for CleanupAlert {
     }
 }
 
-/// `clampCleanupThresholdGb`: a typed limit, rounded and kept in range.
-pub fn clamp_threshold(typed: &str) -> u32 {
-    match typed.trim().parse::<f64>() {
-        Ok(value) if value.is_finite() => {
-            (value
-                .round()
-                .clamp(MIN_THRESHOLD_GB as f64, MAX_THRESHOLD_GB as f64)) as u32
-        }
-        _ => DEFAULT_THRESHOLD_GB,
-    }
-}
+/// The limits Settings offers, in gigabytes.
+pub const THRESHOLD_CHOICES: [u32; 5] = [2, 5, 10, 20, 50];
+
+const GB: u64 = 1024 * 1024 * 1024;
 
 impl CleanupAlert {
+    /// Whether `total` bytes of completed tasks call for the card: past the
+    /// limit, and a gigabyte past where the person last dismissed it.
+    pub fn shows(&self, total: u64) -> bool {
+        self.enabled
+            && total >= u64::from(self.threshold_gb) * GB
+            && self
+                .dismissed_at_bytes
+                .is_none_or(|dismissed| total >= dismissed.saturating_add(GB))
+    }
+
+    /// "Dispensar": quiet until the total grows again.
+    pub fn dismiss(path: &Path, total: u64) -> std::io::Result<Self> {
+        let mut alert = Self::load(path);
+        alert.dismissed_at_bytes = Some(total);
+        alert.write(path)?;
+        Ok(alert)
+    }
+
+    fn write(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(
+            path,
+            serde_json::to_string(self).unwrap_or_else(|_| "{}".into()),
+        )
+    }
+
     pub fn load(path: &Path) -> Self {
         std::fs::read_to_string(path)
             .ok()
@@ -59,13 +80,7 @@ impl CleanupAlert {
         let mut alert = Self::load(path);
         alert.enabled = enabled;
         alert.threshold_gb = threshold_gb;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(
-            path,
-            serde_json::to_string(&alert).unwrap_or_else(|_| "{}".into()),
-        )
+        alert.write(path)
     }
 }
 
@@ -74,17 +89,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_limit_is_clamped_and_kept() {
-        assert_eq!(clamp_threshold("7.4"), 7);
-        assert_eq!(clamp_threshold("0"), MIN_THRESHOLD_GB);
-        assert_eq!(clamp_threshold("5000"), MAX_THRESHOLD_GB);
-        assert_eq!(clamp_threshold("abc"), DEFAULT_THRESHOLD_GB);
+    fn the_card_shows_past_the_limit_until_dismissed_and_again_when_it_grows() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cleanup-alert.json");
         assert_eq!(CleanupAlert::load(&path), CleanupAlert::default());
+        let alert = CleanupAlert::default();
+        assert!(!alert.shows(4 * GB));
+        assert!(alert.shows(5 * GB));
+        let alert = CleanupAlert::dismiss(&path, 6 * GB).unwrap();
+        assert!(!alert.shows(6 * GB + GB / 2));
+        assert!(alert.shows(7 * GB));
         CleanupAlert::save_settings(&path, false, 12).unwrap();
         let saved = CleanupAlert::load(&path);
-        assert!(!saved.enabled);
+        assert!(!saved.enabled && !saved.shows(100 * GB));
         assert_eq!(saved.threshold_gb, 12);
+        // A dismissal stays when the settings change.
+        assert_eq!(saved.dismissed_at_bytes, Some(6 * GB));
     }
 }

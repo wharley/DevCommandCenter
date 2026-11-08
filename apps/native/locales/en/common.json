@@ -315,61 +315,10 @@
       "lines": "lines {{start}}–{{end}}"
     },
     "heading": "Agents",
-    "research": {
-      "newIdea": "New idea",
-      "newIdeaHint": "DCC creates a folder in ~/dcc-ideias with an IDEIA.md and opens the chat with the Researcher. Describe the idea there, in your own words. It stays out of your projects until you publish it.",
-      "start": "Start",
-      "missing": "The Researcher was deleted. Restore it to start an idea.",
-      "progress": "Investigating the idea",
-      "progressCount": "{{count}} of {{total}}",
-      "milestones": {
-        "problem": "Problem",
-        "audience": "Who for",
-        "references": "References",
-        "hypotheses": "Hypotheses",
-        "name": "Name"
-      },
-      "card": "Card",
-      "cardTitle": "Card for {{idea}}",
-      "untitled": "an untitled idea",
-      "draft": "Draft",
-      "empty": "Not filled yet",
-      "verdict": "Verdict",
-      "verdicts": {
-        "seguir": "Go",
-        "pivotar": "Pivot",
-        "descartar": "Drop"
-      },
-      "name": "Repository and folder name",
-      "nameInvalid": "Use letters, numbers, '.', '_' or '-'.",
-      "repository": "Repository",
-      "visibility": {
-        "private": "Private",
-        "public": "Public"
-      },
-      "publicWarning": "IDEIA.md goes along: competitor research, hypotheses and decisions become visible to everyone.",
-      "keepLocal": "Keep docs/IDEIA.md on my computer only",
-      "folder": "Folder",
-      "chooseFolder": "Choose",
-      "warnVerdict": "The verdict is not \"Go\" yet.",
-      "warnArchitecture": "The Architecture and stack section is empty.",
-      "warnRoadmap": "The Roadmap is empty: the first task will have nowhere to start.",
-      "waitTurn": "Wait for the Researcher to finish its turn.",
-      "changeLater": "You can change it later, just say so",
-      "discard": "Discard",
-      "adjust": "Adjust",
-      "publish": "Publish",
-      "published": "{{name}} published: {{url}}",
-      "discardTitle": "Discard this idea?",
-      "discardDescription": "The conversation, the task and the folder {{folder}} will be deleted. This cannot be undone.",
-      "discardConfirm": "Discard and delete"
-    },
     "presets": {
       "reviewerOffer": "May I review these changes?",
       "reviewerKickoff": "Review the current changes in this workspace.",
-      "reviewer": "Reviewer",
-      "researcher": "Researcher",
-      "chronicler": "Reporter"
+      "reviewer": "Reviewer"
     },
     "state": {
       "failed": "Failed",
@@ -402,8 +351,9 @@
       "pullRequests": "Pull request reviews",
       "showRole": "See this agent's role",
       "roleHint": "The role is maintained by DCC and improves with each version. To adapt it to your project, use the extra instructions under “Edit”.",
-      "researcherSessions": "In progress",
-      "researcherNoSessions": "No ideas in progress. Start one above."
+      "howToCallAgent": "This agent works in a task: call it from its icon in the task header. To ask or request something, talk to it in the team room.",
+      "agentSessions": "In tasks",
+      "agentNoSessions": "No tasks yet. When you call it in a task, it shows here."
     },
     "recap": {
       "title": "Recap since {{from}}",
@@ -420,33 +370,15 @@
       "aborted_one": "{{count}} interrupted",
       "aborted_other": "{{count}} interrupted",
       "removedTask": "Removed task",
-      "since": "since {{time}}",
-      "bubble": {
-        "lead": "Since {{from}}: {{facts}}.",
-        "moved_one": "{{count}} task moved",
-        "moved_other": "{{count}} tasks moved",
-        "completed_one": "{{count}} completed",
-        "completed_other": "{{count}} completed",
-        "created_one": "{{count}} new",
-        "created_other": "{{count}} new",
-        "blocked_one": "{{count}} blocked now",
-        "blocked_other": "{{count}} blocked now",
-        "open": "See recap"
-      }
-    },
-    "cleanup": {
-      "bubble": {
-        "safe_one": "Your completed tasks take {{total}}. {{count}} can be deleted safely ({{safe}}).",
-        "safe_other": "Your completed tasks take {{total}}. {{count}} can be deleted safely ({{safe}}).",
-        "noneSafe": "Your completed tasks take {{total}}, but none is ready to delete safely.",
-        "review": "Review",
-        "cleanSafe": "Clean up the safe ones",
-        "checking": "Checking…",
-        "cleaning": "Cleaning {{done}} of {{total}}…",
-        "nothingSafe": "Nothing is ready to delete safely right now."
-      }
+      "since": "since {{time}}"
     },
     "room": {
+      "handoff": {
+        "suggests": "{{agent}} suggests passing to {{teammate}}",
+        "pass": "Pass the turn",
+        "ignore": "Ignore",
+        "passed": "Passed to {{teammate}}"
+      },
       "unread": "{{count}} new",
       "markRead": "Mark all as read",
       "card": {
@@ -462,7 +394,7 @@
       },
       "title": "Team room",
       "subtitle": "Write to the team. With @ you pick who answers; without it, DCC picks by rule.",
-      "placeholder": "Ask what needs you, ask for a review, a research…",
+      "placeholder": "Write to the team · @ to call someone",
       "send": "Send",
       "hint": "Without @: who you named, the request's role, who answered last, or the Reviewer.",
       "next": "Goes to {{agent}} · {{reason}}",
@@ -473,12 +405,21 @@
       "needsYou": "{{agent}} needs you in its conversation",
       "tokens": "{{count}} tokens",
       "noAgent": "No agent can answer now.",
-      "empty": "Nobody spoke yet. Ask what needs you today, ask @Reviewer to look at a PR or @Researcher to compare options.",
+      "empty": "Nobody spoke yet. Ask what needs you today or ask @Reviewer to look at a PR.",
       "reason": {
         "mention": "you named it",
         "role": "by role",
         "continues": "same subject",
         "default": "default"
+      },
+      "cleanup": {
+        "text": "Your completed tasks take {{total}}.",
+        "open": "Free up space",
+        "dismiss": "Dismiss"
+      },
+      "mention": {
+        "title": "Team",
+        "reviewer": "Reviews the tasks' changes and pull requests"
       }
     },
     "team": {
@@ -490,9 +431,6 @@
       "extraHint": "Added to DCC's role on every turn. For example: your project's conventions or folders to ignore.",
       "offerSwitch": "Offer after a turn",
       "offerSwitchHint": "When a turn ends with changes, the agent appears above the composer asking whether it may act.",
-      "cleanupSwitch": "Warn when completed tasks take a lot of space",
-      "cleanupSwitchHint": "The Reporter shows how much can be freed. It only deletes when you ask, and only what is already committed and pushed.",
-      "cleanupThreshold": "Warn from",
       "name": "Name",
       "avatar": "Avatar",
       "colors": {
@@ -528,6 +466,19 @@
       "save": "Save",
       "title": "Edit {{agent}}",
       "description": "This agent is DCC's. You choose the provider, model and avatar, and can add your own instructions to its role."
+    },
+    "templates": {
+      "title": "Start from",
+      "hint": "A template fills the name, the role, what a call asks first and the mascot. It is all yours to change before saving.",
+      "blank": "Blank",
+      "research": {
+        "label": "Research",
+        "name": "Researcher"
+      },
+      "qa": {
+        "label": "QA",
+        "name": "QA"
+      }
     }
   },
   "sidebar": {
@@ -877,14 +828,14 @@
     "description": "Jump to a workspace or run an action. Use @ followed by at least 2 characters to search session content.",
     "searchPlaceholder": "Search actions, projects, files — @ searches sessions…",
     "empty": "No workspace or action found.",
-	"actionDestination": "Opens the selected DCC surface",
-	"loadingSessions": "Loading recent sessions…",
-	"currentWorkspaceSessions": "Sessions in the current workspace",
-	"recentSessions": "Recent sessions and search results",
-	"workspaceFiles": "Files in the active workspace",
-	"workspaceRoot": "Workspace root",
+    "actionDestination": "Opens the selected DCC surface",
+    "loadingSessions": "Loading recent sessions…",
+    "currentWorkspaceSessions": "Sessions in the current workspace",
+    "recentSessions": "Recent sessions and search results",
+    "workspaceFiles": "Files in the active workspace",
+    "workspaceRoot": "Workspace root",
     "switchWorkspace": "Switch workspace",
-	"workspacesAndProjects": "Workspaces & projects",
+    "workspacesAndProjects": "Workspaces & projects",
     "selected": "Selected",
     "actions": "Actions",
     "openProject": "Open project",
@@ -898,26 +849,26 @@
     "keyboardShortcuts": "Keyboard shortcuts",
     "openUsage": "Open DCC Usage",
     "manageSkills": "Manage skills",
-	"keywords": {
-		"openProject": "open project workspace",
-		"clone": "clone repository url",
-		"settings": "settings preferences",
-		"skills": "skills manage",
-		"usage": "usage analytics provider arena tokens models",
-		"onboarding": "onboarding welcome",
-		"shortcuts": "keyboard shortcuts hotkeys",
-		"help": "help documentation guide how it works question",
-		"focusComposer": "composer prompt focus",
-		"execution": "composer execution effort fast ultrathink",
-		"plan": "composer plan mode",
-		"worktreeTerminal": "terminal worktree",
-		"projectTerminal": "terminal project root",
-		"newTerminal": "terminal new tab",
-		"inspectorChanges": "inspector git changes diff",
-		"inspectorFiles": "inspector files code",
-		"activity": "inspector activity milestones",
-		"details": "inspector details runtime diagnostics"
-	},
+    "keywords": {
+      "openProject": "open project workspace",
+      "clone": "clone repository url",
+      "settings": "settings preferences",
+      "skills": "skills manage",
+      "usage": "usage analytics provider arena tokens models",
+      "onboarding": "onboarding welcome",
+      "shortcuts": "keyboard shortcuts hotkeys",
+      "help": "help documentation guide how it works question",
+      "focusComposer": "composer prompt focus",
+      "execution": "composer execution effort fast ultrathink",
+      "plan": "composer plan mode",
+      "worktreeTerminal": "terminal worktree",
+      "projectTerminal": "terminal project root",
+      "newTerminal": "terminal new tab",
+      "inspectorChanges": "inspector git changes diff",
+      "inspectorFiles": "inspector files code",
+      "activity": "inspector activity milestones",
+      "details": "inspector details runtime diagnostics"
+    },
     "workbench": {
       "title": "Current workspace",
       "focusComposer": "Focus composer",
@@ -2679,6 +2630,11 @@
         "keepAwakeWarning": "Your Mac may sleep before the limit comes back, and then nothing resumes.",
         "enableKeepAwake": "Turn on \"While agents work\"",
         "saveFailed": "Could not save: {{message}}"
+      },
+      "cleanup": {
+        "title": "Completed tasks' space",
+        "body": "Tells you in the team room when completed tasks go past the limit, with a shortcut to free up space. Nothing is deleted without your click, and only what is already committed and pushed.",
+        "limit": "Tell me from"
       }
     },
     "appearance": {
@@ -3292,7 +3248,13 @@
       "probabilityHint": "Values estimate the probability that each criterion is true; they do not measure percentage of work completed.",
       "contextIncomplete": "Some context was shortened or omitted. Check the evidence before concluding.",
       "reviewSignal": "lowest signal: {{score}}%",
-      "criteria": {"request_coverage": "Request fulfilled", "constraints": "Constraints respected", "evidence_support": "Execution supported by evidence", "validation": "Appropriate validation", "tool_guard": "Action requires review"},
+      "criteria": {
+        "request_coverage": "Request fulfilled",
+        "constraints": "Constraints respected",
+        "evidence_support": "Execution supported by evidence",
+        "validation": "Appropriate validation",
+        "tool_guard": "Action requires review"
+      },
       "pointsTitle": "Decision points",
       "pointsHint": "Each point can be disabled separately. Thresholds control the signal used by each classification.",
       "points": {
@@ -3525,7 +3487,7 @@
     "badge": "Shortcuts",
     "title": "Keyboard shortcuts",
     "commandPalette": "Open command palette",
-	"commandPaletteLegacy": "Open command palette (legacy)",
+    "commandPaletteLegacy": "Open command palette (legacy)",
     "focusComposer": "Focus composer",
     "toggleTerminal": "Toggle terminal",
     "quickOpen": "Quick open file",
@@ -3642,7 +3604,7 @@
       "agents": {
         "label": "Reviewer agent",
         "summary": "Checks the task's changes and hands you findings ready to fix.",
-        "whatIs": "A DCC agent has a fixed role and steps in at a defined point of your workflow. There are three, in the [Agents] section of the sidebar: the [Reviewer], the [Researcher] and the [Reporter]. The Reviewer reads the task's changes, lists findings by file and line, and lets you send them to the agent that wrote the code. It does not edit files.",
+        "whatIs": "The agents live in [Agents] in the sidebar. DCC ships the [Reviewer], and you build the rest of the team in [New agent], blank or from a template (Research, QA). In the [Team room] you write once: with @ you pick who answers, without it DCC picks by rule. The Reviewer reads the task's changes, lists findings by file and line, and lets you send them to the agent that wrote the code. It does not edit files.",
         "whenToUse": "When a turn ends with changes and you want a second read before committing, or when your review was requested on a PR.",
         "steps": [
           "When a turn ends with changes, the mascot appears above the composer asking whether it may review. Select [Yes, go ahead]. You can also call it from its icon in the task header.",
@@ -3654,37 +3616,6 @@
         ],
         "prompt": "In this project, treat any database query without an index as a major finding and ignore the vendor folder.",
         "keywords": "dcc agents agent reviewer review findings mascot octopus bubble offer author fix pull request"
-      },
-      "researcher": {
-        "label": "Researcher agent",
-        "summary": "Investigates a project idea before any code exists.",
-        "whatIs": "The [Researcher] helps you decide whether an idea is worth becoming a project: the problem, who it is for, references and competitors, hypotheses and the name. Everything it learns and everything you decide goes into an IDEIA.md, in a folder under ~/dcc-ideias, away from your projects.",
-        "whenToUse": "When you have a loose idea and want to research it before opening a repository, without mixing it with the work of your existing projects.",
-        "steps": [
-          "In [Agents], open the [Researcher] and, under [New idea], select [Start]. DCC creates the folder with the IDEIA.md and opens the chat with it.",
-          "Describe the idea in your own words and answer its questions. Above the composer, the [Investigating the idea] bar marks what is already filled in: [Problem], [Who for], [References], [Hypotheses] and [Name].",
-          "Select [Card] to see the idea's summary and the [Verdict]. When every milestone is filled in and the verdict is [Go], the card opens on its own.",
-          "To publish, check the repository name, pick [Private] or [Public] and the folder, and select [Publish]. The idea becomes an ordinary project, with IDEIA.md as the starting point for its tasks.",
-          "If the idea did not pan out, use [Discard]: the conversation, the task and the folder are deleted. To keep talking instead, use [Adjust]."
-        ],
-        "tip": "The Researcher only works on ideas. It is never called inside a project's tasks.",
-        "prompt": "I want an app for small restaurants to track their stock from the phone. Find who already does this, what people complain about in those tools, and whether there is still room.",
-        "keywords": "dcc agents agent researcher research idea new idea ideia.md card verdict competitors hypotheses name publish repository github discard"
-      },
-      "reporter": {
-        "label": "Reporter agent",
-        "summary": "Recaps what moved in your tasks since last time.",
-        "whatIs": "The [Reporter] builds a recap of what happened in your tasks since the previous one: what is blocked now, what moved, what was completed and what is new. It reads what DCC recorded and runs no model, so it spends no tokens.",
-        "whenToUse": "When you start the day or come back after some time away, to know where to pick up without opening task after task.",
-        "steps": [
-          "When there is a new recap, the Reporter leaves the [Agents] section of the sidebar and tells you in a bubble above the composer. Select [See recap] to open the recap on its page.",
-          "Or open the [Reporter] in [Agents] at any time to see the current recap.",
-          "Start with [Blocked now]: these are the tasks waiting on you, with how long they have been stuck. Then look at [Moved], [Completed] and [New].",
-          "Select a task in the recap to open it and pick up from there.",
-          "If completed tasks pass the limit you choose in [Edit], the Reporter tells you above the composer how much they take. [Review] opens the list and [Clean up the safe ones] deletes only those already committed and pushed."
-        ],
-        "tip": "A new recap starts at the first opening after 4am and covers everything since the previous one.",
-        "keywords": "dcc agents agent reporter daily recap summary what moved blocked completed new morning pick up space disk clean up worktrees free"
       },
       "terminal": {
         "label": "Terminal",
@@ -4321,10 +4252,10 @@
       "agentFallback": "the agent"
     },
     "sessionStartup": {
-        "title": "Preparing the new chat…",
-        "creating": "Create session",
-        "starting": "Start agent",
-        "description": "Preparing the session and connecting the selected provider."
+      "title": "Preparing the new chat…",
+      "creating": "Create session",
+      "starting": "Start agent",
+      "description": "Preparing the session and connecting the selected provider."
     },
     "modelRouting": {
       "title": "Model recommendation",

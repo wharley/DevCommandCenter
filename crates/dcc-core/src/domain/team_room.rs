@@ -1,12 +1,11 @@
 //! The team room (Sala): one conversation with the resident agents. Each
 //! message goes to one agent, picked by rule, never by a model: an
-//! `@mention` first; then a clear sign of a role in the message (a pull
-//! request, CI or a task for the Reviewer; an idea or research for the
-//! Researcher); then whoever answered last, while the subject is fresh;
-//! else the Reviewer. The agent answers in its own conversation, with its
+//! `@mention` first; then a clear sign of the Reviewer's job in the
+//! message (a pull request, CI, a task); then whoever answered last, while
+//! the subject is fresh; else the Reviewer. The agent answers in its own conversation, with its
 //! memory and tools; the room shows them together.
 
-use crate::domain::agent::{CHRONICLER_PRESET, RESEARCHER_PRESET, REVIEWER_PRESET};
+use crate::domain::agent::REVIEWER_PRESET;
 
 /// How long the last agent keeps the subject.
 pub const SUBJECT_MINUTES: i64 = 30;
@@ -40,11 +39,6 @@ impl RouteReason {
     }
 }
 
-/// Whether the agent takes part in the room (the Reporter runs no model).
-pub fn talks(preset: Option<&str>) -> bool {
-    preset != Some(CHRONICLER_PRESET)
-}
-
 const REVIEWER_WORDS: &[&str] = &[
     "pull request",
     "review",
@@ -62,17 +56,6 @@ const REVIEWER_WORDS: &[&str] = &[
 ];
 /// Short words that only count on their own.
 const REVIEWER_TOKENS: &[&str] = &["pr", "prs", "ci"];
-const RESEARCHER_WORDS: &[&str] = &[
-    "ideia",
-    "idea",
-    "pesquis",
-    "research",
-    "investig",
-    "compar",
-    "biblioteca",
-    "library",
-    "alternativ",
-];
 
 fn fold(text: &str) -> String {
     text.chars()
@@ -96,7 +79,7 @@ pub fn mentioned<'a>(text: &str, team: &[Teammate<'a>]) -> Option<Teammate<'a>> 
     let mut best: Option<Teammate<'a>> = None;
     for (at, _) in folded.match_indices('@') {
         let rest = &folded[at + 1..];
-        for mate in team.iter().filter(|mate| talks(mate.preset)) {
+        for mate in team {
             let name = fold(mate.name.trim());
             if name.is_empty() || !rest.starts_with(&name) {
                 continue;
@@ -114,21 +97,13 @@ pub fn mentioned<'a>(text: &str, team: &[Teammate<'a>]) -> Option<Teammate<'a>> 
     best
 }
 
-fn role_preset(text: &str) -> Option<&'static str> {
+/// Whether the message is about the Reviewer's job.
+fn reviewer_job(text: &str) -> bool {
     let folded = fold(text);
-    let tokens: Vec<&str> = folded
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .collect();
-    let research = RESEARCHER_WORDS.iter().any(|word| folded.contains(word));
-    let review = REVIEWER_WORDS.iter().any(|word| folded.contains(word))
-        || tokens.iter().any(|token| REVIEWER_TOKENS.contains(token));
-    match (review, research) {
-        (true, false) => Some(REVIEWER_PRESET),
-        (false, true) => Some(RESEARCHER_PRESET),
-        // Both or neither: no clear sign.
-        _ => None,
-    }
+    REVIEWER_WORDS.iter().any(|word| folded.contains(word))
+        || folded
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|token| REVIEWER_TOKENS.contains(&token))
 }
 
 /// Who answers `text`: `last` is the agent that answered last and how many
@@ -138,37 +113,89 @@ pub fn route<'a>(
     team: &[Teammate<'a>],
     last: Option<(&str, i64)>,
 ) -> Option<(Teammate<'a>, RouteReason)> {
-    let talking: Vec<Teammate<'a>> = team
-        .iter()
-        .copied()
-        .filter(|mate| talks(mate.preset))
-        .collect();
-    if let Some(mate) = mentioned(text, &talking) {
+    if let Some(mate) = mentioned(text, team) {
         return Some((mate, RouteReason::Mention));
     }
-    let by_role = role_preset(text)
-        .and_then(|preset| talking.iter().find(|mate| mate.preset == Some(preset)));
-    if let Some(mate) = by_role {
+    let reviewer = team
+        .iter()
+        .find(|mate| mate.preset == Some(REVIEWER_PRESET));
+    if let Some(mate) = reviewer.filter(|_| reviewer_job(text)) {
         return Some((*mate, RouteReason::Role));
     }
     let continues = last
         .filter(|(_, minutes)| *minutes <= SUBJECT_MINUTES)
-        .and_then(|(id, _)| talking.iter().find(|mate| mate.id == id));
+        .and_then(|(id, _)| team.iter().find(|mate| mate.id == id));
     if let Some(mate) = continues {
         return Some((*mate, RouteReason::Continues));
     }
-    talking
-        .iter()
-        .find(|mate| mate.preset == Some(REVIEWER_PRESET))
-        .or(talking.first())
+    reviewer
+        .or(team.first())
         .map(|mate| (*mate, RouteReason::Default))
+}
+
+/// The mark that opens a message one agent passed to another.
+pub const HANDOFF_MARK: &str = "↪ ";
+/// How much of the first agent's answer goes along.
+const HANDOFF_CONTEXT_CHARS: usize = 2_000;
+
+/// What a turn in an agent's own conversation hears about its teammates:
+/// who they are and how to suggest one takes over. The person decides.
+pub fn handoff_block(teammates: &[&str]) -> Option<String> {
+    if teammates.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "You are part of the person's team in DCC's team room, with: {}. When one of them fits what the person needs better, end your answer with one line that starts with @ and their name and says what to ask them (\"@{} can you compare the two APIs?\"). The person decides whether to pass it on; never contact a teammate yourself.",
+        teammates.join(", "),
+        teammates[0]
+    ))
+}
+
+/// The teammate an agent's answer suggests passing to: its last line that
+/// starts with `@` and names another agent, and that line.
+pub fn handoff<'a>(
+    answer: &str,
+    team: &[Teammate<'a>],
+    author: &str,
+) -> Option<(Teammate<'a>, String)> {
+    let others: Vec<Teammate<'a>> = team
+        .iter()
+        .copied()
+        .filter(|mate| mate.id != author)
+        .collect();
+    answer.lines().rev().find_map(|line| {
+        let line = line.trim().trim_start_matches(['-', '*', '>', ' ']).trim();
+        if !line.starts_with('@') {
+            return None;
+        }
+        let mate = mentioned(line, &others)?;
+        // The name opens the line.
+        let named = fold(line).starts_with(&format!("@{}", fold(mate.name.trim())));
+        named.then(|| (mate, line.to_string()))
+    })
+}
+
+/// The message the person passes to `to`: the request on the first line,
+/// then what `from` said.
+pub fn handoff_prompt(from: &str, to: &str, request: &str, answer: &str) -> String {
+    let context: String = answer.chars().take(HANDOFF_CONTEXT_CHARS).collect();
+    format!(
+        "{HANDOFF_MARK}{from} → {to}: {request}\n\nWhat {from} said in the team room:\n{context}"
+    )
+}
+
+/// The first line of a passed message (`↪ Revisor → Pesquisador: …`).
+pub fn handoff_heading(text: &str) -> Option<&str> {
+    text.starts_with(HANDOFF_MARK)
+        .then(|| text.lines().next())
+        .flatten()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const TEAM: [Teammate<'static>; 4] = [
+    const TEAM: [Teammate<'static>; 3] = [
         Teammate {
             id: "rev",
             name: "Revisor",
@@ -176,13 +203,8 @@ mod tests {
         },
         Teammate {
             id: "res",
-            name: "Pesquisador",
-            preset: Some(RESEARCHER_PRESET),
-        },
-        Teammate {
-            id: "rep",
-            name: "Repórter",
-            preset: Some(CHRONICLER_PRESET),
+            name: "Pesquisa",
+            preset: None,
         },
         Teammate {
             id: "qa",
@@ -197,30 +219,26 @@ mod tests {
     }
 
     #[test]
-    fn a_mention_wins_and_the_reporter_never_answers() {
+    fn a_mention_wins_the_longest_name_first() {
         assert_eq!(
-            who("@pesquisador olha a API", None),
+            who("@pesquisa olha a API", None),
             ("res", RouteReason::Mention)
         );
         assert_eq!(
             who("ei @QA mobile, roda isso", None),
             ("qa", RouteReason::Mention)
         );
-        // A mention beats a role sign.
+        // A mention beats the Reviewer's job.
         assert_eq!(
-            who("@Pesquisador revisa o PR", None),
+            who("@Pesquisa revisa o PR", None),
             ("res", RouteReason::Mention)
         );
         // Not a name that only starts the same.
         assert_ne!(who("@Revisores", None).1, RouteReason::Mention);
-        assert_eq!(
-            who("@Repórter como foi o dia", None),
-            ("rev", RouteReason::Default)
-        );
     }
 
     #[test]
-    fn a_role_sign_comes_next_then_the_subject_then_the_reviewer() {
+    fn the_reviewers_job_comes_next_then_the_subject_then_the_reviewer() {
         assert_eq!(
             who("o CI falhou no checkout", None),
             ("rev", RouteReason::Role)
@@ -228,10 +246,6 @@ mod tests {
         assert_eq!(
             who("revisa o PR 1014", Some(("res", 2))),
             ("rev", RouteReason::Role)
-        );
-        assert_eq!(
-            who("pesquisa uma lib de filas", Some(("rev", 2))),
-            ("res", RouteReason::Role)
         );
         // No sign: whoever answered last, while the subject is fresh.
         assert_eq!(
@@ -244,10 +258,31 @@ mod tests {
         );
         // "price" has no "pr" on its own.
         assert_eq!(who("qual o price?", None), ("rev", RouteReason::Default));
-        // Both signs: no clear one.
+        // Without a Reviewer, the first agent.
         assert_eq!(
-            who("pesquisa e revisa", Some(("qa", 1))),
-            ("qa", RouteReason::Continues)
+            route("oi", &TEAM[1..], None).map(|(mate, reason)| (mate.id, reason)),
+            Some(("res", RouteReason::Default))
         );
+    }
+
+    #[test]
+    fn an_answer_can_suggest_a_teammate_and_the_person_passes_it() {
+        let answer = "Revisei o PR, está ok.\n\n- @Pesquisa pode comparar as duas filas?";
+        let (mate, line) = handoff(answer, &TEAM, "rev").unwrap();
+        assert_eq!(mate.id, "res");
+        assert_eq!(line, "@Pesquisa pode comparar as duas filas?");
+        // Not to itself, not a name in the middle.
+        assert!(handoff("@Revisor eu mesmo", &TEAM, "rev").is_none());
+        assert!(handoff("como o @Pesquisa disse", &TEAM, "rev").is_none());
+        let prompt = handoff_prompt("Revisor", "Pesquisa", &line, answer);
+        assert_eq!(
+            handoff_heading(&prompt),
+            Some("↪ Revisor → Pesquisa: @Pesquisa pode comparar as duas filas?")
+        );
+        assert!(prompt.contains("Revisei o PR"));
+        assert_eq!(handoff_heading("oi"), None);
+        let block = handoff_block(&["Pesquisa", "QA"]).unwrap();
+        assert!(block.contains("Pesquisa, QA") && block.contains("never contact"));
+        assert!(handoff_block(&[]).is_none());
     }
 }

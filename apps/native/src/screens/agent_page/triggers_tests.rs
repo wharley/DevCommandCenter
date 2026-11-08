@@ -56,7 +56,7 @@ fn the_reviewers_trigger_is_off_until_turned_on(cx: &mut TestAppContext) {
         page.sidebar.update(cx, |sidebar, cx| {
             sidebar.apply_for_tests(
                 SidebarData {
-                    agents: vec![agent("a-1", "reviewer"), agent("a-2", "researcher")],
+                    agents: vec![agent("a-1", "reviewer"), agent("a-2", "")],
                     ..SidebarData::default()
                 },
                 cx,

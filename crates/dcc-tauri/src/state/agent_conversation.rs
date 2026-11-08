@@ -2,6 +2,7 @@
 //! for the turns it runs and its DCC tools.
 
 use dcc_core::domain::agent_conversation::conversation_block;
+use dcc_core::domain::team_room::handoff_block;
 
 use super::*;
 
@@ -25,7 +26,19 @@ impl SessionCommandState {
         if !home {
             return Ok(memory);
         }
-        let conversation = conversation_block();
+        // Its teammates, and how it suggests one of them takes over.
+        let teammates: Vec<String> = self
+            .session_repo
+            .list_stored_resident_agents(&Default::default())?
+            .into_iter()
+            .filter(|agent| agent.id != agent_id)
+            .map(|agent| agent.name)
+            .collect();
+        let names: Vec<&str> = teammates.iter().map(String::as_str).collect();
+        let conversation = match handoff_block(&names) {
+            Some(team) => format!("{}\n\n{team}", conversation_block()),
+            None => conversation_block(),
+        };
         Ok(Some(match memory {
             Some(memory) => format!("{conversation}\n\n{memory}"),
             None => conversation,

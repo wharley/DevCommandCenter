@@ -1,8 +1,8 @@
-//! The Reporter's recap window (`daily-recap.ts`): a new recap opens at the
+//! The daily recap's window (`daily-recap.ts`): a new recap opens at the
 //! first look after 4am local time and covers everything since the previous
 //! one ended, at most a week. A reading marker of this app, kept in
 //! `daily-recap.json`; the first window it opens counts as read, like the
-//! other markers here, so a first run does not light the Reporter up.
+//! other markers here, so a first run does not light its card up.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -92,7 +92,7 @@ impl DailyRecap {
             .is_some_and(|window| self.seen_to.as_deref() != Some(window.to.as_str()))
     }
 
-    /// `markDailyRecapSeen`: the Reporter's page shows it; returns whether
+    /// `markDailyRecapSeen`: its card opened in the team room; returns whether
     /// it was unread.
     pub fn mark_seen(&mut self) -> bool {
         let Some(to) = self.current.as_ref().map(|window| window.to.clone()) else {

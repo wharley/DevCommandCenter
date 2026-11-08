@@ -73,7 +73,6 @@ fn projects(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
         "SELECT MIN(COALESCE(NULLIF(display_name, ''), name)) AS label
          FROM dcc_repositories
          WHERE project_id NOT LIKE 'dcc-agent-%'
-         AND root_path NOT IN (SELECT root_path FROM dcc_ideas)
          GROUP BY project_id ORDER BY lower(label)",
     )?;
     let names = statement
@@ -242,12 +241,9 @@ mod tests {
             CREATE TABLE dcc_threads (session_id TEXT, title TEXT, archived_at TEXT);
             CREATE TABLE dcc_workspaces (id TEXT, project_id TEXT, name TEXT, root_path TEXT, state TEXT);
             CREATE TABLE dcc_repositories (project_id TEXT, display_name TEXT, name TEXT, root_path TEXT);
-            CREATE TABLE dcc_ideas (root_path TEXT, created_at TEXT);
             CREATE TABLE dcc_session_events (session_id TEXT, sequence INTEGER, kind_json TEXT, occurred_at TEXT);
             INSERT INTO dcc_repositories VALUES ('p', 'Loja', 'loja', '/loja');
             INSERT INTO dcc_repositories VALUES ('dcc-agent-a', NULL, 'a', '/home/a');
-            INSERT INTO dcc_repositories VALUES ('idea', NULL, 'ideia', '/ideia');
-            INSERT INTO dcc_ideas VALUES ('/ideia', 't');
             INSERT INTO dcc_workspaces VALUES ('w', 'p', 'Checkout', '/loja', 'ready');
             INSERT INTO dcc_workspaces VALUES ('h', 'dcc-agent-a', 'Conversa', '/home/a', 'ready');
             INSERT INTO dcc_sessions VALUES ('s', 'w');

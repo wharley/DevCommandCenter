@@ -106,8 +106,7 @@ fn the_room_shows_the_team_together_and_sends_to_who_answers(cx: &mut TestAppCon
                 SidebarData {
                     agents: vec![
                         agent("rev", "Revisor", "reviewer", vec![home]),
-                        agent("res", "Pesquisador", "researcher", Vec::new()),
-                        agent("rep", "Repórter", "chronicler", Vec::new()),
+                        agent("res", "Pesquisa", "", Vec::new()),
                     ],
                     ..SidebarData::default()
                 },
@@ -118,10 +117,26 @@ fn the_room_shows_the_team_together_and_sends_to_who_answers(cx: &mut TestAppCon
     });
     cx.run_until_parked();
     assert!(cx.debug_bounds("team-room").is_some());
-    assert!(cx.debug_bounds("room-empty").is_some());
-    // The Reporter runs no model: no name to address.
-    assert!(cx.debug_bounds("room-address-1").is_some());
-    assert!(cx.debug_bounds("room-address-2").is_none());
+    assert!(
+        cx.debug_bounds("room-empty").is_none(),
+        "the day's recap is there"
+    );
+    // The day's recap opens in place and reads what moved.
+    let db = dir.path().join("database.sqlite");
+    drop(dcc_infra::db::SqliteSessionRepo::open(&db).unwrap());
+    page.update(cx, |page, cx| {
+        let room = page.room.as_ref().unwrap().0.clone();
+        room.update(cx, |room, _| room.db_path = db);
+    });
+    let recap = cx.debug_bounds("room-recap").unwrap();
+    cx.simulate_click(recap.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("recap-card").is_some());
+    assert!(cx.debug_bounds("recap-empty").is_some());
+    let recap = cx.debug_bounds("room-recap").unwrap();
+    cx.simulate_click(recap.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("recap-card").is_none());
 
     let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let sink = events.clone();
@@ -167,13 +182,27 @@ fn the_room_shows_the_team_together_and_sends_to_who_answers(cx: &mut TestAppCon
     cx.run_until_parked();
     assert_eq!(events.borrow().as_slice(), ["w-home s-home"]);
 
-    // Writing shows who would answer; "@Pesquisador" addresses the Researcher.
-    let address = cx.debug_bounds("room-address-1").unwrap();
-    cx.simulate_click(address.center(), Modifiers::none());
-    cx.run_until_parked();
+    // "@" opens the team above the field; a pick becomes "@Pesquisa ".
     room.update(cx, |room, cx| {
-        assert_eq!(room.input.read(cx).text(), "@Pesquisador ");
-        let (agent, reason) = room.pick("@Pesquisador compara filas", cx).unwrap();
+        room.input.update(cx, |area, cx| area.set_text("@", cx));
+        room.update_mention(cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-mentions").is_some());
+    assert!(cx.debug_bounds("room-mention-1").is_some());
+    room.update(cx, |room, cx| {
+        room.input.update(cx, |area, cx| area.set_text("@pe", cx));
+        room.update_mention(cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-mention-0").is_some());
+    assert!(cx.debug_bounds("room-mention-1").is_none());
+    room.update(cx, |room, cx| room.accept_mention(None, cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-mentions").is_none());
+    room.update(cx, |room, cx| {
+        assert_eq!(room.input.read(cx).text(), "@Pesquisa ");
+        let (agent, reason) = room.pick("@Pesquisa compara filas", cx).unwrap();
         assert_eq!(agent.id, "res");
         assert_eq!(reason, dcc_core::domain::team_room::RouteReason::Mention);
         // Without a sign, the subject stays with the Reviewer only while fresh.
@@ -274,4 +303,122 @@ fn what_an_agent_finished_in_a_task_is_a_card_until_it_is_read(cx: &mut TestAppC
     // Read now: the card stays, the count goes.
     assert!(cx.debug_bounds("room-card-0").is_some());
     assert!(cx.debug_bounds("room-unread").is_none());
+}
+
+#[gpui::test]
+fn an_agent_suggests_a_teammate_and_only_the_persons_click_passes_it(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (port, desktop) = fake_desktop_routes(vec![(
+        "/api/v1/sessions/s-res/turns",
+        200,
+        r#"{"turn":{"id":"t-9"}}"#.into(),
+    )]);
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        composer.update(cx, |composer, _| {
+            let providers: Vec<dcc_core::domain::provider::ProviderDescriptor> =
+                serde_json::from_value(serde_json::json!([{
+                    "id": "claude_code", "label": "Claude Code", "description": "",
+                    "models": [{ "id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5",
+                                 "description": "", "recommended": true, "effortLevels": [] }],
+                    "capabilities": {
+                        "streaming": true, "mcpSupport": "unsupported", "tools": true,
+                        "vision": true, "resumable": true, "experimental": false,
+                        "canBeDelegationTarget": true, "canRequestDelegation": true,
+                        "supportsReadOnlyDelegation": true, "supportsEditDelegation": true,
+                        "approvalPolicies": ["read_only", "ask", "auto", "full_access"],
+                        "planModeSupport": "native"
+                    },
+                    "health": "Healthy", "stable": true
+                }]))
+                .unwrap();
+            composer.catalog = Some(std::sync::Arc::new(providers));
+        });
+        AgentPage::new("rev".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(1400.0)));
+    let home = |id: &str, agent: &str| AgentSession {
+        session_id: id.into(),
+        workspace_id: format!("w-{agent}"),
+        state: AgentState::Idle,
+        completed_at: None,
+        project_id: format!("dcc-agent-{agent}"),
+        title: None,
+        updated_at: "2026-11-07T10:01:00Z".into(),
+    };
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![
+                        agent("rev", "Revisor", "reviewer", vec![home("s-home", "rev")]),
+                        agent("res", "Pesquisador", "", vec![home("s-res", "res")]),
+                    ],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.open_room(None, cx);
+    });
+    cx.run_until_parked();
+    let room = page.read_with(cx, |page, _| page.room.as_ref().unwrap().0.clone());
+    room.update(cx, |room, cx| {
+        let mut feed = HomeFeed::new("rev", "s-home");
+        feed.lines = vec![
+            line(
+                "a",
+                "rev",
+                Speaker::Person,
+                "revisa o PR",
+                "2026-11-07T10:00:00Z",
+            ),
+            line(
+                "s-home:t-1",
+                "rev",
+                Speaker::Agent,
+                "O PR está ok.\n\n@Pesquisador pode comparar as duas filas?",
+                "2026-11-07T10:00:42Z",
+            ),
+        ];
+        room.take(vec![feed]);
+        room.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    // Nothing went yet: the room asks.
+    assert!(cx.debug_bounds("room-handoff-1").is_some());
+    let pass = cx.debug_bounds("room-handoff-pass-1").unwrap();
+    cx.simulate_click(pass.center(), Modifiers::none());
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    assert_eq!(seen[0].0, "POST /api/v1/sessions/s-res/turns");
+    let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();
+    let prompt = body["prompt"].as_str().unwrap();
+    assert!(
+        prompt.starts_with("↪ Revisor → Pesquisador: @Pesquisador pode comparar"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("O PR está ok."));
+    room.read_with(cx, |room, _| {
+        assert_eq!(
+            room.handoffs.get("s-home:t-1"),
+            Some(crate::data::room_handoffs::Handled::Passed)
+        );
+    });
+    // Passed, the bar says so and asks no more.
+    assert!(cx.debug_bounds("room-handoff-1").is_some());
+    assert!(cx.debug_bounds("room-handoff-pass-1").is_none());
+    // An ignored suggestion leaves.
+    room.update(cx, |room, cx| room.ignore_handoff("s-home:t-1", cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-handoff-1").is_none());
 }

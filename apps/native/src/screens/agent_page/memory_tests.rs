@@ -1,7 +1,7 @@
 //! The agent page's "Memória" driven headlessly: the notes with the learned
 //! mark, the filter, editing a note in place, the history with "Voltar para
-//! esta" on every version but the current one, and the Reporter without a
-//! memory.
+//! esta" on every version but the current one, and a person's agent with a
+//! memory of its own.
 
 use gpui::{AppContext, Modifiers, TestAppContext, WindowAppearance};
 
@@ -68,7 +68,7 @@ fn the_memory_lists_filters_edits_and_shows_its_history(cx: &mut TestAppContext)
         page.sidebar.update(cx, |sidebar, cx| {
             sidebar.apply_for_tests(
                 SidebarData {
-                    agents: vec![agent("a-1", "reviewer"), agent("a-3", "chronicler")],
+                    agents: vec![agent("a-1", "reviewer"), agent("a-3", "")],
                     ..SidebarData::default()
                 },
                 cx,
@@ -148,7 +148,7 @@ fn the_memory_lists_filters_edits_and_shows_its_history(cx: &mut TestAppContext)
     assert!(cx.debug_bounds("agent-memory-restore-0").is_none());
     assert!(cx.debug_bounds("agent-memory-restore-1").is_some());
 
-    // The Reporter runs no model: no memory on its page.
+    // A person's agent keeps a memory too.
     page.update(cx, |page, cx| {
         page.memory.clone().unwrap().update(cx, |card, cx| {
             card.history_open = false;
@@ -157,7 +157,7 @@ fn the_memory_lists_filters_edits_and_shows_its_history(cx: &mut TestAppContext)
         page.show("a-3".into(), cx);
     });
     cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-memory").is_none());
+    assert!(cx.debug_bounds("agent-memory").is_some());
 }
 
 pub(super) fn project(id: &str, name: &str) -> crate::data::tasks::Project {

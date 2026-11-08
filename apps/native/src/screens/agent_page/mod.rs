@@ -2,8 +2,7 @@
 //! what it runs on; how it is called; its conversations in every project
 //! (opening one goes to that task); the person's extra instructions; and
 //! its role, folded. It reads the sidebar, which reads the agents every few
-//! seconds; "Editar" changes what the person owns, the Reporter's page is
-//! its recap, and the Researcher's starts a new idea.
+//! seconds; "Editar" changes what the person owns.
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, SharedString, Subscription,
@@ -11,7 +10,7 @@ use gpui::{
 };
 
 use crate::agent::AgentAvatarView;
-use crate::data::agents::{AgentRecord, AgentState, CHRONICLER_PRESET};
+use crate::data::agents::{AgentRecord, AgentState};
 use crate::data::composer_settings::clamp_effort;
 use crate::data::time::medium_date_time;
 use crate::i18n::{I18n, Locale, Translate};
@@ -29,7 +28,8 @@ mod editor;
 mod editor_look;
 mod editor_projects;
 mod editor_role;
-mod idea;
+mod editor_templates;
+mod execution;
 mod memory;
 mod memory_history;
 mod memory_layers;
@@ -37,9 +37,12 @@ mod memory_layers;
 mod memory_tests;
 mod picker;
 mod pr_reviews;
-mod recap;
 mod room;
 mod room_cards;
+mod room_cleanup;
+mod room_handoff;
+mod room_mentions;
+mod room_recap;
 #[cfg(test)]
 mod room_tests;
 mod room_view;
@@ -50,16 +53,11 @@ mod triggers;
 #[cfg(test)]
 mod triggers_tests;
 
-pub const RESEARCHER_PRESET: &str = "researcher";
-
 pub enum AgentPageEvent {
     /// A conversation of the agent: its task, on that session.
     OpenSession { task_id: String, session_id: String },
-    /// A task from the Reporter's recap.
+    /// A task from the day's recap in the team room.
     OpenTask(String),
-    /// A new idea's task, on its conversation with the Researcher: the
-    /// composer takes the focus.
-    IdeaStarted { task_id: String, session_id: String },
     /// One of the reviewer's pull request reviews: the hub on its code tab.
     OpenPullRequest(String),
 }
@@ -71,15 +69,7 @@ pub struct AgentPage {
     pub(crate) role_open: bool,
     /// "Editar …", while open.
     pub(crate) editor: Option<(Entity<editor::AgentEditor>, Subscription)>,
-    /// Where the Reporter's cleanup alert is kept (tests use their own).
-    pub(crate) cleanup_path: std::path::PathBuf,
-    /// The Reporter's recap for its current window.
-    pub(crate) recap: recap::RecapRead,
-    /// The database the recap is read from (tests use their own).
-    pub(crate) db_path: std::path::PathBuf,
-    /// "Nova ideia" while it runs.
-    pub(crate) starting_idea: bool,
-    /// The desktop the idea goes through (tests point it elsewhere).
+    /// The desktop the memory goes through (tests point it elsewhere).
     pub(crate) api: Option<crate::data::desktop_api::DesktopApi>,
     /// "Memória", made on the first render (its fields need the window).
     pub(crate) memory: Option<Entity<memory::MemoryCard>>,
@@ -144,10 +134,6 @@ impl AgentPage {
             composer,
             role_open: false,
             editor: None,
-            cleanup_path: crate::prefs::native_file("cleanup-alert.json"),
-            recap: recap::RecapRead::default(),
-            db_path: crate::data::loader::database_path(),
-            starting_idea: false,
             api: if cfg!(test) {
                 None
             } else {
@@ -187,13 +173,12 @@ impl AgentPage {
             .memory
             .get_or_insert_with(|| cx.new(|cx| memory::MemoryCard::new(agent_id, api, window, cx)))
             .clone();
-        // An agent called in tasks keeps a layer per project it works in.
+        // An agent keeps a layer per project it works in.
         let sidebar = self.sidebar.read(cx);
         let layers = sidebar
             .agents()
             .iter()
             .find(|agent| agent.id == self.agent_id)
-            .filter(|agent| dcc_core::domain::agent_call::called_in_a_task(agent.preset.as_deref()))
             .map(|agent| {
                 editor_projects::project_options(sidebar.projects())
                     .into_iter()
@@ -229,7 +214,6 @@ impl AgentPage {
         let dark = cx.theme().appearance == Appearance::Dark;
         let english = cx.global::<I18n>().locale() == Locale::En;
         let agent = &data.agent;
-        let researcher = agent.preset.as_deref() == Some(RESEARCHER_PRESET);
         let home = dcc_core::domain::agent_conversation::home_project_id(&agent.id);
         let rows: Vec<AnyElement> = agent
             .sessions
@@ -237,8 +221,6 @@ impl AgentPage {
             .zip(&data.unread)
             // Its own conversation has the card above.
             .filter(|(session, _)| session.project_id != home)
-            // The Researcher's list is its ideas in progress.
-            .filter(|(session, _)| !researcher || data.idea_tasks.contains(&session.workspace_id))
             .enumerate()
             .map(|(index, (session, unread))| {
                 let read = session.state == AgentState::Done && !unread;
@@ -345,10 +327,11 @@ impl AgentPage {
                     .into_any_element()
             })
             .collect();
-        let title = cx.t(if researcher {
-            "agents.page.researcherSessions"
-        } else {
+        let reviewer = agent.preset.as_deref() == Some(crate::data::agents::REVIEWER_PRESET);
+        let title = cx.t(if reviewer {
             "agents.page.sessions"
+        } else {
+            "agents.page.agentSessions"
         });
         div()
             .child(Self::section_title(title, cx))
@@ -362,10 +345,10 @@ impl AgentPage {
                     .py(px(24.0))
                     .text_size(px(13.0))
                     .text_color(colors.muted_foreground)
-                    .child(cx.t(if researcher {
-                        "agents.page.researcherNoSessions"
-                    } else {
+                    .child(cx.t(if reviewer {
                         "agents.page.noSessions"
+                    } else {
+                        "agents.page.agentNoSessions"
                     }))
                     .into_any_element()
             } else {
@@ -419,8 +402,6 @@ impl AgentPage {
         }
         let agent = data.agent.clone();
         let runs_on = runs_on(&agent, self.composer.read(cx), cx);
-        let chronicler = agent.preset.as_deref() == Some(CHRONICLER_PRESET);
-        let researcher = agent.preset.as_deref() == Some(RESEARCHER_PRESET);
         let mood = self
             .sidebar
             .read(cx)
@@ -472,35 +453,33 @@ impl AgentPage {
                             .child(cx.t("agents.page.edit")),
                     ),
             );
-        // The Reviewer needs a diff, so it is called from a task; the
-        // Researcher is the opposite: an idea starts here.
-        let how_to_call = (!chronicler && !researcher).then(|| {
-            Self::card(cx)
-                .p(px(20.0))
-                .child(
-                    div()
-                        .text_size(px(14.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(cx.t("agents.page.howToCall")),
-                )
-                .child(
-                    div()
-                        .mt(px(4.0))
-                        .text_size(px(12.0))
-                        .line_height(px(19.5))
-                        .text_color(colors.muted_foreground)
-                        .child(cx.t("agents.page.howToCallReviewer")),
-                )
-        });
-        let new_idea = researcher.then(|| self.new_idea_card(cx));
-        let conversation = (!chronicler).then(|| self.conversation_card(&data, cx));
+        // An agent works on a task's changes, so it is called from the task.
+        let reviewer = agent.preset.as_deref() == Some(crate::data::agents::REVIEWER_PRESET);
+        let how_to_call = Self::card(cx)
+            .p(px(20.0))
+            .child(
+                div()
+                    .text_size(px(14.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(cx.t("agents.page.howToCall")),
+            )
+            .child(
+                div()
+                    .mt(px(4.0))
+                    .text_size(px(12.0))
+                    .line_height(px(19.5))
+                    .text_color(colors.muted_foreground)
+                    .child(cx.t(if reviewer {
+                        "agents.page.howToCallReviewer"
+                    } else {
+                        "agents.page.howToCallAgent"
+                    })),
+            );
+        let conversation = self.conversation_card(&data, cx);
         let triggers = self.triggers_card(&data, cx);
-        let sessions = (!chronicler).then(|| self.sessions(&data, cx));
+        let sessions = self.sessions(&data, cx);
         let pr_reviews = self.pr_reviews(&data, cx);
-        // The Reporter has no conversations: its page is the recap.
-        let recap = chronicler.then(|| self.recap_card(&data, cx));
-        // It runs no model either, so it has no memory.
-        let memory = (!chronicler).then(|| self.memory_card(window, cx));
+        let memory = self.memory_card(window, cx);
         let extra = (!agent.extra_instructions.is_empty()).then(|| {
             div()
                 .child(Self::section_title(cx.t("agents.editor.extra"), cx))
@@ -584,14 +563,12 @@ impl AgentPage {
                     .px(px(32.0))
                     .py(px(32.0))
                     .child(header)
-                    .children(recap)
-                    .children(new_idea)
-                    .children(conversation)
+                    .child(conversation)
                     .children(triggers)
-                    .children(how_to_call)
-                    .children(sessions)
+                    .child(how_to_call)
+                    .child(sessions)
                     .children(pr_reviews)
-                    .children(memory)
+                    .child(memory)
                     .children(extra)
                     .child(role),
             )

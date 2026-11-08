@@ -3,7 +3,7 @@
 //! receipt), who is at work or waiting, and the field with the team's names
 //! to address one and who would answer now.
 
-use dcc_core::domain::team_room::talks;
+use dcc_core::domain::team_room::handoff_heading;
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, Render, SharedString, Window, div, prelude::*, px,
 };
@@ -250,34 +250,9 @@ impl TeamRoom {
             .into_any_element()
     }
 
-    fn composer(&self, agents: &[AgentRecord], cx: &mut Context<Self>) -> AnyElement {
+    fn composer(&self, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let text = self.input.read(cx).text().trim().to_string();
-        let names: Vec<AnyElement> = agents
-            .iter()
-            .filter(|agent| talks(agent.preset.as_deref()))
-            .enumerate()
-            .map(|(index, agent)| {
-                let name = agent.name.clone();
-                div()
-                    .id(SharedString::from(format!("room-address-{index}")))
-                    .debug_selector(move || format!("room-address-{index}"))
-                    .px(px(8.0))
-                    .h(px(22.0))
-                    .flex()
-                    .items_center()
-                    .rounded(px(11.0))
-                    .border_1()
-                    .border_color(colors.border.opacity(0.7))
-                    .text_size(px(11.0))
-                    .text_color(colors.muted_foreground)
-                    .cursor_pointer()
-                    .hover(|chip| chip.bg(colors.accent.opacity(0.5)))
-                    .on_click(cx.listener(move |room, _, _, cx| room.address(&name, cx)))
-                    .child(format!("@{}", agent.name))
-                    .into_any_element()
-            })
-            .collect();
         let next = (!text.is_empty())
             .then(|| self.pick(&text, cx))
             .flatten()
@@ -299,7 +274,6 @@ impl TeamRoom {
             .py(px(16.0))
             .border_t_1()
             .border_color(colors.border.opacity(0.7))
-            .child(div().flex().flex_wrap().gap(px(6.0)).children(names))
             .child(
                 div()
                     .flex()
@@ -308,6 +282,7 @@ impl TeamRoom {
                     .child(
                         div()
                             .debug_selector(|| "room-input".into())
+                            .relative()
                             .flex_1()
                             .min_w_0()
                             .min_h(px(40.0))
@@ -318,7 +293,8 @@ impl TeamRoom {
                             .border_color(colors.input)
                             .bg(crate::ui::input_fill(cx.theme()))
                             .text_size(px(13.0))
-                            .child(self.input.clone()),
+                            .child(self.input.clone())
+                            .children(self.mention_popup(cx)),
                     )
                     .child(
                         Button::new("room-send")
@@ -384,14 +360,28 @@ impl Render for TeamRoom {
             let Some(agent) = Self::agent(&agents, &line.agent_id) else {
                 continue;
             };
-            rows.push(match line.speaker {
-                Speaker::Person => {
-                    let note = self.routed(&agent.id, &line.text, &agent.name, cx);
-                    self.person_line(format!("room-said-{index}"), line.text.clone(), note, cx)
+            match line.speaker {
+                Speaker::Person => match handoff_heading(&line.text) {
+                    Some(heading) => rows.push(self.passed_line(index, heading, cx)),
+                    None => {
+                        let note = self.routed(&agent.id, &line.text, &agent.name, cx);
+                        rows.push(self.person_line(
+                            format!("room-said-{index}"),
+                            line.text.clone(),
+                            note,
+                            cx,
+                        ));
+                    }
+                },
+                Speaker::Agent => {
+                    rows.push(self.agent_line(index, line, agent, window, cx));
+                    rows.extend(self.handoff_bar(index, line, agent, &agents, cx));
                 }
-                Speaker::Agent => self.agent_line(index, line, agent, window, cx),
-            });
+            }
         }
+        // What DCC itself has for the person now: the day's recap, the space.
+        rows.extend(self.recap_card(cx));
+        rows.extend(self.cleanup_card(cx));
         let unread_bar = self.unread_bar(unread, cx);
         let pending: Vec<Pending> = self.pending.clone();
         for (index, sent) in pending.iter().enumerate() {
@@ -478,6 +468,6 @@ impl Render for TeamRoom {
                             .children(rows),
                     ),
             )
-            .child(self.composer(&agents, cx))
+            .child(self.composer(cx))
     }
 }

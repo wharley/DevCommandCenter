@@ -7559,11 +7559,8 @@ impl SessionCommandState {
     pub fn list_resident_agents(
         &self,
         reviewer: &dcc_core::domain::agent::ReviewerPresetText,
-        researcher: &dcc_core::domain::agent::ResearcherPresetText,
-        chronicler: &dcc_core::domain::agent::ChroniclerPresetText,
     ) -> Result<Vec<dcc_core::domain::agent::ResidentAgent>> {
-        self.session_repo
-            .list_resident_agents(reviewer, researcher, chronicler)
+        self.session_repo.list_resident_agents(reviewer)
     }
 
     pub fn save_resident_agent(
@@ -9457,14 +9454,10 @@ mod tests {
             .await
             .expect("save session");
         let reviewer = state
-            .list_resident_agents(
-                &dcc_core::domain::agent::ReviewerPresetText {
-                    name: "Revisor".to_string(),
-                    ..Default::default()
-                },
-                &Default::default(),
-                &Default::default(),
-            )
+            .list_resident_agents(&dcc_core::domain::agent::ReviewerPresetText {
+                name: "Revisor".to_string(),
+                ..Default::default()
+            })
             .expect("agents")
             .remove(0);
         state
@@ -9518,6 +9511,15 @@ mod tests {
             .unwrap();
         assert!(instructions.contains("\n\nbase\n\n<dcc_agent_conversation>"));
         assert!(instructions.contains("dcc_overview"));
+        // Alone, nothing about a team; with a teammate, how to pass it the turn.
+        assert!(!instructions.contains("team room"));
+        let qa = dcc_core::domain::agent_templates::template_draft("qa", "QA").unwrap();
+        state.save_resident_agent(None, qa).expect("save QA");
+        let with_team = state
+            .objective_tool_instructions(&home.id, Some("base".to_string()))
+            .unwrap()
+            .unwrap();
+        assert!(with_team.contains("team room, with: QA."));
         assert!(instructions.ends_with("</dcc_agent_memory>"));
         // Its own conversation has no project: the person's notes only.
         assert!(instructions.contains("- Responder em pt-BR"));

@@ -11,7 +11,6 @@ pub mod forge_commands;
 pub mod mcp_commands;
 pub mod provider_commands;
 pub mod agent_conversation;
-pub mod research_commands;
 pub mod session_commands;
 pub mod workspace_attention;
 pub mod workspace_cleanup;

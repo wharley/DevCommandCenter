@@ -343,7 +343,7 @@ impl Sidebar {
                         return;
                     }
                     sidebar.state.now_ms = now;
-                    // The Reporter's next recap opens at the first look after 4am.
+                    // The next daily recap opens at the first look after 4am.
                     if stale {
                         sidebar.agent_markers.recap.refresh(chrono::Local::now());
                         sidebar.refresh_skill_count(cx);

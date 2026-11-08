@@ -88,8 +88,6 @@ fn open<'a>(
                 ConversationEvent::OpenSessionSearch => "session-search",
                 ConversationEvent::OpenInEditor(editor) => editor,
                 ConversationEvent::ReviewDelegation { .. } => "delegation",
-                ConversationEvent::IdeaPublished { .. } => "idea-published",
-                ConversationEvent::IdeaDiscarded => "idea-discarded",
             });
         })
         .detach();
@@ -472,7 +470,7 @@ fn calling_an_agent_starts_its_bound_session_with_the_kickoff(cx: &mut TestAppCo
         buttons.set_agents(
             vec![
                 agent("writer", "Escritor", None),
-                agent("research", "Pesquisador", Some("researcher")),
+                agent("research", "Pesquisa", None),
                 agent("rev", "Revisor", Some("reviewer")),
             ],
             cx,
@@ -483,10 +481,10 @@ fn calling_an_agent_starts_its_bound_session_with_the_kickoff(cx: &mut TestAppCo
         buttons.set_busy(false, cx);
     });
     cx.run_until_parked();
-    // The researcher has a surface of its own; the reviewer waits for changes.
+    // Every agent takes a button; the reviewer waits for changes.
     assert!(cx.debug_bounds("call-agent-0").is_some());
     assert!(cx.debug_bounds("call-agent-1").is_some());
-    assert!(cx.debug_bounds("call-agent-2").is_none());
+    assert!(cx.debug_bounds("call-agent-2").is_some());
     let reviewer = agent("rev", "Revisor", Some("reviewer"));
     assert_eq!(
         cx.update(|_, cx| buttons.read(cx).block_key(&reviewer)),
@@ -501,7 +499,7 @@ fn calling_an_agent_starts_its_bound_session_with_the_kickoff(cx: &mut TestAppCo
         let all = buttons.agents.clone();
         buttons.set_agents(agents, cx);
         buttons.set_project(Some("p".into()), cx);
-        assert_eq!(buttons.team().count(), 1);
+        assert_eq!(buttons.team().count(), 2);
         buttons.set_agents(all, cx);
     });
     cx.run_until_parked();

@@ -86,7 +86,6 @@ mod provider_usage;
 mod providers;
 mod pull_request_hub;
 mod remote_devices;
-mod research;
 mod shortcuts;
 mod skills;
 mod task_proposals;
@@ -1020,15 +1019,6 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/agents/:agent_id/memory/versions/:version_id/restore",
             post(agent_memory::restore),
         )
-        .route("/api/v1/research/ideas", post(research::create_idea))
-        .route(
-            "/api/v1/research/ideas/publish",
-            post(research::publish_idea),
-        )
-        .route(
-            "/api/v1/research/ideas/discard",
-            post(research::discard_idea),
-        )
         .route(
             "/api/v1/sessions/:session_id/last-turn-review",
             post(turn_review::last_turn),
@@ -1942,9 +1932,6 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/agents/:agent_id/memory/:note_id",
             "DELETE /api/v1/agents/:agent_id/memory/:note_id",
             "POST /api/v1/agents/:agent_id/memory/versions/:version_id/restore",
-            "POST /api/v1/research/ideas",
-            "POST /api/v1/research/ideas/publish",
-            "POST /api/v1/research/ideas/discard",
             "POST /api/v1/conversation-rewind/prepare",
             "POST /api/v1/conversation-rewind/execute",
             "POST /api/v1/pull-request-hub/list",
@@ -6737,11 +6724,7 @@ mod tests {
         let agents = fixture
             .backend
             .sessions
-            .list_resident_agents(
-                &Default::default(),
-                &Default::default(),
-                &Default::default(),
-            )
+            .list_resident_agents(&Default::default())
             .unwrap();
         let reviewer = agents
             .iter()
@@ -6787,10 +6770,6 @@ mod tests {
             "/api/v1/agents/{}",
             reviewer.id
         )));
-        // A new idea makes a folder in the home: never from a phone.
-        assert!(!crate::remote_connector::remote_path_allowed(
-            "/api/v1/research/ideas"
-        ));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -6799,11 +6778,7 @@ mod tests {
         let reviewer = fixture
             .backend
             .sessions
-            .list_resident_agents(
-                &Default::default(),
-                &Default::default(),
-                &Default::default(),
-            )
+            .list_resident_agents(&Default::default())
             .unwrap()
             .remove(0);
         let base = format!("/api/v1/agents/{}/memory", reviewer.id);
@@ -6854,11 +6829,7 @@ mod tests {
         let reviewer = fixture
             .backend
             .sessions
-            .list_resident_agents(
-                &Default::default(),
-                &Default::default(),
-                &Default::default(),
-            )
+            .list_resident_agents(&Default::default())
             .unwrap()
             .remove(0);
         let path = format!("/api/v1/agents/{}/conversation", reviewer.id);

@@ -12,12 +12,11 @@ impl Sidebar {
     /// The inbox's cards, oldest first; `runs` say what woke an agent.
     pub fn inbox(&self, runs: &[Run]) -> Vec<InboxCard> {
         let data = &self.state.data;
-        let mut task_names: std::collections::HashMap<String, String> = data
+        let task_names: std::collections::HashMap<String, String> = data
             .tasks
             .iter()
             .map(|task| (task.id.clone(), task.name.clone()))
             .collect();
-        task_names.extend(data.idea_tasks.clone());
         let seen = &self.agent_markers.seen;
         let unread = |session: &str, completed: &str| seen.is_unread(session, Some(completed));
         cards(&InboxSources {
@@ -30,10 +29,11 @@ impl Sidebar {
         })
     }
 
-    /// Beside "Agentes": the unread cards, and whether one waits on the
-    /// person (amber).
+    /// Beside "Agentes": the unread cards (the day's recap among them), and
+    /// whether one waits on the person (amber).
     pub(super) fn agents_waiting(&self) -> (usize, bool) {
-        unread_count(&self.inbox(&[]))
+        let (count, waiting) = unread_count(&self.inbox(&[]));
+        (count + usize::from(self.recap_unread()), waiting)
     }
 
     /// A card opened: its result is read (a pull request review is read
@@ -60,6 +60,7 @@ impl Sidebar {
                 _ => self.mark_card_read(&card, cx),
             }
         }
+        self.agent_markers.recap.mark_seen();
         cx.notify();
     }
 }

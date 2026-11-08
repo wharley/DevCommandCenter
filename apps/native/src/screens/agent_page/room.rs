@@ -13,10 +13,10 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use dcc_core::domain::agent_conversation::home_project_id;
-use dcc_core::domain::team_room::{RouteReason, Teammate, route, talks};
+use dcc_core::domain::team_room::{RouteReason, Teammate, route};
 use gpui::{AppContext, Context, Entity, EventEmitter, ScrollHandle, Subscription, Window};
 
-use super::idea::agent_execution;
+use super::execution::agent_execution;
 use crate::data::agent_conversation::ConversationStart;
 use crate::data::agents::{AgentRecord, AgentSession, AgentState};
 use crate::data::desktop_api::{DesktopApi, TurnOptions};
@@ -32,6 +32,8 @@ pub enum RoomEvent {
     OpenSession { task_id: String, session_id: String },
     /// A pull request review's code tab.
     OpenPullRequest(String),
+    /// A task from the day's recap.
+    OpenTask(String),
 }
 
 /// A message on its way: shown until the agent's conversation has it.
@@ -54,10 +56,21 @@ pub struct TeamRoom {
     /// Why a message went to its agent, by agent and text (this run only).
     pub(crate) reasons: HashMap<(String, String), RouteReason>,
     pub(crate) sending: bool,
+    /// The suggestions to pass the turn the person already acted on.
+    pub(crate) handoffs: crate::data::room_handoffs::Handoffs,
     pub(super) scroll: ScrollHandle,
     /// How many lines it showed, to follow new ones to the bottom.
     pub(super) shown: usize,
     pub(super) markdown: std::cell::RefCell<HashMap<String, Rc<Vec<Block>>>>,
+    /// The day's recap, read when its card opens.
+    pub(crate) recap: super::room_recap::RecapRead,
+    pub(crate) recap_open: bool,
+    /// The team above the field while an `@` is typed.
+    pub(crate) mention: Option<super::room_mentions::AgentMention>,
+    /// When the completed tasks' space shows, and where that is kept
+    /// (none in tests).
+    pub(crate) cleanup: crate::data::cleanup_alert::CleanupAlert,
+    pub(crate) cleanup_path: Option<PathBuf>,
     _subscriptions: [Subscription; 2],
 }
 
@@ -89,7 +102,14 @@ impl TeamRoom {
             }),
             cx.subscribe(&input, |room, _, event, cx| match event {
                 TextAreaEvent::Submitted => room.send(cx),
-                TextAreaEvent::Changed => cx.notify(),
+                TextAreaEvent::Changed => {
+                    room.update_mention(cx);
+                    cx.notify();
+                }
+                TextAreaEvent::MenuUp => room.move_mention(-1, cx),
+                TextAreaEvent::MenuDown => room.move_mention(1, cx),
+                TextAreaEvent::MenuAccept => room.accept_mention(None, cx),
+                TextAreaEvent::Cancelled => room.close_mention(cx),
                 _ => {}
             }),
         ];
@@ -109,11 +129,20 @@ impl TeamRoom {
             pending: Vec::new(),
             reasons: HashMap::new(),
             sending: false,
+            handoffs: crate::data::room_handoffs::Handoffs::load(
+                (!cfg!(test)).then(|| crate::prefs::native_file("room-handoffs.json")),
+            ),
             scroll: ScrollHandle::new(),
             shown: 0,
             markdown: Default::default(),
+            recap: Default::default(),
+            recap_open: false,
+            mention: None,
+            cleanup: Default::default(),
+            cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
             _subscriptions: subscriptions,
         };
+        room.reload_cleanup();
         room.sync(cx);
         room
     }
@@ -128,7 +157,6 @@ impl TeamRoom {
             .read(cx)
             .agents()
             .iter()
-            .filter(|agent| talks(agent.preset.as_deref()))
             .flat_map(|agent| {
                 home_sessions(agent).map(|session| {
                     (
@@ -237,26 +265,12 @@ impl TeamRoom {
         Some((agent, reason))
     }
 
-    /// "@Nome " at the start of the message, from a name above the field.
-    pub(crate) fn address(&mut self, name: &str, cx: &mut Context<Self>) {
-        let text = self.input.read(cx).text().to_string();
-        let rest = text
-            .strip_prefix('@')
-            .and_then(|rest| rest.split_once(' ').map(|(_, rest)| rest))
-            .unwrap_or(&text)
-            .to_string();
-        let text = format!("@{name} {rest}");
-        self.input.update(cx, |area, cx| area.set_text(&text, cx));
-        cx.notify();
-    }
-
     /// The agents at work or waiting on the person in their conversation.
     pub(crate) fn busy(&self, cx: &gpui::App) -> Vec<(AgentRecord, AgentState)> {
         self.sidebar
             .read(cx)
             .agents()
             .iter()
-            .filter(|agent| talks(agent.preset.as_deref()))
             .filter_map(|agent| {
                 let state = home_sessions(agent)
                     .map(|session| session.state)
@@ -292,16 +306,33 @@ impl TeamRoom {
             Toaster::error(cx.t("agents.room.noAgent"), cx);
             return;
         };
+        if self.deliver(agent, text, Some(reason), cx) {
+            self.input.update(cx, |area, cx| area.set_text("", cx));
+        }
+    }
+
+    /// Sends `text` to `agent`'s own conversation (made the first time);
+    /// false when it cannot go now (told to the person).
+    pub(crate) fn deliver(
+        &mut self,
+        agent: AgentRecord,
+        text: String,
+        reason: Option<RouteReason>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.sending {
+            return false;
+        }
         let (provider, model) = match agent_execution(&agent, self.composer.read(cx), cx) {
             Ok(execution) => execution,
             Err(reason) => {
                 Toaster::error(reason, cx);
-                return;
+                return false;
             }
         };
         let Some(api) = self.api.clone() else {
             Toaster::error(cx.t("native.desktopClosed"), cx);
-            return;
+            return false;
         };
         let existing =
             super::conversation::home_session(&agent).map(|session| session.session_id.clone());
@@ -317,14 +348,15 @@ impl TeamRoom {
             )
             .to_string();
         let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        self.reasons
-            .insert((agent.id.clone(), text.clone()), reason);
+        if let Some(reason) = reason {
+            self.reasons
+                .insert((agent.id.clone(), text.clone()), reason);
+        }
         self.pending.push(Pending {
             agent_id: agent.id.clone(),
             text: text.clone(),
             at,
         });
-        self.input.update(cx, |area, cx| area.set_text("", cx));
         self.sending = true;
         cx.notify();
         let effort = agent.provider_id.as_ref().and(agent.effort.clone());
@@ -377,5 +409,6 @@ impl TeamRoom {
             });
         })
         .detach();
+        true
     }
 }

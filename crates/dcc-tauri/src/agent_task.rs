@@ -40,7 +40,7 @@ pub struct OpenTaskInput {
 }
 
 /// The person's project called `project` (its name, any case, or its id);
-/// homes and ideas are not projects. A project with several repositories
+/// agents' homes are not projects. A project with several repositories
 /// opens in the first one added.
 pub fn find_project(
     db_path: &Path,
@@ -55,7 +55,6 @@ pub fn find_project(
             "SELECT project_id, COALESCE(NULLIF(display_name, ''), name), root_path, base_branch
              FROM dcc_repositories
              WHERE project_id NOT LIKE 'dcc-agent-%'
-             AND root_path NOT IN (SELECT root_path FROM dcc_ideas)
              ORDER BY created_at",
         )
         .map_err(|error| error.to_string())?;
@@ -274,19 +273,16 @@ mod tests {
     }
 
     #[test]
-    fn a_project_is_found_by_name_or_id_and_never_a_home_or_an_idea() {
+    fn a_project_is_found_by_name_or_id_and_never_a_home() {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("db.sqlite");
         let conn = Connection::open(&db).unwrap();
         conn.execute_batch(
             "CREATE TABLE dcc_repositories (project_id TEXT, display_name TEXT, name TEXT, root_path TEXT, base_branch TEXT, created_at TEXT);
-            CREATE TABLE dcc_ideas (root_path TEXT);
             INSERT INTO dcc_repositories VALUES ('p-loja', 'Checkout', 'loja', '/loja', 'main', '1');
             INSERT INTO dcc_repositories VALUES ('p-loja', NULL, 'loja-api', '/loja-api', 'develop', '2');
             INSERT INTO dcc_repositories VALUES ('p-painel', NULL, 'painel', '/painel', 'main', '3');
-            INSERT INTO dcc_repositories VALUES ('dcc-agent-a', NULL, 'Revisor', '/home/a', 'main', '4');
-            INSERT INTO dcc_repositories VALUES ('idea', NULL, 'ideia', '/ideia', 'main', '5');
-            INSERT INTO dcc_ideas VALUES ('/ideia');",
+            INSERT INTO dcc_repositories VALUES ('dcc-agent-a', NULL, 'Revisor', '/home/a', 'main', '4');",
         )
         .unwrap();
         let found = find_project(&db, " checkout ", true, Some("high".into())).unwrap();
@@ -300,7 +296,7 @@ mod tests {
             find_project(&db, "p-painel", false, None).unwrap().project,
             "painel"
         );
-        for missing in ["Revisor", "ideia", "nada"] {
+        for missing in ["Revisor", "nada"] {
             let error = find_project(&db, missing, true, None).unwrap_err();
             assert!(error.contains("Checkout, loja-api, painel"), "{error}");
         }

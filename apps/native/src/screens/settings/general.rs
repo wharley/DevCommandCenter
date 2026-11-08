@@ -1,7 +1,7 @@
 //! "Geral": the interface's diagnostics to copy, the installed version,
 //! keeping the Mac awake (the desktop's hold), going on alone when the plan's
-//! limit runs out, the Browser's data, and three notes on how the shell
-//! opens.
+//! limit runs out, the completed tasks' space, the Browser's data, and three
+//! notes on how the shell opens.
 
 use gpui::{AnyElement, Context, FontWeight, SharedString, Task, div, prelude::*, px};
 
@@ -633,6 +633,7 @@ impl Settings {
             .child(self.version_card(cx))
             .children(keep_awake)
             .child(self.usage_limit_card(cx))
+            .child(self.cleanup_card(cx))
             .children(browser)
             .child(
                 card(cx)

@@ -35,7 +35,7 @@ pub struct CleanupDialog {
 
 impl Sidebar {
     /// The brush on the "Concluídos" header. Scans once per opening.
-    pub(in crate::screens::sidebar) fn open_cleanup(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn open_cleanup(&mut self, cx: &mut Context<Self>) {
         self.dialog = Some(SidebarDialog::Cleanup(CleanupDialog {
             scan: Scan::Loading,
             selected: HashSet::new(),

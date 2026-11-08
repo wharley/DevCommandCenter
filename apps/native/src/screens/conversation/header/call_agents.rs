@@ -1,12 +1,11 @@
-//! `CallAgentButtons`: one button per resident agent called in a task (the
-//! researcher and the reporter have surfaces of their own), its mascot at
+//! `CallAgentButtons`: one button per resident agent, its mascot at
 //! 18px, dimmed with the reason while it cannot be called (a turn runs;
 //! the reviewer with nothing to review). Only the agents that work in the
 //! task's project show: the team of that project. A view of its own: the
 //! shell sets the agents and the task's changes, the conversation whether it
 //! runs and its project.
 
-use dcc_core::domain::agent_call::{call_block_key, called_in_a_task};
+use dcc_core::domain::agent_call::call_block_key;
 use gpui::{Context, EventEmitter, Render, SharedString, Window, div, prelude::*};
 
 use crate::agent::AgentAvatarView;
@@ -50,11 +49,9 @@ impl CallAgentButtons {
     /// The agents that take a button in this task.
     pub fn team(&self) -> impl Iterator<Item = &AgentRecord> {
         self.agents.iter().filter(|agent| {
-            called_in_a_task(agent.preset.as_deref())
-                && self
-                    .project_id
-                    .as_deref()
-                    .is_none_or(|project| agent.works_in(project))
+            self.project_id
+                .as_deref()
+                .is_none_or(|project| agent.works_in(project))
         })
     }
 
@@ -80,8 +77,6 @@ impl CallAgentButtons {
 
 impl Render for CallAgentButtons {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // An idea's task belongs to the researcher alone; the native app's
-        // lists leave ideas out, so every task here takes the buttons.
         let mut row = div().flex().items_center().gap(gpui::px(4.0));
         for (index, agent) in self.team().enumerate() {
             let blocked = self.block_key(agent);

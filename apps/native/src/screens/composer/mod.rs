@@ -17,7 +17,7 @@ mod first_send;
 mod handoff;
 mod images;
 mod local_branch;
-mod mentions;
+pub(crate) mod mentions;
 mod objective;
 mod picker;
 mod popups;

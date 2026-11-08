@@ -83,7 +83,7 @@ impl Sidebar {
     }
 
     /// The total on disk, once measured.
-    pub(super) fn completed_bytes(&self) -> Option<u64> {
+    pub(crate) fn completed_bytes(&self) -> Option<u64> {
         if self.completed_scan.failed {
             return None;
         }

@@ -1,6 +1,6 @@
 //! "Conversa" on an agent's page, driven headlessly: the agent's own
 //! conversation is the card, not a row of its conversations; "Continuar
-//! conversa" opens the latest one; the Reporter has none.
+//! conversa" opens the latest one; a person's agent has one too.
 
 use gpui::{AppContext, Modifiers, TestAppContext, WindowAppearance};
 
@@ -75,7 +75,7 @@ fn the_agents_own_conversation_is_its_card(cx: &mut TestAppContext) {
         page.sidebar.update(cx, |sidebar, cx| {
             sidebar.apply_for_tests(
                 SidebarData {
-                    agents: vec![reviewer, agent("a-3", "chronicler", Vec::new())],
+                    agents: vec![reviewer, agent("a-3", "", Vec::new())],
                     agent_homes: [("a-1".to_string(), "w-home".to_string())].into(),
                     ..SidebarData::default()
                 },
@@ -119,7 +119,8 @@ fn the_agents_own_conversation_is_its_card(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(events.borrow().as_slice(), ["w-home s-home"]);
 
+    // Every agent talks in the room, a person's own too.
     page.update(cx, |page, cx| page.show("a-3".into(), cx));
     cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-conversation").is_none());
+    assert!(cx.debug_bounds("agent-conversation").is_some());
 }

@@ -36,11 +36,9 @@ impl AgentPage {
             .as_deref()
             .cloned()
             .unwrap_or_default();
-        let path = self.cleanup_path.clone();
         let options = editor_projects::project_options(self.sidebar.read(cx).projects());
-        let editor = cx.new(|cx| {
-            editor::AgentEditor::new(agent, catalog, path, window, cx).with_projects(options)
-        });
+        let editor = cx
+            .new(|cx| editor::AgentEditor::new(agent, catalog, window, cx).with_projects(options));
         let events = cx.subscribe(&editor, |page, _, event, cx| match event {
             editor::EditorEvent::Closed => {
                 page.editor = None;
