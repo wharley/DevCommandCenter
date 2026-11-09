@@ -43,4 +43,5 @@ pub mod review_tools;
 pub mod routine_tools;
 pub mod runtime;
 pub mod shell_env;
+pub mod source_tools;
 pub mod terminals;

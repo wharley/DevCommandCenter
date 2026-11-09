@@ -216,6 +216,18 @@
     }
   },
   "agents": {
+    "sources": {
+      "title": "Sources",
+      "hint": "What it watches in your connectors. DCC reads them itself, with no model, and wakes the agent only with what is new. To add one, ask in its Conversation: \"watch my mentions in Slack\".",
+      "line": "Source · {{connector}} — {{watch}}",
+      "proposal": "{{agent}} wants to watch",
+      "what": "{{connector}} — {{watch}} · every {{every}} min",
+      "create": "Create",
+      "discard": "Discard",
+      "every": "every {{minutes}} min",
+      "lastRead": "last read {{when}}",
+      "delete": "Remove"
+    },
     "report": {
       "title_one": "Report · {{count}} task",
       "title_other": "Report · {{count}} tasks",

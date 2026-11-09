@@ -89,7 +89,7 @@ fn the_page_shows_the_agent_and_opens_its_conversations(cx: &mut TestAppContext)
         AgentPage::new("a-1".into(), sidebar, composer, cx)
     });
     // Tall enough for the whole page, the role at its end included.
-    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(1800.0)));
+    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(2200.0)));
     // After the sidebar's own first read.
     cx.run_until_parked();
     page.update(cx, |page, cx| {

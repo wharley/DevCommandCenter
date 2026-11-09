@@ -18,6 +18,7 @@ pub mod native_connectors;
 pub mod process_runtime_registry;
 pub mod provider_delta_coalescer;
 pub mod rt;
+pub mod source_read;
 pub mod state;
 pub mod task_gate;
 pub mod task_group;

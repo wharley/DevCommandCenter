@@ -10,6 +10,7 @@ pub mod agent_projects;
 pub mod agent_proposal;
 pub mod agent_reaction;
 pub mod agent_routine;
+pub mod agent_source;
 pub mod agent_templates;
 pub mod attention;
 pub mod browser;

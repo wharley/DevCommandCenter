@@ -63,11 +63,15 @@ mod room_reactions;
 mod room_recap;
 mod room_report;
 mod room_routines;
+mod room_sources;
 #[cfg(test)]
 mod room_tests;
 mod room_timeline;
 mod room_view;
 mod routines;
+mod sources;
+#[cfg(test)]
+mod sources_tests;
 mod spend;
 mod team;
 #[cfg(test)]
@@ -112,8 +116,9 @@ pub struct AgentPage {
     /// What the room's field starts with when it opens ("@Revisor ").
     room_draft: Option<String>,
     _sidebar: Subscription,
-    /// Its mascot follows the blink and the triggers turned on or off.
-    _mascot: [Subscription; 2],
+    /// Its mascot follows the blink and the triggers; its sources follow
+    /// their clock.
+    _mascot: [Subscription; 3],
 }
 
 impl EventEmitter<AgentPageEvent> for AgentPage {}
@@ -185,6 +190,7 @@ impl AgentPage {
                 cx.observe_global::<crate::data::agent_triggers::AgentTriggers>(|_, cx| {
                     cx.notify()
                 }),
+                cx.observe_global::<crate::data::agent_sources::Sources>(|_, cx| cx.notify()),
             ],
         }
     }
@@ -527,6 +533,7 @@ impl AgentPage {
         let triggers = self.triggers_card(&data, cx);
         let spend = self.spend_card(agent.monthly_token_limit, cx);
         let routines = self.routines_card(cx);
+        let sources = self.sources_card(cx);
         let sessions = self.sessions(&data, cx);
         let pr_reviews = self.pr_reviews(&data, cx);
         let memory = self.memory_card(window, cx);
@@ -616,6 +623,7 @@ impl AgentPage {
                     .children(triggers)
                     .children(spend)
                     .child(routines)
+                    .child(sources)
                     .child(how_to_call)
                     .child(sessions)
                     .children(pr_reviews)

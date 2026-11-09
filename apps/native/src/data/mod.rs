@@ -10,6 +10,7 @@ pub mod agent_memory;
 pub mod agent_proposals;
 pub mod agent_quiet;
 pub mod agent_reactions;
+pub mod agent_sources;
 pub mod agent_triggers;
 pub mod agents;
 pub mod ai_memory;

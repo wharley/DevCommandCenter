@@ -94,7 +94,7 @@ pub struct TeamRoom {
     pub(crate) reacted: HashMap<String, Option<dcc_core::domain::agent_reaction::Reaction>>,
     /// "Guardar como regra?" after a 👎 (`room_reactions`).
     pub(crate) rule: Option<super::room_reactions::RuleDraft>,
-    _subscriptions: [Subscription; 4],
+    _subscriptions: [Subscription; 5],
 }
 
 impl EventEmitter<RoomEvent> for TeamRoom {}
@@ -127,6 +127,8 @@ impl TeamRoom {
             cx.observe_global::<crate::data::check_ins::CheckIns>(|_, cx| cx.notify()),
             // The routines proposed, as the clock reads them.
             cx.observe_global::<crate::data::routines::Routines>(|_, cx| cx.notify()),
+            // The sources proposed, as their clock reads them.
+            cx.observe_global::<crate::data::agent_sources::Sources>(|_, cx| cx.notify()),
             cx.subscribe(&input, |room, _, event, cx| match event {
                 TextAreaEvent::Submitted => room.send(cx),
                 TextAreaEvent::Changed => {

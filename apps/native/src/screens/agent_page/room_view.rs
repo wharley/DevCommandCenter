@@ -409,6 +409,12 @@ impl Render for TeamRoom {
                     {
                         rows.extend(self.routine_line(index, &line.text, cx))
                     }
+                    None if line
+                        .text
+                        .starts_with(dcc_core::domain::agent_source::SOURCE_MARK) =>
+                    {
+                        rows.extend(self.source_line(index, &line.text, cx))
+                    }
                     None => {
                         let note = if whole {
                             self.routed(&agent.id, &line.text, &agent.name, cx)
@@ -439,6 +445,7 @@ impl Render for TeamRoom {
         rows.extend(self.limit_rows(&shown, cx));
         rows.extend(self.routine_cards(&shown, cx));
         rows.extend(self.proposal_cards(&agents, cx));
+        rows.extend(self.source_cards(&shown, cx));
         let unread_bar = self.unread_bar(unread, cx);
         let pending: Vec<Pending> = self
             .pending

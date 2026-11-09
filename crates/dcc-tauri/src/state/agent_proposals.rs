@@ -29,7 +29,7 @@ pub struct ProposedAgent {
 }
 
 /// The connectors' ids by their names, any case.
-fn connector_ids(db_path: &Path) -> Result<Vec<(String, String)>> {
+pub(super) fn connector_ids(db_path: &Path) -> Result<Vec<(String, String)>> {
     let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
     let mut statement = conn

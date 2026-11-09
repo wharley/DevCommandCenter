@@ -61,6 +61,7 @@ mod agent_memory;
 mod agent_proposals;
 mod agent_reactions;
 mod agent_routines;
+mod agent_sources;
 mod agents;
 mod ai_memory;
 mod ai_memory_settings;
@@ -1062,6 +1063,18 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/agents/:agent_id/routines/:routine_id/ran",
             post(agent_routines::ran),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/sources/:source_id/switch",
+            post(agent_sources::switch),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/sources/:source_id/delete",
+            post(agent_sources::delete),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/sources/:source_id/read",
+            post(agent_sources::read),
         )
         .route(
             "/api/v1/agents/:agent_id/reactions",

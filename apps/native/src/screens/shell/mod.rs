@@ -1,6 +1,7 @@
 //! The window's frame: sidebar, resize separator and main area
 //! (`App.tsx` root `<main>`). Owns the layout and follows the OS theme.
 
+mod agent_wake;
 mod agents;
 mod annotation;
 mod appshot;
@@ -36,6 +37,7 @@ mod session_search;
 mod settings;
 mod sidebar_events;
 mod skills;
+mod sources;
 mod terminal;
 #[cfg(test)]
 mod tests;
@@ -179,6 +181,7 @@ pub struct Shell {
     cli_updates: Entity<cli_updates::CliUpdates>,
     _pr_watch: (Entity<pr_watch::PrWatch>, gpui::Subscription),
     _routines: (Entity<routines::RoutineClock>, gpui::Subscription),
+    _sources: (Entity<sources::SourceClock>, gpui::Subscription),
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
@@ -340,6 +343,7 @@ impl Shell {
                 (watch, news)
             },
             _routines: routines::start(cx),
+            _sources: sources::start(cx),
             notes,
             _notes: notes_follow,
             delivery,

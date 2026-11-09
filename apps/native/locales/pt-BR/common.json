@@ -216,6 +216,18 @@
     }
   },
   "agents": {
+    "sources": {
+      "title": "Fontes",
+      "hint": "O que ele vigia nos seus conectores. O DCC lê sozinho, sem modelo, e só acorda o agente com o que é novo. Para criar, peça na Conversa dele: \"vigia minhas menções no Slack\".",
+      "line": "Fonte · {{connector}} — {{watch}}",
+      "proposal": "{{agent}} quer vigiar",
+      "what": "{{connector}} — {{watch}} · a cada {{every}} min",
+      "create": "Criar",
+      "discard": "Descartar",
+      "every": "a cada {{minutes}} min",
+      "lastRead": "última leitura {{when}}",
+      "delete": "Remover"
+    },
     "report": {
       "title_one": "Relatório · {{count}} tarefa",
       "title_other": "Relatório · {{count}} tarefas",

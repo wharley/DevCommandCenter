@@ -39,6 +39,9 @@ pub enum Trigger {
     /// A routine's time came (`routines`); not a switch, and not counted in
     /// the daily ceiling, only in the brake (`agent_brake`).
     Routine,
+    /// A source the agent watches brought news (`sources`); like a routine,
+    /// counted only in the brake.
+    Source,
 }
 
 impl Trigger {
@@ -61,6 +64,7 @@ impl Trigger {
             Self::IssueAssigned => "issueAssigned",
             Self::TaskStalled => "taskStalled",
             Self::Routine => "routine",
+            Self::Source => "source",
         }
     }
 
@@ -199,7 +203,7 @@ impl AgentTriggers {
             .runs
             .iter()
             .filter(|run| run.agent_id == agent_id && local_day(&run.at) == Some(today))
-            .filter(|run| run.trigger != Trigger::Routine)
+            .filter(|run| !matches!(run.trigger, Trigger::Routine | Trigger::Source))
             .count()
     }
 

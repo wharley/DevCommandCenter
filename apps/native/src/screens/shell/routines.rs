@@ -13,11 +13,8 @@ use dcc_core::domain::agent_routine::{Routine, routine_prompt};
 use gpui::{App, AppContext, BorrowAppContext, Context, EventEmitter, Task};
 
 use super::Shell;
-use super::check_in::home_session;
-use super::review_trigger::review_run;
-use crate::data::agent_conversation::ConversationStart;
 use crate::data::agent_triggers::{AgentTriggers, Held, Trigger};
-use crate::data::desktop_api::{DesktopApi, TurnOptions};
+use crate::data::desktop_api::DesktopApi;
 use crate::data::routines::{Routines, read};
 use crate::i18n::{Args, Translate};
 
@@ -106,25 +103,13 @@ impl Shell {
                 }
                 Ok(()) => {}
             }
-            let Some(run) = self.run_for_routine(&agent, cx) else {
+            let Some(send) = self.home_send(&agent, routine_prompt(routine), cx) else {
                 continue;
             };
             cx.update_global::<AgentTriggers, _>(|triggers, _| {
                 triggers.record(&agent.id, Trigger::Routine, &routine.id, now)
             });
-            let existing = home_session(&agent);
-            let home_task = self
-                .sidebar
-                .read(cx)
-                .agent_page(&agent.id)
-                .and_then(|data| data.home_task);
-            let title = cx
-                .t_with(
-                    "agents.conversation.taskName",
-                    &Args::default().with("agent", agent.name.clone()),
-                )
-                .to_string();
-            let (routine, prompt) = (routine.clone(), routine_prompt(routine));
+            let routine = routine.clone();
             let at = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             cx.spawn(async move |_, cx| {
                 let name = agent.name.clone();
@@ -136,53 +121,13 @@ impl Shell {
                         // Marked first: a turn that fails is not retried every minute.
                         api.routine_ran(&routine.agent_id, &routine.id, &at)
                             .map_err(|error| error.to_string())?;
-                        let session = match existing {
-                            Some(session) => session,
-                            None => {
-                                api.start_agent_conversation(&ConversationStart {
-                                    agent_id: &agent.id,
-                                    agent_name: &agent.name,
-                                    home_task: home_task.as_deref(),
-                                    title: &title,
-                                    provider: &run.provider_id,
-                                    model: run.model.as_deref(),
-                                })
-                                .map_err(|error| error.to_string())?
-                                .1
-                            }
-                        };
-                        let options = TurnOptions {
-                            provider_id: Some(run.provider_id.clone()),
-                            model: run.model.clone(),
-                            effort: run.effort.clone(),
-                            approval_policy: Some("ask".into()),
-                            plan_mode: false,
-                            fast_mode: false,
-                            tool_instructions: None,
-                            provider_runtime: run.provider_runtime.clone(),
-                        };
-                        api.send_turn(&session, &prompt, None, &options)
-                            .map_err(|error| error.to_string())
+                        super::agent_wake::send_home(&api, send)
                     })
                     .await;
                 let _ = cx.update(|cx| announce(&name, &done, cx));
             })
             .detach();
         }
-    }
-
-    fn run_for_routine(
-        &self,
-        agent: &crate::data::agents::AgentRecord,
-        cx: &App,
-    ) -> Option<crate::data::pr_review::AgentRun> {
-        let composer = self.conversation.read(cx).composer.read(cx);
-        let providers = composer.catalog.clone().unwrap_or_default();
-        let pick = (
-            composer.session.provider_id.clone(),
-            composer.session.model.clone(),
-        );
-        review_run(agent, &providers, &pick, "", String::new())
     }
 
     /// A routine the brake held: marked, so it waits for its next time.

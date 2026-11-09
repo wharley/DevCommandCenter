@@ -7,8 +7,10 @@ mod agent_proposals;
 mod agent_reactions;
 mod agent_reads;
 mod agent_routines;
+mod agent_sources;
 mod pr_review_requests;
 pub use agent_proposals::ProposedAgent;
+pub use agent_sources::ProposedSource;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     path::{Component, Path, PathBuf},
