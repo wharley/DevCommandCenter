@@ -27,6 +27,7 @@ fn session(id: &str, task: &str, state: AgentState) -> AgentSession {
 fn agent(id: &str, preset: &str, sessions: Vec<AgentSession>) -> AgentRecord {
     AgentRecord {
         projects: Vec::new(),
+        monthly_token_limit: None,
         id: id.into(),
         name: "Revisor".into(),
         preset: Some(preset.into()),
@@ -413,6 +414,10 @@ fn the_team_lists_the_agents_and_makes_a_new_one(cx: &mut TestAppContext) {
         editor.apply_template(None, cx);
         assert!(editor.role.read(cx).text().is_empty());
     });
+    // "Limite mensal": 2M tokens.
+    let limit = cx.debug_bounds("agent-editor-limit-2").unwrap();
+    cx.simulate_click(limit.center(), Modifiers::none());
+    cx.run_until_parked();
     editor.update(cx, |editor, cx| {
         assert!(editor.is_new());
         editor.name.update(cx, |input, cx| input.set_text("QA", cx));
@@ -431,6 +436,7 @@ fn the_team_lists_the_agents_and_makes_a_new_one(cx: &mut TestAppContext) {
     let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();
     assert_eq!(body["name"], "QA");
     assert_eq!(body["role"], "Teste o caminho mudado.");
+    assert_eq!(body["monthlyTokenLimit"], 2_000_000);
     // Saved, the page goes to the new agent.
     page.read_with(cx, |page, _| {
         assert_eq!(page.agent_id, "a-new");

@@ -19,6 +19,7 @@ use crate::theme::{Theme, ThemePreference};
 fn reviewer() -> AgentRecord {
     AgentRecord {
         projects: Vec::new(),
+        monthly_token_limit: None,
         id: "rev".into(),
         name: "Revisor".into(),
         preset: Some("reviewer".into()),

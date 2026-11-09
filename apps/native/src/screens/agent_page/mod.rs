@@ -25,6 +25,7 @@ mod conversation;
 mod conversation_tests;
 mod editing;
 mod editor;
+mod editor_budget;
 mod editor_look;
 mod editor_projects;
 mod editor_role;
@@ -42,11 +43,13 @@ mod room_cards;
 mod room_checkins;
 mod room_cleanup;
 mod room_handoff;
+mod room_limits;
 mod room_mentions;
 mod room_recap;
 #[cfg(test)]
 mod room_tests;
 mod room_view;
+mod spend;
 mod team;
 #[cfg(test)]
 mod tests;
@@ -71,6 +74,8 @@ pub struct AgentPage {
     pub(crate) role_open: bool,
     /// "Editar …", while open.
     pub(crate) editor: Option<(Entity<editor::AgentEditor>, Subscription)>,
+    /// The shown agent's month (`spend`), read when it shows.
+    pub(crate) spend: spend::SpendRead,
     /// The desktop the memory goes through (tests point it elsewhere).
     pub(crate) api: Option<crate::data::desktop_api::DesktopApi>,
     /// "Memória", made on the first render (its fields need the window).
@@ -141,6 +146,7 @@ impl AgentPage {
             } else {
                 crate::data::desktop_api::DesktopApi::load()
             },
+            spend: Default::default(),
             memory: None,
             room: None,
             room_open: false,
@@ -157,6 +163,8 @@ impl AgentPage {
 
     pub fn show(&mut self, agent_id: String, cx: &mut Context<Self>) {
         self.room_open = false;
+        // Read again: the month moves while the page is away.
+        self.spend = Default::default();
         if self.agent_id != agent_id {
             self.agent_id = agent_id;
             self.role_open = false;
@@ -479,6 +487,7 @@ impl AgentPage {
             );
         let conversation = self.conversation_card(&data, cx);
         let triggers = self.triggers_card(&data, cx);
+        let spend = self.spend_card(agent.monthly_token_limit, cx);
         let sessions = self.sessions(&data, cx);
         let pr_reviews = self.pr_reviews(&data, cx);
         let memory = self.memory_card(window, cx);
@@ -567,6 +576,7 @@ impl AgentPage {
                     .child(header)
                     .child(conversation)
                     .children(triggers)
+                    .children(spend)
                     .child(how_to_call)
                     .child(sessions)
                     .children(pr_reviews)

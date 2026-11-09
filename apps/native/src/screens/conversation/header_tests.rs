@@ -414,6 +414,7 @@ fn ai_memory_shows_the_waiting_export_and_pins_a_source(cx: &mut TestAppContext)
 fn agent(id: &str, name: &str, preset: Option<&str>) -> crate::data::agents::AgentRecord {
     crate::data::agents::AgentRecord {
         projects: Vec::new(),
+        monthly_token_limit: None,
         id: id.into(),
         name: name.into(),
         preset: preset.map(str::to_string),

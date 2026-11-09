@@ -34,6 +34,8 @@ pub enum RoomEvent {
     OpenPullRequest(String),
     /// A task from the day's recap.
     OpenTask(String),
+    /// An agent's page ("Ajustar" on its limit card).
+    OpenAgent(String),
 }
 
 /// A message on its way: shown until the agent's conversation has it.
@@ -67,6 +69,8 @@ pub struct TeamRoom {
     pub(crate) recap_open: bool,
     /// The team above the field while an `@` is typed.
     pub(crate) mention: Option<super::room_mentions::AgentMention>,
+    /// The agents with a limit that are past it now (`room_limits`).
+    pub(crate) limits: Vec<String>,
     /// When the completed tasks' space shows, and where that is kept
     /// (none in tests).
     pub(crate) cleanup: crate::data::cleanup_alert::CleanupAlert,
@@ -140,11 +144,13 @@ impl TeamRoom {
             recap: Default::default(),
             recap_open: false,
             mention: None,
+            limits: Vec::new(),
             cleanup: Default::default(),
             cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
             _subscriptions: subscriptions,
         };
         room.reload_cleanup();
+        room.read_limits(cx);
         room.sync(cx);
         room
     }
@@ -402,7 +408,13 @@ impl TeamRoom {
                 room.sending = false;
                 if let Err(error) = sent {
                     room.pending.retain(|pending| pending.text != text);
-                    Toaster::error(error.to_string(), cx);
+                    let error = error.to_string();
+                    if super::room_limits::is_limit_error(&error) {
+                        // The card says it and offers "Continuar".
+                        room.read_limits(cx);
+                    } else {
+                        Toaster::error(error, cx);
+                    }
                 } else if !cfg!(test) {
                     room.sidebar
                         .update(cx, |sidebar, cx| sidebar.reload_now(cx));

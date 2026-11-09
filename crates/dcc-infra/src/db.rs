@@ -22,6 +22,7 @@ mod workspace_ports;
 use workspace_ports::WORKSPACE_PORTS_TABLE_SQL;
 mod agent_conversation;
 mod agent_memory;
+mod agent_spend;
 mod session_stall;
 use agent_memory::AGENT_MEMORY_TABLE_SQL;
 pub use workspace_ports::{port_block_is_free, PORT_BLOCK_SIZE, PORT_BLOCK_START};
@@ -2666,6 +2667,18 @@ impl SqliteSessionRepo {
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "effort", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "avatar_shape", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "avatar_accessory", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_agents",
+            "monthly_token_limit",
+            "INTEGER NULL",
+        )?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_agents",
+            "limit_override_month",
+            "TEXT NULL",
+        )?;
         Self::retire_presets(&conn)?;
         SqliteWorkspaceRepo::ensure_column(
             &conn,
@@ -7720,7 +7733,7 @@ impl SqliteSessionRepo {
 
     // ---- Resident agents ---------------------------------------------------
 
-    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions, a.effort, a.avatar_shape, a.avatar_accessory, a.projects_json";
+    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions, a.effort, a.avatar_shape, a.avatar_accessory, a.projects_json, a.monthly_token_limit, a.limit_override_month";
 
     fn resident_agent_from_row(row: &Row<'_>) -> rusqlite::Result<ResidentAgent> {
         let preset: Option<String> = row.get(9)?;
@@ -7756,6 +7769,10 @@ impl SqliteSessionRepo {
                 .get::<_, Option<String>>(17)?
                 .and_then(|json| from_str(&json).ok())
                 .unwrap_or_default(),
+            monthly_token_limit: row
+                .get::<_, Option<i64>>(18)?
+                .and_then(|limit| u64::try_from(limit).ok()),
+            limit_override_month: row.get(19)?,
             preset,
             created_at: row.get(10)?,
             updated_at: row.get(11)?,
@@ -7897,6 +7914,9 @@ impl SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
         // Every project is stored as nothing, like rows saved before.
+        let limit = draft
+            .monthly_token_limit
+            .and_then(|limit| i64::try_from(limit).ok());
         let projects_json = (!draft.projects.is_empty())
             .then(|| to_string(&draft.projects))
             .transpose()
@@ -7905,8 +7925,8 @@ impl SqliteSessionRepo {
             Some(id) => {
                 let updated = conn
                     .execute(
-                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12, effort = ?13, avatar_shape = ?14, avatar_accessory = ?15, projects_json = ?16 WHERE id = ?1 AND deleted_at IS NULL",
-                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json],
+                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12, effort = ?13, avatar_shape = ?14, avatar_accessory = ?15, projects_json = ?16, monthly_token_limit = ?17 WHERE id = ?1 AND deleted_at IS NULL",
+                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json, limit],
                     )
                     .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 if updated != 1 {
@@ -7917,8 +7937,8 @@ impl SqliteSessionRepo {
             None => {
                 let id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
-                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions, effort, avatar_shape, avatar_accessory, projects_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11, ?12, ?13, ?14, ?15)",
-                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json],
+                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions, effort, avatar_shape, avatar_accessory, projects_json, monthly_token_limit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11, ?12, ?13, ?14, ?15, ?16)",
+                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json, limit],
                 )
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 id

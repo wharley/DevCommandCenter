@@ -68,6 +68,8 @@ pub struct AgentRecord {
     pub extra_instructions: String,
     /// The projects it works in; empty: every project.
     pub projects: Vec<String>,
+    /// Tokens a month (`agent_budget`); none: no limit.
+    pub monthly_token_limit: Option<u64>,
     pub sessions: Vec<AgentSession>,
 }
 
@@ -242,6 +244,7 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                 offer_prompt: agent.offer_prompt,
                 extra_instructions: agent.extra_instructions,
                 projects: agent.projects,
+                monthly_token_limit: agent.monthly_token_limit,
                 sessions,
             }
         })

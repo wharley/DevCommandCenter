@@ -25,6 +25,9 @@ export function sendError(error: unknown): string {
 	if (error instanceof ApiError && JSON.stringify(error.body ?? "").includes("roomNoConversation")) {
 		return "Esse agente ainda não tem conversa: comece por ele na Sala do Mac.";
 	}
+	if (error instanceof ApiError && JSON.stringify(error.body ?? "").includes("agentLimitReached")) {
+		return "Esse agente chegou ao limite do mês. Libere no Mac, na página dele, para continuar.";
+	}
 	if (error instanceof ApiError && JSON.stringify(error.body ?? "").includes("roomNoAgent")) {
 		return "Nenhum agente pode responder agora.";
 	}

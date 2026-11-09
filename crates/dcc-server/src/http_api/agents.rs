@@ -47,3 +47,19 @@ pub(super) async fn save(
         .map_err(|error| HttpApiError::bad_request(error.to_string()))?;
     Ok(Json(json!({ "agent": agent })))
 }
+
+/// "Continuar mesmo assim": the agent may go past its monthly limit until
+/// the month ends.
+pub(super) async fn let_past_limit(
+    State(backend): State<Arc<HttpBackend>>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<Value>, HttpApiError> {
+    let changed = backend
+        .sessions
+        .let_agent_past_limit(agent_id.trim())
+        .map_err(|error| HttpApiError::bad_request(error.to_string()))?;
+    if !changed {
+        return Err(HttpApiError::not_found("agent not found"));
+    }
+    Ok(Json(json!({ "ok": true })))
+}

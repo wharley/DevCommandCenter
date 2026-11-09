@@ -2168,6 +2168,13 @@ pub async fn send_turn_with_state(
     state: &SessionCommandState,
     input: SendTurnInput,
 ) -> Result<SendTurnOutput, String> {
+    // An agent past its monthly limit waits for the person's "Continuar".
+    if let Some((agent, _)) = state
+        .agent_over_limit(&input.session_id)
+        .map_err(|error| error.to_string())?
+    {
+        return Err(dcc_core::domain::agent_budget::limit_error(&agent.name));
+    }
     let transition = state
         .acquire_provider_transition(&input.session_id)
         .await

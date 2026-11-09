@@ -179,6 +179,9 @@ pub struct ResidentAgentDraft {
     /// The projects it works in (`agent_projects`); empty: every project.
     #[serde(default)]
     pub projects: Vec<String>,
+    /// Tokens a month (`agent_budget`); none: no limit.
+    #[serde(default)]
+    pub monthly_token_limit: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -197,6 +200,12 @@ pub struct ResidentAgent {
     /// The projects it works in; empty: every project.
     #[serde(default)]
     pub projects: Vec<String>,
+    /// Tokens a month (`agent_budget`); none: no limit.
+    #[serde(default)]
+    pub monthly_token_limit: Option<u64>,
+    /// The month (`2026-11`) the person let it go past its limit.
+    #[serde(default)]
+    pub limit_override_month: Option<String>,
     pub preset: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -279,6 +288,7 @@ impl ResidentAgentDraft {
             effort,
             avatar: self.avatar,
             projects: crate::domain::agent_projects::clean_projects(self.projects)?,
+            monthly_token_limit: self.monthly_token_limit.filter(|limit| *limit > 0),
         })
     }
 
@@ -301,6 +311,7 @@ impl ResidentAgentDraft {
                 accessory: "glasses".to_string(),
             },
             projects: Vec::new(),
+            monthly_token_limit: None,
         }
     }
 }
@@ -404,6 +415,8 @@ mod tests {
             effort: None,
             avatar: draft.avatar,
             projects: Vec::new(),
+            monthly_token_limit: None,
+            limit_override_month: None,
             preset: Some(REVIEWER_PRESET.to_string()),
             created_at: "now".to_string(),
             updated_at: "now".to_string(),

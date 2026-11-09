@@ -207,6 +207,7 @@ mod tests {
             offer_prompt: String::new(),
             extra_instructions: String::new(),
             projects: Vec::new(),
+            monthly_token_limit: None,
             sessions,
         }
     }

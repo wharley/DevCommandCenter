@@ -462,7 +462,11 @@
         "taskStalled": "{{title}} está sem sinal há {{minutes}} min"
       },
       "pause": "Pausar agentes",
-      "resume": "Retomar agentes"
+      "resume": "Retomar agentes",
+      "limit": {
+        "text": "{{agent}} chegou ao limite do mês ({{limit}} tokens)",
+        "adjust": "Ajustar"
+      }
     },
     "team": {
       "title": "Equipe",
@@ -507,7 +511,10 @@
       "cancel": "Cancelar",
       "save": "Salvar",
       "title": "Editar {{agent}}",
-      "description": "Este agente é do DCC. Você escolhe o provider, o modelo e o avatar, e pode somar instruções suas ao papel."
+      "description": "Este agente é do DCC. Você escolhe o provider, o modelo e o avatar, e pode somar instruções suas ao papel.",
+      "limit": "Limite mensal",
+      "limitHint": "Tokens por mês nas conversas dele (leitura de cache conta 10%). Passou do limite, os turnos dele esperam você liberar.",
+      "limitNone": "Sem limite"
     },
     "templates": {
       "title": "Começar de",
@@ -521,6 +528,16 @@
         "label": "QA",
         "name": "QA"
       }
+    },
+    "spend": {
+      "title": "Este mês",
+      "tokens": "{{tokens}} tokens",
+      "turns_one": "{{count}} turno",
+      "turns_other": "{{count}} turnos",
+      "ofLimit": "de {{limit}} no mês",
+      "over": "Chegou ao limite: os turnos dele esperam você.",
+      "continue": "Continuar mesmo assim",
+      "letThrough": "Liberado até o fim do mês."
     }
   },
   "sidebar": {

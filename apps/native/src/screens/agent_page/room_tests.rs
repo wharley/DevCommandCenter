@@ -32,6 +32,7 @@ fn agent(id: &str, name: &str, preset: &str, sessions: Vec<AgentSession>) -> Age
         offer_prompt: String::new(),
         extra_instructions: String::new(),
         projects: Vec::new(),
+        monthly_token_limit: None,
         sessions,
     }
 }
@@ -497,4 +498,54 @@ fn the_check_in_is_a_card_and_the_room_pauses_every_trigger(cx: &mut TestAppCont
     cx.simulate_click(pause.center(), Modifiers::none());
     cx.run_until_parked();
     assert!(cx.update(|_, cx| cx.global::<AgentTriggers>().paused()));
+}
+
+#[gpui::test]
+fn an_agent_past_its_limit_is_a_card_that_opens_its_page(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("rev".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(1400.0)));
+    let qa = AgentRecord {
+        monthly_token_limit: Some(2_000_000),
+        ..agent("qa", "QA", "", Vec::new())
+    };
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![agent("rev", "Revisor", "reviewer", Vec::new()), qa],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.open_room(None, cx);
+    });
+    cx.run_until_parked();
+    page.update(cx, |page, cx| {
+        let room = page.room.as_ref().unwrap().0.clone();
+        room.update(cx, |room, cx| {
+            room.limits = vec!["qa".into()];
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-limit-0").is_some());
+    let adjust = cx.debug_bounds("room-limit-adjust-0").unwrap();
+    cx.simulate_click(adjust.center(), Modifiers::none());
+    cx.run_until_parked();
+    page.read_with(cx, |page, _| {
+        assert_eq!(page.agent_id, "qa");
+        assert!(!page.room_open);
+    });
 }

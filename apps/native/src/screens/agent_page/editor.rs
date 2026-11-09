@@ -66,6 +66,8 @@ pub struct AgentEditor {
     pub(crate) offer: bool,
     /// The template "Novo agente" started from, if any.
     pub(crate) template: Option<&'static str>,
+    /// Tokens a month; none: no limit.
+    pub(crate) monthly_token_limit: Option<u64>,
     pub(super) catalog: Vec<ProviderDescriptor>,
     pub(crate) saving: bool,
     pub(crate) api: Option<DesktopApi>,
@@ -171,6 +173,7 @@ impl AgentEditor {
             project_options: Vec::new(),
             offer: !agent.offer_prompt.trim().is_empty(),
             template: None,
+            monthly_token_limit: agent.monthly_token_limit,
             agent,
             name,
             extra,
@@ -227,6 +230,7 @@ impl AgentEditor {
             "effort": self.effort,
             "avatar": self.avatar,
             "projects": self.projects,
+            "monthlyTokenLimit": self.monthly_token_limit,
         })
     }
 
@@ -371,6 +375,7 @@ impl Render for AgentEditor {
                 self.project_chips(cx),
                 cx,
             ))
+            .child(self.limit_field(cx))
             .child(field(
                 cx.t("agents.editor.extra"),
                 Some(cx.t("agents.editor.extraHint")),

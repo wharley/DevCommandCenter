@@ -24,7 +24,10 @@ impl AgentPage {
         self.room_draft = draft;
         // The limit may have changed in Settings meanwhile.
         if let Some((room, _)) = &self.room {
-            room.update(cx, |room, _| room.reload_cleanup());
+            room.update(cx, |room, cx| {
+                room.reload_cleanup();
+                room.read_limits(cx);
+            });
         }
         cx.notify();
     }
@@ -39,7 +42,7 @@ impl AgentPage {
             None => {
                 let (sidebar, composer) = (self.sidebar.clone(), self.composer.clone());
                 let room = cx.new(|cx| room::TeamRoom::new(sidebar, composer, window, cx));
-                let events = cx.subscribe(&room, |_, _, event, cx| match event {
+                let events = cx.subscribe(&room, |page, _, event, cx| match event {
                     room::RoomEvent::OpenSession {
                         task_id,
                         session_id,
@@ -53,6 +56,7 @@ impl AgentPage {
                     room::RoomEvent::OpenTask(task_id) => {
                         cx.emit(AgentPageEvent::OpenTask(task_id.clone()))
                     }
+                    room::RoomEvent::OpenAgent(agent_id) => page.show(agent_id.clone(), cx),
                 });
                 self.room = Some((room.clone(), events));
                 room

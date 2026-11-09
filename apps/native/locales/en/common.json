@@ -462,7 +462,11 @@
         "taskStalled": "{{title}} has had no sign of life for {{minutes}} min"
       },
       "pause": "Pause agents",
-      "resume": "Resume agents"
+      "resume": "Resume agents",
+      "limit": {
+        "text": "{{agent}} reached its monthly limit ({{limit}} tokens)",
+        "adjust": "Adjust"
+      }
     },
     "team": {
       "title": "Team",
@@ -507,7 +511,10 @@
       "cancel": "Cancel",
       "save": "Save",
       "title": "Edit {{agent}}",
-      "description": "This agent is DCC's. You choose the provider, model and avatar, and can add your own instructions to its role."
+      "description": "This agent is DCC's. You choose the provider, model and avatar, and can add your own instructions to its role.",
+      "limit": "Monthly limit",
+      "limitHint": "Tokens a month in its conversations (cached reads count 10%). Past the limit, its turns wait until you let it go on.",
+      "limitNone": "No limit"
     },
     "templates": {
       "title": "Start from",
@@ -521,6 +528,16 @@
         "label": "QA",
         "name": "QA"
       }
+    },
+    "spend": {
+      "title": "This month",
+      "tokens": "{{tokens}} tokens",
+      "turns_one": "{{count}} turn",
+      "turns_other": "{{count}} turns",
+      "ofLimit": "of {{limit}} this month",
+      "over": "Reached its limit: its turns wait for you.",
+      "continue": "Continue anyway",
+      "letThrough": "Let through until the month ends."
     }
   },
   "sidebar": {

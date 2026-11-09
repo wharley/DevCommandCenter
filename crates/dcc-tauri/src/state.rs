@@ -1,5 +1,6 @@
 use dcc_core::domain::decision::DecisionEvaluation;
 
+mod agent_budget;
 mod agent_conversation;
 mod agent_memory;
 use std::{

@@ -42,6 +42,7 @@ pub fn template_draft(template: &str, name: &str) -> Option<ResidentAgentDraft> 
             accessory: accessory.to_string(),
         },
         projects: Vec::new(),
+        monthly_token_limit: None,
     })
 }
 

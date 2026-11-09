@@ -1007,6 +1007,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/agents", post(agents::create))
         .route("/api/v1/agents/:agent_id", post(agents::save))
         .route(
+            "/api/v1/agents/:agent_id/limit-override",
+            post(agents::let_past_limit),
+        )
+        .route(
             "/api/v1/agents/:agent_id/conversation",
             post(agent_conversation::home),
         )
@@ -1200,7 +1204,9 @@ fn classify_rpc_error(error: String) -> HttpApiError {
 fn classify_session_error(error: String) -> HttpApiError {
     let normalized = error.to_lowercase();
 
-    if normalized.contains("not found") {
+    if error.starts_with(dcc_core::domain::agent_budget::AGENT_LIMIT_ERROR) {
+        HttpApiError::Refused("agentLimitReached", error, json!({}))
+    } else if normalized.contains("not found") {
         HttpApiError::not_found(error)
     } else if normalized.contains("missing ")
         || normalized.contains("must be ")
@@ -1927,6 +1933,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/skills/compile",
             "POST /api/v1/sessions/:session_id/agent",
             "POST /api/v1/agents/:agent_id",
+            "POST /api/v1/agents/:agent_id/limit-override",
             "POST /api/v1/agents/:agent_id/conversation",
             "POST /api/v1/task-proposals/:proposal_id/start",
             "POST /api/v1/task-proposals/:proposal_id/dismiss",
@@ -6854,6 +6861,61 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{missing}");
+        assert!(!crate::remote_connector::remote_path_allowed(&path));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_agent_past_its_monthly_limit_waits_for_the_person() {
+        let fixture = embedded_fixture().await;
+        let mut draft = dcc_core::domain::agent::ResidentAgentDraft::reviewer(&Default::default());
+        draft.name = "QA".into();
+        draft.role = "Teste.".into();
+        draft.monthly_token_limit = Some(1_000);
+        let qa = fixture
+            .backend
+            .sessions
+            .save_resident_agent(None, draft)
+            .unwrap();
+        let session = fixture.session_id.0.clone();
+        let (status, body) = post_json(
+            &fixture.app,
+            &format!("/api/v1/sessions/{session}/agent"),
+            json!({ "agentId": qa.id }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let db = fixture.backend.workspace.db_path.clone();
+        {
+            let conn = rusqlite::Connection::open(&db).unwrap();
+            conn.execute(
+                "INSERT INTO dcc_turn_model_usage (session_id, turn_id, model, total_tokens, recorded_at) VALUES (?1, 't-1', 'm', 5000, ?2)",
+                rusqlite::params![
+                    session,
+                    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                ],
+            )
+            .unwrap();
+        }
+        let (status, refused) = post_json(
+            &fixture.app,
+            &format!("/api/v1/sessions/{session}/turns"),
+            json!({ "sessionId": session, "prompt": "oi" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert!(
+            refused.to_string().contains("agentLimitReached"),
+            "{refused}"
+        );
+        let path = format!("/api/v1/agents/{}/limit-override", qa.id);
+        let (status, body) = post_json(&fixture.app, &path, json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(fixture
+            .backend
+            .sessions
+            .agent_over_limit(&SessionId(session.clone()))
+            .unwrap()
+            .is_none());
         assert!(!crate::remote_connector::remote_path_allowed(&path));
     }
 

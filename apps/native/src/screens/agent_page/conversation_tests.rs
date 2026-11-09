@@ -26,6 +26,7 @@ fn session(id: &str, task: &str, project: &str, updated_at: &str) -> AgentSessio
 fn agent(id: &str, preset: &str, sessions: Vec<AgentSession>) -> AgentRecord {
     AgentRecord {
         projects: Vec::new(),
+        monthly_token_limit: None,
         id: id.into(),
         name: "Revisor".into(),
         preset: Some(preset.into()),

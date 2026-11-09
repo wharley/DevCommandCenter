@@ -195,6 +195,8 @@ mod tests {
                 eyes: "round".into(),
             },
             projects: Vec::new(),
+            monthly_token_limit: None,
+            limit_override_month: None,
             preset: Some(preset.into()),
             created_at: String::new(),
             updated_at: String::new(),
