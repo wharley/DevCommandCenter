@@ -69,6 +69,8 @@ pub fn render(
     let active_background = colors.foreground.opacity(0.08);
     let muted = colors.muted_foreground;
     let id = task_id.to_string();
+    let agent = sidebar.task_agent(task_id).cloned();
+    let agent_step = running && sidebar.mascot_frame;
 
     let glyph = match &project {
         Some(project) => ProjectGlyph::new(
@@ -168,9 +170,17 @@ pub fn render(
                     )
                     .child(div().flex_shrink_0().opacity(0.4).child("·"))
                 })
-                .when_some(provider, |line, provider| {
-                    line.child(ProviderIcon::new(&provider).size(11.0).opacity(0.75))
-                })
+                // Who ran it: the provider and, when an agent opened the
+                // task or works in it, the agent's mascot beside it.
+                .children(super::agent_badge::runner(
+                    provider
+                        .as_deref()
+                        .map(|provider| ProviderIcon::new(provider).size(11.0).opacity(0.75)),
+                    task_id,
+                    agent,
+                    agent_step,
+                    cx,
+                ))
                 .children(state_line),
         )
         .children(chips);

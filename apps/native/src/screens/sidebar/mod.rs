@@ -3,6 +3,7 @@
 //! sidebar renders from its own file.
 
 mod actions;
+mod agent_badge;
 mod agents;
 pub use agents::AgentPageData;
 mod arrival;

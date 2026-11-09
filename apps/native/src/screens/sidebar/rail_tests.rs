@@ -209,3 +209,46 @@ fn rail_picture() {
     let image = cx.capture_screenshot(window.into()).unwrap();
     image.save(&out).unwrap();
 }
+
+/// A task an agent opened shows the agent's mascot on its row; the others
+/// show only their project.
+#[gpui::test]
+fn a_task_shows_the_mascot_of_the_agent_it_belongs_to(cx: &mut TestAppContext) {
+    use crate::data::agents::AgentRecord;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (sidebar, cx) = cx.add_window_view(|_, cx| Sidebar::new(false, false, false, seen, cx));
+    let suporte = AgentRecord {
+        id: "suporte".into(),
+        name: "Suporte".into(),
+        preset: None,
+        avatar: dcc_core::domain::agent_proposal::mascot_for("Suporte"),
+        provider_id: None,
+        model: None,
+        effort: None,
+        kickoff_prompt: String::new(),
+        role: String::new(),
+        offer_prompt: String::new(),
+        extra_instructions: String::new(),
+        projects: Vec::new(),
+        monthly_token_limit: None,
+        tool_access: Default::default(),
+        sessions: Vec::new(),
+    };
+    let data = SidebarData {
+        tasks: vec![TaskSummary::test("w-campo"), TaskSummary::test("w-mine")],
+        agents: vec![suporte],
+        task_agents: [("w-campo".to_string(), "suporte".to_string())].into(),
+        ..SidebarData::default()
+    };
+    sidebar.update(cx, |sidebar, cx| sidebar.apply_for_tests(data, cx));
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("task-agent-w-campo").is_some());
+    assert!(cx.debug_bounds("task-agent-w-mine").is_none());
+}
