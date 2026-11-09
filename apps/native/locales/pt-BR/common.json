@@ -423,7 +423,8 @@
           "reviewReceived": "Gatilho · review recebido",
           "reviewRequested": "Gatilho · PR pede revisão",
           "issueAssigned": "Gatilho · issue atribuída",
-          "taskStalled": "Gatilho · tarefa parada"
+          "taskStalled": "Gatilho · tarefa parada",
+          "routine": "Gatilho · rotina"
         }
       },
       "title": "Sala da equipe",
@@ -554,6 +555,28 @@
       "triggers_other": "{{count}} gatilhos",
       "answersTrend": "respostas {{change}}",
       "tokensTrend": "tokens {{change}} vs semana anterior"
+    },
+    "routines": {
+      "title": "Rotinas",
+      "empty": "Nenhuma rotina. Uma rotina pede algo a este agente em dias e horário fixos, na conversa dele; quando não há nada a relatar, ele fica quieto.",
+      "new": "Nova rotina",
+      "save": "Salvar",
+      "cancel": "Cancelar",
+      "delete": "Apagar",
+      "create": "Criar",
+      "discard": "Descartar",
+      "resume": "Retomar",
+      "next": "Próxima: {{when}}",
+      "off": "Desligada",
+      "proposedBadge": "Proposta pelo agente: só roda depois de criada",
+      "promptPlaceholder": "O que pedir nesse horário (ex.: o que travou no Checkout?)",
+      "badTime": "Use o horário como 09:00.",
+      "line": "Rotina · {{request}}",
+      "proposal": "{{agent}} propõe uma rotina · {{when}}",
+      "brake": "{{agent}} parou depois de {{count}} turnos sozinho, sem você",
+      "done": "Rotina de {{agent}}",
+      "ready": "resposta na conversa dele",
+      "failed": "não consegui rodar a rotina"
     }
   },
   "sidebar": {

@@ -78,7 +78,7 @@ pub struct TeamRoom {
     /// (none in tests).
     pub(crate) cleanup: crate::data::cleanup_alert::CleanupAlert,
     pub(crate) cleanup_path: Option<PathBuf>,
-    _subscriptions: [Subscription; 3],
+    _subscriptions: [Subscription; 4],
 }
 
 impl EventEmitter<RoomEvent> for TeamRoom {}
@@ -109,6 +109,8 @@ impl TeamRoom {
             }),
             // The check-in's cards, as `PrWatch` finds them.
             cx.observe_global::<crate::data::check_ins::CheckIns>(|_, cx| cx.notify()),
+            // The routines proposed, as the clock reads them.
+            cx.observe_global::<crate::data::routines::Routines>(|_, cx| cx.notify()),
             cx.subscribe(&input, |room, _, event, cx| match event {
                 TextAreaEvent::Submitted => room.send(cx),
                 TextAreaEvent::Changed => {
@@ -371,6 +373,13 @@ impl TeamRoom {
             at,
         });
         self.sending = true;
+        // Talking to the agent lifts its brake (`agent_brake`).
+        if cx.has_global::<crate::data::agent_triggers::AgentTriggers>() {
+            gpui::BorrowAppContext::update_global::<crate::data::agent_triggers::AgentTriggers, _>(
+                cx,
+                |triggers, _| triggers.attend(&agent.id, chrono::Utc::now()),
+            );
+        }
         cx.notify();
         let effort = agent.provider_id.as_ref().and(agent.effort.clone());
         cx.spawn(async move |this, cx| {

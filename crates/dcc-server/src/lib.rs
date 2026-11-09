@@ -37,6 +37,7 @@ pub mod prompt_attachments;
 pub mod quick_composer_journal;
 pub mod remote_connector;
 pub mod remote_push;
+pub mod routine_tools;
 pub mod runtime;
 pub mod shell_env;
 pub mod terminals;

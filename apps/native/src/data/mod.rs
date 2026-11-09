@@ -4,6 +4,7 @@
 pub mod account_selection;
 pub mod actions;
 pub mod activity;
+pub mod agent_brake;
 pub mod agent_conversation;
 pub mod agent_memory;
 pub mod agent_quiet;
@@ -90,6 +91,7 @@ pub mod device;
 pub mod video;
 pub mod room_handoffs;
 pub mod room_inbox;
+pub mod routines;
 pub mod seen;
 pub mod session_activity;
 pub mod session_list;

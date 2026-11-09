@@ -36,6 +36,9 @@ pub enum Trigger {
     IssueAssigned,
     /// A task's turn is open with no sign of life (the check-in).
     TaskStalled,
+    /// A routine's time came (`routines`); not a switch, and not counted in
+    /// the daily ceiling, only in the brake (`agent_brake`).
+    Routine,
 }
 
 impl Trigger {
@@ -57,6 +60,7 @@ impl Trigger {
             Self::ReviewRequested => "reviewRequested",
             Self::IssueAssigned => "issueAssigned",
             Self::TaskStalled => "taskStalled",
+            Self::Routine => "routine",
         }
     }
 
@@ -93,6 +97,8 @@ pub(super) struct Stored {
     pub(super) paused: bool,
     /// The hours no trigger wakes anyone (`agent_quiet`).
     pub(super) quiet: Option<super::agent_quiet::QuietHours>,
+    /// When the person last talked to each agent (`agent_brake`).
+    pub(super) attended: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
@@ -111,6 +117,8 @@ pub enum Held {
     Paused,
     /// Inside the quiet hours.
     Quiet,
+    /// Too many runs in a row without the person (`agent_brake`).
+    Unattended,
     DailyLimit,
     TargetLimit,
 }
@@ -191,6 +199,7 @@ impl AgentTriggers {
             .runs
             .iter()
             .filter(|run| run.agent_id == agent_id && local_day(&run.at) == Some(today))
+            .filter(|run| run.trigger != Trigger::Routine)
             .count()
     }
 
@@ -206,6 +215,7 @@ impl AgentTriggers {
             return Err(Held::Off);
         }
         self.quiet_check(now)?;
+        self.brake_check(agent_id)?;
         if self.runs_today(agent_id, now) >= DAILY_RUNS {
             return Err(Held::DailyLimit);
         }

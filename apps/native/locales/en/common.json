@@ -423,7 +423,8 @@
           "reviewReceived": "Trigger · review received",
           "reviewRequested": "Trigger · review requested",
           "issueAssigned": "Trigger · issue assigned",
-          "taskStalled": "Trigger · stalled task"
+          "taskStalled": "Trigger · stalled task",
+          "routine": "Trigger · routine"
         }
       },
       "title": "Team room",
@@ -554,6 +555,28 @@
       "triggers_other": "{{count}} triggers",
       "answersTrend": "answers {{change}}",
       "tokensTrend": "tokens {{change}} vs the week before"
+    },
+    "routines": {
+      "title": "Routines",
+      "empty": "No routines. A routine asks this agent something on set days and times, in its conversation; when there is nothing to report, it stays quiet.",
+      "new": "New routine",
+      "save": "Save",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "create": "Create",
+      "discard": "Discard",
+      "resume": "Resume",
+      "next": "Next: {{when}}",
+      "off": "Off",
+      "proposedBadge": "Proposed by the agent: runs only once created",
+      "promptPlaceholder": "What to ask at that time (e.g. what got stuck in Checkout?)",
+      "badTime": "Write the time like 09:00.",
+      "line": "Routine · {{request}}",
+      "proposal": "{{agent}} proposes a routine · {{when}}",
+      "brake": "{{agent}} stopped after {{count}} turns on its own, without you",
+      "done": "{{agent}}'s routine",
+      "ready": "answer in its conversation",
+      "failed": "could not run the routine"
     }
   },
   "sidebar": {

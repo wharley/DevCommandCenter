@@ -60,7 +60,7 @@ fn announce(trigger: Trigger, agent: &str, item: &CheckIn, done: &Result<(), Str
 }
 
 /// The agent's own conversation, when it has one.
-fn home_session(agent: &AgentRecord) -> Option<String> {
+pub(super) fn home_session(agent: &AgentRecord) -> Option<String> {
     let home = home_project_id(&agent.id);
     agent
         .sessions

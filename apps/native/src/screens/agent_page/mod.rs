@@ -47,9 +47,11 @@ mod room_handoff;
 mod room_limits;
 mod room_mentions;
 mod room_recap;
+mod room_routines;
 #[cfg(test)]
 mod room_tests;
 mod room_view;
+mod routines;
 mod spend;
 mod team;
 #[cfg(test)]
@@ -77,6 +79,8 @@ pub struct AgentPage {
     pub(crate) editor: Option<(Entity<editor::AgentEditor>, Subscription)>,
     /// The shown agent's month (`spend`), read when it shows.
     pub(crate) spend: spend::SpendRead,
+    /// "Nova rotina", while open (`routines`).
+    pub(crate) routine_form: Option<routines::RoutineForm>,
     /// The desktop the memory goes through (tests point it elsewhere).
     pub(crate) api: Option<crate::data::desktop_api::DesktopApi>,
     /// "Memória", made on the first render (its fields need the window).
@@ -148,6 +152,7 @@ impl AgentPage {
                 crate::data::desktop_api::DesktopApi::load()
             },
             spend: Default::default(),
+            routine_form: None,
             memory: None,
             room: None,
             room_open: false,
@@ -166,6 +171,7 @@ impl AgentPage {
         self.room_open = false;
         // Read again: the month moves while the page is away.
         self.spend = Default::default();
+        self.routine_form = None;
         if self.agent_id != agent_id {
             self.agent_id = agent_id;
             self.role_open = false;
@@ -489,6 +495,7 @@ impl AgentPage {
         let conversation = self.conversation_card(&data, cx);
         let triggers = self.triggers_card(&data, cx);
         let spend = self.spend_card(agent.monthly_token_limit, cx);
+        let routines = self.routines_card(cx);
         let sessions = self.sessions(&data, cx);
         let pr_reviews = self.pr_reviews(&data, cx);
         let memory = self.memory_card(window, cx);
@@ -578,6 +585,7 @@ impl AgentPage {
                     .child(conversation)
                     .children(triggers)
                     .children(spend)
+                    .child(routines)
                     .child(how_to_call)
                     .child(sessions)
                     .children(pr_reviews)

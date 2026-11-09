@@ -58,6 +58,7 @@ use uuid::Uuid;
 
 mod agent_conversation;
 mod agent_memory;
+mod agent_routines;
 mod agents;
 mod ai_memory;
 mod ai_memory_settings;
@@ -1011,6 +1012,22 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(agents::let_past_limit),
         )
         .route(
+            "/api/v1/agents/:agent_id/routines",
+            post(agent_routines::save),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/routines/:routine_id/delete",
+            post(agent_routines::delete),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/routines/:routine_id/accept",
+            post(agent_routines::accept),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/routines/:routine_id/ran",
+            post(agent_routines::ran),
+        )
+        .route(
             "/api/v1/agents/:agent_id/conversation",
             post(agent_conversation::home),
         )
@@ -1934,6 +1951,10 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/sessions/:session_id/agent",
             "POST /api/v1/agents/:agent_id",
             "POST /api/v1/agents/:agent_id/limit-override",
+            "POST /api/v1/agents/:agent_id/routines",
+            "POST /api/v1/agents/:agent_id/routines/:routine_id/delete",
+            "POST /api/v1/agents/:agent_id/routines/:routine_id/accept",
+            "POST /api/v1/agents/:agent_id/routines/:routine_id/ran",
             "POST /api/v1/agents/:agent_id/conversation",
             "POST /api/v1/task-proposals/:proposal_id/start",
             "POST /api/v1/task-proposals/:proposal_id/dismiss",

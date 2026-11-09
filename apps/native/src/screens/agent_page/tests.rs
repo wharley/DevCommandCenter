@@ -443,3 +443,65 @@ fn the_team_lists_the_agents_and_makes_a_new_one(cx: &mut TestAppContext) {
         assert!(page.editor.is_none());
     });
 }
+
+#[gpui::test]
+fn the_agents_routines_list_and_open_a_new_one(cx: &mut TestAppContext) {
+    use crate::data::routines::Routines;
+    use dcc_core::domain::agent_routine::Routine;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+        cx.set_global(Routines {
+            list: vec![Routine {
+                id: "r-1".into(),
+                agent_id: "a-1".into(),
+                days: vec![0, 2],
+                hour: 9,
+                minute: 0,
+                prompt: "Resuma a semana".into(),
+                enabled: true,
+                proposed: false,
+                last_run_at: None,
+                created_at: chrono::Utc::now().to_rfc3339(),
+            }],
+        });
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("a-1".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(2600.0)));
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![agent("a-1", "reviewer", Vec::new())],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-routines").is_some());
+    assert!(cx.debug_bounds("agent-routine-0").is_some());
+    let new = cx.debug_bounds("agent-routine-new").unwrap();
+    cx.simulate_click(new.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-routine-form").is_some());
+    // Monday is on by default (weekdays); a click takes it off.
+    let monday = cx.debug_bounds("routine-day-0").unwrap();
+    cx.simulate_click(monday.center(), Modifiers::none());
+    cx.run_until_parked();
+    page.read_with(cx, |page, _| {
+        assert_eq!(page.routine_form.as_ref().unwrap().days, [1, 2, 3, 4]);
+    });
+    let cancel = cx.debug_bounds("agent-routine-cancel").unwrap();
+    cx.simulate_click(cancel.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-routine-form").is_none());
+}

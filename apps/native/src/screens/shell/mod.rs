@@ -30,6 +30,7 @@ mod regions;
 mod review_received;
 mod review_trigger;
 mod reviewer_in_task;
+mod routines;
 mod session_search;
 mod settings;
 mod sidebar_events;
@@ -176,6 +177,7 @@ pub struct Shell {
     /// "Atualização dos agentes", top right while a CLI has a newer release.
     cli_updates: Entity<cli_updates::CliUpdates>,
     _pr_watch: (Entity<pr_watch::PrWatch>, gpui::Subscription),
+    _routines: (Entity<routines::RoutineClock>, gpui::Subscription),
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
@@ -336,6 +338,7 @@ impl Shell {
                 });
                 (watch, news)
             },
+            _routines: routines::start(cx),
             notes,
             _notes: notes_follow,
             delivery,

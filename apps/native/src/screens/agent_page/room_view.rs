@@ -375,6 +375,12 @@ impl Render for TeamRoom {
             match line.speaker {
                 Speaker::Person => match handoff_heading(&line.text) {
                     Some(heading) => rows.push(self.passed_line(index, heading, cx)),
+                    None if line
+                        .text
+                        .starts_with(dcc_core::domain::agent_routine::ROUTINE_MARK) =>
+                    {
+                        rows.extend(self.routine_line(index, &line.text, cx))
+                    }
                     None => {
                         let note = self.routed(&agent.id, &line.text, &agent.name, cx);
                         rows.push(self.person_line(
@@ -385,6 +391,8 @@ impl Render for TeamRoom {
                         ));
                     }
                 },
+                // A routine with nothing to report stays quiet.
+                Speaker::Agent if dcc_core::domain::agent_routine::is_quiet(&line.text) => {}
                 Speaker::Agent => {
                     rows.push(self.agent_line(index, line, agent, window, cx));
                     rows.extend(self.handoff_bar(index, line, agent, &agents, cx));
@@ -396,6 +404,7 @@ impl Render for TeamRoom {
         rows.push(self.bulletin_card(&agents, cx));
         rows.extend(self.cleanup_card(cx));
         rows.extend(self.limit_rows(&agents, cx));
+        rows.extend(self.routine_cards(&agents, cx));
         let unread_bar = self.unread_bar(unread, cx);
         let pending: Vec<Pending> = self.pending.clone();
         for (index, sent) in pending.iter().enumerate() {

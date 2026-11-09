@@ -592,3 +592,91 @@ fn the_weekly_bulletin_opens_in_place_and_reads_the_week(cx: &mut TestAppContext
     // Nobody worked in an empty database.
     assert!(cx.debug_bounds("room-bulletin-empty").is_some());
 }
+
+#[gpui::test]
+fn routines_show_as_lines_proposals_and_a_brake(cx: &mut TestAppContext) {
+    use crate::data::agent_brake::UNATTENDED_LIMIT;
+    use crate::data::agent_triggers::{AgentTriggers, Trigger};
+    use crate::data::routines::Routines;
+    use dcc_core::domain::agent_routine::{QUIET_ANSWER, Routine, routine_prompt};
+    let dir = tempfile::tempdir().unwrap();
+    let routine = Routine {
+        id: "r-1".into(),
+        agent_id: "qa".into(),
+        days: vec![0],
+        hour: 9,
+        minute: 0,
+        prompt: "O que travou no Checkout?".into(),
+        enabled: false,
+        proposed: true,
+        last_run_at: None,
+        created_at: "t".into(),
+    };
+    let asked = routine_prompt(&routine);
+    let triggers = dir.path().join("agent-triggers.json");
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+        cx.set_global(Routines {
+            list: vec![routine.clone()],
+        });
+        let mut triggers = AgentTriggers::load(triggers);
+        let now = chrono::Utc::now();
+        for index in 0..UNATTENDED_LIMIT {
+            triggers.record("qa", Trigger::Routine, &format!("r{index}"), now);
+        }
+        cx.set_global(triggers);
+    });
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("rev".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(1600.0)));
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![
+                        agent("rev", "Revisor", "reviewer", Vec::new()),
+                        agent("qa", "QA", "", Vec::new()),
+                    ],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.open_room(None, cx);
+    });
+    cx.run_until_parked();
+    page.update(cx, |page, cx| {
+        let room = page.room.as_ref().unwrap().0.clone();
+        room.update(cx, |room, cx| {
+            let mut feed = HomeFeed::new("qa", "s-home");
+            feed.lines = vec![
+                line("a", "qa", Speaker::Person, &asked, "2026-11-09T09:00:00Z"),
+                line(
+                    "b",
+                    "qa",
+                    Speaker::Agent,
+                    QUIET_ANSWER,
+                    "2026-11-09T09:00:20Z",
+                ),
+            ];
+            room.take(vec![feed]);
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    // The routine's turn is one line, its quiet answer is not shown.
+    assert!(cx.debug_bounds("room-routine-0").is_some());
+    assert!(cx.debug_bounds("room-answer-1").is_none());
+    assert!(cx.debug_bounds("room-routine-proposal-0").is_some());
+    assert!(cx.debug_bounds("room-brake-0").is_some());
+    let resume = cx.debug_bounds("room-brake-resume-0").unwrap();
+    cx.simulate_click(resume.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-brake-0").is_none());
+}
