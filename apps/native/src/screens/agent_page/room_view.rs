@@ -393,6 +393,7 @@ impl Render for TeamRoom {
         }
         // What DCC itself has for the person now: the day's recap, the space.
         rows.extend(self.recap_card(cx));
+        rows.push(self.bulletin_card(&agents, cx));
         rows.extend(self.cleanup_card(cx));
         rows.extend(self.limit_rows(&agents, cx));
         let unread_bar = self.unread_bar(unread, cx);

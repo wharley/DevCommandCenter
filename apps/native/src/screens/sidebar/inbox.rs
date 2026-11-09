@@ -36,7 +36,10 @@ impl Sidebar {
         let checks = cx
             .try_global::<crate::data::check_ins::CheckIns>()
             .map_or(0, |checks| checks.unread());
-        (count + usize::from(self.recap_unread()) + checks, waiting)
+        (
+            count + usize::from(self.recap_unread()) + usize::from(self.bulletin_unread()) + checks,
+            waiting,
+        )
     }
 
     /// A card opened: its result is read (a pull request review is read
@@ -64,6 +67,7 @@ impl Sidebar {
             }
         }
         self.agent_markers.recap.mark_seen();
+        self.agent_markers.bulletin.mark_seen(chrono::Local::now());
         if cx.has_global::<crate::data::check_ins::CheckIns>() {
             gpui::BorrowAppContext::update_global::<crate::data::check_ins::CheckIns, _>(
                 cx,

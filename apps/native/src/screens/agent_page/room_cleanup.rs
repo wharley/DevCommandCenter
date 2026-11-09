@@ -52,7 +52,7 @@ impl TeamRoom {
                 .border_color(colors.border.opacity(0.7))
                 .bg(colors.card)
                 .child(
-                    Icon::new("hard-drive")
+                    Icon::new("brush-cleaning")
                         .size(18.0)
                         .color(colors.muted_foreground),
                 )

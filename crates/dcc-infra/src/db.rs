@@ -23,6 +23,7 @@ use workspace_ports::WORKSPACE_PORTS_TABLE_SQL;
 mod agent_conversation;
 mod agent_memory;
 mod agent_spend;
+mod agent_week;
 mod session_stall;
 use agent_memory::AGENT_MEMORY_TABLE_SQL;
 pub use workspace_ports::{port_block_is_free, PORT_BLOCK_SIZE, PORT_BLOCK_START};

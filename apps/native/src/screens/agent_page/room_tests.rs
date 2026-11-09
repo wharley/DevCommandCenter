@@ -549,3 +549,46 @@ fn an_agent_past_its_limit_is_a_card_that_opens_its_page(cx: &mut TestAppContext
         assert!(!page.room_open);
     });
 }
+
+#[gpui::test]
+fn the_weekly_bulletin_opens_in_place_and_reads_the_week(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let db = dir.path().join("database.sqlite");
+    drop(dcc_infra::db::SqliteSessionRepo::open(&db).unwrap());
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("rev".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(1400.0)));
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![agent("rev", "Revisor", "reviewer", Vec::new())],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.open_room(None, cx);
+    });
+    cx.run_until_parked();
+    page.update(cx, |page, cx| {
+        let room = page.room.as_ref().unwrap().0.clone();
+        room.update(cx, |room, _| room.db_path = db);
+    });
+    assert!(cx.debug_bounds("room-bulletin-body").is_none());
+    let card = cx.debug_bounds("room-bulletin").unwrap();
+    cx.simulate_click(card.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-bulletin-body").is_some());
+    // Nobody worked in an empty database.
+    assert!(cx.debug_bounds("room-bulletin-empty").is_some());
+}

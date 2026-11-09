@@ -109,3 +109,4 @@ pub mod time;
 pub mod updater;
 pub mod usage;
 pub mod ux_metrics;
+pub mod weekly_bulletin;

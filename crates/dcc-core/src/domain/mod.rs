@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod agent_budget;
+pub mod agent_bulletin;
 pub mod agent_call;
 pub mod agent_conversation;
 pub mod agent_memory;

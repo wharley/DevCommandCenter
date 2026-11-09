@@ -538,6 +538,22 @@
       "over": "Reached its limit: its turns wait for you.",
       "continue": "Continue anyway",
       "letThrough": "Let through until the month ends."
+    },
+    "bulletin": {
+      "title": "Weekly bulletin · {{week}}",
+      "loading": "Adding up the week…",
+      "empty": "No agent worked that week.",
+      "howItWorks": "Built by DCC from what it recorded, with no model: the week runs Monday to Sunday and each number is compared with the week before.",
+      "answers_one": "{{count}} answer",
+      "answers_other": "{{count}} answers",
+      "tasks_one": "{{count}} task",
+      "tasks_other": "{{count}} tasks",
+      "stopped_one": "{{count}} stopped",
+      "stopped_other": "{{count}} stopped",
+      "triggers_one": "{{count}} trigger",
+      "triggers_other": "{{count}} triggers",
+      "answersTrend": "answers {{change}}",
+      "tokensTrend": "tokens {{change}} vs the week before"
     }
   },
   "sidebar": {

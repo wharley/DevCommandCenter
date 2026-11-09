@@ -17,6 +17,8 @@ pub struct AgentMarkers {
     pub seen: SeenResults,
     /// The daily recap's window (`daily-recap.ts`), a card in the team room.
     pub recap: DailyRecap,
+    /// The weekly bulletin's last week opened, a card in the team room.
+    pub bulletin: crate::data::weekly_bulletin::WeeklyBulletin,
 }
 
 impl AgentMarkers {
@@ -28,6 +30,10 @@ impl AgentMarkers {
                 &now.to_utc().to_rfc3339(),
             ),
             recap: DailyRecap::load(&dir.join("daily-recap.json"), now),
+            bulletin: crate::data::weekly_bulletin::WeeklyBulletin::load(
+                &dir.join("weekly-bulletin.json"),
+                now,
+            ),
         }
     }
 }
@@ -155,6 +161,17 @@ impl Sidebar {
 
     pub fn recap_unread(&self) -> bool {
         self.agent_markers.recap.is_unread()
+    }
+
+    pub fn bulletin_unread(&self) -> bool {
+        self.agent_markers.bulletin.is_unread(chrono::Local::now())
+    }
+
+    /// The bulletin's card opened in the team room.
+    pub fn mark_bulletin_seen(&mut self, cx: &mut Context<Self>) {
+        if self.agent_markers.bulletin.mark_seen(chrono::Local::now()) {
+            cx.notify();
+        }
     }
 
     /// `markDailyRecapSeen`: its card is open in the team room.

@@ -538,6 +538,22 @@
       "over": "Chegou ao limite: os turnos dele esperam você.",
       "continue": "Continuar mesmo assim",
       "letThrough": "Liberado até o fim do mês."
+    },
+    "bulletin": {
+      "title": "Boletim da semana · {{week}}",
+      "loading": "Somando a semana…",
+      "empty": "Nenhum agente trabalhou nessa semana.",
+      "howItWorks": "Montado pelo DCC a partir do que ficou registrado, sem modelo: a semana vai de segunda a domingo e cada número é comparado com a semana anterior.",
+      "answers_one": "{{count}} resposta",
+      "answers_other": "{{count}} respostas",
+      "tasks_one": "{{count}} tarefa",
+      "tasks_other": "{{count}} tarefas",
+      "stopped_one": "{{count}} interrompida",
+      "stopped_other": "{{count}} interrompidas",
+      "triggers_one": "{{count}} gatilho",
+      "triggers_other": "{{count}} gatilhos",
+      "answersTrend": "respostas {{change}}",
+      "tokensTrend": "tokens {{change}} vs semana anterior"
     }
   },
   "sidebar": {

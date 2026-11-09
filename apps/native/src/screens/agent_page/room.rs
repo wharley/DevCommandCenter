@@ -71,6 +71,9 @@ pub struct TeamRoom {
     pub(crate) mention: Option<super::room_mentions::AgentMention>,
     /// The agents with a limit that are past it now (`room_limits`).
     pub(crate) limits: Vec<String>,
+    /// The weekly bulletin, read when its card opens (`room_bulletin`).
+    pub(crate) bulletin: super::room_bulletin::BulletinRead,
+    pub(crate) bulletin_open: bool,
     /// When the completed tasks' space shows, and where that is kept
     /// (none in tests).
     pub(crate) cleanup: crate::data::cleanup_alert::CleanupAlert,
@@ -145,6 +148,8 @@ impl TeamRoom {
             recap_open: false,
             mention: None,
             limits: Vec::new(),
+            bulletin: Default::default(),
+            bulletin_open: false,
             cleanup: Default::default(),
             cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
             _subscriptions: subscriptions,

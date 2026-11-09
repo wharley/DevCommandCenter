@@ -39,6 +39,7 @@ mod memory_tests;
 mod picker;
 mod pr_reviews;
 mod room;
+mod room_bulletin;
 mod room_cards;
 mod room_checkins;
 mod room_cleanup;

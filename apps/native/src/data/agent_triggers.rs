@@ -3,7 +3,7 @@
 //! the runs it starts have a ceiling — `DAILY_RUNS` a day for the agent and
 //! `TARGET_RUNS` a day for one pull request or task — so a busy day does not
 //! turn into an open tab of paid runs. Kept in the native app's own file
-//! (`agent-triggers.json`), with the runs of the last week.
+//! (`agent-triggers.json`), with the runs of the last two weeks.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -16,8 +16,9 @@ use serde::{Deserialize, Serialize};
 pub const DAILY_RUNS: usize = 5;
 /// Runs a day for one pull request or task.
 pub const TARGET_RUNS: usize = 2;
-/// Runs older than this are forgotten.
-const KEEP_DAYS: i64 = 7;
+/// Runs older than this are forgotten: two weeks, as the bulletin compares
+/// the last week with the one before.
+const KEEP_DAYS: i64 = 14;
 
 /// Something that wakes an agent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -347,9 +348,9 @@ mod tests {
             Ok(())
         );
 
-        // A week later the old runs are gone.
+        // Two weeks later the old runs are gone.
         let mut later = again;
-        later.record("rev", Trigger::PrUpdated, "pr-9", now + Duration::days(8));
+        later.record("rev", Trigger::PrUpdated, "pr-9", now + Duration::days(15));
         assert_eq!(later.stored.runs.len(), 1);
 
         // A failure is news once per commit, and again after it recovers.
