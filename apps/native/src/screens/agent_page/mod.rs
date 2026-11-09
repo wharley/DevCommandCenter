@@ -40,6 +40,8 @@ mod memory_tests;
 mod page_tabs;
 mod picker;
 mod pr_reviews;
+#[cfg(test)]
+mod proposal_tests;
 mod room;
 mod room_bulletin;
 mod room_cards;
@@ -49,6 +51,7 @@ mod room_focus;
 mod room_handoff;
 mod room_limits;
 mod room_mentions;
+mod room_proposals;
 mod room_recap;
 mod room_routines;
 #[cfg(test)]
@@ -95,6 +98,8 @@ pub struct AgentPage {
     pub(crate) room_open: bool,
     /// The agent's page on its conversation or its settings (`page_tabs`).
     pub(crate) tab: page_tabs::AgentTab,
+    /// The agent proposed the editor holds ("Editar antes").
+    pub(crate) editing_proposal: Option<dcc_core::domain::agent_proposal::AgentProposal>,
     /// What the room's field starts with when it opens ("@Revisor ").
     room_draft: Option<String>,
     _sidebar: Subscription,
@@ -163,6 +168,7 @@ impl AgentPage {
             room: None,
             room_open: false,
             tab: Default::default(),
+            editing_proposal: None,
             room_draft: None,
             _sidebar: observe,
             _mascot: [

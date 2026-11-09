@@ -58,6 +58,7 @@ use uuid::Uuid;
 
 mod agent_conversation;
 mod agent_memory;
+mod agent_proposals;
 mod agent_routines;
 mod agents;
 mod ai_memory;
@@ -1060,6 +1061,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/agents/:agent_id/routines/:routine_id/ran",
             post(agent_routines::ran),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/proposals/:proposal_id/accept",
+            post(agent_proposals::accept),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/proposals/:proposal_id/dismiss",
+            post(agent_proposals::dismiss),
         )
         .route(
             "/api/v1/agents/:agent_id/review-requests/:request_id/taken",

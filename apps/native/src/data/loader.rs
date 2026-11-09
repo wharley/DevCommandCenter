@@ -57,6 +57,8 @@ pub struct SidebarData {
     pub linked_folders: HashMap<String, dcc_core::application::linked_task::LinkedFolders>,
     /// Pull requests an agent asked to review that the app has not taken.
     pub review_requests: Vec<dcc_core::domain::pr_review_request::PrReviewRequest>,
+    /// Agents an agent proposed that the person has not answered.
+    pub agent_proposals: Vec<dcc_core::domain::agent_proposal::AgentProposal>,
 }
 
 /// One row per project, by name (`listRepositories` folded by
@@ -177,6 +179,7 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
     let agents = super::agents::load(&sessions)?;
     // A small table, empty but for a moment after an agent asks.
     let review_requests = sessions.waiting_pr_review_requests().unwrap_or_default();
+    let agent_proposals = sessions.waiting_agent_proposals().unwrap_or_default();
 
     let linked_folders = workspaces
         .list_repository_linked_folders()?
@@ -202,5 +205,6 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         agent_homes,
         child_tasks,
         review_requests,
+        agent_proposals,
     })
 }

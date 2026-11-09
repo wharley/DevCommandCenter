@@ -7,6 +7,7 @@ pub mod activity;
 pub mod agent_brake;
 pub mod agent_conversation;
 pub mod agent_memory;
+pub mod agent_proposals;
 pub mod agent_quiet;
 pub mod agent_triggers;
 pub mod agents;

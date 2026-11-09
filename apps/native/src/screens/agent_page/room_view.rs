@@ -431,6 +431,7 @@ impl Render for TeamRoom {
         }
         rows.extend(self.limit_rows(&shown, cx));
         rows.extend(self.routine_cards(&shown, cx));
+        rows.extend(self.proposal_cards(&agents, cx));
         let unread_bar = self.unread_bar(unread, cx);
         let pending: Vec<Pending> = self
             .pending

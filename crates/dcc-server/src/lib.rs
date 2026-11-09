@@ -6,6 +6,7 @@
 #![recursion_limit = "256"]
 
 pub mod agent_memory_tools;
+pub mod agent_proposal_tool;
 pub mod agent_requests;
 pub mod agent_tool_access;
 pub mod ai_memory_sidecar;

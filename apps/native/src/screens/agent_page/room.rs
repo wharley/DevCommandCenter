@@ -36,6 +36,14 @@ pub enum RoomEvent {
     OpenTask(String),
     /// An agent's page ("Ajustar" on its limit card).
     OpenAgent(String),
+    /// "Criar" on an agent proposed: its conversation, the first request
+    /// in the field.
+    AgentCreated {
+        agent_id: String,
+        first_request: String,
+    },
+    /// "Editar antes" on an agent proposed.
+    EditProposal(dcc_core::domain::agent_proposal::AgentProposal),
 }
 
 /// A message on its way: shown until the agent's conversation has it.
@@ -80,6 +88,8 @@ pub struct TeamRoom {
     pub(crate) cleanup_path: Option<PathBuf>,
     /// The one agent shown, on its page's "Conversa" (`room_focus`).
     pub(crate) focus: Option<String>,
+    /// Agents proposed that the person answered here, gone at once.
+    pub(crate) answered_proposals: Vec<String>,
     _subscriptions: [Subscription; 4],
 }
 
@@ -157,6 +167,7 @@ impl TeamRoom {
             cleanup: Default::default(),
             cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
             focus: None,
+            answered_proposals: Vec::new(),
             _subscriptions: subscriptions,
         };
         room.reload_cleanup();

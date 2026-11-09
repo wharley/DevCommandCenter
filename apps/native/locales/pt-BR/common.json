@@ -216,6 +216,15 @@
     }
   },
   "agents": {
+    "proposal": {
+      "by": "{{agent}} propõe um agente",
+      "everyProject": "Em todos os projetos",
+      "projects": "Em: {{projects}}",
+      "first": "Primeiro pedido: {{request}}",
+      "create": "Criar",
+      "edit": "Editar antes",
+      "discard": "Descartar"
+    },
     "reviewRequest": {
       "noCheckout": "O {{agent}} não achou um checkout de {{repository}} nos seus projetos para revisar."
     },
@@ -525,6 +534,10 @@
       "limitNone": "Sem limite"
     },
     "templates": {
+      "talk": {
+        "label": "Conversando",
+        "draft": "Quero montar um agente novo: "
+      },
       "title": "Começar de",
       "hint": "Um modelo preenche o nome, o papel, o que pedir ao chamar e o bichinho. Tudo continua seu para mudar antes de salvar.",
       "blank": "Do zero",

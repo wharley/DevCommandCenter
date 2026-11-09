@@ -3,9 +3,11 @@ use dcc_core::domain::decision::DecisionEvaluation;
 mod agent_budget;
 mod agent_conversation;
 mod agent_memory;
+mod agent_proposals;
 mod agent_reads;
 mod agent_routines;
 mod pr_review_requests;
+pub use agent_proposals::ProposedAgent;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     path::{Component, Path, PathBuf},

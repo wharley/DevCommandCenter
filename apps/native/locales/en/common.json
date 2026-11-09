@@ -216,6 +216,15 @@
     }
   },
   "agents": {
+    "proposal": {
+      "by": "{{agent}} proposes an agent",
+      "everyProject": "In every project",
+      "projects": "In: {{projects}}",
+      "first": "First request: {{request}}",
+      "create": "Create",
+      "edit": "Edit first",
+      "discard": "Discard"
+    },
     "reviewRequest": {
       "noCheckout": "{{agent}} found no checkout of {{repository}} in your projects to review."
     },
@@ -525,6 +534,10 @@
       "limitNone": "No limit"
     },
     "templates": {
+      "talk": {
+        "label": "By talking",
+        "draft": "I want to build a new agent: "
+      },
       "title": "Start from",
       "hint": "A template fills the name, the role, what a call asks first and the mascot. It is all yours to change before saving.",
       "blank": "Blank",

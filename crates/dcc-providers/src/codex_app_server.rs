@@ -2245,6 +2245,7 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_agent_remember"
                 | "dcc_propose_routine"
                 | "dcc_review_pull_request"
+                | "dcc_propose_agent"
                 | "dcc_overview"
                 | "dcc_open_task"
         )

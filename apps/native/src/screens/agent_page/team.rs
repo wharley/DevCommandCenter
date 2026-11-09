@@ -44,22 +44,37 @@ impl AgentPage {
             None => {
                 let (sidebar, composer) = (self.sidebar.clone(), self.composer.clone());
                 let room = cx.new(|cx| room::TeamRoom::new(sidebar, composer, window, cx));
-                let events = cx.subscribe(&room, |page, _, event, cx| match event {
-                    room::RoomEvent::OpenSession {
-                        task_id,
-                        session_id,
-                    } => cx.emit(AgentPageEvent::OpenSession {
-                        task_id: task_id.clone(),
-                        session_id: session_id.clone(),
-                    }),
-                    room::RoomEvent::OpenPullRequest(pr_id) => {
-                        cx.emit(AgentPageEvent::OpenPullRequest(pr_id.clone()))
-                    }
-                    room::RoomEvent::OpenTask(task_id) => {
-                        cx.emit(AgentPageEvent::OpenTask(task_id.clone()))
-                    }
-                    room::RoomEvent::OpenAgent(agent_id) => page.show(agent_id.clone(), cx),
-                });
+                let events =
+                    cx.subscribe_in(&room, window, |page, _, event, window, cx| match event {
+                        room::RoomEvent::OpenSession {
+                            task_id,
+                            session_id,
+                        } => cx.emit(AgentPageEvent::OpenSession {
+                            task_id: task_id.clone(),
+                            session_id: session_id.clone(),
+                        }),
+                        room::RoomEvent::OpenPullRequest(pr_id) => {
+                            cx.emit(AgentPageEvent::OpenPullRequest(pr_id.clone()))
+                        }
+                        room::RoomEvent::OpenTask(task_id) => {
+                            cx.emit(AgentPageEvent::OpenTask(task_id.clone()))
+                        }
+                        room::RoomEvent::OpenAgent(agent_id) => page.show(agent_id.clone(), cx),
+                        room::RoomEvent::AgentCreated {
+                            agent_id,
+                            first_request,
+                        } => {
+                            if !cfg!(test) {
+                                page.sidebar
+                                    .update(cx, |sidebar, cx| sidebar.reload_now(cx));
+                            }
+                            page.show_conversation(agent_id.clone(), cx);
+                            page.room_draft = Some(first_request.clone());
+                        }
+                        room::RoomEvent::EditProposal(proposal) => {
+                            page.edit_proposal(proposal.clone(), window, cx)
+                        }
+                    });
                 self.room = Some((room.clone(), events));
                 room
             }

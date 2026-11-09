@@ -29,6 +29,8 @@ pub enum EditorEvent {
     Saved,
     /// "Novo agente" saved: its id, for the page to show it.
     Created(String),
+    /// "Começar de › Conversando": build it by talking in the room.
+    Talk,
 }
 
 impl DesktopApi {

@@ -461,6 +461,11 @@ impl Sidebar {
         &self.state.data.agents
     }
 
+    /// Agents an agent proposed, waiting for the person.
+    pub fn agent_proposals(&self) -> &[dcc_core::domain::agent_proposal::AgentProposal] {
+        &self.state.data.agent_proposals
+    }
+
     /// Every task the list has (ideas excluded).
     pub fn tasks(&self) -> &[crate::data::tasks::TaskSummary] {
         &self.state.data.tasks

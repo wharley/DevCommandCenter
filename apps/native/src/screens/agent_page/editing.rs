@@ -1,10 +1,15 @@
-//! Opening "Editar" on the agent page, or the editor on a blank agent for
-//! "Novo agente", and what the page does once it saves.
+//! Opening "Editar" on the agent page, the editor on a blank agent for
+//! "Novo agente" or on an agent proposed ("Editar antes"), and what the
+//! page does once it saves.
 
 use gpui::{AppContext, Context, Window};
 
 use super::{AgentPage, editor, editor_projects, editor_role};
+use dcc_core::domain::agent_proposal::AgentProposal;
+
+use crate::data::agent_proposals::draft_record;
 use crate::data::agents::AgentRecord;
+use crate::i18n::Translate;
 
 impl AgentPage {
     /// "Editar": the stored values, read when it opens.
@@ -28,7 +33,21 @@ impl AgentPage {
         self.edit(editor_role::blank_agent(), window, cx);
     }
 
+    /// "Editar antes" on an agent proposed: the editor filled with it; once
+    /// created, the proposal is answered.
+    pub(crate) fn edit_proposal(
+        &mut self,
+        proposal: AgentProposal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.room_open = false;
+        self.edit(draft_record(&proposal), window, cx);
+        self.editing_proposal = Some(proposal);
+    }
+
     pub(super) fn edit(&mut self, agent: AgentRecord, window: &mut Window, cx: &mut Context<Self>) {
+        self.editing_proposal = None;
         let catalog = self
             .composer
             .read(cx)
@@ -42,18 +61,38 @@ impl AgentPage {
         let events = cx.subscribe(&editor, |page, _, event, cx| match event {
             editor::EditorEvent::Closed => {
                 page.editor = None;
+                page.editing_proposal = None;
                 cx.notify();
+            }
+            // "Conversando": the room, asked to build one.
+            editor::EditorEvent::Talk => {
+                page.editor = None;
+                let draft = cx.t("agents.templates.talk.draft").to_string();
+                page.open_room(Some(draft), cx);
             }
             // The sidebar reads the agents again right away.
             editor::EditorEvent::Saved => page.reload_agents(cx),
             // The new agent's page, once the sidebar has read it.
             editor::EditorEvent::Created(id) => {
                 let id = id.clone();
+                page.answer_edited_proposal(cx);
                 page.reload_agents(cx);
                 page.show(id, cx);
             }
         });
         self.editor = Some((editor, events));
         cx.notify();
+    }
+
+    /// The proposal just created from the editor leaves the room.
+    fn answer_edited_proposal(&mut self, cx: &mut Context<Self>) {
+        let (Some(proposal), Some(api)) = (self.editing_proposal.take(), self.api.clone()) else {
+            return;
+        };
+        cx.background_executor()
+            .spawn(async move {
+                let _ = api.dismiss_agent_proposal(&proposal);
+            })
+            .detach();
     }
 }

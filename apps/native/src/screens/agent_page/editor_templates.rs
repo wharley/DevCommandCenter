@@ -6,7 +6,7 @@
 use dcc_core::domain::agent_templates::{AGENT_TEMPLATES, template_draft};
 use gpui::{AnyElement, Context, SharedString};
 
-use super::editor::{AgentEditor, field};
+use super::editor::{AgentEditor, EditorEvent, field};
 use super::editor_role::blank_agent;
 use crate::i18n::Translate;
 use crate::ui::ToggleGroup;
@@ -46,6 +46,8 @@ impl AgentEditor {
                 .iter()
                 .map(|id| cx.t(&format!("agents.templates.{id}.label"))),
         );
+        // Last: build it by talking (`dcc_propose_agent`).
+        labels.push(cx.t("agents.templates.talk.label"));
         let picked = match self.template {
             None => 0,
             Some(id) => AGENT_TEMPLATES
@@ -56,8 +58,14 @@ impl AgentEditor {
         let editor = cx.entity().downgrade();
         let group = ToggleGroup::new("agent-editor-template", labels, Some(picked)).on_select(
             move |index, _, cx| {
-                let template = index.checked_sub(1).map(|index| AGENT_TEMPLATES[index]);
-                let _ = editor.update(cx, |editor, cx| editor.apply_template(template, cx));
+                let _ = editor.update(cx, |editor, cx| {
+                    if index > AGENT_TEMPLATES.len() {
+                        cx.emit(EditorEvent::Talk);
+                        return;
+                    }
+                    let template = index.checked_sub(1).map(|index| AGENT_TEMPLATES[index]);
+                    editor.apply_template(template, cx)
+                });
             },
         );
         Some(field(
