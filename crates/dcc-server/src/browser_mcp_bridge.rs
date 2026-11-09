@@ -705,10 +705,14 @@ async fn connector_post(
     request: Request<Body>,
 ) -> Response {
     let headers = request.headers().clone();
-    let (_, gateway) = match connector_binding(&bridge, &headers, &definition_id) {
+    let (binding, gateway) = match connector_binding(&bridge, &headers, &definition_id) {
         Ok(found) => found,
         Err(response) => return response,
     };
+    // What the session's agent may use of this connector (`connector_access`).
+    let access = crate::agent_tool_access::session_access(&bridge.sessions, &binding.session_id)
+        .map(|access| access.connector(&definition_id))
+        .unwrap_or_default();
     if !accepts_mcp(&headers) {
         return StatusCode::NOT_ACCEPTABLE.into_response();
     }
@@ -729,13 +733,14 @@ async fn connector_post(
             .map(str::to_string)
     };
     let response = gateway
-        .handle(
+        .handle_with_access(
             &McpDefinitionId(definition_id),
             ConnectorCall {
                 session_id: header_text("mcp-session-id"),
                 protocol_version: header_text("mcp-protocol-version"),
                 body,
             },
+            access,
         )
         .await;
     let with_session = |mut response: Response, session_id: Option<String>| {
@@ -961,7 +966,14 @@ async fn handle_rpc(
         "tools/list"
             if protocol.is_some_and(|header| bridge.ready_protocol(&binding) == Some(header)) =>
         {
-            rpc_result(id, json!({"tools": tools()}), None)
+            // Only what the session's agent may use (`agent_tool_access`).
+            let access =
+                crate::agent_tool_access::session_access(&bridge.sessions, &binding.session_id);
+            rpc_result(
+                id,
+                json!({"tools": crate::agent_tool_access::visible(access.as_ref(), tools())}),
+                None,
+            )
         }
         "tools/call" => match object
             .get("params")
@@ -972,7 +984,13 @@ async fn handle_rpc(
                 if protocol
                     .is_some_and(|header| bridge.ready_protocol(&binding) == Some(header)) =>
             {
-                if tool_call_is_well_formed(&call) {
+                let access =
+                    crate::agent_tool_access::session_access(&bridge.sessions, &binding.session_id);
+                let refused =
+                    crate::agent_tool_access::refusal(access.as_ref(), &call.name, &tools());
+                if let Some(response) = refused {
+                    rpc_result(id, response, None)
+                } else if tool_call_is_well_formed(&call) {
                     if bridge.is_shutting_down() {
                         let dispatched = ToolDispatch::failed();
                         append_mcp_tool_audit(&bridge.browser, &binding, &call.name, &dispatched);

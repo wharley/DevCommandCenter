@@ -91,6 +91,7 @@ fn agents_waiting_are_counted_beside_agentes(cx: &mut TestAppContext) {
         extra_instructions: String::new(),
         projects: Vec::new(),
         monthly_token_limit: None,
+        tool_access: Default::default(),
         sessions: state
             .map(|state| AgentSession {
                 session_id: format!("s-{id}"),

@@ -3,6 +3,7 @@ pub(crate) mod antigravity_account_state;
 pub mod antigravity_installation;
 pub mod app_events;
 pub mod commands;
+pub mod connector_access;
 pub mod connector_gateway;
 pub mod conversation_rewind;
 pub(crate) use dcc_infra::delegation_apply;

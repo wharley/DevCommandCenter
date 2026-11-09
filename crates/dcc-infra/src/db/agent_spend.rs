@@ -126,5 +126,18 @@ mod tests {
         let saved = repo.save_resident_agent(Some(&qa.id), again).unwrap();
         assert_eq!(saved.monthly_token_limit, Some(5_000_000));
         assert_eq!(saved.limit_override_month.as_deref(), Some("2026-11"));
+        // What it may use is kept with it.
+        let mut narrowed = ResidentAgentDraft::reviewer(&ReviewerPresetText::default());
+        narrowed.name = "QA".into();
+        narrowed.role = "Teste.".into();
+        narrowed.tool_access.groups.insert(
+            "browser".into(),
+            dcc_core::domain::agent_access::AccessLevel::Read,
+        );
+        let saved = repo.save_resident_agent(Some(&qa.id), narrowed).unwrap();
+        assert_eq!(
+            saved.tool_access.group("browser"),
+            dcc_core::domain::agent_access::AccessLevel::Read
+        );
     }
 }

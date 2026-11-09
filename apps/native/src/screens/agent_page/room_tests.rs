@@ -33,6 +33,7 @@ fn agent(id: &str, name: &str, preset: &str, sessions: Vec<AgentSession>) -> Age
         extra_instructions: String::new(),
         projects: Vec::new(),
         monthly_token_limit: None,
+        tool_access: Default::default(),
         sessions,
     }
 }

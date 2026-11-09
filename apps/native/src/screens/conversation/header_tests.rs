@@ -415,6 +415,7 @@ fn agent(id: &str, name: &str, preset: Option<&str>) -> crate::data::agents::Age
     crate::data::agents::AgentRecord {
         projects: Vec::new(),
         monthly_token_limit: None,
+        tool_access: Default::default(),
         id: id.into(),
         name: name.into(),
         preset: preset.map(str::to_string),

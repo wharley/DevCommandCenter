@@ -70,6 +70,8 @@ pub struct AgentRecord {
     pub projects: Vec<String>,
     /// Tokens a month (`agent_budget`); none: no limit.
     pub monthly_token_limit: Option<u64>,
+    /// What it may use (`agent_access`); nothing set: everything.
+    pub tool_access: dcc_core::domain::agent_access::ToolAccess,
     pub sessions: Vec<AgentSession>,
 }
 
@@ -245,6 +247,7 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                 extra_instructions: agent.extra_instructions,
                 projects: agent.projects,
                 monthly_token_limit: agent.monthly_token_limit,
+                tool_access: agent.tool_access,
                 sessions,
             }
         })

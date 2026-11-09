@@ -577,6 +577,19 @@
       "done": "{{agent}}'s routine",
       "ready": "answer in its conversation",
       "failed": "could not run the routine"
+    },
+    "access": {
+      "title": "Access",
+      "hint": "What this agent may use. \"Read\" allows only what just reads. DCC cuts it right away: the agent does not even see what is off. Writing still asks for your approval.",
+      "none": "No access",
+      "read": "Read",
+      "write": "Read and write",
+      "groups": {
+        "browser": "DCC's browser",
+        "computer": "Computer use",
+        "device": "iOS Simulator",
+        "delegation": "Delegate tasks"
+      }
     }
   },
   "sidebar": {

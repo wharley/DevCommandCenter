@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_access;
 pub mod agent_budget;
 pub mod agent_bulletin;
 pub mod agent_call;

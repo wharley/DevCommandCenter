@@ -68,6 +68,10 @@ pub struct AgentEditor {
     pub(crate) template: Option<&'static str>,
     /// Tokens a month; none: no limit.
     pub(crate) monthly_token_limit: Option<u64>,
+    /// What it may use (`editor_access`).
+    pub(crate) tool_access: dcc_core::domain::agent_access::ToolAccess,
+    /// The person's connectors, by id and name.
+    pub(crate) connector_names: Vec<(String, String)>,
     pub(super) catalog: Vec<ProviderDescriptor>,
     pub(crate) saving: bool,
     pub(crate) api: Option<DesktopApi>,
@@ -164,7 +168,7 @@ impl AgentEditor {
                 _ => {}
             }),
         ];
-        Self {
+        let editor = Self {
             avatar: agent.avatar.clone(),
             provider_id: agent.provider_id.clone(),
             model: agent.model.clone(),
@@ -174,6 +178,8 @@ impl AgentEditor {
             offer: !agent.offer_prompt.trim().is_empty(),
             template: None,
             monthly_token_limit: agent.monthly_token_limit,
+            tool_access: agent.tool_access.clone(),
+            connector_names: Vec::new(),
             agent,
             name,
             extra,
@@ -183,7 +189,9 @@ impl AgentEditor {
             saving: false,
             api: if cfg!(test) { None } else { DesktopApi::load() },
             _inputs: inputs,
-        }
+        };
+        editor.load_connectors(cx);
+        editor
     }
 
     /// The projects the person can pick; a project the agent keeps that is
@@ -231,6 +239,7 @@ impl AgentEditor {
             "avatar": self.avatar,
             "projects": self.projects,
             "monthlyTokenLimit": self.monthly_token_limit,
+            "toolAccess": self.tool_access,
         })
     }
 
@@ -376,6 +385,7 @@ impl Render for AgentEditor {
                 cx,
             ))
             .child(self.limit_field(cx))
+            .child(self.access_field(cx))
             .child(field(
                 cx.t("agents.editor.extra"),
                 Some(cx.t("agents.editor.extraHint")),

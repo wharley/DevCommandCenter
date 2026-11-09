@@ -17,6 +17,7 @@ fn agent(id: &str, preset: &str) -> AgentRecord {
     AgentRecord {
         projects: Vec::new(),
         monthly_token_limit: None,
+        tool_access: Default::default(),
         id: id.into(),
         name: "Revisor".into(),
         preset: Some(preset.into()),

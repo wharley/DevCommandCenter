@@ -28,6 +28,7 @@ fn agent(id: &str, preset: &str, sessions: Vec<AgentSession>) -> AgentRecord {
     AgentRecord {
         projects: Vec::new(),
         monthly_token_limit: None,
+        tool_access: Default::default(),
         id: id.into(),
         name: "Revisor".into(),
         preset: Some(preset.into()),
@@ -418,6 +419,10 @@ fn the_team_lists_the_agents_and_makes_a_new_one(cx: &mut TestAppContext) {
     let limit = cx.debug_bounds("agent-editor-limit-2").unwrap();
     cx.simulate_click(limit.center(), Modifiers::none());
     cx.run_until_parked();
+    // "Acesso": the browser only reads.
+    let browser = cx.debug_bounds("agent-editor-access-browser-1").unwrap();
+    cx.simulate_click(browser.center(), Modifiers::none());
+    cx.run_until_parked();
     editor.update(cx, |editor, cx| {
         assert!(editor.is_new());
         editor.name.update(cx, |input, cx| input.set_text("QA", cx));
@@ -437,6 +442,7 @@ fn the_team_lists_the_agents_and_makes_a_new_one(cx: &mut TestAppContext) {
     assert_eq!(body["name"], "QA");
     assert_eq!(body["role"], "Teste o caminho mudado.");
     assert_eq!(body["monthlyTokenLimit"], 2_000_000);
+    assert_eq!(body["toolAccess"]["groups"]["browser"], "read");
     // Saved, the page goes to the new agent.
     page.read_with(cx, |page, _| {
         assert_eq!(page.agent_id, "a-new");

@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use dcc_core::domain::agent_access::AccessLevel;
 use dcc_core::domain::mcp::{
     McpConnectionCheck, McpConnectionState, McpDefinition, McpDefinitionId, McpToolAnnotations,
     McpToolSummary, McpTransport,
@@ -72,6 +73,70 @@ impl ConnectorGateway {
     }
 
     pub async fn handle(
+        &self,
+        definition_id: &McpDefinitionId,
+        call: ConnectorCall,
+    ) -> ConnectorResponse {
+        self.handle_with_access(definition_id, call, AccessLevel::Write)
+            .await
+    }
+
+    /// `handle` for a session whose agent may use only part of the
+    /// connector (`connector_access`).
+    pub async fn handle_with_access(
+        &self,
+        definition_id: &McpDefinitionId,
+        call: ConnectorCall,
+        access: AccessLevel,
+    ) -> ConnectorResponse {
+        if let Some(body) = crate::connector_access::empty_list(access, &call.body) {
+            return ConnectorResponse::Json {
+                session_id: call.session_id.clone(),
+                body,
+            };
+        }
+        if access == AccessLevel::Read
+            || crate::connector_access::refusal(access, &call.body, |_| true).is_some()
+        {
+            let read_only = self.read_only_tools(definition_id).await;
+            if let Some(message) = crate::connector_access::refusal(access, &call.body, |name| {
+                read_only.iter().any(|tool| tool == name)
+            }) {
+                return error_response(&call, message);
+            }
+        }
+        let request = call.body.clone();
+        let response = self.exchange_call(definition_id, call).await;
+        match response {
+            ConnectorResponse::Json { session_id, body } => ConnectorResponse::Json {
+                session_id,
+                body: crate::connector_access::filter_list(access, &request, body),
+            },
+            other => other,
+        }
+    }
+
+    /// The tools the vendor marked read-only at the last connection check.
+    async fn read_only_tools(&self, definition_id: &McpDefinitionId) -> Vec<String> {
+        self.stores
+            .repo
+            .list_mcp_connection_checks()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .find(|check| &check.definition_id == definition_id)
+            .map(|check| {
+                check
+                    .tools
+                    .into_iter()
+                    .filter(|tool| tool.annotations.read_only_hint == Some(true))
+                    .map(|tool| tool.name)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    async fn exchange_call(
         &self,
         definition_id: &McpDefinitionId,
         call: ConnectorCall,

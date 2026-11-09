@@ -577,6 +577,19 @@
       "done": "Rotina de {{agent}}",
       "ready": "resposta na conversa dele",
       "failed": "não consegui rodar a rotina"
+    },
+    "access": {
+      "title": "Acesso",
+      "hint": "O que este agente pode usar. \"Ler\" libera só o que só lê. O DCC corta na hora: o agente nem vê o que não está liberado. A escrita continua pedindo a sua aprovação.",
+      "none": "Sem acesso",
+      "read": "Ler",
+      "write": "Ler e escrever",
+      "groups": {
+        "browser": "Navegador do DCC",
+        "computer": "Uso do computador",
+        "device": "Simulador iOS",
+        "delegation": "Delegar tarefas"
+      }
     }
   },
   "sidebar": {

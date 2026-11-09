@@ -182,6 +182,9 @@ pub struct ResidentAgentDraft {
     /// Tokens a month (`agent_budget`); none: no limit.
     #[serde(default)]
     pub monthly_token_limit: Option<u64>,
+    /// What it may use (`agent_access`); nothing set: everything.
+    #[serde(default)]
+    pub tool_access: crate::domain::agent_access::ToolAccess,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -206,6 +209,9 @@ pub struct ResidentAgent {
     /// The month (`2026-11`) the person let it go past its limit.
     #[serde(default)]
     pub limit_override_month: Option<String>,
+    /// What it may use (`agent_access`); nothing set: everything.
+    #[serde(default)]
+    pub tool_access: crate::domain::agent_access::ToolAccess,
     pub preset: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -289,6 +295,7 @@ impl ResidentAgentDraft {
             avatar: self.avatar,
             projects: crate::domain::agent_projects::clean_projects(self.projects)?,
             monthly_token_limit: self.monthly_token_limit.filter(|limit| *limit > 0),
+            tool_access: self.tool_access.normalized(),
         })
     }
 
@@ -312,6 +319,7 @@ impl ResidentAgentDraft {
             },
             projects: Vec::new(),
             monthly_token_limit: None,
+            tool_access: Default::default(),
         }
     }
 }
@@ -416,6 +424,7 @@ mod tests {
             avatar: draft.avatar,
             projects: Vec::new(),
             monthly_token_limit: None,
+            tool_access: Default::default(),
             limit_override_month: None,
             preset: Some(REVIEWER_PRESET.to_string()),
             created_at: "now".to_string(),

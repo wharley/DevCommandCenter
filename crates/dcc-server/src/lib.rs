@@ -6,6 +6,7 @@
 #![recursion_limit = "256"]
 
 pub mod agent_requests;
+pub mod agent_tool_access;
 pub mod ai_memory_sidecar;
 pub mod browser_agent_requests;
 pub mod browser_commands;

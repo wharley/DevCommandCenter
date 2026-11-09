@@ -25,6 +25,7 @@ mod conversation;
 mod conversation_tests;
 mod editing;
 mod editor;
+mod editor_access;
 mod editor_budget;
 mod editor_look;
 mod editor_projects;

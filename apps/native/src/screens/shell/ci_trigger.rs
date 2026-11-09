@@ -172,6 +172,7 @@ mod tests {
         let reviewer = AgentRecord {
             projects: Vec::new(),
             monthly_token_limit: None,
+            tool_access: Default::default(),
             id: "rev".into(),
             name: "Revisor".into(),
             preset: Some("reviewer".into()),
