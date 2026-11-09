@@ -439,6 +439,8 @@
     "room": {
       "handoff": {
         "suggests": "{{agent}} sugere passar a vez para {{teammate}}",
+        "autoPassed": "Passado automaticamente para {{teammate}}",
+        "automatic": "automático",
         "pass": "Passar a vez",
         "ignore": "Ignorar",
         "passed": "Passado para {{teammate}}"
@@ -512,6 +514,8 @@
     "editor": {
       "extra": "Instruções extras",
       "extraHint": "Somadas ao papel do DCC a cada turno. Exemplo: convenções do seu projeto ou pastas a ignorar.",
+      "mayCall": "Pode chamar sozinho",
+      "mayCallHint": "Os colegas para quem ele passa a vez sem esperar seu clique, com a resposta dele como briefing. No máximo 5 passagens seguidas sem você. O Revisor fica de fora: ele entra pela oferta no fim do turno ou quando você chama.",
       "autoStart": "Pode começar tarefas sozinho",
       "autoStartHint": "Quando um gatilho ou rotina o acorda, a tarefa que ele abre já começa, sem esperar você clicar em Começar. O que você pede começa sempre.",
       "offerSwitch": "Oferecer ao terminar um turno",

@@ -3,6 +3,7 @@ pub mod agent_access;
 pub mod agent_budget;
 pub mod agent_bulletin;
 pub mod agent_call;
+pub mod agent_chain;
 pub mod agent_conversation;
 pub mod agent_memory;
 pub mod agent_projects;

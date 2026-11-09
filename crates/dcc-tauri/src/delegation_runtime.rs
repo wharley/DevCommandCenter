@@ -1459,6 +1459,8 @@ pub fn spawn_on_session_turn_terminal(state: &SessionCommandState, session_id: &
 
 /// Called after any durable terminal event of `session_id`'s turn.
 pub async fn on_session_turn_terminal(state: SessionCommandState, session_id: SessionId) {
+    // An agent's answer may pass the turn to a teammate (`agent_chain`).
+    crate::agent_chain_runtime::after_agent_turn(&state, &session_id).await;
     let Ok(Some(delegation)) =
         DelegationRepo::get_delegation_by_child_session(&state, &session_id).await
     else {

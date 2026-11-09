@@ -198,6 +198,7 @@ mod tests {
             monthly_token_limit: None,
             tool_access: Default::default(),
             auto_start_tasks: false,
+            may_call: Vec::new(),
             limit_override_month: None,
             preset: Some(preset.into()),
             created_at: String::new(),

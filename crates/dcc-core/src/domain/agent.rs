@@ -190,6 +190,9 @@ pub struct ResidentAgentDraft {
     /// person asks for always starts at once.
     #[serde(default)]
     pub auto_start_tasks: bool,
+    /// Teammates it may pass the turn to without the person (`agent_chain`).
+    #[serde(default)]
+    pub may_call: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -220,6 +223,9 @@ pub struct ResidentAgent {
     /// See `ResidentAgentDraft::auto_start_tasks`.
     #[serde(default)]
     pub auto_start_tasks: bool,
+    /// See `ResidentAgentDraft::may_call`.
+    #[serde(default)]
+    pub may_call: Vec<String>,
     pub preset: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -307,6 +313,17 @@ impl ResidentAgentDraft {
             monthly_token_limit: self.monthly_token_limit.filter(|limit| *limit > 0),
             tool_access: self.tool_access.normalized(),
             auto_start_tasks: self.auto_start_tasks,
+            may_call: {
+                let mut ids: Vec<String> = self
+                    .may_call
+                    .into_iter()
+                    .map(|id| id.trim().to_string())
+                    .filter(|id| !id.is_empty())
+                    .collect();
+                ids.sort();
+                ids.dedup();
+                ids
+            },
         })
     }
 
@@ -340,6 +357,7 @@ impl ResidentAgentDraft {
                 connectors: Default::default(),
             },
             auto_start_tasks: false,
+            may_call: Vec::new(),
         }
     }
 }
@@ -445,6 +463,7 @@ mod tests {
             monthly_token_limit: None,
             tool_access: Default::default(),
             auto_start_tasks: false,
+            may_call: Vec::new(),
             limit_override_month: None,
             preset: Some(REVIEWER_PRESET.to_string()),
             created_at: "now".to_string(),

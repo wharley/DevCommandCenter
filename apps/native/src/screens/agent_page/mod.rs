@@ -20,6 +20,8 @@ use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
 use crate::ui::{Icon, Tracked};
 
+#[cfg(test)]
+mod chain_tests;
 mod conversation;
 #[cfg(test)]
 mod conversation_tests;
@@ -27,6 +29,7 @@ mod editing;
 mod editor;
 mod editor_access;
 mod editor_budget;
+mod editor_chain;
 mod editor_look;
 mod editor_projects;
 mod editor_role;

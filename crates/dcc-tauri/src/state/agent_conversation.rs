@@ -26,16 +26,28 @@ impl SessionCommandState {
         if !home {
             return Ok(memory);
         }
-        // Its teammates, and how it suggests one of them takes over.
-        let teammates: Vec<String> = self
+        // Its teammates, and how it suggests one of them takes over (or,
+        // where the person allowed it, passes to one itself).
+        let agents = self
             .session_repo
-            .list_stored_resident_agents(&Default::default())?
-            .into_iter()
-            .filter(|agent| agent.id != agent_id)
-            .map(|agent| agent.name)
+            .list_stored_resident_agents(&Default::default())?;
+        let may_call: Vec<String> = agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .map(|agent| agent.may_call.clone())
+            .unwrap_or_default();
+        let teammates: Vec<&dcc_core::domain::agent::ResidentAgent> =
+            agents.iter().filter(|agent| agent.id != agent_id).collect();
+        let names: Vec<&str> = teammates.iter().map(|agent| agent.name.as_str()).collect();
+        let direct: Vec<&str> = teammates
+            .iter()
+            .filter(|agent| {
+                may_call.contains(&agent.id)
+                    && agent.preset.as_deref() != Some(dcc_core::domain::agent::REVIEWER_PRESET)
+            })
+            .map(|agent| agent.name.as_str())
             .collect();
-        let names: Vec<&str> = teammates.iter().map(String::as_str).collect();
-        let conversation = match handoff_block(&names) {
+        let conversation = match handoff_block(&names, &direct) {
             Some(team) => format!("{}\n\n{team}", conversation_block()),
             None => conversation_block(),
         };
@@ -43,6 +55,19 @@ impl SessionCommandState {
             Some(memory) => format!("{conversation}\n\n{memory}"),
             None => conversation,
         }))
+    }
+
+    /// The live agents as stored, without seeding the built-in ones.
+    pub fn list_stored_agents(
+        &self,
+        reviewer: &dcc_core::domain::agent::ReviewerPresetText,
+    ) -> Result<Vec<dcc_core::domain::agent::ResidentAgent>> {
+        self.session_repo.list_stored_resident_agents(reviewer)
+    }
+
+    /// Every session bound to a live agent, most recently updated first.
+    pub fn agent_session_bindings(&self) -> Result<Vec<dcc_infra::db::AgentSessionBinding>> {
+        self.session_repo.list_agent_session_bindings()
     }
 
     /// The agent `session_id` runs as, if any.

@@ -398,7 +398,11 @@ impl Render for TeamRoom {
             };
             match line.speaker {
                 Speaker::Person => match handoff_heading(&line.text) {
-                    Some(heading) => rows.push(self.passed_line(index, heading, cx)),
+                    Some(heading) => {
+                        let automatic =
+                            dcc_core::domain::agent_chain::passed_answer(&line.text).is_some();
+                        rows.push(self.passed_line(index, heading, automatic, cx))
+                    }
                     None if line
                         .text
                         .starts_with(dcc_core::domain::agent_routine::ROUTINE_MARK) =>

@@ -140,12 +140,20 @@ const HANDOFF_CONTEXT_CHARS: usize = 2_000;
 
 /// What a turn in an agent's own conversation hears about its teammates:
 /// who they are and how to suggest one takes over. The person decides.
-pub fn handoff_block(teammates: &[&str]) -> Option<String> {
+pub fn handoff_block(teammates: &[&str], direct: &[&str]) -> Option<String> {
     if teammates.is_empty() {
         return None;
     }
+    let who_decides = if direct.is_empty() {
+        "The person decides whether to pass it on; never contact a teammate yourself.".to_string()
+    } else {
+        format!(
+            "The person lets you pass to {} yourself: that line goes to them at once, with your answer as their brief — so end with it only when they should take over now. For anyone else the person decides; never contact a teammate any other way.",
+            direct.join(", ")
+        )
+    };
     Some(format!(
-        "You are part of the person's team in DCC's team room, with: {}. When one of them fits what the person needs better, end your answer with one line that starts with @ and their name and says what to ask them (\"@{} can you compare the two APIs?\"). The person decides whether to pass it on; never contact a teammate yourself.",
+        "You are part of the person's team in DCC's team room, with: {}. When one of them fits what the person needs better, end your answer with one line that starts with @ and their name and says what to ask them (\"@{} can you compare the two APIs?\"). {who_decides}",
         teammates.join(", "),
         teammates[0]
     ))
@@ -281,8 +289,11 @@ mod tests {
         );
         assert!(prompt.contains("Revisei o PR"));
         assert_eq!(handoff_heading("oi"), None);
-        let block = handoff_block(&["Pesquisa", "QA"]).unwrap();
+        let block = handoff_block(&["Pesquisa", "QA"], &[]).unwrap();
+        assert!(handoff_block(&["Dev"], &["Dev"])
+            .unwrap()
+            .contains("pass to Dev yourself"));
         assert!(block.contains("Pesquisa, QA") && block.contains("never contact"));
-        assert!(handoff_block(&[]).is_none());
+        assert!(handoff_block(&[], &[]).is_none());
     }
 }

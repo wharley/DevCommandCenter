@@ -4,7 +4,7 @@
 
 use gpui::{AppContext, Context, Window};
 
-use super::{AgentPage, editor, editor_projects, editor_role};
+use super::{AgentPage, editor, editor_chain, editor_projects, editor_role};
 use dcc_core::domain::agent_proposal::AgentProposal;
 
 use crate::data::agent_proposals::draft_record;
@@ -56,8 +56,12 @@ impl AgentPage {
             .cloned()
             .unwrap_or_default();
         let options = editor_projects::project_options(self.sidebar.read(cx).projects());
-        let editor = cx
-            .new(|cx| editor::AgentEditor::new(agent, catalog, window, cx).with_projects(options));
+        let teammates = editor_chain::callable(self.sidebar.read(cx).agents(), &agent.id);
+        let editor = cx.new(|cx| {
+            editor::AgentEditor::new(agent, catalog, window, cx)
+                .with_projects(options)
+                .with_teammates(teammates)
+        });
         let events = cx.subscribe(&editor, |page, _, event, cx| match event {
             editor::EditorEvent::Closed => {
                 page.editor = None;

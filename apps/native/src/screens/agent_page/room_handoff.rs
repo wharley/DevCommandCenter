@@ -49,6 +49,14 @@ impl TeamRoom {
         }
     }
 
+    /// Whether DCC passed the answer `key` on by itself (`agent_chain`).
+    fn auto_passed(&self, key: &str) -> bool {
+        self.feeds.iter().flat_map(|feed| &feed.lines).any(|line| {
+            line.speaker == crate::data::team_room::Speaker::Person
+                && dcc_core::domain::agent_chain::passed_answer(&line.text) == Some(key)
+        })
+    }
+
     pub(crate) fn ignore_handoff(&mut self, key: &str, cx: &mut Context<Self>) {
         self.handoffs.set(key, Handled::Ignored);
         cx.notify();
@@ -82,6 +90,12 @@ impl TeamRoom {
             .border_color(colors.border.opacity(0.7))
             .text_size(px(12.0))
             .text_color(colors.muted_foreground);
+        if self.auto_passed(&line.key) {
+            return Some(
+                bar.child(cx.t_with("agents.room.handoff.autoPassed", &args))
+                    .into_any_element(),
+            );
+        }
         match self.handoffs.get(&line.key) {
             Some(Handled::Ignored) => None,
             Some(Handled::Passed) => Some(
@@ -136,9 +150,15 @@ impl TeamRoom {
         &self,
         index: usize,
         heading: &str,
+        automatic: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
+        let heading = if automatic {
+            format!("{heading} · {}", cx.t("agents.room.handoff.automatic"))
+        } else {
+            heading.to_string()
+        };
         div()
             .debug_selector(move || format!("room-passed-{index}"))
             .flex()
@@ -153,7 +173,7 @@ impl TeamRoom {
                     .bg(colors.accent.opacity(0.6))
                     .text_size(px(11.5))
                     .text_color(colors.muted_foreground)
-                    .child(heading.to_string()),
+                    .child(heading),
             )
             .into_any_element()
     }

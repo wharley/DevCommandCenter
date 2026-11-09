@@ -35,6 +35,7 @@ fn agent(id: &str, name: &str, preset: &str, sessions: Vec<AgentSession>) -> Age
         monthly_token_limit: None,
         tool_access: Default::default(),
         auto_start_tasks: false,
+        may_call: Vec::new(),
         sessions,
     }
 }

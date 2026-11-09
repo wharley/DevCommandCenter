@@ -74,6 +74,8 @@ pub struct AgentRecord {
     pub tool_access: dcc_core::domain::agent_access::ToolAccess,
     /// Starts the tasks it opens when an event woke it.
     pub auto_start_tasks: bool,
+    /// Teammates it may pass the turn to itself (`agent_chain`).
+    pub may_call: Vec<String>,
     pub sessions: Vec<AgentSession>,
 }
 
@@ -251,6 +253,7 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                 monthly_token_limit: agent.monthly_token_limit,
                 tool_access: agent.tool_access,
                 auto_start_tasks: agent.auto_start_tasks,
+                may_call: agent.may_call,
                 sessions,
             }
         })

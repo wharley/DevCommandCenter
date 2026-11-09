@@ -18,6 +18,7 @@ fn agent(id: &str, preset: &str) -> AgentRecord {
         monthly_token_limit: None,
         tool_access: Default::default(),
         auto_start_tasks: false,
+        may_call: Vec::new(),
         id: id.into(),
         name: "Revisor".into(),
         preset: Some(preset.into()),

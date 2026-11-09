@@ -439,6 +439,8 @@
     "room": {
       "handoff": {
         "suggests": "{{agent}} suggests passing to {{teammate}}",
+        "autoPassed": "Passed on to {{teammate}} automatically",
+        "automatic": "automatic",
         "pass": "Pass the turn",
         "ignore": "Ignore",
         "passed": "Passed to {{teammate}}"
@@ -512,6 +514,8 @@
     "editor": {
       "extra": "Extra instructions",
       "extraHint": "Added to DCC's role on every turn. For example: your project's conventions or folders to ignore.",
+      "mayCall": "May call by itself",
+      "mayCallHint": "The teammates it passes the turn to without waiting for your click, its answer as their brief. At most 5 passes in a row without you. The Reviewer stays out: it joins by the offer at the end of a turn or when you call it.",
       "autoStart": "May start tasks itself",
       "autoStartHint": "When a trigger or a routine wakes it, the task it opens starts at once instead of waiting for you to click Start. What you ask for always starts.",
       "offerSwitch": "Offer after a turn",

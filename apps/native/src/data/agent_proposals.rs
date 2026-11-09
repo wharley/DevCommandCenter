@@ -59,6 +59,7 @@ pub fn draft_record(proposal: &AgentProposal) -> AgentRecord {
         monthly_token_limit: draft.monthly_token_limit,
         tool_access: draft.tool_access,
         auto_start_tasks: draft.auto_start_tasks,
+        may_call: draft.may_call,
         sessions: Vec::new(),
     }
 }
