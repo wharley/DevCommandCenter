@@ -59,6 +59,8 @@ pub struct SidebarData {
     pub review_requests: Vec<dcc_core::domain::pr_review_request::PrReviewRequest>,
     /// The agent each task belongs to (`task_agents`), by task id.
     pub task_agents: HashMap<String, String>,
+    /// What the team room's report shows of each task, by delegation id.
+    pub task_reports: HashMap<String, super::task_reports::TaskReport>,
     /// Agents an agent proposed that the person has not answered.
     pub agent_proposals: Vec<dcc_core::domain::agent_proposal::AgentProposal>,
 }
@@ -180,6 +182,7 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
 
     let agents = super::agents::load(&sessions)?;
     let task_agents = super::task_agents::by_task(&agents, &delegations);
+    let task_reports = super::task_reports::by_delegation(&delegations, &agents);
     // A small table, empty but for a moment after an agent asks.
     let review_requests = sessions.waiting_pr_review_requests().unwrap_or_default();
     let agent_proposals = sessions.waiting_agent_proposals().unwrap_or_default();
@@ -210,5 +213,6 @@ pub fn load(db_path: &Path, untitled: &str) -> anyhow::Result<SidebarData> {
         review_requests,
         agent_proposals,
         task_agents,
+        task_reports,
     })
 }

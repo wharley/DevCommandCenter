@@ -216,6 +216,18 @@
     }
   },
   "agents": {
+    "report": {
+      "title_one": "Report · {{count}} task",
+      "title_other": "Report · {{count}} tasks",
+      "files_one": "{{count}} file",
+      "files_other": "{{count}} files",
+      "state": {
+        "working": "Working",
+        "turnEnded": "Ended its turn",
+        "closed": "Closed",
+        "failed": "Failed"
+      }
+    },
     "reactions": {
       "rulePlaceholder": "What should it do? E.g. always cite the PR",
       "ruleAsk": "Keep as a rule?",
@@ -500,6 +512,8 @@
     "editor": {
       "extra": "Extra instructions",
       "extraHint": "Added to DCC's role on every turn. For example: your project's conventions or folders to ignore.",
+      "autoStart": "May start tasks itself",
+      "autoStartHint": "When a trigger or a routine wakes it, the task it opens starts at once instead of waiting for you to click Start. What you ask for always starts.",
       "offerSwitch": "Offer after a turn",
       "offerSwitchHint": "When a turn ends with changes, the agent appears above the composer asking whether it may act.",
       "name": "Name",
@@ -610,9 +624,12 @@
       "title": "Access",
       "hint": "What this agent may use. \"Read\" allows only what just reads. DCC cuts it right away: the agent does not even see what is off. Writing still asks for your approval.",
       "none": "No access",
+      "tasksOff": "Doesn't open",
+      "tasksOn": "Opens tasks",
       "read": "Read",
       "write": "Read and write",
       "groups": {
+        "tasks": "Open tasks",
         "browser": "DCC's browser",
         "computer": "Computer use",
         "device": "iOS Simulator",

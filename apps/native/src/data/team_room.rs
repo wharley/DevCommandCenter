@@ -84,6 +84,7 @@ mod tests {
             text: text.into(),
             at: at.into(),
             receipt: None,
+            tasks: Vec::new(),
         }
     }
 

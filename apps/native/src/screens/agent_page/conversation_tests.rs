@@ -29,6 +29,7 @@ fn agent(id: &str, preset: &str, sessions: Vec<AgentSession>) -> AgentRecord {
         projects: Vec::new(),
         monthly_token_limit: None,
         tool_access: Default::default(),
+        auto_start_tasks: false,
         id: id.into(),
         name: "Revisor".into(),
         preset: Some(preset.into()),

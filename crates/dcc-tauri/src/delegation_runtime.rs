@@ -243,11 +243,15 @@ pub fn extract_delegation_instruction(prompt: &str) -> String {
         return prompt.trim().to_string();
     };
     let rest = &prompt[start + marker.len()..];
-    let end = ["\n\nGit context:\n", "\n\nMission spec:\n", "\n\nRecent parent session context:\n"]
-        .iter()
-        .filter_map(|section| rest.find(section))
-        .min()
-        .unwrap_or(rest.len());
+    let end = [
+        "\n\nGit context:\n",
+        "\n\nMission spec:\n",
+        "\n\nRecent parent session context:\n",
+    ]
+    .iter()
+    .filter_map(|section| rest.find(section))
+    .min()
+    .unwrap_or(rest.len());
     rest[..end].trim().to_string()
 }
 
@@ -286,7 +290,11 @@ fn delegation_instruction(delegation: &Delegation) -> String {
 
 fn agent_label(delegation: &Delegation) -> String {
     let provider = provider_label(&delegation.target_provider_id.0);
-    match delegation.target_model_id.as_deref().filter(|model| !model.trim().is_empty()) {
+    match delegation
+        .target_model_id
+        .as_deref()
+        .filter(|model| !model.trim().is_empty())
+    {
         Some(model) => format!("{provider} ({model})"),
         None => provider,
     }
@@ -339,7 +347,10 @@ pub fn delegation_result_turn(delegation: &Delegation, failure_reason: Option<&s
     ]);
     if !delegation.touched_files.is_empty() {
         lines.push(String::new());
-        lines.push(format!("Files touched ({}):", delegation.touched_files.len()));
+        lines.push(format!(
+            "Files touched ({}):",
+            delegation.touched_files.len()
+        ));
         lines.extend(
             delegation
                 .touched_files
@@ -389,7 +400,10 @@ pub fn delegation_result_turn(delegation: &Delegation, failure_reason: Option<&s
             clip(validation, 1_200),
         ]);
     }
-    lines.extend([String::new(), "Continue your task using this result.".to_string()]);
+    lines.extend([
+        String::new(),
+        "Continue your task using this result.".to_string(),
+    ]);
     lines.join("\n")
 }
 
@@ -440,7 +454,9 @@ pub struct ChildTurnSummary {
 }
 
 /// Final assistant text and observed commands of the child's latest turn.
-pub fn summarize_child_turn(events: &[dcc_core::domain::session::SessionEventRecord]) -> ChildTurnSummary {
+pub fn summarize_child_turn(
+    events: &[dcc_core::domain::session::SessionEventRecord],
+) -> ChildTurnSummary {
     let Some(turn_id) = events.iter().rev().find_map(|event| match &event.kind {
         SessionEventKind::TurnStarted { turn_id, .. } => Some(turn_id.clone()),
         _ => None,
@@ -470,7 +486,10 @@ pub fn summarize_child_turn(events: &[dcc_core::domain::session::SessionEventRec
     };
     for event in events {
         match &event.kind {
-            SessionEventKind::TurnDelta { turn_id: id, content } if *id == turn_id => {
+            SessionEventKind::TurnDelta {
+                turn_id: id,
+                content,
+            } if *id == turn_id => {
                 let index = message_index(&mut messages, "legacy");
                 messages[index].content.push_str(content);
             }
@@ -576,7 +595,15 @@ fn validation_summary(commands: &[String]) -> String {
         .filter(|command| {
             let lower = command.to_lowercase();
             [
-                "test", "check", "lint", "typecheck", "vitest", "jest", "cargo", "pnpm", "npm",
+                "test",
+                "check",
+                "lint",
+                "typecheck",
+                "vitest",
+                "jest",
+                "cargo",
+                "pnpm",
+                "npm",
                 "yarn",
             ]
             .iter()
@@ -850,9 +877,9 @@ fn open_turn_prompt(
 ) -> Option<(TurnId, String)> {
     let active = SessionProjection::fold(events)?.active_turn_id?;
     events.iter().rev().find_map(|event| match &event.kind {
-        SessionEventKind::TurnStarted { turn_id, prompt, .. } if *turn_id == active => {
-            Some((active.clone(), prompt.clone()))
-        }
+        SessionEventKind::TurnStarted {
+            turn_id, prompt, ..
+        } if *turn_id == active => Some((active.clone(), prompt.clone())),
         _ => None,
     })
 }
@@ -983,7 +1010,10 @@ pub async fn run_delegation(
             .map_err(|error| error.to_string())?
             .is_some()
         {
-            return Err("a delegated agent cannot delegate further; finish your task and report back".to_string());
+            return Err(
+                "a delegated agent cannot delegate further; finish your task and report back"
+                    .to_string(),
+            );
         }
         let parent_events = SessionEventRepo::list_events_by_session(state, &parent.id)
             .await
@@ -1083,7 +1113,10 @@ pub async fn run_delegation(
         .ok()
         .and_then(|events| latest_turn_approval_policy(&events));
     budget.approval_policy = if is_task && allow_file_edits {
-        task_approval_policy(&provider_approval_policies(&target_provider_id), parent_policy)
+        task_approval_policy(
+            &provider_approval_policies(&target_provider_id),
+            parent_policy,
+        )
     } else {
         child_approval_policy(
             &provider_approval_policies(&target_provider_id),
@@ -1100,18 +1133,27 @@ pub async fn run_delegation(
         .find(|summary| summary.session.id == parent.id)
         .map(|summary| summary.thread.title.clone())
         .filter(|title| !title.trim().is_empty())
-        .unwrap_or_else(|| workspace.name.clone().unwrap_or_else(|| "Untitled".to_string()));
+        .unwrap_or_else(|| {
+            workspace
+                .name
+                .clone()
+                .unwrap_or_else(|| "Untitled".to_string())
+        });
     // A child on the parent's provider runs as the parent's account.
     let parent_runtime = (parent.provider_id == target_provider_id)
         .then(|| parent.provider_runtime.clone())
         .flatten();
-    let provider_runtime = input.provider_runtime.clone().or(parent_runtime).or_else(|| {
-        sessions
-            .iter()
-            .filter(|summary| summary.session.provider_id == target_provider_id)
-            .max_by(|left, right| left.session.updated_at.cmp(&right.session.updated_at))
-            .and_then(|summary| summary.session.provider_runtime.clone())
-    });
+    let provider_runtime = input
+        .provider_runtime
+        .clone()
+        .or(parent_runtime)
+        .or_else(|| {
+            sessions
+                .iter()
+                .filter(|summary| summary.session.provider_id == target_provider_id)
+                .max_by(|left, right| left.session.updated_at.cmp(&right.session.updated_at))
+                .and_then(|summary| summary.session.provider_runtime.clone())
+        });
 
     // A resident agent's task becomes a task of its own in the project the
     // person named; its conversation and brief live there.
@@ -1147,7 +1189,9 @@ pub async fn run_delegation(
     } else {
         None
     };
-    let operation_id = prepared.as_ref().map(|prepared| prepared.operation_id.clone());
+    let operation_id = prepared
+        .as_ref()
+        .map(|prepared| prepared.operation_id.clone());
 
     let launched = async {
         let prompt = match input.prebuilt_prompt.clone() {
@@ -1326,7 +1370,9 @@ pub async fn run_delegation(
         }
     });
 
-    Ok(RunDelegationOutput { delegation: running })
+    Ok(RunDelegationOutput {
+        delegation: running,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1357,7 +1403,11 @@ impl Drop for FinalizeGuard {
     }
 }
 
-async fn fail_and_hand_back(state: &SessionCommandState, delegation_id: &DelegationId, reason: &str) {
+async fn fail_and_hand_back(
+    state: &SessionCommandState,
+    delegation_id: &DelegationId,
+    reason: &str,
+) {
     let Some(_guard) = FinalizeGuard::acquire(delegation_id) else {
         return;
     };
@@ -1390,7 +1440,12 @@ async fn finish_failed(state: &SessionCommandState, delegation: Delegation, reas
         remove_delegation_worktree(state, Some(&failed.id), None, true).await;
     }
     if failed.origin == DelegationOrigin::Agent {
-        deliver_result(state, &failed, delegation_result_turn(&failed, Some(reason))).await;
+        deliver_result(
+            state,
+            &failed,
+            delegation_result_turn(&failed, Some(reason)),
+        )
+        .await;
     }
 }
 
@@ -1425,7 +1480,9 @@ enum ChildOutcome {
 }
 
 fn child_outcome(events: &[dcc_core::domain::session::SessionEventRecord]) -> ChildOutcome {
-    if let Some(active) = SessionProjection::fold(events).and_then(|projection| projection.active_turn_id) {
+    if let Some(active) =
+        SessionProjection::fold(events).and_then(|projection| projection.active_turn_id)
+    {
         return ChildOutcome::Running(active);
     }
     for event in events.iter().rev() {
@@ -1474,7 +1531,10 @@ async fn finalize_running_delegation(state: &SessionCommandState, delegation: De
             let mut touched = Vec::<String>::new();
             let (mut additions, mut deletions) = (0u64, 0u64);
             if let Ok(change_sets) = state.list_turn_change_sets(&child_session_id) {
-                for file in change_sets.iter().flat_map(|change_set| change_set.files.iter()) {
+                for file in change_sets
+                    .iter()
+                    .flat_map(|change_set| change_set.files.iter())
+                {
                     if !touched.contains(&file.path) {
                         touched.push(file.path.clone());
                     }
@@ -1659,7 +1719,9 @@ pub fn task_result_turn(
     }
     let listed: Vec<String> = tasks
         .iter()
-        .filter(|task| task.kind == DelegationKind::Task && task.status != DelegationStatus::Cancelled)
+        .filter(|task| {
+            task.kind == DelegationKind::Task && task.status != DelegationStatus::Cancelled
+        })
         .take(MAX_LISTED_TASKS)
         .map(|task| {
             format!(
@@ -1739,7 +1801,10 @@ async fn report_task_turn(state: &SessionCommandState, task: Delegation) {
     else {
         return;
     };
-    if SessionProjection::fold(&events).and_then(|projection| projection.active_turn_id).is_some() {
+    if SessionProjection::fold(&events)
+        .and_then(|projection| projection.active_turn_id)
+        .is_some()
+    {
         return;
     }
     let Some((turn_id, interrupted)) = last_ended_turn(&events) else {
@@ -1749,9 +1814,11 @@ async fn report_task_turn(state: &SessionCommandState, task: Delegation) {
         return;
     }
     let turn_prompt = events.iter().find_map(|event| match &event.kind {
-        SessionEventKind::TurnStarted { turn_id: id, prompt, .. } if *id == turn_id => {
-            Some(prompt.as_str())
-        }
+        SessionEventKind::TurnStarted {
+            turn_id: id,
+            prompt,
+            ..
+        } if *id == turn_id => Some(prompt.as_str()),
         _ => None,
     });
     let wakes_parent = turn_prompt.is_some_and(|prompt| {
@@ -1761,7 +1828,10 @@ async fn report_task_turn(state: &SessionCommandState, task: Delegation) {
     let mut touched = Vec::<String>::new();
     let (mut additions, mut deletions) = (0u64, 0u64);
     if let Ok(change_sets) = state.list_turn_change_sets(&child_session_id) {
-        for file in change_sets.iter().flat_map(|change_set| change_set.files.iter()) {
+        for file in change_sets
+            .iter()
+            .flat_map(|change_set| change_set.files.iter())
+        {
             if !touched.contains(&file.path) {
                 touched.push(file.path.clone());
             }
@@ -1793,7 +1863,15 @@ async fn report_task_turn(state: &SessionCommandState, task: Delegation) {
     let tasks = DelegationRepo::list_delegations(state, None, Some(&task.parent_session_id))
         .await
         .unwrap_or_default();
-    let prompt = task_result_turn(&task, interrupted.as_deref(), &tasks);
+    // Tasks opened together answer their briefs once, when the last ends.
+    let brief = turn_prompt.is_some_and(|prompt| prompt.starts_with(TASK_BRIEF_HEADER));
+    if brief && crate::task_group::waits_for_siblings(&task, &tasks) {
+        return;
+    }
+    let mut prompt = task_result_turn(&task, interrupted.as_deref(), &tasks);
+    if brief {
+        prompt = crate::task_group::with_siblings(prompt, &task, &tasks);
+    }
     deliver_result(state, &task, prompt).await;
 }
 
@@ -1817,8 +1895,13 @@ pub async fn complete_task(
         let events = SessionEventRepo::list_events_by_session(state, child_session_id)
             .await
             .map_err(|error| error.to_string())?;
-        if SessionProjection::fold(&events).and_then(|projection| projection.active_turn_id).is_some() {
-            return Err("the task is still working; wait for its turn to end or stop it first".to_string());
+        if SessionProjection::fold(&events)
+            .and_then(|projection| projection.active_turn_id)
+            .is_some()
+        {
+            return Err(
+                "the task is still working; wait for its turn to end or stop it first".to_string(),
+            );
         }
     }
     complete_delegation_with_state(
@@ -1871,7 +1954,9 @@ pub async fn message_task(
         .child_session_id
         .clone()
         .ok_or_else(|| "the task has no conversation".to_string())?;
-    let prompt = format!("{DCC_TURN_PREFIX}Message from the session that coordinates this task:\n\n{message}");
+    let prompt = format!(
+        "{DCC_TURN_PREFIX}Message from the session that coordinates this task:\n\n{message}"
+    );
     let child_busy = SessionEventRepo::list_events_by_session(state, &child_session_id)
         .await
         .ok()
@@ -1904,6 +1989,9 @@ pub struct ProposeTaskInput {
     pub target_model_id: Option<String>,
     /// Start without a card; only for a turn the person started.
     pub start_now: bool,
+    /// Start when DCC allows it — the person started this turn, or an event
+    /// woke an agent that may start tasks itself — else a card.
+    pub start_when_allowed: bool,
     /// A task of its own in one of the person's projects (`agent_task`).
     pub new_task: Option<dcc_core::domain::agent_conversation::NewTaskTarget>,
 }
@@ -1929,7 +2017,9 @@ pub async fn propose_task(
         .map_err(|error| error.to_string())?
         .is_some()
     {
-        return Err("a task or delegated agent cannot propose tasks; report back instead".to_string());
+        return Err(
+            "a task or delegated agent cannot propose tasks; report back instead".to_string(),
+        );
     }
     // The agent's own conversation has no code to split off: its tasks go
     // to a project the person names.
@@ -1944,23 +2034,33 @@ pub async fn propose_task(
         .await
         .map_err(|error| error.to_string())?;
     let open_turn = open_turn_prompt(&events);
-    let person_turn = open_turn
-        .as_ref()
-        .is_some_and(|(_, prompt)| !prompt.starts_with(DCC_TURN_PREFIX));
-    // A [DCC] status turn proposing the next task is how review → fix →
-    // review chains form with nobody asking; only the human moves the plan.
-    if open_turn.is_some() && !person_turn {
+    // The person's turn starts tasks; an event that woke an agent opens one
+    // in a project (started only if the agent may start tasks itself); a
+    // task's [DCC] status opens none (`task_gate`).
+    let starts_itself = input.new_task.is_some()
+        && state
+            .session_agent(&parent.id)
+            .map_err(|error| error.to_string())?
+            .is_some_and(|agent| agent.auto_start_tasks);
+    let gate = crate::task_gate::task_gate(
+        open_turn.as_ref().map(|(_, prompt)| prompt.as_str()),
+        input.new_task.is_some(),
+        starts_itself,
+    );
+    if gate == crate::task_gate::TaskGate::Refused {
         return Err("a turn started by a [DCC] status cannot propose tasks; tell the human where things stand and stop. Fixing or re-checking a task's work is yours to do in this conversation once they reply".to_string());
     }
-    if input.start_now && !person_turn {
+    let may_start = gate == crate::task_gate::TaskGate::MayStart && open_turn.is_some();
+    if input.start_now && !may_start {
         return Err("start=now is only for a turn the human started; propose the task instead so they can start it".to_string());
     }
-    let proposals: Vec<Delegation> = DelegationRepo::list_delegations(state, None, Some(&parent.id))
-        .await
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .filter(|delegation| delegation.kind == DelegationKind::Task)
-        .collect();
+    let proposals: Vec<Delegation> =
+        DelegationRepo::list_delegations(state, None, Some(&parent.id))
+            .await
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|delegation| delegation.kind == DelegationKind::Task)
+            .collect();
     if let Some((turn_id, _)) = &open_turn {
         let this_turn = proposals
             .iter()
@@ -2025,7 +2125,7 @@ pub async fn propose_task(
         },
     )
     .await?;
-    if input.start_now {
+    if input.start_now || (input.start_when_allowed && may_start) {
         return start_task_proposal(state, &proposal.id, None).await;
     }
     Ok(proposal)
@@ -2084,7 +2184,8 @@ pub async fn start_task_proposal(
 
 /// Withdraws proposals nobody started within [`TASK_PROPOSAL_TTL_DAYS`].
 async fn expire_task_proposals(state: &SessionCommandState) {
-    let Ok(drafts) = DelegationRepo::list_delegations_by_status(state, DelegationStatus::Draft).await
+    let Ok(drafts) =
+        DelegationRepo::list_delegations_by_status(state, DelegationStatus::Draft).await
     else {
         return;
     };
@@ -2163,11 +2264,10 @@ struct WaitGuard {
 }
 
 impl WaitGuard {
-    fn register(
-        state: &SessionCommandState,
-        delegation: &Delegation,
-    ) -> Result<Self, String> {
-        let mut waits = waits().lock().map_err(|_| "wait registry unavailable".to_string())?;
+    fn register(state: &SessionCommandState, delegation: &Delegation) -> Result<Self, String> {
+        let mut waits = waits()
+            .lock()
+            .map_err(|_| "wait registry unavailable".to_string())?;
         if waits.contains_key(&delegation.id.0) {
             return Err("this task is already being waited on".to_string());
         }
@@ -2186,10 +2286,11 @@ impl WaitGuard {
     }
 
     fn claimed(&self) -> Option<String> {
-        waits()
-            .lock()
-            .ok()
-            .and_then(|waits| waits.get(&self.delegation_id).and_then(|slot| slot.claimed.clone()))
+        waits().lock().ok().and_then(|waits| {
+            waits
+                .get(&self.delegation_id)
+                .and_then(|slot| slot.claimed.clone())
+        })
     }
 
     fn mark_returned(&self) {
@@ -2246,26 +2347,44 @@ pub async fn wait_for_delegation(
         let current = delegation_for_parent(state, parent_session_id, delegation_id).await?;
         if let Some(result) = guard.claimed() {
             guard.mark_returned();
-            return Ok(WaitOutcome { delegation: current, result: Some(result), timed_out: false });
+            return Ok(WaitOutcome {
+                delegation: current,
+                result: Some(result),
+                timed_out: false,
+            });
         }
         match current.status {
             // Cancelled tasks are never handed back; nothing to wait for.
             DelegationStatus::Cancelled => {
-                return Ok(WaitOutcome { delegation: current, result: None, timed_out: false });
+                return Ok(WaitOutcome {
+                    delegation: current,
+                    result: None,
+                    timed_out: false,
+                });
             }
-            DelegationStatus::Completed | DelegationStatus::ReviewPending | DelegationStatus::Failed => {
+            DelegationStatus::Completed
+            | DelegationStatus::ReviewPending
+            | DelegationStatus::Failed => {
                 let since = *finished_since.get_or_insert_with(Instant::now);
                 if since.elapsed() >= CLAIM_GRACE {
                     // Finished before this wait began (already handed back),
                     // so report the record without delivering it twice.
                     guard.mark_returned();
-                    return Ok(WaitOutcome { delegation: current, result: None, timed_out: false });
+                    return Ok(WaitOutcome {
+                        delegation: current,
+                        result: None,
+                        timed_out: false,
+                    });
                 }
             }
             _ => {}
         }
         if Instant::now() >= deadline {
-            return Ok(WaitOutcome { delegation: current, result: None, timed_out: true });
+            return Ok(WaitOutcome {
+                delegation: current,
+                result: None,
+                timed_out: true,
+            });
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -2330,8 +2449,7 @@ pub async fn hand_back_to_parent(
             }
         }
     } else {
-        match send_turn_with_state(state, hand_back_turn(parent_session_id, prompt.clone())).await
-        {
+        match send_turn_with_state(state, hand_back_turn(parent_session_id, prompt.clone())).await {
             Ok(_) => Ok(()),
             Err(error) => {
                 eprintln!("[DCC] delegation hand-back could not start a turn: {error}");
@@ -2404,7 +2522,8 @@ fn timed_out(delegation: &Delegation, now: DateTime<Utc>) -> bool {
         .as_deref()
         .and_then(|started| DateTime::parse_from_rfc3339(started).ok())
         .is_some_and(|started| {
-            (now - started.with_timezone(&Utc)).num_seconds() > i64::try_from(timeout).unwrap_or(i64::MAX)
+            (now - started.with_timezone(&Utc)).num_seconds()
+                > i64::try_from(timeout).unwrap_or(i64::MAX)
         })
 }
 
@@ -2425,14 +2544,20 @@ fn start_grace_elapsed(delegation: &Delegation, now: DateTime<Utc>) -> bool {
 /// that never started.
 pub async fn reconcile_running_delegations(state: &SessionCommandState) {
     expire_task_proposals(state).await;
-    let Ok(running) = DelegationRepo::list_delegations_by_status(state, DelegationStatus::Running).await
+    let Ok(running) =
+        DelegationRepo::list_delegations_by_status(state, DelegationStatus::Running).await
     else {
         return;
     };
     let now = Utc::now();
     for delegation in running {
         let Some(child_session_id) = delegation.child_session_id.clone() else {
-            fail_and_hand_back(state, &delegation.id, "The delegated session no longer exists.").await;
+            fail_and_hand_back(
+                state,
+                &delegation.id,
+                "The delegated session no longer exists.",
+            )
+            .await;
             continue;
         };
         let Ok(events) = SessionEventRepo::list_events_by_session(state, &child_session_id).await
@@ -2494,10 +2619,11 @@ pub async fn delegation_for_parent(
     parent_session_id: &SessionId,
     delegation_id: &str,
 ) -> Result<Delegation, String> {
-    let delegation = DelegationRepo::get_delegation(state, &DelegationId(delegation_id.trim().to_string()))
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("task not found: {delegation_id}"))?;
+    let delegation =
+        DelegationRepo::get_delegation(state, &DelegationId(delegation_id.trim().to_string()))
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("task not found: {delegation_id}"))?;
     if delegation.parent_session_id != *parent_session_id {
         return Err(format!("task not found: {delegation_id}"));
     }
@@ -2534,7 +2660,8 @@ pub async fn cancel_delegation_for_parent(
     .await?
     .delegation;
     if let Some(child_session_id) = cancelled.child_session_id.as_ref() {
-        if let Ok(events) = SessionEventRepo::list_events_by_session(state, child_session_id).await {
+        if let Ok(events) = SessionEventRepo::list_events_by_session(state, child_session_id).await
+        {
             if let ChildOutcome::Running(turn_id) = child_outcome(&events) {
                 if let Err(error) = state
                     .quiesce_turn_for_abort(child_session_id, &turn_id, Some(&reason))
@@ -2599,7 +2726,9 @@ mod tests {
     #[test]
     fn result_turn_carries_task_result_and_validation() {
         let text = delegation_result_turn(&delegation(DelegationStatus::Completed), None);
-        assert!(text.starts_with("[DCC] Delegated review task finished — Codex (gpt-5.6) (task d-1)."));
+        assert!(
+            text.starts_with("[DCC] Delegated review task finished — Codex (gpt-5.6) (task d-1).")
+        );
         assert!(text.contains("Task you delegated:\nReview the diff."));
         assert!(text.contains("Result:\nLooks good."));
         assert!(text.contains("Validation:\nValidation-like commands: yarn test"));
@@ -2619,7 +2748,8 @@ mod tests {
 
     #[test]
     fn failed_result_reports_reason_without_result_block() {
-        let text = delegation_result_turn(&delegation(DelegationStatus::Failed), Some("Timed out."));
+        let text =
+            delegation_result_turn(&delegation(DelegationStatus::Failed), Some("Timed out."));
         assert!(text.contains("task failed"));
         assert!(text.contains("Failure: Timed out."));
         assert!(!text.contains("Result:"));
@@ -2658,7 +2788,10 @@ mod tests {
             extract_delegation_instruction(&delegation(DelegationStatus::Running).prompt),
             "Review the diff."
         );
-        assert_eq!(extract_delegation_instruction("  plain task "), "plain task");
+        assert_eq!(
+            extract_delegation_instruction("  plain task "),
+            "plain task"
+        );
     }
 
     #[test]
@@ -2719,7 +2852,9 @@ mod tests {
         let summary = summarize_child_turn(&events);
         assert_eq!(summary.assistant_text.as_deref(), Some("All good."));
         assert_eq!(summary.commands, vec!["yarn test".to_string()]);
-        assert!(validation_summary(&summary.commands).contains("Validation-like commands: yarn test"));
+        assert!(
+            validation_summary(&summary.commands).contains("Validation-like commands: yarn test")
+        );
     }
 
     #[test]
@@ -2728,8 +2863,14 @@ mod tests {
         let started = DateTime::parse_from_rfc3339("2026-10-05T10:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        assert!(!timed_out(&running, started + chrono::Duration::seconds(599)));
-        assert!(timed_out(&running, started + chrono::Duration::seconds(601)));
+        assert!(!timed_out(
+            &running,
+            started + chrono::Duration::seconds(599)
+        ));
+        assert!(timed_out(
+            &running,
+            started + chrono::Duration::seconds(601)
+        ));
     }
 
     #[test]
@@ -2737,24 +2878,48 @@ mod tests {
         use ProviderApprovalPolicy::*;
         let full = [ReadOnly, Ask, Auto, FullAccess];
         // Read-only modes stay read-only even under a full-access parent.
-        assert_eq!(child_approval_policy(&full, &DelegationMode::Review, Some(FullAccess)), Some(ReadOnly));
-        assert_eq!(child_approval_policy(&full, &DelegationMode::Explain, None), Some(ReadOnly));
+        assert_eq!(
+            child_approval_policy(&full, &DelegationMode::Review, Some(FullAccess)),
+            Some(ReadOnly)
+        );
+        assert_eq!(
+            child_approval_policy(&full, &DelegationMode::Explain, None),
+            Some(ReadOnly)
+        );
         // Implement tops out at auto in its worktree, and follows a stricter parent.
-        assert_eq!(child_approval_policy(&full, &DelegationMode::Implement, Some(FullAccess)), Some(Auto));
-        assert_eq!(child_approval_policy(&full, &DelegationMode::Implement, Some(Ask)), Some(Ask));
-        assert_eq!(child_approval_policy(&full, &DelegationMode::Implement, None), Some(Auto));
+        assert_eq!(
+            child_approval_policy(&full, &DelegationMode::Implement, Some(FullAccess)),
+            Some(Auto)
+        );
+        assert_eq!(
+            child_approval_policy(&full, &DelegationMode::Implement, Some(Ask)),
+            Some(Ask)
+        );
+        assert_eq!(
+            child_approval_policy(&full, &DelegationMode::Implement, None),
+            Some(Auto)
+        );
         // Without a read-only sandbox the next stricter level gates writes.
         let no_read_only = [Ask, Auto, FullAccess];
-        assert_eq!(child_approval_policy(&no_read_only, &DelegationMode::Review, Some(Auto)), Some(Ask));
+        assert_eq!(
+            child_approval_policy(&no_read_only, &DelegationMode::Review, Some(Auto)),
+            Some(Ask)
+        );
         // A provider that takes no policy gets none; the prompt carries the rule.
-        assert_eq!(child_approval_policy(&[], &DelegationMode::Review, Some(Auto)), None);
+        assert_eq!(
+            child_approval_policy(&[], &DelegationMode::Review, Some(Auto)),
+            None
+        );
     }
 
     #[test]
     fn a_task_that_edits_runs_with_its_parents_access() {
         use ProviderApprovalPolicy::*;
         let codex = [ReadOnly, Ask, Auto, FullAccess];
-        assert_eq!(task_approval_policy(&codex, Some(FullAccess)), Some(FullAccess));
+        assert_eq!(
+            task_approval_policy(&codex, Some(FullAccess)),
+            Some(FullAccess)
+        );
         assert_eq!(task_approval_policy(&codex, Some(Ask)), Some(Ask));
         // A delegation from the same parent stays under the auto ceiling.
         assert_eq!(
@@ -2762,7 +2927,10 @@ mod tests {
             Some(Auto)
         );
         // A level the provider lacks falls back to the delegation rule.
-        assert_eq!(task_approval_policy(&[ReadOnly, Ask], Some(FullAccess)), Some(Ask));
+        assert_eq!(
+            task_approval_policy(&[ReadOnly, Ask], Some(FullAccess)),
+            Some(Ask)
+        );
         assert_eq!(
             task_approval_policy(&codex, None),
             child_approval_policy(&codex, &DelegationMode::Implement, None)
@@ -2790,7 +2958,10 @@ mod tests {
             started(2, Some(ProviderApprovalPolicy::Ask)),
             started(3, None),
         ];
-        assert_eq!(latest_turn_approval_policy(&events), Some(ProviderApprovalPolicy::Ask));
+        assert_eq!(
+            latest_turn_approval_policy(&events),
+            Some(ProviderApprovalPolicy::Ask)
+        );
         assert_eq!(latest_turn_approval_policy(&[]), None);
     }
 
@@ -2808,8 +2979,12 @@ mod tests {
             writes_guarded,
             shared_checkout: false,
         };
-        assert!(build_delegation_prompt(&context(false)).contains("DCC cannot sandbox this provider"));
-        assert!(!build_delegation_prompt(&context(true)).contains("DCC cannot sandbox this provider"));
+        assert!(
+            build_delegation_prompt(&context(false)).contains("DCC cannot sandbox this provider")
+        );
+        assert!(
+            !build_delegation_prompt(&context(true)).contains("DCC cannot sandbox this provider")
+        );
     }
 
     #[test]
@@ -2938,7 +3113,10 @@ mod tests {
             }
         }
 
-        async fn running_delegation(state: &SessionCommandState, origin: DelegationOrigin) -> Delegation {
+        async fn running_delegation(
+            state: &SessionCommandState,
+            origin: DelegationOrigin,
+        ) -> Delegation {
             let mut delegation = delegation(DelegationStatus::Running);
             // The finalize guard is process-wide; parallel tests need distinct ids.
             delegation.id = DelegationId(Uuid::new_v4().to_string());
@@ -3135,7 +3313,10 @@ mod tests {
             append(
                 state,
                 "parent",
-                started("p-2", "[DCC] Delegated review task finished — Codex (task d-1)."),
+                started(
+                    "p-2",
+                    "[DCC] Delegated review task finished — Codex (task d-1).",
+                ),
             )
             .await;
 
@@ -3185,7 +3366,10 @@ mod tests {
             let error = run_delegation(state, agent_review_from_parent())
                 .await
                 .expect_err("the per-turn cap must refuse");
-            assert!(error.contains("already delegated 6 tasks in this turn"), "{error}");
+            assert!(
+                error.contains("already delegated 6 tasks in this turn"),
+                "{error}"
+            );
 
             // The next turn the person starts gets a fresh allowance.
             append(
@@ -3214,6 +3398,7 @@ mod tests {
                 target_provider_id: Some("not-a-provider".to_string()),
                 target_model_id: None,
                 start_now: false,
+                start_when_allowed: false,
                 new_task: None,
             }
         }
@@ -3229,9 +3414,7 @@ mod tests {
                     parent_session_id: SessionId("parent".to_string()),
                     parent_turn_id: turn.map(|turn| TurnId(turn.to_string())),
                     workspace_id: WorkspaceId("workspace".to_string()),
-                    target_provider_id: dcc_core::domain::provider::ProviderId(
-                        "codex".to_string(),
-                    ),
+                    target_provider_id: dcc_core::domain::provider::ProviderId("codex".to_string()),
                     target_model_id: None,
                     mode: DelegationMode::Implement,
                     title: title.to_string(),
@@ -3249,9 +3432,12 @@ mod tests {
             let state = &fixture.state;
             let now = |title: &str| ProposeTaskInput {
                 start_now: true,
+                start_when_allowed: false,
                 ..proposal_input(title)
             };
-            let error = propose_task(state, now("Fase 2")).await.expect_err("no open turn");
+            let error = propose_task(state, now("Fase 2"))
+                .await
+                .expect_err("no open turn");
             assert!(error.contains("start=now"), "{error}");
 
             append(state, "parent", started("p-2", "plan the mobile app")).await;
@@ -3435,7 +3621,9 @@ mod tests {
             let state = &fixture.state;
             let mut old = saved_proposal(state, "Fase antiga", None).await;
             old.created_at = (Utc::now() - chrono::Duration::days(8)).to_rfc3339();
-            DelegationRepo::save_delegation(state, &old).await.expect("age it");
+            DelegationRepo::save_delegation(state, &old)
+                .await
+                .expect("age it");
             let fresh = saved_proposal(state, "Fase nova", None).await;
 
             reconcile_running_delegations(state).await;
@@ -3461,9 +3649,16 @@ mod tests {
             task.budget.timeout_seconds = None;
             // Long past any delegation timeout: a task has no clock.
             task.started_at = Some((Utc::now() - chrono::Duration::hours(3)).to_rfc3339());
-            DelegationRepo::save_delegation(state, &task).await.expect("save task");
+            DelegationRepo::save_delegation(state, &task)
+                .await
+                .expect("save task");
             append(state, "parent", started("p-1", "work")).await;
-            append(state, "child", started("c-1", "Task from Dev Command Center, proposed in \"x\".")).await;
+            append(
+                state,
+                "child",
+                started("c-1", "Task from Dev Command Center, proposed in \"x\"."),
+            )
+            .await;
             reconcile_running_delegations(state).await;
             assert_eq!(
                 DelegationRepo::get_delegation(state, &task.id)
@@ -3481,7 +3676,10 @@ mod tests {
                     turn_id: TurnId("c-1".to_string()),
                     message_id: "m".to_string(),
                     phase: AssistantMessagePhase::FinalAnswer,
-                    content: Some(format!("Push notifications work. {}", "detail ".repeat(200))),
+                    content: Some(format!(
+                        "Push notifications work. {}",
+                        "detail ".repeat(200)
+                    )),
                 },
             )
             .await;
@@ -3497,7 +3695,11 @@ mod tests {
 
             let queued = queued_prompts(state, "parent").await;
             assert_eq!(queued.len(), 1);
-            assert!(queued[0].starts_with("[DCC] Task \"Fase 2\" ended a turn"), "{}", queued[0]);
+            assert!(
+                queued[0].starts_with("[DCC] Task \"Fase 2\" ended a turn"),
+                "{}",
+                queued[0]
+            );
             assert!(queued[0].contains("Push notifications work."));
             assert!(queued[0].chars().count() < 900, "the status stays short");
         }
@@ -3515,7 +3717,9 @@ mod tests {
                 shared_checkout: false,
                 new_task: None,
             };
-            DelegationRepo::save_delegation(state, &task).await.expect("save task");
+            DelegationRepo::save_delegation(state, &task)
+                .await
+                .expect("save task");
             task
         }
 
@@ -3557,13 +3761,23 @@ mod tests {
             let task = open_task(state).await;
             append(state, "parent", started("p-1", "plan")).await;
 
-            child_turn(state, "c-1", "Task from Dev Command Center, proposed in \"plan\".", "Phase 2 done.").await;
+            child_turn(
+                state,
+                "c-1",
+                "Task from Dev Command Center, proposed in \"plan\".",
+                "Phase 2 done.",
+            )
+            .await;
             // The watchdog announcing the same turn again reports nothing new.
             reconcile_running_delegations(state).await;
             let queued = queued_prompts(state, "parent").await;
             assert_eq!(queued.len(), 1);
             assert!(queued[0].contains("Phase 2 done."));
-            assert!(queued[0].contains("Your tasks:\n- Fase 2 — open"), "{}", queued[0]);
+            assert!(
+                queued[0].contains("Your tasks:\n- Fase 2 — open"),
+                "{}",
+                queued[0]
+            );
             let stored = load(state, &task.id).await;
             assert_eq!(stored.status, DelegationStatus::Running);
             assert_eq!(stored.reported_turn_id, Some(TurnId("c-1".to_string())));
@@ -3571,10 +3785,19 @@ mod tests {
             // The person talking to the task: recorded, the parent left alone.
             child_turn(state, "c-2", "also rename the button", "Renamed.").await;
             assert_eq!(queued_prompts(state, "parent").await.len(), 1);
-            assert_eq!(load(state, &task.id).await.result_summary.as_deref(), Some("Renamed."));
+            assert_eq!(
+                load(state, &task.id).await.result_summary.as_deref(),
+                Some("Renamed.")
+            );
 
             // A follow-up the parent sent comes back to it.
-            child_turn(state, "c-3", "[DCC] Message from the session that coordinates this task:\n\nadd tests", "Tests added.").await;
+            child_turn(
+                state,
+                "c-3",
+                "[DCC] Message from the session that coordinates this task:\n\nadd tests",
+                "Tests added.",
+            )
+            .await;
             let queued = queued_prompts(state, "parent").await;
             assert_eq!(queued.len(), 2);
             assert!(queued[1].contains("Tests added."));
@@ -3586,7 +3809,12 @@ mod tests {
             let state = &fixture.state;
             let task = open_task(state).await;
             append(state, "parent", started("p-1", "plan")).await;
-            append(state, "child", started("c-1", "Task from Dev Command Center, proposed in \"plan\".")).await;
+            append(
+                state,
+                "child",
+                started("c-1", "Task from Dev Command Center, proposed in \"plan\"."),
+            )
+            .await;
             append(
                 state,
                 "child",
@@ -3598,7 +3826,10 @@ mod tests {
             .await;
             on_session_turn_terminal(state.clone(), SessionId("child".to_string())).await;
 
-            assert_eq!(load(state, &task.id).await.status, DelegationStatus::Running);
+            assert_eq!(
+                load(state, &task.id).await.status,
+                DelegationStatus::Running
+            );
             let queued = queued_prompts(state, "parent").await;
             assert_eq!(queued.len(), 1);
             assert!(queued[0].contains("The turn was interrupted: Stopped by the person."));
@@ -3609,8 +3840,15 @@ mod tests {
             let fixture = fixture().await;
             let state = &fixture.state;
             let task = open_task(state).await;
-            append(state, "child", started("c-1", "Task from Dev Command Center.")).await;
-            let error = complete_task(state, &task.id).await.expect_err("still working");
+            append(
+                state,
+                "child",
+                started("c-1", "Task from Dev Command Center."),
+            )
+            .await;
+            let error = complete_task(state, &task.id)
+                .await
+                .expect_err("still working");
             assert!(error.contains("still working"), "{error}");
 
             append(
@@ -3623,7 +3861,9 @@ mod tests {
             .await;
             let closed = complete_task(state, &task.id).await.expect("close");
             assert_eq!(closed.status, DelegationStatus::Completed);
-            let error = complete_task(state, &task.id).await.expect_err("closed already");
+            let error = complete_task(state, &task.id)
+                .await
+                .expect_err("closed already");
             assert!(error.contains("only an open task"), "{error}");
         }
 
@@ -3632,22 +3872,51 @@ mod tests {
             let fixture = fixture().await;
             let state = &fixture.state;
             let task = open_task(state).await;
-            append(state, "parent", started("p-1", "[DCC] Task \"Fase 2\" ended a turn")).await;
-            let error = message_task(state, &SessionId("parent".to_string()), &task.id.0, "add tests")
-                .await
-                .expect_err("a DCC turn cannot message");
+            append(
+                state,
+                "parent",
+                started("p-1", "[DCC] Task \"Fase 2\" ended a turn"),
+            )
+            .await;
+            let error = message_task(
+                state,
+                &SessionId("parent".to_string()),
+                &task.id.0,
+                "add tests",
+            )
+            .await
+            .expect_err("a DCC turn cannot message");
             assert!(error.contains("a turn the human started"), "{error}");
 
-            append(state, "parent", SessionEventKind::TurnCompleted { turn_id: TurnId("p-1".to_string()) }).await;
+            append(
+                state,
+                "parent",
+                SessionEventKind::TurnCompleted {
+                    turn_id: TurnId("p-1".to_string()),
+                },
+            )
+            .await;
             append(state, "parent", started("p-2", "ask the task to add tests")).await;
             // The task is mid-turn: the message waits as a turn of its own.
-            append(state, "child", started("c-1", "Task from Dev Command Center.")).await;
-            message_task(state, &SessionId("parent".to_string()), &task.id.0, "add tests")
-                .await
-                .expect("queued");
+            append(
+                state,
+                "child",
+                started("c-1", "Task from Dev Command Center."),
+            )
+            .await;
+            message_task(
+                state,
+                &SessionId("parent".to_string()),
+                &task.id.0,
+                "add tests",
+            )
+            .await
+            .expect("queued");
             let queued = queued_prompts(state, "child").await;
             assert_eq!(queued.len(), 1);
-            assert!(queued[0].starts_with("[DCC] Message from the session that coordinates this task:"));
+            assert!(
+                queued[0].starts_with("[DCC] Message from the session that coordinates this task:")
+            );
             assert!(queued[0].ends_with("add tests"));
         }
 
@@ -3660,7 +3929,9 @@ mod tests {
             task.budget.allow_file_edits = true;
             task.budget.shared_checkout = true;
             task.touched_files = vec!["src/push.ts".to_string()];
-            DelegationRepo::save_delegation(state, &task).await.expect("save");
+            DelegationRepo::save_delegation(state, &task)
+                .await
+                .expect("save");
 
             let status = task_result_turn(&task, None, &[]);
             assert!(status.contains("directly in your checkout"), "{status}");
@@ -3818,7 +4089,10 @@ mod tests {
                 SessionEventRepo::list_events_by_session(state, &SessionId("child".to_string()))
                     .await
                     .expect("child history");
-            assert!(matches!(child_outcome(&child_events), ChildOutcome::Aborted(_)));
+            assert!(matches!(
+                child_outcome(&child_events),
+                ChildOutcome::Aborted(_)
+            ));
 
             // The abort's terminal hook finds a cancelled delegation: no hand-back.
             on_session_turn_terminal(state.clone(), SessionId("child".to_string())).await;
@@ -3826,10 +4100,15 @@ mod tests {
             assert!(queued_prompts(state, "parent").await.is_empty());
             // Cancelling again is a no-op that reports the current state.
             assert_eq!(
-                cancel_delegation_for_parent(state, &SessionId("parent".to_string()), &delegation.id.0, None)
-                    .await
-                    .expect("idempotent")
-                    .status,
+                cancel_delegation_for_parent(
+                    state,
+                    &SessionId("parent".to_string()),
+                    &delegation.id.0,
+                    None
+                )
+                .await
+                .expect("idempotent")
+                .status,
                 DelegationStatus::Cancelled
             );
         }
@@ -3881,9 +4160,15 @@ mod tests {
 
             let outcome = waiter.await.expect("join").expect("wait");
             assert!(!outcome.timed_out);
-            assert!(outcome.result.as_deref().is_some_and(|text| text.contains("Waited result.")));
+            assert!(outcome
+                .result
+                .as_deref()
+                .is_some_and(|text| text.contains("Waited result.")));
             assert_eq!(outcome.delegation.status, DelegationStatus::Completed);
-            assert!(queued_prompts(&state, "parent").await.is_empty(), "delivered twice");
+            assert!(
+                queued_prompts(&state, "parent").await.is_empty(),
+                "delivered twice"
+            );
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -3934,12 +4219,20 @@ mod tests {
             let fixture = fixture().await;
             let state = &fixture.state;
             let delegation = running_delegation(state, DelegationOrigin::Agent).await;
-            assert!(delegation_for_parent(state, &SessionId("parent".to_string()), &delegation.id.0)
-                .await
-                .is_ok());
-            assert!(delegation_for_parent(state, &SessionId("child".to_string()), &delegation.id.0)
-                .await
-                .is_err());
+            assert!(delegation_for_parent(
+                state,
+                &SessionId("parent".to_string()),
+                &delegation.id.0
+            )
+            .await
+            .is_ok());
+            assert!(delegation_for_parent(
+                state,
+                &SessionId("child".to_string()),
+                &delegation.id.0
+            )
+            .await
+            .is_err());
         }
     }
 }

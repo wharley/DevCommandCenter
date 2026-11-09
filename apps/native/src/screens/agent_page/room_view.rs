@@ -189,6 +189,7 @@ impl TeamRoom {
                             )
                             .child(self.reaction_buttons(index, line, cx)),
                     )
+                    .children(self.report_card(index, line, cx))
                     .children(self.rule_field(line, cx)),
             )
             .into_any_element()

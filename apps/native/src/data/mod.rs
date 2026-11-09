@@ -106,6 +106,7 @@ pub(crate) mod sse;
 pub mod system_terminal;
 pub mod task_agents;
 pub mod task_proposal;
+pub mod task_reports;
 pub mod tasks;
 pub mod team_room;
 pub mod terminal_api;

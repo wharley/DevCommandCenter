@@ -2701,6 +2701,7 @@ async fn dispatch_delegation_tool(
                     target_provider_id: args.provider,
                     target_model_id: args.model,
                     start_now,
+                    start_when_allowed: false,
                     new_task: None,
                 },
             )
@@ -2731,13 +2732,13 @@ async fn dispatch_delegation_tool(
             let Some(args) = crate::open_task_tool::parse(call.arguments) else {
                 return ToolDispatch::computer_error("invalid dcc_open_task arguments");
             };
-            let start_now = args.starts_now();
             match crate::open_task_tool::open(&bridge.sessions, parent, args).await {
                 Ok(task) => {
+                    let started = task.child_session_id.is_some();
                     let mut view = delegation_task_view(&task);
-                    view["delivery"] = json!(crate::open_task_tool::delivery(start_now, &task));
+                    view["delivery"] = json!(crate::open_task_tool::delivery(&task));
                     reply(
-                        if start_now {
+                        if started {
                             "Task started."
                         } else {
                             "Task proposed."

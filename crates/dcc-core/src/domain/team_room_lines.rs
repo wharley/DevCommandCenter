@@ -37,6 +37,37 @@ pub struct RoomLine {
     /// When it was said (RFC 3339).
     pub at: String,
     pub receipt: Option<Receipt>,
+    /// The tasks a [DCC] status reported in the turn this answers (the task
+    /// that ended and the others opened with it), for the room's report.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<String>,
+}
+
+/// The tasks a `[DCC] Task "…" ended a turn` status reports: its own and
+/// the others listed as opened in the same turn (`task_group`).
+pub fn reported_tasks(status: &str) -> Vec<String> {
+    let mut tasks = Vec::new();
+    if let Some(hand_back) = crate::domain::timeline::parse_delegation_hand_back(status) {
+        tasks.push(hand_back.delegation_id);
+    }
+    let Some(start) = status.find("The other tasks you opened in the same turn") else {
+        return tasks;
+    };
+    for line in status[start..].lines().skip(1) {
+        let Some(rest) = line.strip_prefix("- \"") else {
+            break;
+        };
+        let Some(id) = rest
+            .split_once("\" (task ")
+            .and_then(|(_, tail)| tail.split_once(')'))
+            .map(|(id, _)| id)
+            .filter(|id| !id.is_empty() && !id.contains(char::is_whitespace))
+        else {
+            continue;
+        };
+        tasks.push(id.to_string());
+    }
+    tasks
 }
 
 fn seconds_between(start: &str, end: &str) -> Option<i64> {
@@ -56,6 +87,8 @@ pub fn lines_of(
     let mut lines: Vec<RoomLine> = Vec::new();
     // The last answer of each turn, by its turn.
     let mut answer_of: HashMap<&str, usize> = HashMap::new();
+    // The tasks a status reported, by the turn it started.
+    let mut reported: HashMap<&str, Vec<String>> = HashMap::new();
     for message in messages {
         let at = message
             .created_at
@@ -63,7 +96,12 @@ pub fn lines_of(
             .or_else(|| message.turn_ended_at.clone())
             .unwrap_or_default();
         match message.role {
-            Role::User if message.hand_back.is_none() && !message.content.trim().is_empty() => {
+            Role::User if message.hand_back.is_some() => {
+                if let Some(turn) = message.turn_id.as_deref() {
+                    reported.insert(turn, reported_tasks(&message.content));
+                }
+            }
+            Role::User if !message.content.trim().is_empty() => {
                 lines.push(RoomLine {
                     key: format!("{session_id}:{}", message.id),
                     agent_id: agent_id.to_string(),
@@ -72,6 +110,7 @@ pub fn lines_of(
                     text: message.content.trim().to_string(),
                     at,
                     receipt: None,
+                    tasks: Vec::new(),
                 });
             }
             Role::Assistant
@@ -99,6 +138,7 @@ pub fn lines_of(
                     text: message.content.trim().to_string(),
                     at: message.turn_ended_at.clone().unwrap_or(at),
                     receipt: Some(receipt),
+                    tasks: reported.get(turn).cloned().unwrap_or_default(),
                 };
                 match answer_of.get(turn) {
                     Some(&index) => lines[index] = line,
@@ -133,6 +173,13 @@ pub fn last_answer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_status_names_the_tasks_it_reports() {
+        let status = "[DCC] Task \"Campo X\" ended a turn — Claude Code (task t-2).\n\nFeito.\nThe other tasks you opened in the same turn ended their first turn too:\n- \"Análise\" (task t-1): dá para enviar.\nGive the person one report for all of them.\n\nYour tasks:\n- Outra — open (task t-9)";
+        assert_eq!(reported_tasks(status), ["t-2", "t-1"]);
+        assert!(reported_tasks("corrige isso").is_empty());
+    }
 
     fn message(id: &str, role: Role, turn: &str, content: &str, at: &str) -> TimelineMessage {
         let mut message = TimelineMessage {

@@ -18,6 +18,8 @@ pub mod process_runtime_registry;
 pub mod provider_delta_coalescer;
 pub mod rt;
 pub mod state;
+pub mod task_gate;
+pub mod task_group;
 pub mod terminal_arbiter;
 pub mod turn_review;
 pub mod usage_limit_resume;
@@ -34,4 +36,3 @@ fn _capture_v2_send_sync_assertions() {
     assert_send_sync::<dcc_infra::guarded_undo::macos_store::MacArtifactStoreLease>();
     assert_send_sync::<dcc_infra::guarded_undo::macos_store::MacArtifactStore>();
 }
-

@@ -15,6 +15,11 @@ use crate::theme::ActiveTheme;
 const MASCOT: f32 = 13.0;
 
 impl Sidebar {
+    /// What the room's report shows of the task delegated as `id`.
+    pub(crate) fn task_report(&self, id: &str) -> Option<&crate::data::task_reports::TaskReport> {
+        self.state.data.task_reports.get(id)
+    }
+
     /// The agent task `task_id` belongs to, if one does.
     pub(crate) fn task_agent(&self, task_id: &str) -> Option<&AgentRecord> {
         let agent_id = self.state.data.task_agents.get(task_id)?;

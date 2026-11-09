@@ -71,6 +71,7 @@ pub fn proposal_draft(
         projects,
         monthly_token_limit: None,
         tool_access,
+        auto_start_tasks: false,
     }
     .normalized()
 }

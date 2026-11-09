@@ -173,6 +173,7 @@ mod tests {
             projects: Vec::new(),
             monthly_token_limit: None,
             tool_access: Default::default(),
+            auto_start_tasks: false,
             id: "rev".into(),
             name: "Revisor".into(),
             preset: Some("reviewer".into()),

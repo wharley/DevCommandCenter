@@ -30,7 +30,7 @@ use crate::i18n::{Args, Translate};
 /// What an agent is asked about an issue assigned to the person.
 pub(super) fn issue_prompt(issue: &CheckIn) -> String {
     format!(
-        "[DCC] An issue was assigned to the person: {} — \"{}\" ({}).\n\nRead it. If it is work for one of the person's projects, propose the task with dcc_open_task and a self-contained brief (a card the person starts); if it is not, say why in one line. Do not start anything yourself. Answer in the person's language, short.",
+        "[DCC] An issue was assigned to the person: {} — \"{}\" ({}).\n\nRead it. If it is work for one of the person's projects, open the task with dcc_open_task and a self-contained brief (it starts, or waits as a card, as the person set for you); if it is not, say why in one line. Answer in the person's language, short.",
         issue.place,
         issue.title,
         issue.url.as_deref().unwrap_or_default()
@@ -316,7 +316,7 @@ mod tests {
         );
         let prompt = issue_prompt(&issue);
         assert!(prompt.starts_with("[DCC] An issue was assigned to the person: acme/app #4"));
-        assert!(prompt.contains("dcc_open_task") && prompt.contains("Do not start anything"));
+        assert!(prompt.contains("dcc_open_task") && prompt.contains("as the person set for you"));
         let stalled = stalled_prompt(&issue);
         assert!(stalled.contains("read-only") && stalled.contains("20 minutes"));
     }

@@ -44,6 +44,7 @@ pub fn template_draft(template: &str, name: &str) -> Option<ResidentAgentDraft> 
         projects: Vec::new(),
         monthly_token_limit: None,
         tool_access: Default::default(),
+        auto_start_tasks: false,
     })
 }
 

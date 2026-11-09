@@ -37,6 +37,8 @@ pub struct OpenTaskInput {
     pub effort: Option<String>,
     /// Start without a card; only for a turn the person started.
     pub start_now: bool,
+    /// Start if DCC allows it, else a card (`ProposeTaskInput`).
+    pub start_when_allowed: bool,
 }
 
 /// The person's project called `project` (its name, any case, or its id);
@@ -148,6 +150,7 @@ pub async fn open_task(
             target_provider_id: input.target_provider_id,
             target_model_id: input.target_model_id,
             start_now: input.start_now,
+            start_when_allowed: input.start_when_allowed,
             new_task: Some(target),
         },
     )
@@ -227,6 +230,7 @@ mod tests {
             target_model_id: None,
             effort: None,
             start_now: false,
+            start_when_allowed: false,
         }
     }
 

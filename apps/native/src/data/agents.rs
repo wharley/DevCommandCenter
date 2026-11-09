@@ -72,6 +72,8 @@ pub struct AgentRecord {
     pub monthly_token_limit: Option<u64>,
     /// What it may use (`agent_access`); nothing set: everything.
     pub tool_access: dcc_core::domain::agent_access::ToolAccess,
+    /// Starts the tasks it opens when an event woke it.
+    pub auto_start_tasks: bool,
     pub sessions: Vec<AgentSession>,
 }
 
@@ -248,6 +250,7 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                 projects: agent.projects,
                 monthly_token_limit: agent.monthly_token_limit,
                 tool_access: agent.tool_access,
+                auto_start_tasks: agent.auto_start_tasks,
                 sessions,
             }
         })

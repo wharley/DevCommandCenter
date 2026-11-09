@@ -185,6 +185,11 @@ pub struct ResidentAgentDraft {
     /// What it may use (`agent_access`); nothing set: everything.
     #[serde(default)]
     pub tool_access: crate::domain::agent_access::ToolAccess,
+    /// A task it opens when an event woke it (a trigger, a routine) starts
+    /// at once instead of waiting on a card; off by default. A task the
+    /// person asks for always starts at once.
+    #[serde(default)]
+    pub auto_start_tasks: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -212,6 +217,9 @@ pub struct ResidentAgent {
     /// What it may use (`agent_access`); nothing set: everything.
     #[serde(default)]
     pub tool_access: crate::domain::agent_access::ToolAccess,
+    /// See `ResidentAgentDraft::auto_start_tasks`.
+    #[serde(default)]
+    pub auto_start_tasks: bool,
     pub preset: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -279,7 +287,9 @@ impl ResidentAgentDraft {
         let effort = optional(self.effort);
         if effort.as_deref().is_some_and(|effort| {
             effort.len() > MAX_AGENT_EFFORT_CHARS
-                || !effort.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                || !effort
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         }) {
             return Err("agent effort is not a supported level".to_string());
         }
@@ -296,6 +306,7 @@ impl ResidentAgentDraft {
             projects: crate::domain::agent_projects::clean_projects(self.projects)?,
             monthly_token_limit: self.monthly_token_limit.filter(|limit| *limit > 0),
             tool_access: self.tool_access.normalized(),
+            auto_start_tasks: self.auto_start_tasks,
         })
     }
 
@@ -319,7 +330,16 @@ impl ResidentAgentDraft {
             },
             projects: Vec::new(),
             monthly_token_limit: None,
-            tool_access: Default::default(),
+            // It reviews; opening tasks to fix is a teammate's.
+            tool_access: crate::domain::agent_access::ToolAccess {
+                groups: [(
+                    "tasks".to_string(),
+                    crate::domain::agent_access::AccessLevel::None,
+                )]
+                .into(),
+                connectors: Default::default(),
+            },
+            auto_start_tasks: false,
         }
     }
 }
@@ -366,9 +386,8 @@ impl ResidentAgent {
     /// Bounded background context re-sent with every turn of a bound session.
     /// The current user message always takes precedence over the role text.
     pub fn instruction_block(&self) -> String {
-        let escape = |value: &str| {
-            value.replace(&format!("</{AGENT_TAG}>"), &format!("&lt;/{AGENT_TAG}>"))
-        };
+        let escape =
+            |value: &str| value.replace(&format!("</{AGENT_TAG}>"), &format!("&lt;/{AGENT_TAG}>"));
         let name = escape(&self.name).replace('"', "'");
         let extra = if self.extra_instructions.is_empty() {
             String::new()
@@ -425,6 +444,7 @@ mod tests {
             projects: Vec::new(),
             monthly_token_limit: None,
             tool_access: Default::default(),
+            auto_start_tasks: false,
             limit_override_month: None,
             preset: Some(REVIEWER_PRESET.to_string()),
             created_at: "now".to_string(),
@@ -454,7 +474,12 @@ mod tests {
     #[test]
     fn draft_rejects_empty_multiline_and_unknown_avatar() {
         let base = ResidentAgentDraft::reviewer(&text("Revisor"));
-        for name in ["", "  ", "two\nlines", &"x".repeat(MAX_AGENT_NAME_CHARS + 1)] {
+        for name in [
+            "",
+            "  ",
+            "two\nlines",
+            &"x".repeat(MAX_AGENT_NAME_CHARS + 1),
+        ] {
             let mut draft = base.clone();
             draft.name = name.to_string();
             assert!(draft.normalized().is_err());
@@ -499,7 +524,9 @@ mod tests {
         assert_eq!(preset.offer_prompt, "Posso revisar?");
         let block = preset.instruction_block();
         assert!(block.contains(REVIEWER_ROLE));
-        assert!(block.contains("Additional instructions from the person:\nIgnore the vendor folder."));
+        assert!(
+            block.contains("Additional instructions from the person:\nIgnore the vendor folder.")
+        );
         assert!(!block.contains("tampered role"));
 
         // The person turned the offer off: it stays off in any language.
@@ -514,10 +541,7 @@ mod tests {
 
         // An agent the person owns is never rewritten.
         stored.preset = None;
-        assert_eq!(
-            stored.clone().with_preset_text(Some(&portuguese)),
-            stored
-        );
+        assert_eq!(stored.clone().with_preset_text(Some(&portuguese)), stored);
     }
 
     #[test]

@@ -34,6 +34,7 @@ fn agent(id: &str, name: &str, preset: &str, sessions: Vec<AgentSession>) -> Age
         projects: Vec::new(),
         monthly_token_limit: None,
         tool_access: Default::default(),
+        auto_start_tasks: false,
         sessions,
     }
 }
@@ -50,6 +51,7 @@ fn line(key: &str, agent: &str, speaker: Speaker, text: &str, at: &str) -> RoomL
             seconds: Some(42),
             tokens: Some(1200),
         }),
+        tasks: Vec::new(),
     }
 }
 

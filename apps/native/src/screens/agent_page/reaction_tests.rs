@@ -77,6 +77,7 @@ fn an_answer_is_marked_and_a_thumbs_down_keeps_a_rule(cx: &mut TestAppContext) {
                 text: "Revisei os 3 PRs.".into(),
                 at: "2026-11-09T10:00:42Z".into(),
                 receipt: None,
+                tasks: Vec::new(),
             }];
             room.take(vec![feed]);
             cx.notify();

@@ -72,6 +72,8 @@ pub struct AgentEditor {
     pub(crate) monthly_token_limit: Option<u64>,
     /// What it may use (`editor_access`).
     pub(crate) tool_access: dcc_core::domain::agent_access::ToolAccess,
+    /// "Pode começar tarefas sozinho".
+    pub(crate) auto_start_tasks: bool,
     /// The person's connectors, by id and name.
     pub(crate) connector_names: Vec<(String, String)>,
     pub(super) catalog: Vec<ProviderDescriptor>,
@@ -181,6 +183,7 @@ impl AgentEditor {
             template: None,
             monthly_token_limit: agent.monthly_token_limit,
             tool_access: agent.tool_access.clone(),
+            auto_start_tasks: agent.auto_start_tasks,
             connector_names: Vec::new(),
             agent,
             name,
@@ -242,6 +245,7 @@ impl AgentEditor {
             "projects": self.projects,
             "monthlyTokenLimit": self.monthly_token_limit,
             "toolAccess": self.tool_access,
+            "autoStartTasks": self.auto_start_tasks,
         })
     }
 
@@ -388,6 +392,14 @@ impl Render for AgentEditor {
             ))
             .child(self.limit_field(cx))
             .child(self.access_field(cx))
+            .child(self.switch_row(
+                "agent-editor-auto-start",
+                cx.t("agents.editor.autoStart"),
+                cx.t("agents.editor.autoStartHint"),
+                self.auto_start_tasks,
+                |editor, on| editor.auto_start_tasks = on,
+                cx,
+            ))
             .child(field(
                 cx.t("agents.editor.extra"),
                 Some(cx.t("agents.editor.extraHint")),

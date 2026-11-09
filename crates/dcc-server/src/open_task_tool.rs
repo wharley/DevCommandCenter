@@ -39,6 +39,12 @@ impl OpenTaskArgs {
     pub fn starts_now(&self) -> bool {
         self.start.as_deref() == Some("now")
     }
+
+    /// No `start` given: it starts when DCC allows it (the person asked in
+    /// this turn, or an event woke an agent that may start tasks itself).
+    pub fn starts_when_allowed(&self) -> bool {
+        self.start.is_none()
+    }
 }
 
 pub fn is_open_task_tool(name: &str) -> bool {
@@ -48,7 +54,7 @@ pub fn is_open_task_tool(name: &str) -> bool {
 pub fn definition() -> Value {
     json!({
         "name": OPEN_TASK_TOOL,
-        "description": "Only in your own conversation as a DCC resident agent (your instructions carry a dcc_agent_conversation block): open a task in one of the person's projects, the way they would with \"Nova tarefa\". It becomes a task of its own in their task list, in a protected worktree unless worktree=false (the project's own checkout). Call it when the person asks for work in a project; questions about where things stand you answer yourself with dcc_overview. The task sees only your brief and the project, so make it self-contained: goal, area, constraints and what done looks like. Nothing runs until the person starts it from the card; use start=now only when they asked, in this turn, to start it now. Each time the task ends a turn DCC sends you a short [DCC] status: tell the person where it stands and stop; send it more with dcc_task_message only when they ask. At most 3 per turn.",
+        "description": "Only in your own conversation as a DCC resident agent (your instructions carry a dcc_agent_conversation block): open a task in one of the person's projects, the way they would with \"Nova tarefa\". It becomes a task of its own in their task list, in a protected worktree unless worktree=false (the project's own checkout). Call it when the person asks for work in a project; questions about where things stand you answer yourself with dcc_overview. The task sees only your brief and the project, so make it self-contained: goal, area, constraints and what done looks like. When the person asked for the work in this turn the task starts at once; when an event woke you (a trigger, a routine) it starts only if the person lets you start tasks yourself, else it waits as a card they start. Pass start=propose when they want to see it before it runs. Each time the task ends a turn DCC sends you a short [DCC] status: tell the person where it stands and stop; send it more with dcc_task_message only when they ask. At most 3 per turn.",
         "inputSchema": {
             "type": "object",
             "additionalProperties": false,
@@ -110,6 +116,7 @@ pub async fn open(
     args: OpenTaskArgs,
 ) -> Result<Delegation, String> {
     let start_now = args.starts_now();
+    let start_when_allowed = args.starts_when_allowed();
     let clean = |value: Option<String>| {
         value
             .map(|value| value.trim().to_string())
@@ -127,15 +134,16 @@ pub async fn open(
             target_model_id: clean(args.model),
             effort: clean(args.effort),
             start_now,
+            start_when_allowed,
         },
     )
     .await
 }
 
 /// What the agent is told after the call, besides the task's view.
-pub fn delivery(start_now: bool, task: &Delegation) -> &'static str {
-    match (start_now, task.child_session_id.is_some()) {
-        (true, true) => "The task started in the person's task list. When it ends a turn, DCC sends you a short status starting with [DCC]. Do not poll.",
+pub fn delivery(task: &Delegation) -> &'static str {
+    match task.child_session_id.is_some() {
+        true => "The task started in the person's task list. When it ends a turn, DCC sends you a short status starting with [DCC]. Do not poll.",
         _ => "The proposal waits as a card in this conversation; nothing runs until the person starts it. Mention it in your reply and end your turn.",
     }
 }
@@ -149,8 +157,13 @@ mod tests {
         let parse = |value: Value| parse(Some(value));
         let args = parse(json!({"project": "Checkout", "title": "Fase 2", "task": "Do it."}))
             .expect("the minimum");
-        assert!(!args.starts_now());
+        assert!(!args.starts_now() && args.starts_when_allowed());
         assert!(args.worktree.is_none());
+        let shown = parse(
+            json!({"project": "Checkout", "title": "Fase 2", "task": "Do it.", "start": "propose"}),
+        )
+        .unwrap();
+        assert!(!shown.starts_now() && !shown.starts_when_allowed());
         assert!(parse(json!({"project": "Checkout", "title": "Fase 2", "task": "Do it.", "worktree": false, "effort": "high", "start": "now", "provider": "codex"})).is_some_and(|args| args.starts_now()));
         for bad in [
             json!({"title": "Fase 2", "task": "Do it."}),

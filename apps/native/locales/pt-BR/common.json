@@ -216,6 +216,18 @@
     }
   },
   "agents": {
+    "report": {
+      "title_one": "Relatório · {{count}} tarefa",
+      "title_other": "Relatório · {{count}} tarefas",
+      "files_one": "{{count}} arquivo",
+      "files_other": "{{count}} arquivos",
+      "state": {
+        "working": "Trabalhando",
+        "turnEnded": "Terminou o turno",
+        "closed": "Fechada",
+        "failed": "Falhou"
+      }
+    },
     "reactions": {
       "rulePlaceholder": "O que ele deveria fazer? Ex.: sempre cite o PR",
       "ruleAsk": "Guardar como regra?",
@@ -500,6 +512,8 @@
     "editor": {
       "extra": "Instruções extras",
       "extraHint": "Somadas ao papel do DCC a cada turno. Exemplo: convenções do seu projeto ou pastas a ignorar.",
+      "autoStart": "Pode começar tarefas sozinho",
+      "autoStartHint": "Quando um gatilho ou rotina o acorda, a tarefa que ele abre já começa, sem esperar você clicar em Começar. O que você pede começa sempre.",
       "offerSwitch": "Oferecer ao terminar um turno",
       "offerSwitchHint": "Quando um turno termina com mudanças, o agente aparece acima do composer perguntando se pode agir.",
       "name": "Nome",
@@ -610,9 +624,12 @@
       "title": "Acesso",
       "hint": "O que este agente pode usar. \"Ler\" libera só o que só lê. O DCC corta na hora: o agente nem vê o que não está liberado. A escrita continua pedindo a sua aprovação.",
       "none": "Sem acesso",
+      "tasksOff": "Não abre",
+      "tasksOn": "Abre tarefas",
       "read": "Ler",
       "write": "Ler e escrever",
       "groups": {
+        "tasks": "Abrir tarefas",
         "browser": "Navegador do DCC",
         "computer": "Uso do computador",
         "device": "Simulador iOS",

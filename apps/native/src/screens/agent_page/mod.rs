@@ -44,6 +44,8 @@ mod pr_reviews;
 mod proposal_tests;
 #[cfg(test)]
 mod reaction_tests;
+#[cfg(test)]
+mod report_tests;
 mod room;
 mod room_bulletin;
 mod room_cards;
@@ -56,6 +58,7 @@ mod room_mentions;
 mod room_proposals;
 mod room_reactions;
 mod room_recap;
+mod room_report;
 mod room_routines;
 #[cfg(test)]
 mod room_tests;

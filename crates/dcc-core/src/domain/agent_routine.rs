@@ -119,7 +119,7 @@ impl Routine {
 /// What the agent gets at the routine's time.
 pub fn routine_prompt(routine: &Routine) -> String {
     format!(
-        "{ROUTINE_MARK} ({:02}:{:02}): {}\n\nThis is a routine the person scheduled, not a message they just wrote. Do what it asks with your tools; to change code, propose a task with dcc_open_task (a card the person starts). If there is nothing worth the person's attention, answer exactly {QUIET_ANSWER} and nothing else.",
+        "{ROUTINE_MARK} ({:02}:{:02}): {}\n\nThis is a routine the person scheduled, not a message they just wrote. Do what it asks with your tools; to change code, open a task with dcc_open_task (it starts, or waits as a card, as the person set for you). If there is nothing worth the person's attention, answer exactly {QUIET_ANSWER} and nothing else.",
         routine.hour, routine.minute, routine.prompt
     )
 }
