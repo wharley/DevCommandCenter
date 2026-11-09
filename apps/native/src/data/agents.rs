@@ -76,6 +76,8 @@ pub struct AgentRecord {
     pub auto_start_tasks: bool,
     /// Teammates it may pass the turn to itself (`agent_chain`).
     pub may_call: Vec<String>,
+    /// The account its conversations start on; none: the system login.
+    pub account_id: Option<String>,
     pub sessions: Vec<AgentSession>,
 }
 
@@ -254,6 +256,7 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                 tool_access: agent.tool_access,
                 auto_start_tasks: agent.auto_start_tasks,
                 may_call: agent.may_call,
+                account_id: agent.account_id,
                 sessions,
             }
         })

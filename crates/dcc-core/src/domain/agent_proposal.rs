@@ -73,6 +73,7 @@ pub fn proposal_draft(
         tool_access,
         auto_start_tasks: false,
         may_call: Vec::new(),
+        account_id: None,
     }
     .normalized()
 }

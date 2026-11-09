@@ -60,6 +60,7 @@ pub fn draft_record(proposal: &AgentProposal) -> AgentRecord {
         tool_access: draft.tool_access,
         auto_start_tasks: draft.auto_start_tasks,
         may_call: draft.may_call,
+        account_id: draft.account_id,
         sessions: Vec::new(),
     }
 }

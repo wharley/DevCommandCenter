@@ -116,6 +116,27 @@ pub fn for_provider(provider_id: &str) -> Option<ProviderRuntimeConfig> {
     Some(runtime)
 }
 
+/// An agent's conversations and turns: on its own provider, its own
+/// account (none: the system login); on another (it follows the composer),
+/// the composer's pick, like `for_provider`.
+pub fn for_agent(
+    agent: &crate::data::agents::AgentRecord,
+    provider_id: &str,
+) -> Option<ProviderRuntimeConfig> {
+    let mut runtime = for_provider(provider_id)?;
+    if agent.provider_id.as_deref() == Some(provider_id) {
+        let supports = dcc_providers::offline_catalog()
+            .providers
+            .into_iter()
+            .find(|provider| provider.id.0 == provider_id)
+            .is_some_and(|provider| provider.capabilities.supports_accounts);
+        if supports {
+            runtime.account_id = agent.account_id.clone();
+        }
+    }
+    Some(runtime)
+}
+
 impl Store {
     /// `readProviderRuntimeSettings`: unreadable or unknown values read as none.
     pub fn load(path: &Path) -> Self {

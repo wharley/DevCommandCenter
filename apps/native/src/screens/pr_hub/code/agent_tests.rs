@@ -23,6 +23,7 @@ fn reviewer() -> AgentRecord {
         tool_access: Default::default(),
         auto_start_tasks: false,
         may_call: Vec::new(),
+        account_id: None,
         id: "rev".into(),
         name: "Revisor".into(),
         preset: Some("reviewer".into()),

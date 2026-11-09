@@ -588,6 +588,19 @@ impl DesktopApi {
         model: Option<&str>,
         title: Option<&str>,
     ) -> Result<String, ApiError> {
+        let runtime = crate::data::provider_runtime::for_provider(provider_id);
+        self.start_thread_with(start, provider_id, model, title, runtime)
+    }
+
+    /// `start_thread` with the runtime given (an agent's own account).
+    pub fn start_thread_with(
+        &self,
+        start: &crate::data::conversation::ThreadStart,
+        provider_id: &str,
+        model: Option<&str>,
+        title: Option<&str>,
+        runtime: Option<ProviderRuntimeConfig>,
+    ) -> Result<String, ApiError> {
         let value = self.post(
             "/api/v1/sessions/start",
             &json!({
@@ -597,7 +610,7 @@ impl DesktopApi {
                 "providerId": provider_id,
                 "model": model,
                 "title": title,
-                "providerRuntime": crate::data::provider_runtime::for_provider(provider_id),
+                "providerRuntime": runtime,
             }),
         )?;
         value

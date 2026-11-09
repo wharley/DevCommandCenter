@@ -193,6 +193,10 @@ pub struct ResidentAgentDraft {
     /// Teammates it may pass the turn to without the person (`agent_chain`).
     #[serde(default)]
     pub may_call: Vec<String>,
+    /// The provider account its conversations start on; none: the system
+    /// login (the person's own).
+    #[serde(default)]
+    pub account_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -226,6 +230,9 @@ pub struct ResidentAgent {
     /// See `ResidentAgentDraft::may_call`.
     #[serde(default)]
     pub may_call: Vec<String>,
+    /// See `ResidentAgentDraft::account_id`.
+    #[serde(default)]
+    pub account_id: Option<String>,
     pub preset: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -313,6 +320,7 @@ impl ResidentAgentDraft {
             monthly_token_limit: self.monthly_token_limit.filter(|limit| *limit > 0),
             tool_access: self.tool_access.normalized(),
             auto_start_tasks: self.auto_start_tasks,
+            account_id: optional(self.account_id),
             may_call: {
                 let mut ids: Vec<String> = self
                     .may_call
@@ -358,6 +366,7 @@ impl ResidentAgentDraft {
             },
             auto_start_tasks: false,
             may_call: Vec::new(),
+            account_id: None,
         }
     }
 }
@@ -464,6 +473,7 @@ mod tests {
             tool_access: Default::default(),
             auto_start_tasks: false,
             may_call: Vec::new(),
+            account_id: None,
             limit_override_month: None,
             preset: Some(REVIEWER_PRESET.to_string()),
             created_at: "now".to_string(),

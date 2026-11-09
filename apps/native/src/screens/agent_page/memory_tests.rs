@@ -20,6 +20,7 @@ fn agent(id: &str, preset: &str) -> AgentRecord {
         tool_access: Default::default(),
         auto_start_tasks: false,
         may_call: Vec::new(),
+        account_id: None,
         id: id.into(),
         name: "Revisor".into(),
         preset: Some(preset.into()),

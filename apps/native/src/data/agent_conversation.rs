@@ -34,6 +34,9 @@ pub struct ConversationStart<'a> {
     pub title: &'a str,
     pub provider: &'a str,
     pub model: Option<&'a str>,
+    /// What the conversation starts with, its account included
+    /// (`provider_runtime::for_agent`).
+    pub runtime: Option<dcc_core::ports::provider::ProviderRuntimeConfig>,
 }
 
 impl DesktopApi {
@@ -73,8 +76,13 @@ impl DesktopApi {
             name: Some(start.title.to_string()),
             auto_named: false,
         };
-        let session =
-            self.start_thread(&thread, start.provider, start.model, Some(start.agent_name))?;
+        let session = self.start_thread_with(
+            &thread,
+            start.provider,
+            start.model,
+            Some(start.agent_name),
+            start.runtime.clone(),
+        )?;
         if let Err(error) = self.bind_session_agent(&session, start.agent_id) {
             // Without the binding it would be a plain session with no role.
             let _ = self.close_session(&session, true);

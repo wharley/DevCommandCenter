@@ -57,6 +57,13 @@ impl AgentPage {
             .unwrap_or_default();
         let options = editor_projects::project_options(self.sidebar.read(cx).projects());
         let teammates = editor_chain::callable(self.sidebar.read(cx).agents(), &agent.id);
+        // A new agent starts on the model the composer has now, as its own.
+        let mut agent = agent;
+        if agent.id.is_empty() && agent.provider_id.is_none() {
+            let session = &self.composer.read(cx).session;
+            agent.provider_id = session.provider_id.clone();
+            agent.model = session.model.clone();
+        }
         let editor = cx.new(|cx| {
             editor::AgentEditor::new(agent, catalog, window, cx)
                 .with_projects(options)

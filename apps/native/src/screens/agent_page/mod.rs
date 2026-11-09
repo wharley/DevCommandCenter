@@ -33,6 +33,7 @@ mod editor_chain;
 mod editor_look;
 mod editor_projects;
 mod editor_role;
+mod editor_sections;
 mod editor_templates;
 mod execution;
 mod memory;
@@ -41,7 +42,6 @@ mod memory_layers;
 #[cfg(test)]
 mod memory_tests;
 mod page_tabs;
-mod picker;
 mod pr_reviews;
 #[cfg(test)]
 mod proposal_tests;
@@ -69,6 +69,9 @@ mod room_tests;
 mod room_timeline;
 mod room_view;
 mod routines;
+mod runs_on;
+#[cfg(test)]
+mod runs_on_tests;
 mod sources;
 #[cfg(test)]
 mod sources_tests;

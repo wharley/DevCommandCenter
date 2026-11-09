@@ -145,8 +145,9 @@ pub(super) fn review_run(
             let levels = &model?.effort_levels;
             (!levels.is_empty()).then(|| clamp_effort(effort, levels))
         });
+    // Its own account on its own provider.
     let provider_runtime = (!cfg!(test))
-        .then(|| crate::data::provider_runtime::for_provider(id))
+        .then(|| crate::data::provider_runtime::for_agent(reviewer, id))
         .flatten();
     Some(AgentRun {
         working_directory: root.to_string(),

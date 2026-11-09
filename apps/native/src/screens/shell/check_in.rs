@@ -234,6 +234,7 @@ impl Shell {
                                 title: &title,
                                 provider: &run.provider_id,
                                 model: run.model.as_deref(),
+                                runtime: run.provider_runtime.clone(),
                             })
                             .map_err(|error| error.to_string())?
                             .1

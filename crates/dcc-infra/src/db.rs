@@ -2702,6 +2702,7 @@ impl SqliteSessionRepo {
             "INTEGER NOT NULL DEFAULT 0",
         )?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "may_call_json", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "account_id", "TEXT NULL")?;
         Self::retire_presets(&conn)?;
         Self::reviewer_without_tasks(&conn)?;
         SqliteWorkspaceRepo::ensure_column(
@@ -7757,7 +7758,7 @@ impl SqliteSessionRepo {
 
     // ---- Resident agents ---------------------------------------------------
 
-    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions, a.effort, a.avatar_shape, a.avatar_accessory, a.projects_json, a.monthly_token_limit, a.limit_override_month, a.tool_access_json, a.auto_start_tasks, a.may_call_json";
+    const RESIDENT_AGENT_COLUMNS: &'static str = "a.id, a.name, a.role, a.kickoff_prompt, a.provider_id, a.model, a.avatar_color, a.avatar_arms, a.avatar_eyes, a.preset, a.created_at, a.updated_at, a.offer_prompt, a.extra_instructions, a.effort, a.avatar_shape, a.avatar_accessory, a.projects_json, a.monthly_token_limit, a.limit_override_month, a.tool_access_json, a.auto_start_tasks, a.may_call_json, a.account_id";
 
     fn resident_agent_from_row(row: &Row<'_>) -> rusqlite::Result<ResidentAgent> {
         let preset: Option<String> = row.get(9)?;
@@ -7806,6 +7807,7 @@ impl SqliteSessionRepo {
                 .get::<_, Option<String>>(22)?
                 .and_then(|json| from_str(&json).ok())
                 .unwrap_or_default(),
+            account_id: row.get(23)?,
             preset,
             created_at: row.get(10)?,
             updated_at: row.get(11)?,
@@ -7969,8 +7971,8 @@ impl SqliteSessionRepo {
             Some(id) => {
                 let updated = conn
                     .execute(
-                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12, effort = ?13, avatar_shape = ?14, avatar_accessory = ?15, projects_json = ?16, monthly_token_limit = ?17, tool_access_json = ?18, auto_start_tasks = ?19, may_call_json = ?20 WHERE id = ?1 AND deleted_at IS NULL",
-                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json, limit, access_json, draft.auto_start_tasks, may_call_json],
+                        "UPDATE dcc_agents SET name = ?2, role = CASE WHEN preset IS NULL THEN ?3 ELSE role END, kickoff_prompt = CASE WHEN preset IS NULL THEN ?4 ELSE kickoff_prompt END, provider_id = ?5, model = ?6, avatar_color = ?7, avatar_arms = ?8, avatar_eyes = ?9, updated_at = ?10, offer_prompt = CASE WHEN preset IS NULL THEN '' ELSE ?11 END, extra_instructions = ?12, effort = ?13, avatar_shape = ?14, avatar_accessory = ?15, projects_json = ?16, monthly_token_limit = ?17, tool_access_json = ?18, auto_start_tasks = ?19, may_call_json = ?20, account_id = ?21 WHERE id = ?1 AND deleted_at IS NULL",
+                        params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.offer_prompt, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json, limit, access_json, draft.auto_start_tasks, may_call_json, draft.account_id],
                     )
                     .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 if updated != 1 {
@@ -7983,8 +7985,8 @@ impl SqliteSessionRepo {
             None => {
                 let id = uuid::Uuid::new_v4().to_string();
                 conn.execute(
-                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions, effort, avatar_shape, avatar_accessory, projects_json, monthly_token_limit, tool_access_json, auto_start_tasks, may_call_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
-                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json, limit, access_json, draft.auto_start_tasks, may_call_json],
+                    "INSERT INTO dcc_agents (id, name, role, kickoff_prompt, provider_id, model, avatar_color, avatar_arms, avatar_eyes, preset, created_at, updated_at, offer_prompt, extra_instructions, effort, avatar_shape, avatar_accessory, projects_json, monthly_token_limit, tool_access_json, auto_start_tasks, may_call_json, account_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, '', ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                    params![id, draft.name, draft.role, draft.kickoff_prompt, draft.provider_id, draft.model, draft.avatar.color, draft.avatar.arms, draft.avatar.eyes, now, draft.extra_instructions, draft.effort, draft.avatar.shape, draft.avatar.accessory, projects_json, limit, access_json, draft.auto_start_tasks, may_call_json, draft.account_id],
                 )
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 id

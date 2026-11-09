@@ -411,6 +411,10 @@ impl TeamRoom {
         }
         cx.notify();
         let effort = agent.provider_id.as_ref().and(agent.effort.clone());
+        // Its own account on its own provider (`provider_runtime::for_agent`).
+        let runtime = (!cfg!(test))
+            .then(|| crate::data::provider_runtime::for_agent(&agent, &provider))
+            .flatten();
         cx.spawn(async move |this, cx| {
             let sent = cx
                 .background_executor()
@@ -427,6 +431,7 @@ impl TeamRoom {
                                     title: &title,
                                     provider: &provider,
                                     model: model.as_deref(),
+                                    runtime: runtime.clone(),
                                 })?
                                 .1
                             }
@@ -439,9 +444,7 @@ impl TeamRoom {
                             plan_mode: false,
                             fast_mode: false,
                             tool_instructions: None,
-                            provider_runtime: (!cfg!(test))
-                                .then(|| crate::data::provider_runtime::for_provider(&provider))
-                                .flatten(),
+                            provider_runtime: runtime,
                         };
                         api.send_turn(&session, &text, None, &options)
                     }

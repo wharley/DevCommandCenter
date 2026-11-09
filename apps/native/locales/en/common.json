@@ -548,10 +548,16 @@
         "smile": "Smiling eyes",
         "visor": "Visor"
       },
-      "providerCurrent": "The one selected in the composer",
-      "modelDefault": "Provider's recommended",
       "runsOn": "Runs on",
-      "runsOnHint": "Provider, model and effort used when DCC starts a turn as this agent.",
+      "sections": {
+        "who": "Who it is",
+        "how": "How it works",
+        "may": "What it may do",
+        "more": "More"
+      },
+      "account": "Account",
+      "providerPick": "Pick a model (follows the composer for now)",
+      "runsOnHint": "This agent's provider, model and effort: each its own, so the team does not change when you switch a task's model.",
       "projects": "Projects",
       "projectsHint": "Where it shows in tasks and where its triggers act.",
       "projectsAll": "All",

@@ -12,6 +12,7 @@ use gpui::{
 };
 use serde_json::json;
 
+use super::editor_sections::section;
 use crate::agent::AgentAvatarView;
 use crate::data::agents::AgentRecord;
 use crate::data::desktop_api::{ApiError, DesktopApi, encode};
@@ -80,6 +81,11 @@ pub struct AgentEditor {
     /// The person's connectors, by id and name.
     pub(crate) connector_names: Vec<(String, String)>,
     pub(super) catalog: Vec<ProviderDescriptor>,
+    /// "Roda em", while its panel is open (`runs_on`).
+    pub(crate) runs_on: super::runs_on::RunsOn,
+    /// The account it runs on (none: the system login) and the ones known.
+    pub(crate) account_id: Option<String>,
+    pub(crate) accounts: Vec<dcc_core::domain::provider::ProviderAccount>,
     pub(crate) saving: bool,
     pub(crate) api: Option<DesktopApi>,
     _inputs: Vec<Subscription>,
@@ -188,6 +194,7 @@ impl AgentEditor {
             tool_access: agent.tool_access.clone(),
             auto_start_tasks: agent.auto_start_tasks,
             may_call: agent.may_call.clone(),
+            account_id: agent.account_id.clone(),
             teammates: Vec::new(),
             connector_names: Vec::new(),
             agent,
@@ -196,6 +203,8 @@ impl AgentEditor {
             role,
             kickoff,
             catalog,
+            runs_on: super::runs_on::RunsOn::new(window, cx),
+            accounts: crate::data::account_selection::known().unwrap_or_default(),
             saving: false,
             api: if cfg!(test) { None } else { DesktopApi::load() },
             _inputs: inputs,
@@ -252,6 +261,7 @@ impl AgentEditor {
             "toolAccess": self.tool_access,
             "autoStartTasks": self.auto_start_tasks,
             "mayCall": self.may_call,
+            "accountId": self.account_id,
         })
     }
 
@@ -295,20 +305,7 @@ impl AgentEditor {
         .detach();
     }
 
-    pub(crate) fn set_execution(
-        &mut self,
-        provider_id: Option<String>,
-        model: Option<String>,
-        effort: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        self.provider_id = provider_id;
-        self.model = model;
-        self.effort = effort;
-        cx.notify();
-    }
-
-    /// `Choice`: a 44px tile, its ring when chosen.
+    /// A setting with its switch on the right; the text wraps beside it.
     fn switch_row(
         &self,
         id: &'static str,
@@ -326,18 +323,24 @@ impl AgentEditor {
             .gap(px(16.0))
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
                     .child(label(title, cx))
                     .child(hint(text, cx)),
             )
-            .child(Switch::new(id, on).on_toggle(move |on, _, cx| {
-                let _ = this.update(cx, |editor, cx| {
-                    set(editor, on);
-                    cx.notify();
-                });
-            }))
+            .child(
+                div()
+                    .flex_none()
+                    .child(Switch::new(id, on).on_toggle(move |on, _, cx| {
+                        let _ = this.update(cx, |editor, cx| {
+                            set(editor, on);
+                            cx.notify();
+                        });
+                    })),
+            )
             .into_any_element()
     }
 }
@@ -351,6 +354,7 @@ impl Render for AgentEditor {
             .flex()
             .flex_col()
             .gap(px(16.0))
+            .child(section(cx.t("agents.editor.sections.who"), true, cx))
             .children(self.template_row(cx))
             .child(
                 div()
@@ -384,10 +388,11 @@ impl Render for AgentEditor {
                 self.look_rows(cx),
                 cx,
             ))
+            .child(section(cx.t("agents.editor.sections.how"), false, cx))
             .child(field(
                 cx.t("agents.editor.runsOn"),
                 Some(cx.t("agents.editor.runsOnHint")),
-                self.picker(cx),
+                self.runs_on_field(cx),
                 cx,
             ))
             .child(field(
@@ -397,6 +402,7 @@ impl Render for AgentEditor {
                 cx,
             ))
             .child(self.limit_field(cx))
+            .child(section(cx.t("agents.editor.sections.may"), false, cx))
             .child(self.access_field(cx))
             .children(self.chain_field(cx))
             .child(self.switch_row(
@@ -407,6 +413,7 @@ impl Render for AgentEditor {
                 |editor, on| editor.auto_start_tasks = on,
                 cx,
             ))
+            .child(section(cx.t("agents.editor.sections.more"), false, cx))
             .child(field(
                 cx.t("agents.editor.extra"),
                 Some(cx.t("agents.editor.extraHint")),

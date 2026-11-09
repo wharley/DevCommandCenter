@@ -94,6 +94,7 @@ fn agents_waiting_are_counted_beside_agentes(cx: &mut TestAppContext) {
         tool_access: Default::default(),
         auto_start_tasks: false,
         may_call: Vec::new(),
+        account_id: None,
         sessions: state
             .map(|state| AgentSession {
                 session_id: format!("s-{id}"),
@@ -241,6 +242,7 @@ fn a_task_shows_the_mascot_of_the_agent_it_belongs_to(cx: &mut TestAppContext) {
         tool_access: Default::default(),
         auto_start_tasks: false,
         may_call: Vec::new(),
+        account_id: None,
         sessions: Vec::new(),
     };
     let data = SidebarData {

@@ -548,10 +548,16 @@
         "smile": "Olhos sorrindo",
         "visor": "Visor"
       },
-      "providerCurrent": "O selecionado no composer",
-      "modelDefault": "Recomendado do provider",
       "runsOn": "Roda em",
-      "runsOnHint": "Provider, modelo e esforço usados quando o DCC inicia um turno como este agente.",
+      "sections": {
+        "who": "Quem é",
+        "how": "Como trabalha",
+        "may": "O que pode fazer",
+        "more": "Ajustes"
+      },
+      "account": "Conta",
+      "providerPick": "Escolha o modelo (hoje segue o composer)",
+      "runsOnHint": "O provider, o modelo e o esforço deste agente: cada um com o seu, para o time não mudar quando você troca o modelo de uma tarefa.",
       "projects": "Projetos",
       "projectsHint": "Onde ele aparece nas tarefas e onde os gatilhos agem.",
       "projectsAll": "Todos",
