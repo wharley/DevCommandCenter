@@ -7,6 +7,7 @@
 use super::*;
 use dcc_core::domain::agent_budget::counted_tokens;
 use dcc_core::domain::agent_bulletin::AgentWeek;
+use dcc_core::domain::agent_reaction::Reaction;
 
 impl SqliteSessionRepo {
     /// Every agent that did something between `from` and `to`.
@@ -87,6 +88,17 @@ impl SqliteSessionRepo {
             week.tokens += counted_tokens(total.max(0) as u64, cached.max(0) as u64);
             if let Some(cost) = cost {
                 *week.cost_usd.get_or_insert(0.0) += cost;
+            }
+        }
+        // The answers the person marked in the room.
+        for (agent_id, reaction) in Self::reactions_between(&conn, from, to)? {
+            let week = weeks.entry(agent_id.clone()).or_insert_with(|| AgentWeek {
+                agent_id,
+                ..AgentWeek::default()
+            });
+            match reaction {
+                Reaction::Up => week.useful += 1,
+                Reaction::Down => week.not_useful += 1,
             }
         }
         let mut list: Vec<AgentWeek> = weeks

@@ -136,6 +136,18 @@ impl TeamRoom {
                     .to_string(),
             );
         }
+        // What the person marked in the room (`room_reactions`).
+        if week.useful + week.not_useful > 0 {
+            parts.push(
+                cx.t_with(
+                    "agents.reactions.useful",
+                    &Args::default()
+                        .with("up", week.useful.to_string())
+                        .with("down", week.not_useful.to_string()),
+                )
+                .to_string(),
+            );
+        }
         parts.push(
             cx.t_with(
                 "agents.spend.tokens",

@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use dcc_core::domain::agent_reaction::Reaction;
 use dcc_core::domain::session::{SessionEventRecord, SessionId};
 pub use dcc_core::domain::team_room_lines::{Receipt, RoomLine, Speaker, last_answer, lines_of};
 use dcc_core::domain::timeline::activity::total_turn_tokens;
@@ -24,6 +25,8 @@ pub struct HomeFeed {
     pub read_at: String,
     events: Vec<SessionEventRecord>,
     pub lines: Vec<RoomLine>,
+    /// The person's 👍 / 👎 by answer (`agent_reaction`).
+    pub reactions: HashMap<String, Reaction>,
 }
 
 impl HomeFeed {
@@ -50,6 +53,12 @@ impl HomeFeed {
             .collect();
         let messages = project_session(&self.events, &self.session_id);
         self.lines = lines_of(&self.agent_id, &self.session_id, &messages, &tokens);
+        // A database older than the reactions has none yet.
+        self.reactions = sessions
+            .session_reactions(&self.session_id)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         self.read_at = updated_at.to_string();
         Ok(self)
     }

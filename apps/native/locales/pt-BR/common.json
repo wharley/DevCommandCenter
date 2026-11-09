@@ -216,6 +216,14 @@
     }
   },
   "agents": {
+    "reactions": {
+      "rulePlaceholder": "O que ele deveria fazer? Ex.: sempre cite o PR",
+      "ruleAsk": "Guardar como regra?",
+      "keep": "Guardar",
+      "skip": "Agora não",
+      "kept": "Regra guardada na memória do agente.",
+      "useful": "{{up}} útil · {{down}} não"
+    },
     "proposal": {
       "by": "{{agent}} propõe um agente",
       "everyProject": "Em todos os projetos",

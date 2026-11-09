@@ -20,6 +20,11 @@ pub struct AgentWeek {
     pub tasks: u32,
     pub tokens: u64,
     pub cost_usd: Option<f64>,
+    /// Answers the person marked 👍 and 👎 in the team room.
+    #[serde(default)]
+    pub useful: u32,
+    #[serde(default)]
+    pub not_useful: u32,
 }
 
 /// A week: its first instant and the next week's, as stored timestamps compare.

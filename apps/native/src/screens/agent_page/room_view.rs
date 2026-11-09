@@ -186,8 +186,10 @@ impl TeamRoom {
                                         room.open_conversation(&agent_id, cx)
                                     }))
                                     .child(cx.t("agents.room.open")),
-                            ),
-                    ),
+                            )
+                            .child(self.reaction_buttons(index, line, cx)),
+                    )
+                    .children(self.rule_field(line, cx)),
             )
             .into_any_element()
     }

@@ -90,6 +90,10 @@ pub struct TeamRoom {
     pub(crate) focus: Option<String>,
     /// Agents proposed that the person answered here, gone at once.
     pub(crate) answered_proposals: Vec<String>,
+    /// 👍 / 👎 changed here, by answer, before the feed reads them again.
+    pub(crate) reacted: HashMap<String, Option<dcc_core::domain::agent_reaction::Reaction>>,
+    /// "Guardar como regra?" after a 👎 (`room_reactions`).
+    pub(crate) rule: Option<super::room_reactions::RuleDraft>,
     _subscriptions: [Subscription; 4],
 }
 
@@ -168,6 +172,8 @@ impl TeamRoom {
             cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
             focus: None,
             answered_proposals: Vec::new(),
+            reacted: HashMap::new(),
+            rule: None,
             _subscriptions: subscriptions,
         };
         room.reload_cleanup();
