@@ -55,6 +55,12 @@ pub struct PullRequestHubReviewedOutput {
     /// commented on, each with its task (`pr_hub_received`).
     #[serde(default)]
     pub received: Vec<super::pr_hub_received::PullRequestHubReceived>,
+    /// Open pull requests that ask for the person's review (`pr_hub_checkin`).
+    #[serde(default)]
+    pub requested: Vec<super::pr_hub_checkin::PullRequestHubAsked>,
+    /// Open issues assigned to the person (`pr_hub_checkin`).
+    #[serde(default)]
+    pub issues: Vec<super::pr_hub_checkin::PullRequestHubAsked>,
 }
 
 fn at(value: Option<&Value>) -> Option<DateTime<Utc>> {
@@ -175,6 +181,12 @@ pub async fn pull_request_hub_reviewed_with_state(
                 output
                     .received
                     .extend(super::pr_hub_received::from_search(&answer));
+                output
+                    .requested
+                    .extend(super::pr_hub_checkin::requested_from_search(&answer));
+                output
+                    .issues
+                    .extend(super::pr_hub_checkin::issues_from_search(&answer));
                 viewer
             }
             Err(error) => {
@@ -206,6 +218,16 @@ pub async fn pull_request_hub_reviewed_with_state(
                             output.received.push(pr);
                         }
                     }
+                    for pr in super::pr_hub_checkin::requested_from_search(&answer) {
+                        if !output.requested.iter().any(|known| known.url == pr.url) {
+                            output.requested.push(pr);
+                        }
+                    }
+                    for issue in super::pr_hub_checkin::issues_from_search(&answer) {
+                        if !output.issues.iter().any(|known| known.url == issue.url) {
+                            output.issues.push(issue);
+                        }
+                    }
                 }
                 Err(error) => output.warnings.push(error),
             }
@@ -221,7 +243,11 @@ pub async fn pull_request_hub_reviewed_with_state(
 /// only for what the saved branches do not settle, the checkouts' local git.
 fn link_tasks(db_path: &std::path::Path, output: &mut PullRequestHubReviewedOutput) {
     use dcc_core::ports::{RepositoryRepo, WorkspaceRepo};
-    if output.failing.is_empty() && output.received.is_empty() {
+    if output.failing.is_empty()
+        && output.received.is_empty()
+        && output.requested.is_empty()
+        && output.issues.is_empty()
+    {
         return;
     }
     let Ok(repo) = dcc_infra::db::SqliteWorkspaceRepo::open(db_path) else {
@@ -236,6 +262,8 @@ fn link_tasks(db_path: &std::path::Path, output: &mut PullRequestHubReviewedOutp
     };
     super::pr_hub_failing::link(&mut output.failing, &repositories, &workspaces, branch_of);
     super::pr_hub_received::link(&mut output.received, &repositories, &workspaces, branch_of);
+    super::pr_hub_checkin::link(&mut output.requested, &repositories);
+    super::pr_hub_checkin::link(&mut output.issues, &repositories);
 }
 
 #[cfg(test)]

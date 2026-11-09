@@ -71,7 +71,7 @@ pub struct TeamRoom {
     /// (none in tests).
     pub(crate) cleanup: crate::data::cleanup_alert::CleanupAlert,
     pub(crate) cleanup_path: Option<PathBuf>,
-    _subscriptions: [Subscription; 2],
+    _subscriptions: [Subscription; 3],
 }
 
 impl EventEmitter<RoomEvent> for TeamRoom {}
@@ -100,6 +100,8 @@ impl TeamRoom {
                 room.sync(cx);
                 cx.notify();
             }),
+            // The check-in's cards, as `PrWatch` finds them.
+            cx.observe_global::<crate::data::check_ins::CheckIns>(|_, cx| cx.notify()),
             cx.subscribe(&input, |room, _, event, cx| match event {
                 TextAreaEvent::Submitted => room.send(cx),
                 TextAreaEvent::Changed => {

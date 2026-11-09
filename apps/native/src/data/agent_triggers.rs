@@ -29,13 +29,22 @@ pub enum Trigger {
     CiFailed,
     /// Someone reviewed or commented on a task's pull request.
     ReviewReceived,
+    /// A pull request asks for the person's review (the check-in).
+    ReviewRequested,
+    /// An issue was assigned to the person (the check-in).
+    IssueAssigned,
+    /// A task's turn is open with no sign of life (the check-in).
+    TaskStalled,
 }
 
 impl Trigger {
-    pub const ALL: [Trigger; 3] = [
+    pub const ALL: [Trigger; 6] = [
         Trigger::PrUpdated,
+        Trigger::ReviewRequested,
         Trigger::CiFailed,
         Trigger::ReviewReceived,
+        Trigger::IssueAssigned,
+        Trigger::TaskStalled,
     ];
 
     /// `agents.triggers.<id>.*`
@@ -44,7 +53,16 @@ impl Trigger {
             Self::PrUpdated => "prUpdated",
             Self::CiFailed => "ciFailed",
             Self::ReviewReceived => "reviewReceived",
+            Self::ReviewRequested => "reviewRequested",
+            Self::IssueAssigned => "issueAssigned",
+            Self::TaskStalled => "taskStalled",
         }
+    }
+
+    /// The pull request hub's review is the Reviewer's own job; the others
+    /// wake any agent in its conversation.
+    pub fn reviewer_only(self) -> bool {
+        matches!(self, Self::PrUpdated | Self::ReviewRequested)
     }
 }
 
@@ -60,7 +78,7 @@ pub struct Run {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-struct Stored {
+pub(super) struct Stored {
     /// The triggers turned on, by agent.
     on: BTreeMap<String, Vec<Trigger>>,
     runs: Vec<Run>,
@@ -70,12 +88,16 @@ struct Stored {
     /// The latest review activity seen on each pull request, by
     /// `<agent>|<url>`: only what comes after it wakes the agent.
     received: BTreeMap<String, String>,
+    /// "Pausar todos": no trigger wakes anyone.
+    pub(super) paused: bool,
+    /// The hours no trigger wakes anyone (`agent_quiet`).
+    pub(super) quiet: Option<super::agent_quiet::QuietHours>,
 }
 
 #[derive(Default)]
 pub struct AgentTriggers {
     path: Option<PathBuf>,
-    stored: Stored,
+    pub(super) stored: Stored,
 }
 
 impl Global for AgentTriggers {}
@@ -84,6 +106,10 @@ impl Global for AgentTriggers {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Held {
     Off,
+    /// "Pausar todos".
+    Paused,
+    /// Inside the quiet hours.
+    Quiet,
     DailyLimit,
     TargetLimit,
 }
@@ -110,7 +136,7 @@ impl AgentTriggers {
         }
     }
 
-    fn save(&self) {
+    pub(super) fn save(&self) {
         let Some(path) = &self.path else {
             return;
         };
@@ -178,6 +204,7 @@ impl AgentTriggers {
         if !self.is_on(agent_id, trigger) {
             return Err(Held::Off);
         }
+        self.quiet_check(now)?;
         if self.runs_today(agent_id, now) >= DAILY_RUNS {
             return Err(Held::DailyLimit);
         }

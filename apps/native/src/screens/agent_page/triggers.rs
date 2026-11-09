@@ -1,5 +1,7 @@
-//! "Gatilhos" on the Reviewer's page: what wakes it by itself. Each one
-//! starts off; the ceilings (`agent_triggers`) are shown, not set.
+//! "Gatilhos" on an agent's page: what wakes it by itself. Each one starts
+//! off; the hub's review triggers are the Reviewer's alone; the ceilings
+//! (`agent_triggers`) are shown, not set; when it wakes next and the quiet
+//! hours sit below (`triggers_wake`).
 
 use chrono::Utc;
 use dcc_core::domain::agent::REVIEWER_PRESET;
@@ -63,15 +65,12 @@ impl AgentPage {
             .into_any_element()
     }
 
-    /// Only the Reviewer has triggers for now.
     pub(super) fn triggers_card(
         &self,
         data: &AgentPageData,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if data.agent.preset.as_deref() != Some(REVIEWER_PRESET) {
-            return None;
-        }
+        let reviewer = data.agent.preset.as_deref() == Some(REVIEWER_PRESET);
         let colors = cx.theme().colors.clone();
         let agent_id = data.agent.id.clone();
         let today = cx
@@ -83,8 +82,10 @@ impl AgentPage {
             .unwrap_or_default();
         let rows: Vec<AnyElement> = Trigger::ALL
             .into_iter()
+            .filter(|trigger| reviewer || !trigger.reviewer_only())
             .map(|trigger| self.trigger_row(&agent_id, trigger, cx))
             .collect();
+        let wake = self.wake_rows(&agent_id, cx);
         let limits = cx.t_with(
             "agents.triggers.limits",
             &Args::default()
@@ -110,6 +111,7 @@ impl AgentPage {
                         .child(cx.t("agents.triggers.title")),
                 )
                 .children(rows)
+                .children(wake)
                 .child(
                     div()
                         .debug_selector(|| "agent-triggers-limits".into())

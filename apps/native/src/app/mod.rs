@@ -62,6 +62,7 @@ pub fn run() {
         crate::ui::Toaster::init(cx);
         crate::data::pr_news::PrNews::init(cx);
         crate::data::agent_triggers::AgentTriggers::init(cx);
+        crate::data::check_ins::CheckIns::init(cx);
         cx.on_app_quit(|_| {
             crate::data::host::shutdown();
             async {}

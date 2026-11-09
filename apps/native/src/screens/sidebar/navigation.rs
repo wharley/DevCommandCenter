@@ -67,7 +67,7 @@ impl Sidebar {
 pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement {
     let theme = cx.theme();
     let current = sidebar.current_page;
-    let agents_waiting = sidebar.agents_waiting();
+    let agents_waiting = sidebar.agents_waiting(cx);
     let entries = [
         Entry {
             id: "nav-new-task",

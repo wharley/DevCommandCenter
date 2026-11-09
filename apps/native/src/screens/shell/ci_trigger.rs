@@ -1,8 +1,8 @@
-//! The Reviewer's second trigger: the checks of a task's pull request
+//! A trigger any agent can have on: the checks of a task's pull request
 //! failed. The same search `PrWatch` already makes lists the person's own
 //! failing pull requests with their task (`pr_hub_failing`), so no `gh` is
 //! added to notice it. Each failure (pull request + commit) wakes the
-//! Reviewer once, when the person turned this on and its ceilings allow
+//! agent once, when the person turned this on and its ceilings allow
 //! (`AgentTriggers`): it reads the failing checks (the code column's "fix
 //! checks" read) and, in its own conversation in that task, says what broke
 //! and the smallest fix — read-only, so who fixes it stays the person's call.
@@ -28,7 +28,7 @@ pub(super) fn diagnosis_prompt(pr: &Failing, checks: Option<&str>) -> String {
         None => "DCC could not read the failing checks' logs; work from the task's code and its latest changes.".to_string(),
     };
     format!(
-        "[DCC] The checks of this task's pull request {}#{} failed on {sha} (branch {}).\n\nAs the Reviewer, find the cause: say what broke, where, and the smallest fix. Work read-only: do not edit files, commit or push; the person decides who fixes it. Answer in the person's language, short.\n\n{evidence}",
+        "[DCC] The checks of this task's pull request {}#{} failed on {sha} (branch {}).\n\nFind the cause: say what broke, where, and the smallest fix. Work read-only: do not edit files, commit or push; the person decides who fixes it. Answer in the person's language, short.\n\n{evidence}",
         pr.repository, pr.number, pr.head_branch
     )
 }
@@ -47,19 +47,20 @@ fn announce(reviewer: &str, pr: &Failing, done: &Result<(), String>, cx: &App) {
 }
 
 impl Shell {
-    /// The failing pull requests of this search: the Reviewer looks at each
+    /// The failing pull requests of this search: each watching agent looks at each
     /// new failure of a task its trigger, its ceilings and its target allow.
     pub(super) fn checks_failing(&mut self, failing: &[Failing], cx: &mut Context<Self>) {
-        let Some(reviewer) = self.sidebar.read(cx).reviewer() else {
-            return;
-        };
-        if !cx.has_global::<AgentTriggers>()
-            || !cx
-                .global::<AgentTriggers>()
-                .is_on(&reviewer.id, Trigger::CiFailed)
-        {
-            return;
+        for agent in self.watching(Trigger::CiFailed, cx) {
+            self.checks_failing_for(agent, failing, cx);
         }
+    }
+
+    fn checks_failing_for(
+        &mut self,
+        reviewer: crate::data::agents::AgentRecord,
+        failing: &[Failing],
+        cx: &mut Context<Self>,
+    ) {
         let urls: Vec<&str> = failing.iter().map(|pr| pr.url.as_str()).collect();
         cx.update_global::<AgentTriggers, _>(|triggers, _| {
             triggers.keep_failures(&reviewer.id, &urls)

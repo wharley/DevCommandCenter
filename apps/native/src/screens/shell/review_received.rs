@@ -1,8 +1,8 @@
-//! The Reviewer's third trigger: someone else reviewed or commented on one
+//! A trigger any agent can have on: someone else reviewed or commented on one
 //! of the person's task pull requests. The same search `PrWatch` already
 //! makes lists the latest review activity on the person's own pull requests
 //! (`pr_hub_received`), so no `gh` is added to notice it. The first sight
-//! only sets where it starts; what comes after wakes the Reviewer, when the
+//! only sets where it starts; what comes after wakes the agent, when the
 //! person turned this on and its ceilings allow: it reads the open review
 //! conversations (the code column's read) and, read-only in its own
 //! conversation in that task, says for each whether it holds and what to
@@ -86,7 +86,7 @@ pub(super) fn review_prompt(
         format!("The open review conversations:\n\n{threads}")
     };
     format!(
-        "[DCC] New review activity on this task's pull request {}#{} (branch {}) from {from}.\n\nAs the Reviewer, read what they asked: for each point, say whether it holds and what to change, the smallest fix first; say so when a point is already handled or does not apply. Work read-only: do not edit files, reply on the pull request, commit or push; the person decides what to do. Answer in the person's language, short.\n\n{evidence}",
+        "[DCC] New review activity on this task's pull request {}#{} (branch {}) from {from}.\n\nRead what they asked: for each point, say whether it holds and what to change, the smallest fix first; say so when a point is already handled or does not apply. Work read-only: do not edit files, reply on the pull request, commit or push; the person decides what to do. Answer in the person's language, short.\n\n{evidence}",
         pr.repository, pr.number, pr.head_branch
     )
 }
@@ -106,19 +106,20 @@ fn announce(reviewer: &str, pr: &Received, done: &Result<(), String>, cx: &App) 
 
 impl Shell {
     /// The reviews on the person's pull requests in this search: the
-    /// Reviewer reads what came after the last look, when its trigger, its
+    /// watching agent reads what came after the last look, when its trigger, its
     /// ceilings and the task allow.
     pub(super) fn reviews_received(&mut self, received: &[Received], cx: &mut Context<Self>) {
-        let Some(reviewer) = self.sidebar.read(cx).reviewer() else {
-            return;
-        };
-        if !cx.has_global::<AgentTriggers>()
-            || !cx
-                .global::<AgentTriggers>()
-                .is_on(&reviewer.id, Trigger::ReviewReceived)
-        {
-            return;
+        for agent in self.watching(Trigger::ReviewReceived, cx) {
+            self.reviews_received_for(agent, received, cx);
         }
+    }
+
+    fn reviews_received_for(
+        &mut self,
+        reviewer: crate::data::agents::AgentRecord,
+        received: &[Received],
+        cx: &mut Context<Self>,
+    ) {
         let composer = self.conversation.read(cx).composer.read(cx);
         let providers: std::sync::Arc<Vec<ProviderDescriptor>> =
             composer.catalog.clone().unwrap_or_default();

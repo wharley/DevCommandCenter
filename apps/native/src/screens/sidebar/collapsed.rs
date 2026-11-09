@@ -141,7 +141,7 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         cx,
     );
     // A dot while an agent needs the person (amber) or left a result (sky).
-    let (waiting, needs_you) = sidebar.agents_waiting();
+    let (waiting, needs_you) = sidebar.agents_waiting(cx);
     let agents = div()
         .relative()
         .child(icon_button(

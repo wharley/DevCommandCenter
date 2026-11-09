@@ -29,11 +29,14 @@ impl Sidebar {
         })
     }
 
-    /// Beside "Agentes": the unread cards (the day's recap among them), and
-    /// whether one waits on the person (amber).
-    pub(super) fn agents_waiting(&self) -> (usize, bool) {
+    /// Beside "Agentes": the unread cards (the day's recap and the
+    /// check-in's among them), and whether one waits on the person (amber).
+    pub(super) fn agents_waiting(&self, cx: &gpui::App) -> (usize, bool) {
         let (count, waiting) = unread_count(&self.inbox(&[]));
-        (count + usize::from(self.recap_unread()), waiting)
+        let checks = cx
+            .try_global::<crate::data::check_ins::CheckIns>()
+            .map_or(0, |checks| checks.unread());
+        (count + usize::from(self.recap_unread()) + checks, waiting)
     }
 
     /// A card opened: its result is read (a pull request review is read
@@ -61,6 +64,12 @@ impl Sidebar {
             }
         }
         self.agent_markers.recap.mark_seen();
+        if cx.has_global::<crate::data::check_ins::CheckIns>() {
+            gpui::BorrowAppContext::update_global::<crate::data::check_ins::CheckIns, _>(
+                cx,
+                |checks, _| checks.mark_all_read(),
+            );
+        }
         cx.notify();
     }
 }

@@ -105,7 +105,11 @@ fn the_reviewers_trigger_is_off_until_turned_on(cx: &mut TestAppContext) {
         "a trigger is on"
     );
 
+    // Any agent has triggers; the hub's reviews stay the Reviewer's.
     page.update(cx, |page, cx| page.show("a-2".into(), cx));
     cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-triggers").is_none());
+    assert!(cx.debug_bounds("agent-triggers").is_some());
+    assert!(cx.debug_bounds("agent-trigger-prUpdated").is_none());
+    assert!(cx.debug_bounds("agent-trigger-ciFailed").is_some());
+    assert!(cx.debug_bounds("agent-trigger-taskStalled").is_some());
 }

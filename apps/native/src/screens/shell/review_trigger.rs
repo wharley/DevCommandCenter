@@ -160,14 +160,21 @@ pub(super) fn review_run(
 }
 
 /// "Revisor revisou de novo" — "acme/app #1014 · 3 comentários para revisar".
-fn announce(reviewer: &str, pr: &Reviewed, answer: &Result<String, String>, cx: &App) {
+fn announce(
+    trigger: Trigger,
+    reviewer: &str,
+    pr: &Reviewed,
+    answer: &Result<String, String>,
+    cx: &App,
+) {
+    let key = |what: &str| format!("agents.triggers.{}.{what}", trigger.id());
     let title = cx.t_with(
-        "agents.triggers.prUpdated.done",
+        &key("done"),
         &Args::default().with("agent", reviewer.to_string()),
     );
     let what = match answer {
-        Ok(_) => cx.t("agents.triggers.prUpdated.ready").to_string(),
-        Err(_) => cx.t("agents.triggers.prUpdated.failed").to_string(),
+        Ok(_) => cx.t(&key("ready")).to_string(),
+        Err(_) => cx.t(&key("failed")).to_string(),
     };
     let body = format!("{} #{} · {what}", pr.repository, pr.number);
     crate::ui::attention::notify_away(&title, &body);
@@ -177,16 +184,20 @@ impl Shell {
     /// News from `PrWatch`: the Reviewer reviews again what its trigger,
     /// its ceilings and the person's checkouts allow.
     pub(super) fn pr_news_arrived(&mut self, news: &[Reviewed], cx: &mut Context<Self>) {
-        let Some(reviewer) = self.sidebar.read(cx).reviewer() else {
+        self.review_pull_requests(Trigger::PrUpdated, news, cx);
+    }
+
+    /// The hub's review of each pull request, started by `trigger` for the
+    /// Reviewer when it watches for it.
+    pub(super) fn review_pull_requests(
+        &mut self,
+        trigger: Trigger,
+        news: &[Reviewed],
+        cx: &mut Context<Self>,
+    ) {
+        let Some(reviewer) = self.watching(trigger, cx).into_iter().next() else {
             return;
         };
-        if !cx.has_global::<AgentTriggers>()
-            || !cx
-                .global::<AgentTriggers>()
-                .is_on(&reviewer.id, Trigger::PrUpdated)
-        {
-            return;
-        }
         let composer = self.conversation.read(cx).composer.read(cx);
         let providers: Arc<Vec<ProviderDescriptor>> = composer.catalog.clone().unwrap_or_default();
         let pick = (
@@ -196,9 +207,9 @@ impl Shell {
         let db = crate::data::loader::database_path();
         for pr in news {
             let now = Utc::now();
-            let allowed =
-                cx.global::<AgentTriggers>()
-                    .check(&reviewer.id, Trigger::PrUpdated, &pr.url, now);
+            let allowed = cx
+                .global::<AgentTriggers>()
+                .check(&reviewer.id, trigger, &pr.url, now);
             if allowed.is_err() {
                 continue;
             }
@@ -221,7 +232,7 @@ impl Shell {
             }
             PrReviewJobs::started_by_trigger(cx, &item.id);
             cx.update_global::<AgentTriggers, _>(|triggers, _| {
-                triggers.record(&reviewer.id, Trigger::PrUpdated, &pr.url, now)
+                triggers.record(&reviewer.id, trigger, &pr.url, now)
             });
             let (reviewer, providers, pick, pr) = (
                 reviewer.clone(),
@@ -248,7 +259,7 @@ impl Shell {
                     })
                     .await;
                 let _ = cx.update(|cx| {
-                    announce(&name, &pr, &answer, cx);
+                    announce(trigger, &name, &pr, &answer, cx);
                     PrReviewJobs::finish(cx, &id, answer);
                 });
             })

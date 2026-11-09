@@ -32,6 +32,7 @@ mod repo_picker;
 mod row;
 mod row_actions;
 mod row_status;
+mod running;
 mod sections;
 mod skills_count;
 pub mod state;

@@ -113,6 +113,21 @@ pub struct Received {
     pub workspace_path: Option<String>,
 }
 
+/// `PullRequestHubAsked`: a pull request that asks for the person's review
+/// or an issue assigned to them, read in the same search.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Asked {
+    pub url: String,
+    pub number: u32,
+    /// `owner/name`
+    pub repository: String,
+    pub title: String,
+    pub author: Option<String>,
+    pub updated_at: String,
+    pub project_id: Option<String>,
+}
+
 /// `PullRequestHubReviewedOutput`
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -121,6 +136,8 @@ pub struct ReviewedList {
     pub warnings: Vec<String>,
     pub failing: Vec<Failing>,
     pub received: Vec<Received>,
+    pub requested: Vec<Asked>,
+    pub issues: Vec<Asked>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]

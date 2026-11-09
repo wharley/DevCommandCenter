@@ -221,14 +221,14 @@
       "limits": "Up to {{daily}} runs a day and {{target}} per PR or task. Today: {{today}}.",
       "ciFailed": {
         "title": "A task's CI failed",
-        "hint": "When the checks of one of your tasks' PRs fail, the Reviewer reads what failed and says the cause and the smallest fix in its conversation in that task. It only reads; who fixes it is up to you.",
+        "hint": "When the checks of one of your tasks' PRs fail, the agent reads what failed and says the cause and the smallest fix in its conversation in that task. It only reads; who fixes it is up to you.",
         "done": "{{agent}} looked at the CI",
         "ready": "diagnosis in the task",
         "failed": "could not ask for the diagnosis"
       },
       "reviewReceived": {
         "title": "A review came on a task's PR",
-        "hint": "When someone reviews or comments on one of your tasks' PRs, the Reviewer reads the open conversations and says, in its conversation in that task, whether each point holds and what to change. It only reads and does not reply on the PR.",
+        "hint": "When someone reviews or comments on one of your tasks' PRs, the agent reads the open conversations and says, in its conversation in that task, whether each point holds and what to change. It only reads and does not reply on the PR.",
         "done": "{{agent}} read the review",
         "ready": "analysis in the task",
         "failed": "could not ask for the analysis"
@@ -239,6 +239,37 @@
         "done": "{{agent}} reviewed again",
         "ready": "drafts ready for you",
         "failed": "the review did not finish"
+      },
+      "reviewRequested": {
+        "title": "A PR asks for your review",
+        "hint": "When a PR asks for your review, the Reviewer reviews it in Pull Requests and leaves the drafts there. Nothing is published.",
+        "done": "{{agent}} reviewed the PR that asked for you",
+        "ready": "drafts in Pull Requests",
+        "failed": "could not review"
+      },
+      "issueAssigned": {
+        "title": "An issue assigned to you",
+        "hint": "When an issue is assigned to you, the agent reads it and, if it is work for one of your projects, proposes the task by card. It never starts anything on its own.",
+        "done": "{{agent}} read the issue",
+        "ready": "answer in its conversation",
+        "failed": "could not ask it to read"
+      },
+      "taskStalled": {
+        "title": "A stalled task",
+        "hint": "When a task's turn goes 20 min with no sign of life, the agent looks at what it was doing and says whether it is stuck and what would unblock it. It only reads.",
+        "done": "{{agent}} looked at the stalled task",
+        "ready": "diagnosis in the task",
+        "failed": "could not ask for the diagnosis"
+      },
+      "next": {
+        "paused": "Paused in the room: no trigger wakes the agents.",
+        "quiet": "In quiet hours: back at {{hour}}:00.",
+        "ceiling": "Reached today's ceiling: back tomorrow.",
+        "check": "Next check within 5 min, with no model until something new shows up."
+      },
+      "quiet": {
+        "title": "Quiet hours (every agent)",
+        "off": "Off"
       }
     },
     "mood": {
@@ -389,7 +420,10 @@
         "trigger": {
           "prUpdated": "Trigger · PR updated",
           "ciFailed": "Trigger · CI failed",
-          "reviewReceived": "Trigger · review received"
+          "reviewReceived": "Trigger · review received",
+          "reviewRequested": "Trigger · review requested",
+          "issueAssigned": "Trigger · issue assigned",
+          "taskStalled": "Trigger · stalled task"
         }
       },
       "title": "Team room",
@@ -420,7 +454,15 @@
       "mention": {
         "title": "Team",
         "reviewer": "Reviews the tasks' changes and pull requests"
-      }
+      },
+      "checkIn": {
+        "tag": "Check-in",
+        "reviewRequested": "A PR asks for your review: {{title}}",
+        "issueAssigned": "An issue for you: {{title}}",
+        "taskStalled": "{{title}} has had no sign of life for {{minutes}} min"
+      },
+      "pause": "Pause agents",
+      "resume": "Resume agents"
     },
     "team": {
       "title": "Team",

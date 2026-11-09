@@ -221,14 +221,14 @@
       "limits": "Até {{daily}} execuções por dia e {{target}} por PR ou tarefa. Hoje: {{today}}.",
       "ciFailed": {
         "title": "CI de uma tarefa falhou",
-        "hint": "Quando os checks do PR de uma tarefa sua falham, o Revisor lê o que falhou e diz a causa e a menor correção na conversa dele nessa tarefa. Ele só lê; você decide quem corrige.",
+        "hint": "Quando os checks do PR de uma tarefa sua falham, o agente lê o que falhou e diz a causa e a menor correção na conversa dele nessa tarefa. Ele só lê; você decide quem corrige.",
         "done": "{{agent}} olhou o CI",
         "ready": "diagnóstico na tarefa",
         "failed": "não consegui pedir o diagnóstico"
       },
       "reviewReceived": {
         "title": "Review chegou num PR de tarefa",
-        "hint": "Quando alguém revisa ou comenta o PR de uma tarefa sua, o Revisor lê as conversas abertas e diz, na conversa dele nessa tarefa, se cada ponto procede e o que mudar. Ele só lê e não responde no PR.",
+        "hint": "Quando alguém revisa ou comenta o PR de uma tarefa sua, o agente lê as conversas abertas e diz, na conversa dele nessa tarefa, se cada ponto procede e o que mudar. Ele só lê e não responde no PR.",
         "done": "{{agent}} leu o review",
         "ready": "análise na tarefa",
         "failed": "não consegui pedir a análise"
@@ -239,6 +239,37 @@
         "done": "{{agent}} revisou de novo",
         "ready": "rascunhos prontos para você ver",
         "failed": "a revisão não terminou"
+      },
+      "reviewRequested": {
+        "title": "PR pede sua revisão",
+        "hint": "Quando um PR pede a sua revisão, o Revisor faz a revisão em Pull Requests e deixa os rascunhos lá. Nada é publicado.",
+        "done": "{{agent}} revisou o PR que pediu você",
+        "ready": "rascunhos em Pull Requests",
+        "failed": "não consegui revisar"
+      },
+      "issueAssigned": {
+        "title": "Issue atribuída a você",
+        "hint": "Quando uma issue é atribuída a você, o agente lê e, se for trabalho de um dos seus projetos, propõe a tarefa por cartão. Ele não começa nada sozinho.",
+        "done": "{{agent}} leu a issue",
+        "ready": "resposta na conversa dele",
+        "failed": "não consegui pedir a leitura"
+      },
+      "taskStalled": {
+        "title": "Tarefa parada",
+        "hint": "Quando o turno de uma tarefa fica 20 min sem nenhum sinal, o agente olha o que ela fazia e diz se travou e o que destrava. Ele só lê.",
+        "done": "{{agent}} olhou a tarefa parada",
+        "ready": "diagnóstico na tarefa",
+        "failed": "não consegui pedir o diagnóstico"
+      },
+      "next": {
+        "paused": "Pausado na Sala: nenhum gatilho acorda os agentes.",
+        "quiet": "Em horas quietas: volta às {{hour}}h.",
+        "ceiling": "Chegou ao teto de hoje: volta amanhã.",
+        "check": "Próxima verificação em até 5 min, sem gastar modelo até achar algo novo."
+      },
+      "quiet": {
+        "title": "Horas quietas (todos os agentes)",
+        "off": "Desligado"
       }
     },
     "mood": {
@@ -389,7 +420,10 @@
         "trigger": {
           "prUpdated": "Gatilho · PR atualizado",
           "ciFailed": "Gatilho · CI falhou",
-          "reviewReceived": "Gatilho · review recebido"
+          "reviewReceived": "Gatilho · review recebido",
+          "reviewRequested": "Gatilho · PR pede revisão",
+          "issueAssigned": "Gatilho · issue atribuída",
+          "taskStalled": "Gatilho · tarefa parada"
         }
       },
       "title": "Sala da equipe",
@@ -420,7 +454,15 @@
       "mention": {
         "title": "Equipe",
         "reviewer": "Revisa as mudanças das tarefas e os PRs"
-      }
+      },
+      "checkIn": {
+        "tag": "Check-in",
+        "reviewRequested": "PR pede sua revisão: {{title}}",
+        "issueAssigned": "Issue para você: {{title}}",
+        "taskStalled": "{{title}} está sem sinal há {{minutes}} min"
+      },
+      "pause": "Pausar agentes",
+      "resume": "Retomar agentes"
     },
     "team": {
       "title": "Equipe",

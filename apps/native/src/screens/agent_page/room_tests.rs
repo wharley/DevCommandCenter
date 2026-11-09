@@ -422,3 +422,79 @@ fn an_agent_suggests_a_teammate_and_only_the_persons_click_passes_it(cx: &mut Te
     cx.run_until_parked();
     assert!(cx.debug_bounds("room-handoff-1").is_none());
 }
+
+#[gpui::test]
+fn the_check_in_is_a_card_and_the_room_pauses_every_trigger(cx: &mut TestAppContext) {
+    use crate::data::agent_triggers::AgentTriggers;
+    use crate::data::check_ins::{CheckInKind, CheckIns, Running, stalled};
+    let dir = tempfile::tempdir().unwrap();
+    let triggers = dir.path().join("agent-triggers.json");
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+        cx.set_global(AgentTriggers::load(triggers));
+        // A stall found after the first read of its kind.
+        let mut checks = CheckIns::load(None);
+        let now = chrono::Utc::now();
+        checks.take(CheckInKind::TaskStalled, Vec::new(), now);
+        let turn = Running {
+            workspace_id: "w-1".into(),
+            session_id: "s-1".into(),
+            title: "Checkout".into(),
+            project: "Loja".into(),
+            project_id: "p".into(),
+            started_at: "t".into(),
+            last_event_at: Some((now - chrono::Duration::minutes(30)).to_rfc3339()),
+        };
+        checks.take(CheckInKind::TaskStalled, stalled(&[turn], now), now);
+        cx.set_global(checks);
+    });
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("rev".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(1400.0)));
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![agent("rev", "Revisor", "reviewer", Vec::new())],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.open_room(None, cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-check-in-0").is_some());
+    assert!(cx.debug_bounds("room-unread").is_some());
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = events.clone();
+    page.update(cx, |_, cx| {
+        cx.subscribe_self(move |_, event: &AgentPageEvent, _| {
+            if let AgentPageEvent::OpenSession {
+                task_id,
+                session_id,
+            } = event
+            {
+                sink.borrow_mut().push(format!("{task_id} {session_id}"));
+            }
+        })
+        .detach();
+    });
+    let card = cx.debug_bounds("room-check-in-0").unwrap();
+    cx.simulate_click(card.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(events.borrow().as_slice(), ["w-1 s-1"]);
+    assert_eq!(cx.update(|_, cx| cx.global::<CheckIns>().unread()), 0);
+
+    // "Pausar agentes" holds every trigger until "Retomar".
+    let pause = cx.debug_bounds("room-pause").unwrap();
+    cx.simulate_click(pause.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| cx.global::<AgentTriggers>().paused()));
+}

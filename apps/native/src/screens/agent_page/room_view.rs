@@ -330,8 +330,10 @@ impl Render for TeamRoom {
         let agents: Vec<AgentRecord> = self.sidebar.read(cx).agents().to_vec();
         let lines: Vec<RoomLine> = self.lines().into_iter().cloned().collect();
         let cards = self.cards(cx);
-        let unread = cards.iter().filter(|card| card.unread).count();
-        // The room's lines and the inbox's cards, in time order.
+        let checks = self.check_ins(cx);
+        let unread = cards.iter().filter(|card| card.unread).count()
+            + checks.iter().filter(|card| card.unread).count();
+        // The room's lines, the inbox's cards and the check-in's, in time order.
         let mut timeline: Vec<(&str, Option<usize>, Option<usize>)> = lines
             .iter()
             .enumerate()
@@ -342,10 +344,20 @@ impl Render for TeamRoom {
                     .enumerate()
                     .map(|(index, card)| (card.at.as_str(), None, Some(index))),
             )
+            .chain(
+                checks
+                    .iter()
+                    .enumerate()
+                    .map(|(index, card)| (card.at.as_str(), None, Some(cards.len() + index))),
+            )
             .collect();
         timeline.sort_by(|left, right| left.0.cmp(right.0));
         let mut rows: Vec<AnyElement> = Vec::new();
         for (_, line, card) in timeline {
+            if let Some(index) = card.and_then(|index| index.checked_sub(cards.len())) {
+                rows.push(self.check_in_row(index, &checks[index], cx));
+                continue;
+            }
             if let Some(index) = card {
                 let card = &cards[index];
                 if let Some(agent) = Self::agent(&agents, &card.agent_id) {
@@ -435,10 +447,17 @@ impl Render for TeamRoom {
                     .border_color(colors.border.opacity(0.7))
                     .child(
                         div()
-                            .text_size(px(16.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(colors.foreground)
-                            .child(cx.t("agents.room.title")),
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(px(16.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(colors.foreground)
+                                    .child(cx.t("agents.room.title")),
+                            )
+                            .children(self.pause_button(cx)),
                     )
                     .child(
                         div()

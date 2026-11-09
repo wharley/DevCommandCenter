@@ -301,6 +301,8 @@ fn the_reviewers_pull_request_reviews_show_and_open(cx: &mut TestAppContext) {
         let composer = cx.new(|cx| Composer::new(window, cx));
         AgentPage::new("a-1".into(), sidebar, composer, cx)
     });
+    // Tall enough for the reviews below the triggers.
+    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(2400.0)));
     cx.run_until_parked();
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {

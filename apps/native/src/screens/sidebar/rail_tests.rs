@@ -118,7 +118,7 @@ fn agents_waiting_are_counted_beside_agentes(cx: &mut TestAppContext) {
         sidebar.update(cx, |sidebar, cx| sidebar.apply_for_tests(data, cx));
         cx.run_until_parked();
         assert_eq!(
-            sidebar.read_with(cx, |sidebar, _| sidebar.agents_waiting()),
+            sidebar.read_with(cx, |sidebar, cx| sidebar.agents_waiting(cx)),
             (1, true)
         );
         assert_eq!(

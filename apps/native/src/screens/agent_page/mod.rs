@@ -39,6 +39,7 @@ mod picker;
 mod pr_reviews;
 mod room;
 mod room_cards;
+mod room_checkins;
 mod room_cleanup;
 mod room_handoff;
 mod room_mentions;
@@ -52,6 +53,7 @@ mod tests;
 mod triggers;
 #[cfg(test)]
 mod triggers_tests;
+mod triggers_wake;
 
 pub enum AgentPageEvent {
     /// A conversation of the agent: its task, on that session.

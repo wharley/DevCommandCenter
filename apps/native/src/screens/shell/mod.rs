@@ -10,6 +10,7 @@ mod browser;
 mod device;
 mod browser_opens;
 mod cached;
+mod check_in;
 mod ci_trigger;
 mod cli_updates;
 mod computer;
@@ -331,6 +332,7 @@ impl Shell {
                     shell.pr_news_arrived(&event.news, cx);
                     shell.checks_failing(&event.failing, cx);
                     shell.reviews_received(&event.received, cx);
+                    shell.check_in_arrived(event, cx);
                 });
                 (watch, news)
             },
