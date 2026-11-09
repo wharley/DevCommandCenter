@@ -27,7 +27,9 @@ pub(crate) enum Sending {
 pub(crate) struct Requests {
     /// One field per question, by `request id + question`.
     inputs: RefCell<HashMap<(String, String), Entity<TextInput>>>,
-    sending: HashMap<String, Sending>,
+    pub(super) sending: HashMap<String, Sending>,
+    /// "Recusar com motivo", while its field is open (`approval_reason`).
+    pub(super) reason: Option<(String, Entity<TextInput>)>,
     /// Where answers go instead of the desktop's own endpoint (tests).
     pub endpoint: Option<DesktopApi>,
 }
@@ -36,6 +38,7 @@ impl Requests {
     pub fn clear(&mut self) {
         self.inputs.borrow_mut().clear();
         self.sending.clear();
+        self.reason = None;
     }
 }
 

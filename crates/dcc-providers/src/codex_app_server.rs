@@ -32,15 +32,14 @@ use dcc_core::{
         PromptInjectionOptions,
     },
     domain::{
+        goal::{GoalSignal, GoalStatus, ProviderGoalSnapshot},
         mcp::{McpErrorCategory, McpRuntimeState, McpRuntimeStatus, McpToolPolicyDecision},
         provider::{
             Capabilities, HealthStatus, NativeSubagentStatus, ProviderAccountStatus,
-            ProviderAccountUsage, ProviderAccountUsageState, ProviderApprovalPolicy,
-            ProviderEvent, ProviderId,
-            ProviderResetCredit, ProviderResetCredits, ProviderResetOutcome, ProviderUsageWindow,
-            SessionHandle, ToolCallDetail,
+            ProviderAccountUsage, ProviderAccountUsageState, ProviderApprovalPolicy, ProviderEvent,
+            ProviderId, ProviderResetCredit, ProviderResetCredits, ProviderResetOutcome,
+            ProviderUsageWindow, SessionHandle, ToolCallDetail,
         },
-        goal::{GoalSignal, GoalStatus, ProviderGoalSnapshot},
         session::{AssistantMessagePhase, SessionId},
         usage::ModelTokenUsage,
     },
@@ -343,7 +342,10 @@ fn codex_goal_snapshot(goal: &Value) -> Option<ProviderGoalSnapshot> {
 
 /// The answer to `/goal`, `/goal clear` and `/goal pause`, which change the
 /// goal without a model turn. Fixed text, never generated.
-fn codex_goal_control_message(command: &CodexGoalCommand, goal: Option<&ProviderGoalSnapshot>) -> String {
+fn codex_goal_control_message(
+    command: &CodexGoalCommand,
+    goal: Option<&ProviderGoalSnapshot>,
+) -> String {
     match (command, goal) {
         (CodexGoalCommand::Clear, _) => "Objetivo removido.".to_string(),
         (CodexGoalCommand::Pause, Some(_)) => "Objetivo pausado.".to_string(),
@@ -658,7 +660,8 @@ fn validate_codex_mcp_projection(
 }
 
 fn codex_reasoning_effort(model: Option<&str>, effort: Option<&str>) -> Option<&'static str> {
-    let model = model.map(|model| dcc_core::domain::model_registry::resolve_alias("codex", model.trim()));
+    let model =
+        model.map(|model| dcc_core::domain::model_registry::resolve_alias("codex", model.trim()));
     // A model the built-in catalog does not know came from the CLI's own
     // list, and the picker offers "max" only where that list does.
     let supports_max = matches!(
@@ -1054,8 +1057,13 @@ async fn run_codex_browser_sign_in(
         let auth_url = login
             .get("authUrl")
             .and_then(Value::as_str)
-            .ok_or_else(|| CoreError::Provider("Codex did not return a sign-in page".to_string()))?;
-        let login_id = login.get("loginId").and_then(Value::as_str).map(str::to_string);
+            .ok_or_else(|| {
+                CoreError::Provider("Codex did not return a sign-in page".to_string())
+            })?;
+        let login_id = login
+            .get("loginId")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         if !is_codex_local_sign_in_link(auth_url) {
             return Err(CoreError::Provider(
                 "Codex asked to open an unexpected sign-in page; sign in with the command instead"
@@ -2236,6 +2244,7 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_device_install"
                 | "dcc_agent_remember"
                 | "dcc_propose_routine"
+                | "dcc_review_pull_request"
                 | "dcc_overview"
                 | "dcc_open_task"
         )
@@ -2460,7 +2469,9 @@ impl SessionRuntime {
     fn release_goal_hold(&self, tracker: &mut CodexGoalTracker) {
         if tracker.held_turn.take().is_some() {
             tracker.hold_generation += 1;
-            let _ = self.events_tx.send(ProviderEvent::Completed { at: now_iso() });
+            let _ = self
+                .events_tx
+                .send(ProviderEvent::Completed { at: now_iso() });
         }
     }
 
@@ -2552,13 +2563,15 @@ impl SessionRuntime {
         let message = codex_goal_control_message(command, goal.as_ref());
         self.emit_goal(goal);
         let at = now_iso();
-        let _ = self.events_tx.send(ProviderEvent::AssistantMessageCompleted {
-            id: format!("codex:goal:{}", Uuid::new_v4()),
-            phase: AssistantMessagePhase::Unknown,
-            content: Some(message),
-            model: None,
-            at: at.clone(),
-        });
+        let _ = self
+            .events_tx
+            .send(ProviderEvent::AssistantMessageCompleted {
+                id: format!("codex:goal:{}", Uuid::new_v4()),
+                phase: AssistantMessagePhase::Unknown,
+                content: Some(message),
+                model: None,
+                at: at.clone(),
+            });
         let _ = self.events_tx.send(ProviderEvent::Completed { at });
         Ok(())
     }
@@ -3647,7 +3660,10 @@ impl CodexAppServerAdapter {
                     if (method == "turn/completed" || method == "error") && belongs_to_root {
                         *runtime.active_turn_id.lock().await = None;
                     }
-                    if matches!(method.as_str(), "thread/goal/updated" | "thread/goal/cleared") {
+                    if matches!(
+                        method.as_str(),
+                        "thread/goal/updated" | "thread/goal/cleared"
+                    ) {
                         if belongs_to_root {
                             let goal = if method == "thread/goal/updated" {
                                 params.get("goal").and_then(codex_goal_snapshot)
@@ -3772,7 +3788,8 @@ impl CodexAppServerAdapter {
                     }
                     let plan_events = codex_plan_update_events(method, params);
                     if !plan_events.is_empty() {
-                        if codex_notification_belongs_to_root(params, current_thread_id.as_deref()) {
+                        if codex_notification_belongs_to_root(params, current_thread_id.as_deref())
+                        {
                             for event in plan_events {
                                 let _ = runtime.events_tx.send(event);
                             }
@@ -3946,7 +3963,10 @@ impl CodexUsageLimitTracker {
         if belongs_to_root && codex_failure_is_usage_limit(method, params) {
             let resets_at = codex_usage_limit_reset_at(self.snapshot.as_ref());
             self.reset_unknown = resets_at.is_none();
-            return (Some(ProviderEvent::UsageLimitReached { resets_at, at }), false);
+            return (
+                Some(ProviderEvent::UsageLimitReached { resets_at, at }),
+                false,
+            );
         }
         (None, false)
     }
@@ -3996,7 +4016,13 @@ fn merge_codex_rate_limits(previous: Option<Value>, update: &Value) -> Option<Va
         return Some(update.clone());
     };
     if let Value::Object(fields) = update {
-        for key in ["limitId", "planType", "rateLimitReachedType", "primary", "secondary"] {
+        for key in [
+            "limitId",
+            "planType",
+            "rateLimitReachedType",
+            "primary",
+            "secondary",
+        ] {
             if let Some(value) = fields.get(key) {
                 merged.insert(key.to_string(), value.clone());
             }
@@ -4215,7 +4241,9 @@ impl Provider for CodexAppServerAdapter {
             Input::Turn(turn) => codex_turn_has_full_access(turn.approval_policy, turn.plan_mode),
             _ => false,
         };
-        runtime.turn_full_access.store(full_access, Ordering::SeqCst);
+        runtime
+            .turn_full_access
+            .store(full_access, Ordering::SeqCst);
         let (payload, effort, summary, approval_policy, sandbox_policy) = match input {
             Input::Text(text) => (
                 CodexTurnPayload {
@@ -4319,9 +4347,10 @@ impl Provider for CodexAppServerAdapter {
             .await
             .clone()
             .ok_or_else(|| CoreError::Provider("codex session has no thread ID".to_string()))?;
-        let expected_turn_id = runtime.turn_for_steer().await.ok_or_else(|| {
-            CoreError::Provider("codex session has no active turn".to_string())
-        })?;
+        let expected_turn_id = runtime
+            .turn_for_steer()
+            .await
+            .ok_or_else(|| CoreError::Provider("codex session has no active turn".to_string()))?;
 
         runtime
             .send_request(
@@ -4632,7 +4661,9 @@ mod tests {
 
     #[test]
     fn codex_usage_limit_carries_the_main_allowance_reset() {
-        let events = replay_codex_limits(include_str!("../fixtures/usage_limit/codex_usage_limit.jsonl"));
+        let events = replay_codex_limits(include_str!(
+            "../fixtures/usage_limit/codex_usage_limit.jsonl"
+        ));
         // Both the `error` and the failed `turn/completed` name it; the
         // session records the first and ignores the repeat.
         assert_eq!(events.len(), 2);
@@ -4646,9 +4677,17 @@ mod tests {
 
     #[test]
     fn codex_reset_learned_after_the_stop_is_reported_once() {
-        let events = replay_codex_limits(include_str!("../fixtures/usage_limit/codex_late_reset.jsonl"));
+        let events = replay_codex_limits(include_str!(
+            "../fixtures/usage_limit/codex_late_reset.jsonl"
+        ));
         assert_eq!(events.len(), 2);
-        assert!(matches!(&events[0], ProviderEvent::UsageLimitReached { resets_at: None, .. }));
+        assert!(matches!(
+            &events[0],
+            ProviderEvent::UsageLimitReached {
+                resets_at: None,
+                ..
+            }
+        ));
         assert!(matches!(
             &events[1],
             ProviderEvent::UsageLimitReached { resets_at, .. } if *resets_at == codex_rfc3339(2_000_100_000)
@@ -4657,10 +4696,16 @@ mod tests {
 
     #[test]
     fn codex_other_failures_and_subagents_are_not_usage_limits() {
-        assert!(replay_codex_limits(include_str!("../fixtures/usage_limit/codex_other_failure.jsonl")).is_empty());
+        assert!(replay_codex_limits(include_str!(
+            "../fixtures/usage_limit/codex_other_failure.jsonl"
+        ))
+        .is_empty());
         let mut tracker = CodexUsageLimitTracker::default();
         let line: Value = serde_json::from_str(
-            include_str!("../fixtures/usage_limit/codex_usage_limit.jsonl").lines().nth(3).unwrap(),
+            include_str!("../fixtures/usage_limit/codex_usage_limit.jsonl")
+                .lines()
+                .nth(3)
+                .unwrap(),
         )
         .unwrap();
         let (event, _) = tracker.observe("error", &line["params"], false, "now".to_string());
@@ -4673,7 +4718,10 @@ mod tests {
             "primary": { "usedPercent": 100, "resetsAt": 2_000_100_000 },
             "secondary": { "usedPercent": 100, "resetsAt": 2_000_500_000 }
         });
-        assert_eq!(codex_usage_limit_reset_at(Some(&snapshot)), codex_rfc3339(2_000_500_000));
+        assert_eq!(
+            codex_usage_limit_reset_at(Some(&snapshot)),
+            codex_rfc3339(2_000_500_000)
+        );
         let unknown = json!({ "primary": { "usedPercent": 100 } });
         assert_eq!(codex_usage_limit_reset_at(Some(&unknown)), None);
         let fine = json!({ "primary": { "usedPercent": 40, "resetsAt": 2_000_100_000 } });
@@ -6252,7 +6300,9 @@ unified_exec                         stable             true
         assert!(error.to_string().contains("denied"));
 
         let mut lines = BufReader::new(&b""[..]).lines();
-        assert!(wait_codex_login_completed(&mut lines, Some("mine")).await.is_err());
+        assert!(wait_codex_login_completed(&mut lines, Some("mine"))
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -6311,11 +6361,26 @@ mod mcp_task_mode_tests {
 
     #[test]
     fn only_full_access_outside_plan_mode_skips_the_prompt() {
-        assert!(codex_turn_has_full_access(Some(ProviderApprovalPolicy::FullAccess), None));
+        assert!(codex_turn_has_full_access(
+            Some(ProviderApprovalPolicy::FullAccess),
+            None
+        ));
         assert!(codex_turn_has_full_access(None, Some(false)));
-        assert!(!codex_turn_has_full_access(Some(ProviderApprovalPolicy::FullAccess), Some(true)));
-        assert!(!codex_turn_has_full_access(Some(ProviderApprovalPolicy::Ask), None));
-        assert!(!codex_turn_has_full_access(Some(ProviderApprovalPolicy::Auto), None));
-        assert!(!codex_turn_has_full_access(Some(ProviderApprovalPolicy::ReadOnly), None));
+        assert!(!codex_turn_has_full_access(
+            Some(ProviderApprovalPolicy::FullAccess),
+            Some(true)
+        ));
+        assert!(!codex_turn_has_full_access(
+            Some(ProviderApprovalPolicy::Ask),
+            None
+        ));
+        assert!(!codex_turn_has_full_access(
+            Some(ProviderApprovalPolicy::Auto),
+            None
+        ));
+        assert!(!codex_turn_has_full_access(
+            Some(ProviderApprovalPolicy::ReadOnly),
+            None
+        ));
     }
 }

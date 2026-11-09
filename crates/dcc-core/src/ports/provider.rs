@@ -262,6 +262,10 @@ pub struct ProviderPermissionRequest {
 pub struct ProviderPermissionResponse {
     pub request_id: String,
     pub behavior: String,
+    /// The person's reason for a denial ("Recusar com motivo"), for the
+    /// providers that pass it to the model (Claude does).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]

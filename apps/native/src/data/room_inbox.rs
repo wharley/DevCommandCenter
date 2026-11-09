@@ -32,8 +32,13 @@ pub enum CardKind {
         workspace_id: String,
         session_id: String,
     },
-    /// A pull request review of the Reviewer's.
-    PrReview { pr_id: String, failed: bool },
+    /// A pull request review of the Reviewer's (or of the agent that asked
+    /// for it), working until it finishes.
+    PrReview {
+        pr_id: String,
+        failed: bool,
+        running: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -129,27 +134,41 @@ pub fn cards(sources: &InboxSources<'_>) -> Vec<InboxCard> {
         .agents
         .iter()
         .find(|agent| agent.preset.as_deref() == Some(REVIEWER_PRESET));
-    if let Some(reviewer) = reviewer {
-        for job in sources.jobs {
-            let Some(at) = job.finished_at.as_deref().filter(|at| recent(at)) else {
-                continue;
-            };
-            if job.status == JobStatus::Running {
-                continue;
-            }
-            cards.push(InboxCard {
-                key: format!("pr:{}:{at}", job.pr_id),
-                agent_id: reviewer.id.clone(),
-                kind: CardKind::PrReview {
-                    pr_id: job.pr_id.clone(),
-                    failed: job.status == JobStatus::Failed,
-                },
-                title: job.label.clone(),
-                trigger: job.by_trigger.then_some(Trigger::PrUpdated),
-                at: at.to_string(),
-                unread: !job.seen,
-            });
-        }
+    for job in sources.jobs {
+        let asked = job
+            .agent_id
+            .as_deref()
+            .and_then(|id| sources.agents.iter().find(|agent| agent.id == id));
+        let Some(agent) = asked.or(reviewer) else {
+            continue;
+        };
+        let running = job.status == JobStatus::Running;
+        let at = if running {
+            job.started_at.as_deref()
+        } else {
+            job.finished_at.as_deref()
+        };
+        let Some(at) = at.filter(|at| recent(at)) else {
+            continue;
+        };
+        let title = if job.title.is_empty() {
+            job.label.clone()
+        } else {
+            format!("{} · {}", job.label, job.title)
+        };
+        cards.push(InboxCard {
+            key: format!("pr:{}:{at}", job.pr_id),
+            agent_id: agent.id.clone(),
+            kind: CardKind::PrReview {
+                pr_id: job.pr_id.clone(),
+                failed: job.status == JobStatus::Failed,
+                running,
+            },
+            title,
+            trigger: job.by_trigger.then_some(Trigger::PrUpdated),
+            at: at.to_string(),
+            unread: !running && !job.seen,
+        });
     }
     cards.sort_by(|left, right| left.at.cmp(&right.at));
     cards
@@ -264,6 +283,8 @@ mod tests {
             seen: false,
             finished_at: Some("2026-11-07T10:50:00Z".into()),
             by_trigger: true,
+            started_at: Some("2026-11-07T10:45:00Z".into()),
+            agent_id: None,
         }];
         let unread = |session: &str, _: &str| session == "s-ci";
         let now = parse_ms("2026-11-07T11:00:00Z").unwrap();
@@ -276,11 +297,39 @@ mod tests {
             now_ms: now,
         });
         let keys: Vec<&str> = cards.iter().map(|card| card.title.as_str()).collect();
-        assert_eq!(keys, ["Checkout", "app#1014", "Conversa s-ask"]);
+        assert_eq!(
+            keys,
+            ["Checkout", "app#1014 · Pagamentos", "Conversa s-ask"]
+        );
         assert_eq!(cards[0].trigger, Some(Trigger::CiFailed));
         assert!(cards[0].unread);
         assert_eq!(cards[1].trigger, Some(Trigger::PrUpdated));
         assert!(matches!(cards[2].kind, CardKind::TaskWaiting { .. }));
         assert_eq!(unread_count(&cards), (3, true));
+
+        // One the agent asked for shows working, unread only once done.
+        let mut asked = jobs[0].clone();
+        asked.pr_id = "pr-2".into();
+        asked.status = JobStatus::Running;
+        asked.finished_at = None;
+        asked.title = String::new();
+        asked.agent_id = Some(agents[0].id.clone());
+        let jobs = [asked];
+        let asked_cards = super::cards(&InboxSources {
+            agents: &agents,
+            task_names: &names,
+            runs: &runs,
+            jobs: &jobs,
+            unread: &unread,
+            now_ms: now,
+        });
+        let working = asked_cards
+            .iter()
+            .find(|card| matches!(card.kind, CardKind::PrReview { running: true, .. }))
+            .unwrap();
+        assert_eq!(
+            (working.title.as_str(), working.unread, working.at.as_str()),
+            ("app#1014", false, "2026-11-07T10:45:00Z")
+        );
     }
 }

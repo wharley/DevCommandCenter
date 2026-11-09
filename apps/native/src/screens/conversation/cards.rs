@@ -64,6 +64,7 @@ fn card_header(
             div()
                 .flex()
                 .flex_col()
+                .flex_1()
                 .min_w_0()
                 .child(eyebrow(label, 11.0, 0.22, 0.8, FontWeight::MEDIUM, cx))
                 .child(
@@ -75,7 +76,7 @@ fn card_header(
                         .child(line),
                 ),
         )
-        .children(badge)
+        .children(badge.map(|badge| div().flex_none().child(badge)))
         .into_any_element()
 }
 
@@ -310,7 +311,12 @@ pub(super) fn approval_card(
             .child(label)
             .into_any_element()
     });
-    let title = SharedString::from(approval.title.unwrap_or(approval.tool_name).to_string());
+    let title = SharedString::from(
+        approval
+            .title
+            .unwrap_or_else(|| super::approval_reason::short_tool(approval.tool_name))
+            .to_string(),
+    );
     card(cx)
         .child(card_header(
             cx.t("conversation.permission.label"),
@@ -374,36 +380,99 @@ pub(super) fn approval_card(
             let sending = view.sending(approval.request_id);
             let request = approval.request_id.to_string();
             let deny_request = request.clone();
+            let tool = approval.tool_name.to_string();
             let busy = |kind: Sending| {
                 (sending == Some(kind))
                     .then(|| spinner(SharedString::from(format!("{request}-{kind:?}")), 16.0))
             };
-            div()
-                .mt(px(16.0))
-                .flex()
-                .items_center()
-                .justify_end()
-                .gap(px(8.0))
-                .child(
-                    Button::new(SharedString::from(format!("{request}-deny")))
-                        .variant(ButtonVariant::Outline)
-                        .disabled(sending.is_some())
-                        .on_click(cx.listener(move |view, _, _, cx| {
-                            view.respond_permission(deny_request.clone(), false, cx)
-                        }))
-                        .children(busy(Sending::Deny))
-                        .child(cx.t("conversation.permission.deny")),
-                )
-                .child({
-                    let allow_request = request.clone();
-                    Button::new(SharedString::from(format!("{request}-allow")))
-                        .disabled(sending.is_some())
-                        .on_click(cx.listener(move |view, _, _, cx| {
-                            view.respond_permission(allow_request.clone(), true, cx)
-                        }))
-                        .children(busy(Sending::Allow))
-                        .child(cx.t("conversation.permission.allow"))
-                })
+            // "Recusar com motivo": the field and its send, while open.
+            let reason = view.reason_input(&request).map(|input| {
+                let (send_request, send_tool) = (request.clone(), tool.clone());
+                div()
+                    .mt(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .debug_selector(|| "permission-reason".into())
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(32.0))
+                            .px(px(10.0))
+                            .flex()
+                            .items_center()
+                            .rounded(px(8.0))
+                            .border_1()
+                            .border_color(colors.input)
+                            .bg(crate::ui::input_fill(cx.theme()))
+                            .text_size(px(13.0))
+                            .child(input),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("{request}-deny-send")))
+                            .variant(ButtonVariant::Outline)
+                            .disabled(sending.is_some())
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.deny_with_reason(send_request.clone(), send_tool.clone(), cx)
+                            }))
+                            .child(cx.t("conversation.permission.denySend")),
+                    )
+            });
+            let reason_open = reason.is_some();
+            let (reason_request, always_request, always_tool) =
+                (request.clone(), request.clone(), tool.clone());
+            let always = super::approval_reason::may_always_allow(&tool).then(|| {
+                Button::new(SharedString::from(format!("{request}-always")))
+                    .variant(ButtonVariant::Outline)
+                    .disabled(sending.is_some())
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.allow_always(always_request.clone(), always_tool.clone(), cx)
+                    }))
+                    .child(cx.t("conversation.permission.always"))
+            });
+            div().children(reason).child(
+                div()
+                    .mt(px(16.0))
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .when(!reason_open, |row| {
+                        row.child(
+                            Button::new(SharedString::from(format!(
+                                "{reason_request}-deny-reason"
+                            )))
+                            .variant(ButtonVariant::Ghost)
+                            .disabled(sending.is_some())
+                            .on_click(cx.listener(move |view, _, window, cx| {
+                                view.open_reason(reason_request.clone(), window, cx)
+                            }))
+                            .child(cx.t("conversation.permission.denyWithReason")),
+                        )
+                    })
+                    .child(
+                        Button::new(SharedString::from(format!("{request}-deny")))
+                            .variant(ButtonVariant::Outline)
+                            .disabled(sending.is_some())
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.respond_permission(deny_request.clone(), false, cx)
+                            }))
+                            .children(busy(Sending::Deny))
+                            .child(cx.t("conversation.permission.deny")),
+                    )
+                    .child({
+                        let allow_request = request.clone();
+                        Button::new(SharedString::from(format!("{request}-allow")))
+                            .disabled(sending.is_some())
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.respond_permission(allow_request.clone(), true, cx)
+                            }))
+                            .children(busy(Sending::Allow))
+                            .child(cx.t("conversation.permission.allow"))
+                    })
+                    .children(always),
+            )
         }))
         .into_any_element()
 }

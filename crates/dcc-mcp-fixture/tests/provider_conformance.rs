@@ -398,6 +398,7 @@ where
                 Input::PermissionResponse(ProviderPermissionResponse {
                     request_id,
                     behavior: behavior.to_string(),
+                    message: None,
                 }),
             )
             .await

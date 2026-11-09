@@ -100,7 +100,7 @@ const DELEGATION_MCP_TOOL_NAMES: [&str; 6] = [
 ];
 #[cfg(test)]
 const DCC_MCP_TOOL_COUNT: usize =
-    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 4;
+    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 5;
 /// Starting a delegation prepares a worktree and a child thread before it
 /// returns the task id; the child's turn itself runs in the background.
 const DELEGATE_TASK_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
@@ -1568,6 +1568,9 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
         name if crate::routine_tools::is_routine_tool(name) => {
             crate::routine_tools::call_is_well_formed(&call.arguments)
         }
+        name if crate::review_tools::is_review_tool(name) => {
+            crate::review_tools::call_is_well_formed(&call.arguments)
+        }
         name if crate::open_task_tool::is_open_task_tool(name) => {
             crate::open_task_tool::call_is_well_formed(&call.arguments)
         }
@@ -1725,6 +1728,27 @@ async fn dispatch_tool(
                 );
             }
             let response = crate::routine_tools::dispatch(
+                &bridge.sessions,
+                &binding.session_id,
+                call.arguments,
+            );
+            if response["isError"] == true {
+                ToolDispatch {
+                    response,
+                    outcome: BrowserAuditOutcome::Failed,
+                    grant_state: BrowserAuditGrantState::NotApplicable,
+                }
+            } else {
+                ToolDispatch::executed(response, BrowserAuditGrantState::NotApplicable)
+            }
+        }
+        name if crate::review_tools::is_review_tool(name) => {
+            if !bridge.lease_is_current(binding) {
+                return ToolDispatch::computer_error(
+                    "pull request reviews are unavailable for this provider session",
+                );
+            }
+            let response = crate::review_tools::dispatch(
                 &bridge.sessions,
                 &binding.session_id,
                 call.arguments,
@@ -3188,6 +3212,8 @@ fn tools() -> Vec<Value> {
     .chain([crate::agent_memory_tools::definition()])
     // A routine an agent proposes to the person.
     .chain([crate::routine_tools::definition()])
+    // A pull request review an agent asks for, run by the app.
+    .chain([crate::review_tools::definition()])
     // The person's tasks, in an agent's own conversation.
     .chain([crate::overview_tool::definition()])
     // A task in one of the person's projects, from that conversation.
@@ -4557,6 +4583,7 @@ mod tests {
                 "dcc_task_cancel",
                 "dcc_agent_remember",
                 "dcc_propose_routine",
+                "dcc_review_pull_request",
                 "dcc_overview",
                 "dcc_open_task",
             ]

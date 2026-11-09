@@ -557,6 +557,12 @@ async function main() {
 				});
 				continue;
 			}
+			if (typeof payload.message === "string" && payload.message.trim().length > 0) {
+				(state.permissionMessages ??= new Map()).set(
+					requestId,
+					payload.message.trim().slice(0, 500),
+				);
+			}
 			pending.resolve(
 				typeof payload.behavior === "string" && payload.behavior.trim().length > 0
 					? payload.behavior.trim()

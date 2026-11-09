@@ -78,6 +78,8 @@ pub struct TeamRoom {
     /// (none in tests).
     pub(crate) cleanup: crate::data::cleanup_alert::CleanupAlert,
     pub(crate) cleanup_path: Option<PathBuf>,
+    /// The one agent shown, on its page's "Conversa" (`room_focus`).
+    pub(crate) focus: Option<String>,
     _subscriptions: [Subscription; 4],
 }
 
@@ -154,6 +156,7 @@ impl TeamRoom {
             bulletin_open: false,
             cleanup: Default::default(),
             cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
+            focus: None,
             _subscriptions: subscriptions,
         };
         room.reload_cleanup();
@@ -317,11 +320,18 @@ impl TeamRoom {
         if text.is_empty() || self.sending {
             return;
         }
-        let Some((agent, reason)) = self.pick(&text, cx) else {
+        // On an agent's own "Conversa", it goes straight to that agent.
+        let picked = match self.focused(cx) {
+            Some(agent) => Some((agent, None)),
+            None => self
+                .pick(&text, cx)
+                .map(|(agent, reason)| (agent, Some(reason))),
+        };
+        let Some((agent, reason)) = picked else {
             Toaster::error(cx.t("agents.room.noAgent"), cx);
             return;
         };
-        if self.deliver(agent, text, Some(reason), cx) {
+        if self.deliver(agent, text, reason, cx) {
             self.input.update(cx, |area, cx| area.set_text("", cx));
         }
     }

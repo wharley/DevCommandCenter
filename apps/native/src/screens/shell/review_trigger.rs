@@ -71,7 +71,7 @@ pub(super) fn pick_repository(repositories: &[Repository], repository: &str) -> 
 }
 
 /// `pick_repository` over DCC's database.
-fn local_repository(db: &Path, repository: &str) -> Option<Checkout> {
+pub(super) fn local_repository(db: &Path, repository: &str) -> Option<Checkout> {
     let repo = SqliteWorkspaceRepo::open(db).ok()?;
     let repositories = futures::executor::block_on(repo.list_repositories()).ok()?;
     pick_repository(&repositories, repository)

@@ -14,12 +14,11 @@ use dcc_core::domain::model_registry;
 use dcc_core::domain::objective::{ObjectiveTransition, SessionObjective, SessionObjectiveDraft};
 use dcc_core::{
     application::{
-        abort_run as run_abort_run, active_turn_for_steer,
-        plan_conversation_rewind, queue_turn as run_queue_turn, record_turn_steer,
-        send_turn as run_send_turn, start_thread as run_start_thread, AbortRunInput,
-        AbortRunOutput,
-        ConversationRewindBlock, ConversationRewindPlan, QueueTurnInput, SendTurnInput,
-        SendTurnOutput, StartThreadInput, StartThreadOutput, SteerTurnInput, SteerTurnOutput,
+        abort_run as run_abort_run, active_turn_for_steer, plan_conversation_rewind,
+        queue_turn as run_queue_turn, record_turn_steer, send_turn as run_send_turn,
+        start_thread as run_start_thread, AbortRunInput, AbortRunOutput, ConversationRewindBlock,
+        ConversationRewindPlan, QueueTurnInput, SendTurnInput, SendTurnOutput, StartThreadInput,
+        StartThreadOutput, SteerTurnInput, SteerTurnOutput,
     },
     domain::{
         mcp::{McpDefinitionId, McpErrorCategory, McpRuntimeState, McpRuntimeStatus},
@@ -589,12 +588,21 @@ pub struct RespondToPermissionRequestInput {
     pub session_id: String,
     pub request_id: String,
     pub behavior: String,
+    /// Why the person denied it, when they said.
+    #[serde(default)]
+    pub message: Option<String>,
+    /// "Sempre permitir": a connector's read-only tool is allowed from now on.
+    #[serde(default)]
+    pub always: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RespondToPermissionRequestOutput {
     pub ok: bool,
+    /// "Sempre permitir" was kept (the tool only reads); otherwise only this once.
+    #[serde(default)]
+    pub always_saved: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
@@ -2331,7 +2339,11 @@ async fn record_provider_start_failure(
         return Err(reason);
     };
     state
-        .emit_unbound_started_turn_aborted(&output.session.id, &output.turn.id, Some(reason.clone()))
+        .emit_unbound_started_turn_aborted(
+            &output.session.id,
+            &output.turn.id,
+            Some(reason.clone()),
+        )
         .await
         .map_err(|_| reason)?;
     Ok(output)
@@ -2499,7 +2511,9 @@ async fn record_mcp_needs_auth(state: &SessionCommandState, definition_id: &McpD
             definition_id: definition_id.clone(),
             state: dcc_core::domain::mcp::McpConnectionState::NeedsAuth,
             tools,
-            message: Some("The sign-in is missing or expired. Reconnect to keep using it".to_string()),
+            message: Some(
+                "The sign-in is missing or expired. Reconnect to keep using it".to_string(),
+            ),
             checked_at: chrono::Utc::now().to_rfc3339(),
         })
         .await;
@@ -2735,6 +2749,8 @@ pub async fn respond_to_permission_request_with_state(
     )
     .await?;
     let mut behavior = input.behavior;
+    let tool_name = pending_tool_guard_context(&events, &input.request_id)
+        .map(|(_, request)| request.tool_name);
     if behavior == "allow" {
         if let Some((prompt, request)) = pending_tool_guard_context(&events, &input.request_id) {
             if decision_provider_tool_guard(state, &session_id, &prompt, &request).await
@@ -2755,17 +2771,39 @@ pub async fn respond_to_permission_request_with_state(
             }
         }
     }
+    let allowed = behavior == "allow";
     forward_claimed_answer(
         state,
         &session_id,
         &input.request_id,
         Input::PermissionResponse(ProviderPermissionResponse {
             request_id: input.request_id.clone(),
+            message: (behavior == "deny")
+                .then(|| {
+                    input
+                        .message
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|reason| !reason.is_empty())
+                        .map(|reason| reason.chars().take(500).collect())
+                })
+                .flatten(),
             behavior,
         }),
     )
     .await?;
-    Ok(RespondToPermissionRequestOutput { ok: true })
+    let always_saved = match (allowed && input.always, tool_name) {
+        (true, Some(tool)) => {
+            super::permission_always::remember_read_only_allow(state.db_path(), &tool)
+                .await
+                .unwrap_or(false)
+        }
+        _ => false,
+    };
+    Ok(RespondToPermissionRequestOutput {
+        ok: true,
+        always_saved,
+    })
 }
 
 #[cfg(test)]

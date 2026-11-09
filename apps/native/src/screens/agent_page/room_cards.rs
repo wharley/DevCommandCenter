@@ -14,7 +14,7 @@ use crate::data::room_inbox::{CardKind, InboxCard};
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
-use crate::ui::{Button, ButtonSize, ButtonVariant};
+use crate::ui::{Button, ButtonSize, ButtonVariant, spinner};
 
 impl TeamRoom {
     /// The inbox's cards now, with what woke each agent.
@@ -66,9 +66,16 @@ impl TeamRoom {
         let (key, waiting) = match &card.kind {
             CardKind::TaskResult { .. } => ("agents.room.card.done", false),
             CardKind::TaskWaiting { .. } => ("agents.room.card.waiting", true),
+            CardKind::PrReview { running: true, .. } => ("agents.room.card.reviewing", false),
             CardKind::PrReview { failed: false, .. } => ("agents.room.card.reviewed", false),
             CardKind::PrReview { failed: true, .. } => ("agents.room.card.reviewFailed", false),
         };
+        let working = matches!(card.kind, CardKind::PrReview { running: true, .. }).then(|| {
+            spinner(
+                SharedString::from(format!("room-card-working-{index}")),
+                14.0,
+            )
+        });
         let text = cx.t_with(key, &args);
         let trigger = card.trigger.map(|trigger| {
             div()
@@ -140,6 +147,7 @@ impl TeamRoom {
                     .text_color(colors.muted_foreground)
                     .child(when),
             )
+            .children(working)
             .children(dot)
             .into_any_element()
     }

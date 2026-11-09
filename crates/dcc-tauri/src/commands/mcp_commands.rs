@@ -29,11 +29,11 @@ use dcc_core::{
     application::probe_mcp_definition,
     domain::mcp::{McpConnectionCheck, McpConnectionState, McpConnectorDetails, McpErrorCategory},
 };
-use dcc_infra::mcp_probe::{CommandLookup, McpProbeLimits, SecureMcpProbe};
-use std::time::Duration;
 use dcc_infra::mcp_oauth::{McpOauthError, UserProvidedClient};
+use dcc_infra::mcp_probe::{CommandLookup, McpProbeLimits, SecureMcpProbe};
 use dcc_infra::native_mcp::{same_server_url, NativeMcpSource, NativeRemoteServer};
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -180,9 +180,7 @@ pub struct McpConnectLoginInput {
 )]
 pub enum WaitMcpConnectOutput {
     /// Signed in. `check` lists the tools when the follow-up check ran.
-    Connected {
-        check: Option<McpConnectionCheck>,
-    },
+    Connected { check: Option<McpConnectionCheck> },
     Failed {
         reason: McpConnectFailure,
         message: String,
@@ -671,9 +669,7 @@ async fn update_connector_details(
             logo: None,
         });
     change(&mut details);
-    details
-        .validate()
-        .map_err(|error| error.to_string())?;
+    details.validate().map_err(|error| error.to_string())?;
     repo.save_mcp_connector_details(&details)
         .await
         .map_err(|error| error.to_string())?;
@@ -1059,6 +1055,19 @@ where
         removed: true,
         deleted_credentials,
     })
+}
+
+/// `set_tool_policy` for another command of this crate.
+pub(crate) async fn set_tool_policy_in<R>(
+    repo: &R,
+    input: SetMcpToolPolicyInput,
+) -> Result<SetMcpToolPolicyOutput, String>
+where
+    R: McpRepo + Sync + ?Sized,
+{
+    set_tool_policy(repo, input)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 async fn set_tool_policy<R>(

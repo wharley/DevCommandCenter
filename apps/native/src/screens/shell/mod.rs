@@ -6,8 +6,6 @@ mod annotation;
 mod appshot;
 mod bootstrap;
 mod browser;
-#[cfg(target_os = "macos")]
-mod device;
 mod browser_opens;
 mod cached;
 mod check_in;
@@ -15,6 +13,8 @@ mod ci_trigger;
 mod cli_updates;
 mod computer;
 mod delivery;
+#[cfg(target_os = "macos")]
+mod device;
 mod editor;
 mod feedback;
 mod help;
@@ -28,6 +28,7 @@ mod pr_watch;
 mod quick_open;
 mod regions;
 mod review_received;
+mod review_requests;
 mod review_trigger;
 mod reviewer_in_task;
 mod routines;

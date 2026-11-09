@@ -33,6 +33,11 @@ pub struct PrReviewJob {
     pub finished_at: Option<String>,
     /// The Reviewer's trigger started it, not the person.
     pub by_trigger: bool,
+    /// When it started (RFC 3339): the team room shows it working from then.
+    pub started_at: Option<String>,
+    /// The agent that asked for it (`dcc_review_pull_request`); none: the
+    /// Reviewer, from the hub or its trigger.
+    pub agent_id: Option<String>,
 }
 
 impl PrReviewJob {
@@ -95,6 +100,8 @@ impl PrReviewJobs {
                 seen: false,
                 finished_at: None,
                 by_trigger: false,
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                agent_id: None,
             },
         );
         true
@@ -129,6 +136,18 @@ impl PrReviewJobs {
             .find(|job| job.pr_id == pr_id)
         {
             job.by_trigger = true;
+        }
+    }
+
+    /// The job of `pr_id` was asked for by `agent_id` from its conversation.
+    pub fn asked_by(cx: &mut App, pr_id: &str, agent_id: &str) {
+        if let Some(job) = cx
+            .default_global::<Self>()
+            .jobs
+            .iter_mut()
+            .find(|job| job.pr_id == pr_id)
+        {
+            job.agent_id = Some(agent_id.to_string());
         }
     }
 

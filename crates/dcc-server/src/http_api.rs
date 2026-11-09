@@ -71,9 +71,9 @@ mod decision_provider;
 mod delegation_review;
 mod delivery;
 mod desktop_app;
+mod fetch_base;
 mod files;
 mod forge;
-mod fetch_base;
 mod git_changes;
 mod git_conflicts;
 mod keep_awake;
@@ -83,6 +83,7 @@ mod menu_bar;
 mod mobile;
 mod mobile_agents;
 mod mobile_room;
+mod pr_review_requests;
 mod provider_accounts;
 mod provider_usage;
 mod providers;
@@ -387,7 +388,10 @@ impl HttpBackend {
     }
 
     /// Shares the desktop's workspace state (same delivery-failure store).
-    pub fn with_workspace_state(mut self, workspace: dcc_tauri::state::WorkspaceCommandState) -> Self {
+    pub fn with_workspace_state(
+        mut self,
+        workspace: dcc_tauri::state::WorkspaceCommandState,
+    ) -> Self {
         self.workspace = workspace;
         self
     }
@@ -660,7 +664,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/mobile/agent-requests",
             get(attention::list_agent_requests),
         )
-        .route("/api/v1/mobile/attention", get(attention::workspace_attention))
+        .route(
+            "/api/v1/mobile/attention",
+            get(attention::workspace_attention),
+        )
         .route(
             "/api/v1/mobile/workspaces/:workspace_id/delivery",
             get(delivery::summary),
@@ -894,17 +901,35 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/git/discard-file", post(git_changes::discard_file))
         .route("/api/v1/git/stage-all", post(git_changes::stage_all))
         .route("/api/v1/git/fetch-base", post(fetch_base::fetch_base))
-        .route("/api/v1/git/conflict-state", post(git_conflicts::conflict_state))
-        .route("/api/v1/git/accept-conflict", post(git_conflicts::accept_conflict))
+        .route(
+            "/api/v1/git/conflict-state",
+            post(git_conflicts::conflict_state),
+        )
+        .route(
+            "/api/v1/git/accept-conflict",
+            post(git_conflicts::accept_conflict),
+        )
         .route(
             "/api/v1/git/mark-conflict-resolved",
             post(git_conflicts::mark_conflict_resolved),
         )
         .route("/api/v1/git/abort-merge", post(git_conflicts::abort_merge))
-        .route("/api/v1/git/validation-config", post(git_conflicts::validation_config))
-        .route("/api/v1/git/complete-merge", post(git_conflicts::complete_merge))
-        .route("/api/v1/git/delivery-failure", post(forge::delivery_failure))
-        .route("/api/v1/git/delivery-recovery", post(forge::delivery_recovery))
+        .route(
+            "/api/v1/git/validation-config",
+            post(git_conflicts::validation_config),
+        )
+        .route(
+            "/api/v1/git/complete-merge",
+            post(git_conflicts::complete_merge),
+        )
+        .route(
+            "/api/v1/git/delivery-failure",
+            post(forge::delivery_failure),
+        )
+        .route(
+            "/api/v1/git/delivery-recovery",
+            post(forge::delivery_recovery),
+        )
         .route("/api/v1/forge/context", post(forge::context))
         .route(
             "/api/v1/forge/change-request-context",
@@ -942,22 +967,31 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/forge/backfill-bindings",
             post(forge::backfill_bindings),
         )
-        .route(
-            "/api/v1/forge/retry-binding",
-            post(forge::retry_binding),
-        )
+        .route("/api/v1/forge/retry-binding", post(forge::retry_binding))
         .route("/api/v1/forge/review-state", post(forge::review_state))
         .route(
             "/api/v1/forge/reviewer-candidates",
             post(forge::reviewer_candidates),
         )
-        .route("/api/v1/forge/request-reviewers", post(forge::request_reviewers))
-        .route("/api/v1/forge/review-comments", post(forge::review_comments))
+        .route(
+            "/api/v1/forge/request-reviewers",
+            post(forge::request_reviewers),
+        )
+        .route(
+            "/api/v1/forge/review-comments",
+            post(forge::review_comments),
+        )
         .route("/api/v1/forge/reply-thread", post(forge::reply_thread))
         .route("/api/v1/forge/resolve-thread", post(forge::resolve_thread))
         .route("/api/v1/forge/pipeline", post(forge::pipeline))
-        .route("/api/v1/forge/pipeline-job-log", post(forge::pipeline_job_log))
-        .route("/api/v1/forge/pipeline-job-retry", post(forge::pipeline_job_retry))
+        .route(
+            "/api/v1/forge/pipeline-job-log",
+            post(forge::pipeline_job_log),
+        )
+        .route(
+            "/api/v1/forge/pipeline-job-retry",
+            post(forge::pipeline_job_retry),
+        )
         .route(
             "/api/v1/delegations/:delegation_id/apply",
             post(delegation_review::apply),
@@ -1028,6 +1062,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(agent_routines::ran),
         )
         .route(
+            "/api/v1/agents/:agent_id/review-requests/:request_id/taken",
+            post(pr_review_requests::taken),
+        )
+        .route(
             "/api/v1/agents/:agent_id/conversation",
             post(agent_conversation::home),
         )
@@ -1047,9 +1085,18 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/sessions/:session_id/last-turn-review",
             post(turn_review::last_turn),
         )
-        .route("/api/v1/turn-review/file-diff", post(turn_review::file_diff))
-        .route("/api/v1/guarded-undo/prepare", post(turn_review::prepare_undo))
-        .route("/api/v1/guarded-undo/execute", post(turn_review::execute_undo))
+        .route(
+            "/api/v1/turn-review/file-diff",
+            post(turn_review::file_diff),
+        )
+        .route(
+            "/api/v1/guarded-undo/prepare",
+            post(turn_review::prepare_undo),
+        )
+        .route(
+            "/api/v1/guarded-undo/execute",
+            post(turn_review::execute_undo),
+        )
         .route(
             "/api/v1/conversation-rewind/prepare",
             post(turn_review::prepare_rewind),
@@ -1329,7 +1376,11 @@ fn live_combs(conn: &rusqlite::Connection, project_id: Option<String>) -> Result
         // A picked logo travels as the icon value itself (a PNG data URI).
         let icon: Option<String> = row.get(10).map_err(|e| e.to_string())?;
         let logo: Option<String> = row.get(12).map_err(|e| e.to_string())?;
-        let project_icon = if icon.as_deref() == Some("logo") { logo } else { icon };
+        let project_icon = if icon.as_deref() == Some("logo") {
+            logo
+        } else {
+            icon
+        };
         out.push(json!({
             "id": row.get::<_, String>(0).map_err(|e| e.to_string())?,
             "projectId": row_project_id,
@@ -4242,6 +4293,8 @@ mod tests {
             session_id: fixture.session_id.0.clone(),
             request_id: "r1".to_string(),
             behavior: "allow".to_string(),
+            message: None,
+            always: false,
         };
         // No provider is attached in the fixture, so forwarding fails.
         for _ in 0..2 {
@@ -4399,20 +4452,17 @@ mod tests {
             )
             .unwrap();
 
-        let (status, inside) = get_json(
-            &fixture.app,
-            "/api/v1/sessions/http-respond/events?after=3",
-        )
-        .await;
+        let (status, inside) =
+            get_json(&fixture.app, "/api/v1/sessions/http-respond/events?after=3").await;
         assert_eq!(status, StatusCode::OK, "{inside}");
         assert_eq!(inside["reset"], true);
-        assert_eq!(inside["lastSeq"], 0, "older phones reset on lastSeq < cursor");
+        assert_eq!(
+            inside["lastSeq"], 0,
+            "older phones reset on lastSeq < cursor"
+        );
 
-        let (_, past) = get_json(
-            &fixture.app,
-            "/api/v1/sessions/http-respond/events?after=4",
-        )
-        .await;
+        let (_, past) =
+            get_json(&fixture.app, "/api/v1/sessions/http-respond/events?after=4").await;
         assert_eq!(past["reset"], Value::Null);
         assert_eq!(past["lastSeq"], 5);
     }
@@ -4710,11 +4760,17 @@ mod tests {
                 json!({ "cwd": cwd, "command": "/bin/zsh", "args": ["-lc", "true"] }),
             )
         };
-        let (status, _) = open("/api/v1/terminals/by-owner/cli-update%3Acodex", home.clone()).await;
+        let (status, _) = open(
+            "/api/v1/terminals/by-owner/cli-update%3Acodex",
+            home.clone(),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
-        let (status, _) =
-            open("/api/v1/terminals/by-owner/forge-connect%3Agithub%3Agithub.com", home.clone())
-                .await;
+        let (status, _) = open(
+            "/api/v1/terminals/by-owner/forge-connect%3Agithub%3Agithub.com",
+            home.clone(),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         let (status, _) = open("/api/v1/terminals/by-owner/terminal%3Ax", home.clone()).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -5147,7 +5203,11 @@ mod tests {
             "/api/v1/mobile/workspaces/ws-files/files?q=untracked",
         )
         .await;
-        assert_eq!(body["files"], json!([{ "path": "untracked.txt" }]), "{body}");
+        assert_eq!(
+            body["files"],
+            json!([{ "path": "untracked.txt" }]),
+            "{body}"
+        );
         let (_, body) = get_json(
             &fixture.app,
             "/api/v1/mobile/workspaces/ws-files/files?q=secret",
@@ -5216,10 +5276,16 @@ mod tests {
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
-    fn agent_request(id: &str, detail: crate::agent_requests::AgentRequestDetail) -> crate::agent_requests::PendingAgentRequest {
+    fn agent_request(
+        id: &str,
+        detail: crate::agent_requests::AgentRequestDetail,
+    ) -> crate::agent_requests::PendingAgentRequest {
         crate::agent_requests::PendingAgentRequest {
             request_id: id.to_string(),
             session_id: "http-respond".to_string(),
@@ -5276,12 +5342,22 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, listed) =
-            call(&fixture.app, "GET", "/api/v1/mobile/task-proposals", None, Some("phone-1"), false).await;
+        let (status, listed) = call(
+            &fixture.app,
+            "GET",
+            "/api/v1/mobile/task-proposals",
+            None,
+            Some("phone-1"),
+            false,
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(listed["proposals"][0]["id"], proposal.id.0);
         assert_eq!(listed["proposals"][0]["title"], "Fase 2: push");
-        assert_eq!(listed["proposals"][0]["brief"], "Implement push notifications.");
+        assert_eq!(
+            listed["proposals"][0]["brief"],
+            "Implement push notifications."
+        );
         assert_eq!(listed["proposals"][0]["provider"], "Codex");
         assert_eq!(listed["proposals"][0]["edits"], true);
 
@@ -5299,8 +5375,15 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(stored.status, DelegationStatus::Cancelled);
-        let (_, listed) =
-            call(&fixture.app, "GET", "/api/v1/mobile/task-proposals", None, Some("phone-1"), false).await;
+        let (_, listed) = call(
+            &fixture.app,
+            "GET",
+            "/api/v1/mobile/task-proposals",
+            None,
+            Some("phone-1"),
+            false,
+        )
+        .await;
         assert_eq!(listed["proposals"], json!([]));
 
         // The desktop's card answers the same proposals.
@@ -5354,11 +5437,20 @@ mod tests {
         fixture.backend.attach_agent_requests(queue.clone());
         let waiting = queue.enqueue(agent_request(
             "bo-1",
-            AgentRequestDetail::BrowserOpen { url: "https://docs.example.com".into() },
+            AgentRequestDetail::BrowserOpen {
+                url: "https://docs.example.com".into(),
+            },
         ));
 
-        let (status, listed) =
-            call(&fixture.app, "GET", "/api/v1/mobile/agent-requests", None, Some("phone-1"), false).await;
+        let (status, listed) = call(
+            &fixture.app,
+            "GET",
+            "/api/v1/mobile/agent-requests",
+            None,
+            Some("phone-1"),
+            false,
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(listed["requests"][0]["kind"], "browserOpen");
         assert_eq!(listed["requests"][0]["url"], "https://docs.example.com");
@@ -5392,7 +5484,10 @@ mod tests {
         assert_eq!(conflict["error"]["code"], "already_resolved");
         assert_eq!(conflict["error"]["outcome"]["decision"], "allowed");
         assert_eq!(conflict["error"]["outcome"]["by"], "phone");
-        assert_eq!(conflict["error"]["message"], "Esse pedido já foi aprovado pelo celular.");
+        assert_eq!(
+            conflict["error"]["message"],
+            "Esse pedido já foi aprovado pelo celular."
+        );
 
         let (status, _) = call(
             &fixture.app,
@@ -5413,10 +5508,19 @@ mod tests {
         fixture.backend.attach_agent_requests(queue.clone());
         let _waiting = queue.enqueue(agent_request(
             "bo-2",
-            crate::agent_requests::AgentRequestDetail::BrowserOpen { url: "https://a.example".into() },
+            crate::agent_requests::AgentRequestDetail::BrowserOpen {
+                url: "https://a.example".into(),
+            },
         ));
-        let (status, _) =
-            call(&fixture.app, "GET", "/api/v1/mobile/agent-requests", None, None, false).await;
+        let (status, _) = call(
+            &fixture.app,
+            "GET",
+            "/api/v1/mobile/agent-requests",
+            None,
+            None,
+            false,
+        )
+        .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         let (status, _) = call(
             &fixture.app,
@@ -5429,7 +5533,11 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         use crate::agent_requests::AgentRequestSource;
-        assert_eq!(queue.pending().len(), 1, "nothing answered without credentials");
+        assert_eq!(
+            queue.pending().len(),
+            1,
+            "nothing answered without credentials"
+        );
         // Unknown fields (a path, say) are refused, not ignored.
         let (status, _) = call(
             &fixture.app,
@@ -5447,11 +5555,15 @@ mod tests {
             &fixture.app,
             "POST",
             "/api/v1/remote/fixture/agent-requests",
-            Some(serde_json::to_value(agent_request(
-                "bo-3",
-                crate::agent_requests::AgentRequestDetail::BrowserOpen { url: "https://a.example".into() },
-            ))
-            .unwrap()),
+            Some(
+                serde_json::to_value(agent_request(
+                    "bo-3",
+                    crate::agent_requests::AgentRequestDetail::BrowserOpen {
+                        url: "https://a.example".into(),
+                    },
+                ))
+                .unwrap(),
+            ),
             Some("phone-1"),
             false,
         )
@@ -5521,27 +5633,58 @@ mod tests {
         assert_eq!(listed["devices"][0]["deviceName"], "Pixel");
         assert_eq!(listed["devices"][0]["kind"], "relay");
         // A paired phone cannot manage phones, even with the key.
-        let (status, _) = call(&fixture.app, "GET", "/api/v1/remote/devices", None, Some("phone-1"), true).await;
+        let (status, _) = call(
+            &fixture.app,
+            "GET",
+            "/api/v1/remote/devices",
+            None,
+            Some("phone-1"),
+            true,
+        )
+        .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         let revoke = json!({ "deviceId": "phone-1" });
-        let (status, _) = call(&fixture.app, "POST", "/api/v1/remote/devices/revoke", Some(revoke.clone()), Some("phone-1"), true).await;
+        let (status, _) = call(
+            &fixture.app,
+            "POST",
+            "/api/v1/remote/devices/revoke",
+            Some(revoke.clone()),
+            Some("phone-1"),
+            true,
+        )
+        .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        let (status, revoked) = post_json(&fixture.app, "/api/v1/remote/devices/revoke", revoke).await;
+        let (status, revoked) =
+            post_json(&fixture.app, "/api/v1/remote/devices/revoke", revoke).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(revoked, json!({ "revoked": true }));
         let (_, listed) = get_json(&fixture.app, "/api/v1/remote/devices").await;
         assert_eq!(listed["devices"], json!([]));
-        let (_, listed) = get_json(&fixture.app, "/api/v1/remote/devices?includeRevoked=true").await;
+        let (_, listed) =
+            get_json(&fixture.app, "/api/v1/remote/devices?includeRevoked=true").await;
         assert_eq!(listed["devices"][0]["revoked"], true);
         let (status, audit) = get_json(&fixture.app, "/api/v1/remote/audit?limit=50").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(audit["entries"][0]["event"], "revoke");
         assert_eq!(audit["entries"][0]["deviceId"], "phone-1");
         // Without the relay running there is nothing to save.
-        let (status, _) = post_json(&fixture.app, "/api/v1/remote/relay", json!({ "relayUrl": null })).await;
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/remote/relay",
+            json!({ "relayUrl": null }),
+        )
+        .await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-        for path in ["/api/v1/remote/devices", "/api/v1/remote/devices/revoke", "/api/v1/remote/audit", "/api/v1/remote/relay"] {
-            assert!(!crate::remote_connector::remote_path_allowed(path), "{path}");
+        for path in [
+            "/api/v1/remote/devices",
+            "/api/v1/remote/devices/revoke",
+            "/api/v1/remote/audit",
+            "/api/v1/remote/relay",
+        ] {
+            assert!(
+                !crate::remote_connector::remote_path_allowed(path),
+                "{path}"
+            );
         }
     }
 
@@ -5549,7 +5692,8 @@ mod tests {
     async fn a_session_s_computer_use_grant_ends_through_the_bridge() {
         let fixture = embedded_fixture().await;
         let body = json!({ "sessionId": "s-1" });
-        let (status, _) = post_json(&fixture.app, "/api/v1/computer/bridge/disarm", body.clone()).await;
+        let (status, _) =
+            post_json(&fixture.app, "/api/v1/computer/bridge/disarm", body.clone()).await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         let _ = fixture
             .backend
@@ -5558,7 +5702,9 @@ mod tests {
         let (status, grant) = post_json(&fixture.app, "/api/v1/computer/bridge/disarm", body).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(grant, json!({ "sessionId": "s-1", "armed": false }));
-        assert!(!crate::remote_connector::remote_path_allowed("/api/v1/computer/bridge/disarm"));
+        assert!(!crate::remote_connector::remote_path_allowed(
+            "/api/v1/computer/bridge/disarm"
+        ));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -5570,17 +5716,34 @@ mod tests {
         let waiting = queue.enqueue(agent_request(
             "cu-1",
             AgentRequestDetail::ComputerControl {
-                apps: vec![AgentRequestApp { bundle_id: "com.apple.Safari".into(), name: "Safari".into() }],
+                apps: vec![AgentRequestApp {
+                    bundle_id: "com.apple.Safari".into(),
+                    name: "Safari".into(),
+                }],
                 blocker: None,
             },
         ));
-        let respond = |body: Value| call(&fixture.app, "POST", "/api/v1/mobile/agent-requests/cu-1/respond", Some(body), Some("phone-1"), false);
+        let respond = |body: Value| {
+            call(
+                &fixture.app,
+                "POST",
+                "/api/v1/mobile/agent-requests/cu-1/respond",
+                Some(body),
+                Some("phone-1"),
+                false,
+            )
+        };
         let (status, error) = respond(json!({ "allow": true })).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(error["error"]["message"], "Escolha pelo menos um app que o agente pode controlar.");
-        let (status, _) = respond(json!({ "allow": true, "allowedBundleIds": ["com.apple.Terminal"] })).await;
+        assert_eq!(
+            error["error"]["message"],
+            "Escolha pelo menos um app que o agente pode controlar."
+        );
+        let (status, _) =
+            respond(json!({ "allow": true, "allowedBundleIds": ["com.apple.Terminal"] })).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        let (status, _) = respond(json!({ "allow": true, "allowedBundleIds": ["com.apple.Safari"] })).await;
+        let (status, _) =
+            respond(json!({ "allow": true, "allowedBundleIds": ["com.apple.Safari"] })).await;
         assert_eq!(status, StatusCode::OK);
         assert!(waiting.await.is_ok());
     }
@@ -5594,7 +5757,9 @@ mod tests {
         fixture.backend.attach_agent_requests(queue.clone());
         let _waiting = queue.enqueue(agent_request(
             "bo-9",
-            crate::agent_requests::AgentRequestDetail::BrowserOpen { url: "https://b.example".into() },
+            crate::agent_requests::AgentRequestDetail::BrowserOpen {
+                url: "https://b.example".into(),
+            },
         ));
         let seen = read_until(&mut body, "bo-9").await;
         assert!(seen.contains("event: agent-requests"), "{seen}");
@@ -5617,8 +5782,12 @@ mod tests {
         use dcc_core::ports::ThreadRepo;
         let fixture = embedded_fixture().await;
         let db_path = fixture.backend.workspace.db_path.clone();
-        let workspaces = dcc_infra::db::SqliteWorkspaceRepo::open(&db_path).expect("workspace repo");
-        for (id, state) in [("workspace", WorkspaceState::Ready), ("archived", WorkspaceState::Archived)] {
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&db_path).expect("workspace repo");
+        for (id, state) in [
+            ("workspace", WorkspaceState::Ready),
+            ("archived", WorkspaceState::Archived),
+        ] {
             dcc_core::ports::WorkspaceRepo::save_workspace(
                 &workspaces,
                 &Workspace {
@@ -5686,8 +5855,15 @@ mod tests {
             .await
             .expect("append");
         }
-        let (status, body) =
-            call(&fixture.app, "GET", "/api/v1/mobile/attention", None, Some("phone-1"), false).await;
+        let (status, body) = call(
+            &fixture.app,
+            "GET",
+            "/api/v1/mobile/attention",
+            None,
+            Some("phone-1"),
+            false,
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         let items = body["items"].as_array().expect("items");
         assert_eq!(items.len(), 1, "the archived task is left out: {body}");
@@ -5695,8 +5871,15 @@ mod tests {
         assert_eq!(items[0]["reason"], "permission");
         assert_eq!(items[0]["sessionId"], fixture.session_id.0);
         assert_eq!(items[0]["returnedAt"], "2026-10-12T10:00:00Z");
-        let (status, _) =
-            call(&fixture.app, "GET", "/api/v1/mobile/attention", None, None, false).await;
+        let (status, _) = call(
+            &fixture.app,
+            "GET",
+            "/api/v1/mobile/attention",
+            None,
+            None,
+            false,
+        )
+        .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
@@ -5712,7 +5895,9 @@ mod tests {
         };
         let mut news = attention::BlockerNews::default();
         // Already there when the watcher starts: old news.
-        assert!(news.next(&[blocker("a", WorkspaceBlockerKind::Conflicts)]).is_empty());
+        assert!(news
+            .next(&[blocker("a", WorkspaceBlockerKind::Conflicts)])
+            .is_empty());
         let fresh = news.next(&[
             blocker("a", WorkspaceBlockerKind::Conflicts),
             blocker("b", WorkspaceBlockerKind::ChecksFailing),
@@ -5721,7 +5906,13 @@ mod tests {
         ]);
         let mut kinds: Vec<_> = fresh.iter().map(|(w, k, _)| (w.as_str(), *k)).collect();
         kinds.sort_by_key(|(w, _)| *w);
-        assert_eq!(kinds, [("b", AttentionKind::ChecksFailing), ("d", AttentionKind::Conflict)]);
+        assert_eq!(
+            kinds,
+            [
+                ("b", AttentionKind::ChecksFailing),
+                ("d", AttentionKind::Conflict)
+            ]
+        );
         // Still red: nothing new.
         assert!(news
             .next(&[blocker("b", WorkspaceBlockerKind::ChecksFailing)])
@@ -5730,7 +5921,10 @@ mod tests {
         news.next(&[]);
         let again = news.next(&[blocker("b", WorkspaceBlockerKind::ChecksFailing)]);
         assert_eq!(again.len(), 1);
-        assert_ne!(again[0].2, fresh.iter().find(|(w, _, _)| w == "b").unwrap().2);
+        assert_ne!(
+            again[0].2,
+            fresh.iter().find(|(w, _, _)| w == "b").unwrap().2
+        );
     }
 
     fn git(dir: &std::path::Path, args: &[&str]) -> String {
@@ -6462,17 +6656,31 @@ mod tests {
                 "content": content, "expectedPrevious": expected,
             })
         };
-        let (status, saved) =
-            post_json(&fixture.app, "/api/v1/files/write", write("dois\n", Some("um\n"))).await;
+        let (status, saved) = post_json(
+            &fixture.app,
+            "/api/v1/files/write",
+            write("dois\n", Some("um\n")),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{saved}");
         assert_eq!(saved["conflicted"], false);
-        assert_eq!(std::fs::read_to_string(repo.join("a.txt")).unwrap(), "dois\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("a.txt")).unwrap(),
+            "dois\n"
+        );
         // The disk moved on (an agent): nothing is written, the disk comes back.
-        let (_, conflict) =
-            post_json(&fixture.app, "/api/v1/files/write", write("tres\n", Some("um\n"))).await;
+        let (_, conflict) = post_json(
+            &fixture.app,
+            "/api/v1/files/write",
+            write("tres\n", Some("um\n")),
+        )
+        .await;
         assert_eq!(conflict["conflicted"], true);
         assert_eq!(conflict["diskContent"], "dois\n");
-        assert_eq!(std::fs::read_to_string(repo.join("a.txt")).unwrap(), "dois\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("a.txt")).unwrap(),
+            "dois\n"
+        );
         let other = tempfile::tempdir().unwrap();
         let (status, _) = post_json(
             &fixture.app,
@@ -6577,13 +6785,25 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(std::fs::read_to_string(repo.join("a.txt")).unwrap(), "feature\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("a.txt")).unwrap(),
+            "feature\n"
+        );
         // A folder that is no task's checkout is refused.
         let other = tempfile::tempdir().unwrap();
         for (uri, body) in [
-            ("/api/v1/git/conflict-state", json!({ "workspaceRoot": other.path() })),
-            ("/api/v1/git/validation-config", json!({ "workspaceRoot": other.path() })),
-            ("/api/v1/git/abort-merge", json!({ "workspaceRoot": other.path() })),
+            (
+                "/api/v1/git/conflict-state",
+                json!({ "workspaceRoot": other.path() }),
+            ),
+            (
+                "/api/v1/git/validation-config",
+                json!({ "workspaceRoot": other.path() }),
+            ),
+            (
+                "/api/v1/git/abort-merge",
+                json!({ "workspaceRoot": other.path() }),
+            ),
             (
                 "/api/v1/git/accept-conflict",
                 json!({ "workspaceRoot": other.path(), "relativePath": "a.txt", "side": "current" }),
@@ -6633,8 +6853,12 @@ mod tests {
         .unwrap();
         let root = repo.to_string_lossy().to_string();
         // No remote: no forge, and no failure captured.
-        let (status, context) =
-            post_json(&fixture.app, "/api/v1/forge/context", json!({ "workspaceRoot": root })).await;
+        let (status, context) = post_json(
+            &fixture.app,
+            "/api/v1/forge/context",
+            json!({ "workspaceRoot": root }),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{context}");
         assert_eq!(context["provider"], Value::Null);
         let (status, failure) = post_json(
@@ -7050,14 +7274,20 @@ mod tests {
         let remote = base.join("remote.git");
         let repo = base.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
-        git(&base, &["init", "--bare", "-b", "main", remote.to_str().unwrap()]);
+        git(
+            &base,
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
         git(&repo, &["init", "-b", "main"]);
         git(&repo, &["config", "user.name", "DCC Test"]);
         git(&repo, &["config", "user.email", "test@example.com"]);
         std::fs::write(repo.join("README.md"), "oi\n").unwrap();
         git(&repo, &["add", "-A"]);
         git(&repo, &["commit", "-m", "init"]);
-        git(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
         git(&repo, &["push", "-u", "origin", "main"]);
         git(&repo, &["switch", "-c", "dcc/revisao"]);
         git(&repo, &["push", "-u", "origin", "dcc/revisao"]);
@@ -7116,7 +7346,10 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{preview}");
         assert_eq!(preview["stagedFileCount"], 1);
         assert!(!preview["subject"].as_str().unwrap().is_empty());
-        assert_eq!(git(&repo, &["diff", "--cached", "--name-only"]).trim(), "docs/guia.md");
+        assert_eq!(
+            git(&repo, &["diff", "--cached", "--name-only"]).trim(),
+            "docs/guia.md"
+        );
 
         // The ✨ asks the task's agent; a task without a conversation has none.
         let (status, draft) = post_json(
@@ -7126,7 +7359,10 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{draft}");
-        assert!(draft.to_string().contains("ainda não tem conversa"), "{draft}");
+        assert!(
+            draft.to_string().contains("ainda não tem conversa"),
+            "{draft}"
+        );
 
         // The person's edited message is what lands, pushed.
         let (status, body) = post_json(
@@ -7153,8 +7389,12 @@ mod tests {
         git(&repo, &["commit", "-m", "base"]);
         git(&repo, &["push", "origin", "main"]);
         git(&repo, &["switch", "dcc/revisao"]);
-        let (status, synced) =
-            post_json(&fixture.app, &action("sync-base"), json!({ "baseBranch": "main" })).await;
+        let (status, synced) = post_json(
+            &fixture.app,
+            &action("sync-base"),
+            json!({ "baseBranch": "main" }),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{synced}");
         assert_eq!(synced["updated"], true);
         assert!(repo.join("base.txt").exists());
@@ -7174,18 +7414,25 @@ mod tests {
         let repo = base.join("repo");
         let other = base.join("other");
         std::fs::create_dir_all(&repo).unwrap();
-        git(&base, &["init", "--bare", "-b", "main", remote.to_str().unwrap()]);
+        git(
+            &base,
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
         git(&repo, &["init", "-b", "main"]);
         git(&repo, &["config", "user.name", "DCC Test"]);
         git(&repo, &["config", "user.email", "test@example.com"]);
         std::fs::write(repo.join("README.md"), "oi\n").unwrap();
         git(&repo, &["add", "-A"]);
         git(&repo, &["commit", "-m", "init"]);
-        git(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
         git(&repo, &["push", "-u", "origin", "main"]);
         git(&repo, &["switch", "-c", "dcc/tarefa"]);
         git(&repo, &["push", "-u", "origin", "dcc/tarefa"]);
-        let workspaces = dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
+        let workspaces =
+            dcc_infra::db::SqliteWorkspaceRepo::open(&fixture.backend.workspace.db_path).unwrap();
         dcc_core::ports::WorkspaceRepo::save_workspace(
             &workspaces,
             &Workspace {
@@ -7213,7 +7460,12 @@ mod tests {
             let app = fixture.app.clone();
             async move { call(&app, method, &uri, body, Some("phone-1"), false).await }
         };
-        let (status, summary) = phone("GET", "/api/v1/mobile/workspaces/w-git/delivery".into(), None).await;
+        let (status, summary) = phone(
+            "GET",
+            "/api/v1/mobile/workspaces/w-git/delivery".into(),
+            None,
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{summary}");
         assert_eq!(summary["branch"], "dcc/tarefa");
         assert_eq!(summary["changes"][0]["path"], "docs/guia.md");
@@ -7222,7 +7474,15 @@ mod tests {
         let token = summary["changesToken"].as_str().unwrap().to_string();
 
         // Without auth, nothing; a path from the phone is refused.
-        let (status, _) = call(&fixture.app, "GET", "/api/v1/mobile/workspaces/w-git/delivery", None, None, false).await;
+        let (status, _) = call(
+            &fixture.app,
+            "GET",
+            "/api/v1/mobile/workspaces/w-git/delivery",
+            None,
+            None,
+            false,
+        )
+        .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         let (status, _) = phone(
             "POST",
@@ -7231,7 +7491,12 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        let (status, _) = phone("GET", "/api/v1/mobile/workspaces/..%2F..%2Fetc/delivery".into(), None).await;
+        let (status, _) = phone(
+            "GET",
+            "/api/v1/mobile/workspaces/..%2F..%2Fetc/delivery".into(),
+            None,
+        )
+        .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
 
         // The files moved after the phone looked: refused.
@@ -7245,7 +7510,12 @@ mod tests {
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(stale["error"]["code"], "stale");
 
-        let (_, summary) = phone("GET", "/api/v1/mobile/workspaces/w-git/delivery".into(), None).await;
+        let (_, summary) = phone(
+            "GET",
+            "/api/v1/mobile/workspaces/w-git/delivery".into(),
+            None,
+        )
+        .await;
         let token = summary["changesToken"].as_str().unwrap().to_string();
         let (status, body) = phone(
             "POST",
@@ -7254,7 +7524,10 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(git(&repo, &["log", "-1", "--format=%s"]), "docs: ajustar o guia");
+        assert_eq!(
+            git(&repo, &["log", "-1", "--format=%s"]),
+            "docs: ajustar o guia"
+        );
         assert_eq!(
             git(&remote, &["rev-parse", "dcc/tarefa"]),
             git(&repo, &["rev-parse", "HEAD"]),
@@ -7263,13 +7536,38 @@ mod tests {
 
         // Someone else pushed to the branch: the phone's push is refused, then
         // "Atualizar e enviar" brings it in and pushes.
-        git(&base, &["clone", "-b", "dcc/tarefa", remote.to_str().unwrap(), other.to_str().unwrap()]);
+        git(
+            &base,
+            &[
+                "clone",
+                "-b",
+                "dcc/tarefa",
+                remote.to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        );
         std::fs::write(other.join("CHANGELOG.md"), "outro\n").unwrap();
         git(&other, &["add", "-A"]);
-        git(&other, &["-c", "user.name=O", "-c", "user.email=o@example.com", "commit", "-m", "outro"]);
+        git(
+            &other,
+            &[
+                "-c",
+                "user.name=O",
+                "-c",
+                "user.email=o@example.com",
+                "commit",
+                "-m",
+                "outro",
+            ],
+        );
         git(&other, &["push"]);
         std::fs::write(repo.join("docs/guia.md"), "um\ndois\ntrês\nquatro\n").unwrap();
-        let (_, summary) = phone("GET", "/api/v1/mobile/workspaces/w-git/delivery".into(), None).await;
+        let (_, summary) = phone(
+            "GET",
+            "/api/v1/mobile/workspaces/w-git/delivery".into(),
+            None,
+        )
+        .await;
         let token = summary["changesToken"].as_str().unwrap().to_string();
         let (status, behind) = phone(
             "POST",
@@ -7280,26 +7578,51 @@ mod tests {
         assert_eq!(status, StatusCode::CONFLICT, "{behind}");
         assert_eq!(behind["error"]["code"], "behind_remote");
         assert_eq!(behind["error"]["outcome"]["target"], "origin/dcc/tarefa");
-        let (_, summary) = phone("GET", "/api/v1/mobile/workspaces/w-git/delivery".into(), None).await;
+        let (_, summary) = phone(
+            "GET",
+            "/api/v1/mobile/workspaces/w-git/delivery".into(),
+            None,
+        )
+        .await;
         assert_eq!(summary["pushFailure"]["canSync"], true, "{summary}");
         assert_eq!(summary["aheadOfRemoteCount"], 1);
-        let (status, body) =
-            phone("POST", "/api/v1/mobile/workspaces/w-git/delivery/sync-and-push".into(), None).await;
+        let (status, body) = phone(
+            "POST",
+            "/api/v1/mobile/workspaces/w-git/delivery/sync-and-push".into(),
+            None,
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(
             git(&remote, &["rev-parse", "dcc/tarefa"]),
             git(&repo, &["rev-parse", "HEAD"]),
         );
-        assert!(repo.join("CHANGELOG.md").exists(), "the other commit came in");
+        assert!(
+            repo.join("CHANGELOG.md").exists(),
+            "the other commit came in"
+        );
 
-        let (status, _) = phone("POST", "/api/v1/mobile/workspaces/w-git/delivery/archive".into(), None).await;
+        let (status, _) = phone(
+            "POST",
+            "/api/v1/mobile/workspaces/w-git/delivery/archive".into(),
+            None,
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
-        let archived = dcc_core::ports::WorkspaceRepo::get_workspace(&workspaces, &WorkspaceId("w-git".into()))
-            .await
-            .unwrap()
-            .unwrap();
+        let archived = dcc_core::ports::WorkspaceRepo::get_workspace(
+            &workspaces,
+            &WorkspaceId("w-git".into()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(archived.state, WorkspaceState::Archived);
-        let (status, _) = phone("POST", "/api/v1/mobile/workspaces/w-git/delivery/reset-hard".into(), None).await;
+        let (status, _) = phone(
+            "POST",
+            "/api/v1/mobile/workspaces/w-git/delivery/reset-hard".into(),
+            None,
+        )
+        .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }

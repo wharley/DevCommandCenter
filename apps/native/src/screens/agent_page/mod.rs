@@ -37,6 +37,7 @@ mod memory_history;
 mod memory_layers;
 #[cfg(test)]
 mod memory_tests;
+mod page_tabs;
 mod picker;
 mod pr_reviews;
 mod room;
@@ -44,6 +45,7 @@ mod room_bulletin;
 mod room_cards;
 mod room_checkins;
 mod room_cleanup;
+mod room_focus;
 mod room_handoff;
 mod room_limits;
 mod room_mentions;
@@ -90,6 +92,8 @@ pub struct AgentPage {
     pub(crate) room: Option<(Entity<room::TeamRoom>, Subscription)>,
     /// The room is on screen instead of an agent's page.
     pub(crate) room_open: bool,
+    /// The agent's page on its conversation or its settings (`page_tabs`).
+    pub(crate) tab: page_tabs::AgentTab,
     /// What the room's field starts with when it opens ("@Revisor ").
     room_draft: Option<String>,
     _sidebar: Subscription,
@@ -157,6 +161,7 @@ impl AgentPage {
             memory: None,
             room: None,
             room_open: false,
+            tab: Default::default(),
             room_draft: None,
             _sidebar: observe,
             _mascot: [
@@ -170,6 +175,7 @@ impl AgentPage {
 
     pub fn show(&mut self, agent_id: String, cx: &mut Context<Self>) {
         self.room_open = false;
+        self.tab = page_tabs::AgentTab::Settings;
         // Read again: the month moves while the page is away.
         self.spend = Default::default();
         self.routine_form = None;
@@ -237,7 +243,7 @@ impl AgentPage {
             .sessions
             .iter()
             .zip(&data.unread)
-            // Its own conversation has the card above.
+            // Its own conversation is the "Conversa" tab.
             .filter(|(session, _)| session.project_id != home)
             .enumerate()
             .map(|(index, (session, unread))| {
@@ -384,8 +390,17 @@ impl AgentPage {
     /// The agent's page, or its editor, beside the team (`team`).
     fn page_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.room_open && self.editor.is_none() {
-            return self.room_element(window, cx);
+            return self.room_element(None, window, cx);
         }
+        // "Novo agente" has no conversation yet.
+        if self.editor_is_for_agent(cx) {
+            return self.tabbed_body(window, cx);
+        }
+        self.settings_body(window, cx)
+    }
+
+    /// "Configuração": the page as it is, or its editor.
+    fn settings_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let Some(data) = self.sidebar.read(cx).agent_page(&self.agent_id) else {
             return div()
@@ -493,7 +508,6 @@ impl AgentPage {
                         "agents.page.howToCallAgent"
                     })),
             );
-        let conversation = self.conversation_card(&data, cx);
         let triggers = self.triggers_card(&data, cx);
         let spend = self.spend_card(agent.monthly_token_limit, cx);
         let routines = self.routines_card(cx);
@@ -583,7 +597,6 @@ impl AgentPage {
                     .px(px(32.0))
                     .py(px(32.0))
                     .child(header)
-                    .child(conversation)
                     .children(triggers)
                     .children(spend)
                     .child(routines)

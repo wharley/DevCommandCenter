@@ -24,10 +24,10 @@ mod meta_chips;
 mod navigation;
 #[cfg(test)]
 mod open_tests;
-#[cfg(test)]
-mod rail_tests;
 mod piece;
 mod project_menu;
+#[cfg(test)]
+mod rail_tests;
 mod repo_picker;
 mod row;
 mod row_actions;
@@ -88,6 +88,8 @@ pub enum SidebarEvent {
     OpenNotes,
     /// Tasks just completed (a bundle's members, or the task): their notes may be done.
     TasksCompleted(Vec<String>),
+    /// Pull requests an agent asked DCC to review, not taken yet.
+    ReviewRequests(Vec<dcc_core::domain::pr_review_request::PrReviewRequest>),
     /// A resident agent's page.
     /// "Agentes": the team's screen.
     OpenAgents,
@@ -379,6 +381,9 @@ impl Sidebar {
                 self.open_listed(cx);
             }
             return;
+        }
+        if !data.review_requests.is_empty() {
+            cx.emit(SidebarEvent::ReviewRequests(data.review_requests.clone()));
         }
         self.state.data = data;
         self.state.now_ms = time::now_ms();

@@ -328,9 +328,26 @@ impl Render for TeamRoom {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
         let agents: Vec<AgentRecord> = self.sidebar.read(cx).agents().to_vec();
-        let lines: Vec<RoomLine> = self.lines().into_iter().cloned().collect();
-        let cards = self.cards(cx);
-        let checks = self.check_ins(cx);
+        let lines: Vec<RoomLine> = self
+            .lines()
+            .into_iter()
+            .filter(|line| self.shows(&line.agent_id))
+            .cloned()
+            .collect();
+        let mut cards = self.cards(cx);
+        cards.retain(|card| self.shows(&card.agent_id));
+        // On one agent, only what is its own; the room's cards stay there.
+        let whole = self.focus.is_none();
+        let shown: Vec<AgentRecord> = agents
+            .iter()
+            .filter(|agent| self.shows(&agent.id))
+            .cloned()
+            .collect();
+        let checks = if whole {
+            self.check_ins(cx)
+        } else {
+            Vec::new()
+        };
         let unread = cards.iter().filter(|card| card.unread).count()
             + checks.iter().filter(|card| card.unread).count();
         // The room's lines, the inbox's cards and the check-in's, in time order.
@@ -382,7 +399,11 @@ impl Render for TeamRoom {
                         rows.extend(self.routine_line(index, &line.text, cx))
                     }
                     None => {
-                        let note = self.routed(&agent.id, &line.text, &agent.name, cx);
+                        let note = if whole {
+                            self.routed(&agent.id, &line.text, &agent.name, cx)
+                        } else {
+                            SharedString::default()
+                        };
                         rows.push(self.person_line(
                             format!("room-said-{index}"),
                             line.text.clone(),
@@ -400,23 +421,34 @@ impl Render for TeamRoom {
             }
         }
         // What DCC itself has for the person now: the day's recap, the space.
-        rows.extend(self.recap_card(cx));
-        rows.push(self.bulletin_card(&agents, cx));
-        rows.extend(self.cleanup_card(cx));
-        rows.extend(self.limit_rows(&agents, cx));
-        rows.extend(self.routine_cards(&agents, cx));
+        if whole {
+            rows.extend(self.recap_card(cx));
+            rows.push(self.bulletin_card(&agents, cx));
+            rows.extend(self.cleanup_card(cx));
+        }
+        rows.extend(self.limit_rows(&shown, cx));
+        rows.extend(self.routine_cards(&shown, cx));
         let unread_bar = self.unread_bar(unread, cx);
-        let pending: Vec<Pending> = self.pending.clone();
+        let pending: Vec<Pending> = self
+            .pending
+            .iter()
+            .filter(|sent| self.shows(&sent.agent_id))
+            .cloned()
+            .collect();
         for (index, sent) in pending.iter().enumerate() {
             let name = Self::agent(&agents, &sent.agent_id)
                 .map(|agent| agent.name.clone())
                 .unwrap_or_default();
-            let note: SharedString = format!(
-                "{} · {}",
-                self.routed(&sent.agent_id, &sent.text, &name, cx),
+            let note: SharedString = if whole {
+                format!(
+                    "{} · {}",
+                    self.routed(&sent.agent_id, &sent.text, &name, cx),
+                    cx.t("agents.room.sending")
+                )
+                .into()
+            } else {
                 cx.t("agents.room.sending")
-            )
-            .into();
+            };
             rows.push(self.person_line(
                 format!("room-pending-{index}"),
                 sent.text.clone(),
@@ -424,20 +456,63 @@ impl Render for TeamRoom {
                 cx,
             ));
         }
-        for (agent, state) in self.busy(cx) {
+        for (agent, state) in self
+            .busy(cx)
+            .into_iter()
+            .filter(|(agent, _)| self.shows(&agent.id))
+        {
             rows.push(self.busy_line(&agent, state, cx));
         }
         if rows.len() != self.shown {
             self.shown = rows.len();
             self.scroll.scroll_to_bottom();
         }
+        let empty_text = match self.focused(cx) {
+            Some(agent) => cx.t_with(
+                "agents.room.emptyAgent",
+                &Args::default().with("agent", agent.name),
+            ),
+            None => cx.t("agents.room.empty"),
+        };
         let empty = rows.is_empty().then(|| {
             div()
                 .debug_selector(|| "room-empty".into())
                 .text_size(px(13.0))
                 .line_height(px(20.0))
                 .text_color(colors.muted_foreground)
-                .child(cx.t("agents.room.empty"))
+                .child(empty_text)
+        });
+        let header = whole.then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .px(px(24.0))
+                .pt(px(20.0))
+                .pb(px(12.0))
+                .border_b_1()
+                .border_color(colors.border.opacity(0.7))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_size(px(16.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(colors.foreground)
+                                .child(cx.t("agents.room.title")),
+                        )
+                        .children(self.pause_button(cx)),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(colors.muted_foreground)
+                        .child(cx.t("agents.room.subtitle")),
+                )
+                .children(unread_bar)
         });
         div()
             .debug_selector(|| "team-room".into())
@@ -446,38 +521,8 @@ impl Render for TeamRoom {
             .size_full()
             .min_h_0()
             .bg(colors.background)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .px(px(24.0))
-                    .pt(px(20.0))
-                    .pb(px(12.0))
-                    .border_b_1()
-                    .border_color(colors.border.opacity(0.7))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_size(px(16.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(colors.foreground)
-                                    .child(cx.t("agents.room.title")),
-                            )
-                            .children(self.pause_button(cx)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(colors.muted_foreground)
-                            .child(cx.t("agents.room.subtitle")),
-                    )
-                    .children(unread_bar),
-            )
+            // On one agent, its page draws the head.
+            .children(header)
             .child(
                 div()
                     .id("room-lines")

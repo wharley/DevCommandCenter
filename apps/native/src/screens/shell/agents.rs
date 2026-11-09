@@ -18,7 +18,7 @@ impl Shell {
         match &self.agent_page {
             Some((page, _)) => {
                 let id = id.clone();
-                page.update(cx, |page, cx| page.show(id, cx));
+                page.update(cx, |page, cx| page.show_conversation(id, cx));
             }
             None => {
                 let (sidebar, composer) = (
@@ -52,6 +52,9 @@ impl Shell {
                             shell.open_pull_requests(window, cx);
                         }
                     });
+                page.update(cx, |page, cx| {
+                    page.show_conversation(page.agent_id.clone(), cx)
+                });
                 self.agent_page = Some((page, events));
             }
         }

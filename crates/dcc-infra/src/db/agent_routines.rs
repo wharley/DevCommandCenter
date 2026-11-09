@@ -213,9 +213,12 @@ mod tests {
             .unwrap());
         let listed = repo.list_agent_routines().unwrap();
         assert_eq!(listed.len(), 2);
-        assert!(!listed[1].proposed && listed[1].enabled);
+        // Both may share a millisecond: found by id, not by place.
+        let by_id = |id: &str| listed.iter().find(|routine| routine.id == id).unwrap();
+        let accepted = by_id(&proposed.id);
+        assert!(!accepted.proposed && accepted.enabled);
         assert_eq!(
-            listed[0].last_run_at.as_deref(),
+            by_id(&first.id).last_run_at.as_deref(),
             Some("2026-11-09T12:00:00.000Z")
         );
         for index in 0..3 {

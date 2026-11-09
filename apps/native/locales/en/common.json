@@ -216,6 +216,9 @@
     }
   },
   "agents": {
+    "reviewRequest": {
+      "noCheckout": "{{agent}} found no checkout of {{repository}} in your projects to review."
+    },
     "triggers": {
       "title": "Triggers",
       "limits": "Up to {{daily}} runs a day and {{target}} per PR or task. Today: {{today}}.",
@@ -278,10 +281,6 @@
       "reading": "Reading a PR"
     },
     "conversation": {
-      "inRoom": "Talk in the room",
-      "title": "Conversation",
-      "hint": "Talk to it in the team room. Its whole conversation, with its tools, opens from here.",
-      "continue": "Open conversation",
       "taskName": "Conversation with {{agent}}"
     },
     "memory": {
@@ -403,6 +402,11 @@
       "removedTask": "Removed task",
       "since": "since {{time}}"
     },
+    "tabs": {
+      "conversation": "Conversation",
+      "settings": "Settings",
+      "whole": "Whole conversation"
+    },
     "room": {
       "handoff": {
         "suggests": "{{agent}} suggests passing to {{teammate}}",
@@ -416,6 +420,7 @@
         "done": "{{agent}} finished in {{task}}",
         "waiting": "{{agent}} needs you in {{task}}",
         "reviewed": "{{agent}} reviewed {{task}}",
+        "reviewing": "{{agent}} is reviewing {{task}}",
         "reviewFailed": "{{agent}} could not review {{task}}",
         "trigger": {
           "prUpdated": "Trigger · PR updated",
@@ -429,6 +434,8 @@
       },
       "title": "Team room",
       "subtitle": "Write to the team. With @ you pick who answers; without it, DCC picks by rule.",
+      "placeholderAgent": "Write to {{agent}}",
+      "emptyAgent": "Write to {{agent}}. The answer comes here; the whole conversation, with its tools, opens in \"Whole conversation\".",
       "placeholder": "Write to the team · @ to call someone",
       "send": "Send",
       "hint": "Without @: who you named, the request's role, who answered last, or the Reviewer.",
@@ -4673,7 +4680,13 @@
       "allowed": "Allowed",
       "denied": "Denied",
       "pending": "Pending",
-      "submitError": "Unable to send the permission decision to the agent."
+      "submitError": "Unable to send the permission decision to the agent.",
+      "reasonPlaceholder": "Why deny it? The agent reads this",
+      "denySend": "Send denial",
+      "denyWithReason": "Deny with a reason",
+      "always": "Always allow",
+      "alwaysSaved": "{{tool}} only reads: always allowed now",
+      "onlyOnce": "This tool writes: allowed only this once"
     }
   },
   "workbench": {

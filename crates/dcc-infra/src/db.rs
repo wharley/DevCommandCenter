@@ -12,8 +12,8 @@ use serde_json::{from_str, to_string};
 use crate::ai_memory::AiMemoryHit;
 
 mod delta_compaction;
-pub use delta_compaction::{DeltaCompactionStep, DELTA_COMPACTION_SETTLE_MINUTES};
 use delta_compaction::DELTA_COMPACTION_TABLE_SQL;
+pub use delta_compaction::{DeltaCompactionStep, DELTA_COMPACTION_SETTLE_MINUTES};
 mod space;
 pub use space::{database_space, vacuum_into_incremental_mode, DatabaseSpace, VacuumOutcome};
 mod turn_windows;
@@ -25,9 +25,11 @@ mod agent_memory;
 mod agent_routines;
 mod agent_spend;
 mod agent_week;
+mod pr_review_requests;
 mod session_stall;
 use agent_memory::AGENT_MEMORY_TABLE_SQL;
 use agent_routines::AGENT_ROUTINE_TABLE_SQL;
+use pr_review_requests::PR_REVIEW_REQUEST_TABLE_SQL;
 pub use workspace_ports::{port_block_is_free, PORT_BLOCK_SIZE, PORT_BLOCK_START};
 
 #[cfg(all(target_os = "macos", feature = "guarded-undo-capture-v2"))]
@@ -1247,7 +1249,10 @@ impl SqliteWorkspaceRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let changed = conn
-            .execute("DELETE FROM dcc_provider_accounts WHERE id = ?1", params![id])
+            .execute(
+                "DELETE FROM dcc_provider_accounts WHERE id = ?1",
+                params![id],
+            )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Ok(changed > 0)
     }
@@ -2659,7 +2664,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{PROVIDER_NATIVE_REWIND_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{AGENT_MEMORY_TABLE_SQL}\n{AGENT_ROUTINE_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}\n{SCHEMA_MARKER_TABLE_SQL}\n{DELTA_COMPACTION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{PROVIDER_NATIVE_REWIND_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{AGENT_MEMORY_TABLE_SQL}\n{AGENT_ROUTINE_TABLE_SQL}\n{PR_REVIEW_REQUEST_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}\n{SCHEMA_MARKER_TABLE_SQL}\n{DELTA_COMPACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::drop_redundant_event_sequence_index(&conn)?;
@@ -6062,9 +6067,9 @@ impl SqliteSessionRepo {
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let mut ids = Vec::new();
         for row in rows {
-            ids.push(SessionId(
-                row.map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?,
-            ));
+            ids.push(SessionId(row.map_err(|error| {
+                dcc_core::CoreError::Repository(error.to_string())
+            })?));
         }
         Ok(ids)
     }
@@ -7943,7 +7948,9 @@ impl SqliteSessionRepo {
                     )
                     .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
                 if updated != 1 {
-                    return Err(dcc_core::CoreError::InvalidInput(format!("agent {id} does not exist")));
+                    return Err(dcc_core::CoreError::InvalidInput(format!(
+                        "agent {id} does not exist"
+                    )));
                 }
                 id.to_string()
             }
@@ -7999,7 +8006,9 @@ impl SqliteSessionRepo {
             )
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         if !live {
-            return Err(dcc_core::CoreError::InvalidInput(format!("agent {agent_id} does not exist")));
+            return Err(dcc_core::CoreError::InvalidInput(format!(
+                "agent {agent_id} does not exist"
+            )));
         }
         let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
         conn.execute(
@@ -13168,7 +13177,10 @@ mod tests {
         assert_eq!(renamed.icon.as_deref(), Some("logo"));
         assert_eq!(renamed.color.as_deref(), Some("violet"));
         // The uploaded logo survives re-discovery of the repository below.
-        assert_eq!(renamed.logo.as_deref(), Some("data:image/png;base64,iVBORw0KGgo="));
+        assert_eq!(
+            renamed.logo.as_deref(),
+            Some("data:image/png;base64,iVBORw0KGgo=")
+        );
         assert!(repo
             .update_repository_pinned_at(
                 &RepositoryId("/tmp/repo".to_string()),
@@ -14638,7 +14650,11 @@ mod tests {
                 content: Some("narwhal grammar".to_owned()),
             },
         );
-        assert_eq!(matches("narwhal"), 0, "a step inside the turn does not reindex");
+        assert_eq!(
+            matches("narwhal"),
+            0,
+            "a step inside the turn does not reindex"
+        );
 
         append("completed", 4, SessionEventKind::TurnCompleted { turn_id });
         assert_eq!(matches("zebrafish"), 1);

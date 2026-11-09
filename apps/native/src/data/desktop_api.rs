@@ -24,6 +24,10 @@ const IO_TIMEOUT: Duration = Duration::from_secs(20);
 /// calls, so the app waits for its answer instead of reporting a failure
 /// while the push goes on.
 const DELIVERY_WAIT: Duration = Duration::from_secs(300);
+/// Starting a turn may first start the provider (its process, its MCP
+/// servers and their sign-in check), which outlasts `IO_TIMEOUT` on a cold
+/// start; giving up early drops the request and the turn never starts.
+const TURN_START_WAIT: Duration = Duration::from_secs(120);
 
 /// The changes list's git actions (`workspaceGitStageFile`…), run by the
 /// desktop so they wait for an agent's edit to the same checkout.
@@ -328,6 +332,32 @@ impl DesktopApi {
         }
     }
 
+    /// `respondToPermissionRequest` with the person's reason for a denial or
+    /// "Sempre permitir"; answers whether the allow was kept for good.
+    pub fn respond_permission_with(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        allow: bool,
+        message: Option<&str>,
+        always: bool,
+    ) -> Result<bool, ApiError> {
+        let value = self.post(
+            &format!("/api/v1/sessions/{}/respond-permission", encode(session_id)),
+            &json!({
+                "sessionId": session_id,
+                "requestId": request_id,
+                "behavior": if allow { "allow" } else { "deny" },
+                "message": message,
+                "always": always,
+            }),
+        )?;
+        Ok(value
+            .get("alwaysSaved")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false))
+    }
+
     /// `respondToPermissionRequest`: `allow` or `deny`.
     pub fn respond_permission(
         &self,
@@ -374,9 +404,11 @@ impl DesktopApi {
         let mut body =
             json!({ "sessionId": session_id, "prompt": prompt, "retryOfTurnId": retry_of_turn_id });
         options.write_into(&mut body);
-        self.post(
+        self.request_waiting(
+            "POST",
             &format!("/api/v1/sessions/{}/turns", encode(session_id)),
-            &body,
+            Some(&body),
+            TURN_START_WAIT,
         )
         .map(|_| ())
     }
@@ -390,9 +422,11 @@ impl DesktopApi {
     ) -> Result<String, ApiError> {
         let mut body = json!({ "sessionId": session_id, "prompt": prompt, "retryOfTurnId": null });
         options.write_into(&mut body);
-        let value = self.post(
+        let value = self.request_waiting(
+            "POST",
             &format!("/api/v1/sessions/{}/turns", encode(session_id)),
-            &body,
+            Some(&body),
+            TURN_START_WAIT,
         )?;
         value
             .pointer("/turn/id")

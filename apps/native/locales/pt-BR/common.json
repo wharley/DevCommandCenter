@@ -216,6 +216,9 @@
     }
   },
   "agents": {
+    "reviewRequest": {
+      "noCheckout": "O {{agent}} não achou um checkout de {{repository}} nos seus projetos para revisar."
+    },
     "triggers": {
       "title": "Gatilhos",
       "limits": "Até {{daily}} execuções por dia e {{target}} por PR ou tarefa. Hoje: {{today}}.",
@@ -278,10 +281,6 @@
       "reading": "Lendo um PR"
     },
     "conversation": {
-      "inRoom": "Falar na Sala",
-      "title": "Conversa",
-      "hint": "Fale com ele na Sala da equipe. A conversa inteira dele, com as ferramentas, abre daqui.",
-      "continue": "Abrir conversa",
       "taskName": "Conversa com {{agent}}"
     },
     "memory": {
@@ -403,6 +402,11 @@
       "removedTask": "Tarefa removida",
       "since": "desde {{time}}"
     },
+    "tabs": {
+      "conversation": "Conversa",
+      "settings": "Configuração",
+      "whole": "Conversa completa"
+    },
     "room": {
       "handoff": {
         "suggests": "{{agent}} sugere passar a vez para {{teammate}}",
@@ -416,6 +420,7 @@
         "done": "{{agent}} terminou em {{task}}",
         "waiting": "{{agent}} precisa de você em {{task}}",
         "reviewed": "{{agent}} revisou {{task}}",
+        "reviewing": "{{agent}} está revisando {{task}}",
         "reviewFailed": "{{agent}} não conseguiu revisar {{task}}",
         "trigger": {
           "prUpdated": "Gatilho · PR atualizado",
@@ -429,6 +434,8 @@
       },
       "title": "Sala da equipe",
       "subtitle": "Escreva para a equipe. Com @ você escolhe quem responde; sem @, o DCC escolhe pela regra.",
+      "placeholderAgent": "Escreva para o {{agent}}",
+      "emptyAgent": "Escreva para o {{agent}}. A resposta chega aqui; a conversa completa, com as ferramentas, abre em \"Conversa completa\".",
       "placeholder": "Escreva para a equipe · @ para chamar alguém",
       "send": "Enviar",
       "hint": "Sem @: quem você chamou, o papel do pedido, quem respondeu por último ou o Revisor.",
@@ -4673,7 +4680,13 @@
       "allowed": "Permitido",
       "denied": "Negado",
       "pending": "Pendente",
-      "submitError": "Não foi possível enviar sua decisão ao agente."
+      "submitError": "Não foi possível enviar sua decisão ao agente.",
+      "reasonPlaceholder": "Por que recusar? O agente lê isso",
+      "denySend": "Enviar recusa",
+      "denyWithReason": "Recusar com motivo",
+      "always": "Sempre permitir",
+      "alwaysSaved": "{{tool}} só lê: fica sempre permitida",
+      "onlyOnce": "Essa ferramenta escreve: permitida só desta vez"
     }
   },
   "workbench": {

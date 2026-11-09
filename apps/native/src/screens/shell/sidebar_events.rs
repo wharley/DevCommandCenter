@@ -126,6 +126,10 @@ impl Shell {
             SidebarEvent::OpenAgents => self.open_agents(window, cx),
             SidebarEvent::OpenPullRequests => self.open_pull_requests(window, cx),
             SidebarEvent::OpenNotes => self.open_notes(cx),
+            SidebarEvent::ReviewRequests(requests) => {
+                let requests = requests.clone();
+                self.review_requests_arrived(&requests, cx);
+            }
             SidebarEvent::TasksCompleted(ids) => {
                 let ids = ids.clone();
                 self.notes

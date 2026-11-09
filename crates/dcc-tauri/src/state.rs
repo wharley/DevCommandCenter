@@ -3,7 +3,9 @@ use dcc_core::domain::decision::DecisionEvaluation;
 mod agent_budget;
 mod agent_conversation;
 mod agent_memory;
+mod agent_reads;
 mod agent_routines;
+mod pr_review_requests;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     path::{Component, Path, PathBuf},
@@ -61,8 +63,8 @@ use dcc_core::{
     ports::{
         AppendEventOutcome, DelegationApplyTransactionRepo, DelegationRepo,
         DelegationWorktreeOperationRepo, EventBus, Input, McpRepo, ProjectRepo, Provider,
-        ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo, SessionConfig, SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo,
-        WorkspaceRepo,
+        ProviderMcpServerConfig, ProviderRuntimeConfig, RepositoryRepo, SessionConfig,
+        SessionEventRepo, SessionRepo, ThreadRepo, UsageRepo, WorkspaceBundleRepo, WorkspaceRepo,
     },
     Result,
 };
@@ -2996,7 +2998,10 @@ impl SessionCommandState {
         UsageRepo::usage_dashboard(&self.session_repo, input).await
     }
 
-    pub async fn session_turn_usage(&self, session_id: &SessionId) -> Result<Vec<SessionTurnUsage>> {
+    pub async fn session_turn_usage(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<SessionTurnUsage>> {
         UsageRepo::list_session_turn_usage(&self.session_repo, session_id).await
     }
 
@@ -4762,8 +4767,7 @@ impl SessionCommandState {
     ) -> Result<()> {
         let events = self.session_repo.list_events_by_session_sync(session_id)?;
         let current = dcc_core::domain::goal::session_goal(&events);
-        let Some(goal) =
-            dcc_core::domain::goal::apply_goal_signal(current.as_ref(), signal, at)
+        let Some(goal) = dcc_core::domain::goal::apply_goal_signal(current.as_ref(), signal, at)
         else {
             return Ok(());
         };
@@ -4785,7 +4789,11 @@ impl SessionCommandState {
 
     /// A turn that ended normally can complete a goal its provider never
     /// reports as achieved (Claude clears it once the condition holds).
-    async fn complete_goal_with_turn(&self, session_id: &SessionId, turn_id: &TurnId) -> Result<()> {
+    async fn complete_goal_with_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<()> {
         let events = self.session_repo.list_events_by_session_sync(session_id)?;
         let at = Utc::now().to_rfc3339();
         match dcc_core::domain::goal::goal_completed_by_turn(&events, turn_id, &at) {
@@ -5788,7 +5796,7 @@ impl SessionCommandState {
         }
 
         let repo = SqliteMcpRepo::open(&self.db_path)?;
-        resolve_session_mcp_servers(
+        let mut servers = resolve_session_mcp_servers(
             &repo,
             &SystemCredentialStore::default(),
             &ResolveSessionMcpInput {
@@ -5797,7 +5805,14 @@ impl SessionCommandState {
                 session_id: session.id.clone(),
             },
         )
-        .await
+        .await?;
+        // An agent's own conversation reads without asking (`agent_reads`).
+        let home = dcc_core::domain::agent_conversation::home_agent_id(&session.project_id.0);
+        if home.is_some() && !servers.is_empty() {
+            let checks = repo.list_mcp_connection_checks().await.unwrap_or_default();
+            agent_reads::allow_reads(&mut servers, &checks);
+        }
+        Ok(servers)
     }
 
     pub fn list_mcp_runtime_statuses(
@@ -6181,12 +6196,12 @@ impl SessionCommandState {
         model: Option<&str>,
         runtime: Option<&ProviderRuntimeConfig>,
     ) -> Result<()> {
-        if let Err(error) = validate_provider_model(provider_id, &registration.capabilities, model) {
+        if let Err(error) = validate_provider_model(provider_id, &registration.capabilities, model)
+        {
             let offered = match model.map(str::trim) {
                 Some(model) if dcc_providers::model_discovery::reads_models(provider_id) => {
                     let runtime = self.provider_runtime_config(provider_id, runtime)?;
-                    dcc_providers::model_discovery::offers(provider_id, Some(&runtime), model)
-                        .await
+                    dcc_providers::model_discovery::offers(provider_id, Some(&runtime), model).await
                 }
                 _ => false,
             };
@@ -6947,7 +6962,8 @@ impl SessionCommandState {
                     Ok(ProviderEvent::ToolCallCompleted { id, detail, .. }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
-                            let detail = detail.map(dcc_core::domain::provider::ToolCallDetail::bounded);
+                            let detail =
+                                detail.map(dcc_core::domain::provider::ToolCallDetail::bounded);
                             let _ = state
                                 .append_and_publish_session_event(
                                     &session_id,
@@ -6966,10 +6982,13 @@ impl SessionCommandState {
                                 .await;
                         }
                     }
-                    Ok(ProviderEvent::ToolCallFailed { id, reason, detail, .. }) => {
+                    Ok(ProviderEvent::ToolCallFailed {
+                        id, reason, detail, ..
+                    }) => {
                         let turn_id = binding.current_turn_id.lock().await.clone();
                         if let Some(turn_id) = turn_id {
-                            let detail = detail.map(dcc_core::domain::provider::ToolCallDetail::bounded);
+                            let detail =
+                                detail.map(dcc_core::domain::provider::ToolCallDetail::bounded);
                             let _ = state
                                 .append_and_publish_session_event(
                                     &session_id,
@@ -8047,7 +8066,11 @@ pub fn connector_server_name(display_name: &str, taken: &HashSet<String>) -> Str
             slug.push('-');
         }
     }
-    let mut slug = slug.trim_end_matches('-').chars().take(32).collect::<String>();
+    let mut slug = slug
+        .trim_end_matches('-')
+        .chars()
+        .take(32)
+        .collect::<String>();
     slug = slug.trim_end_matches('-').to_string();
     if slug.is_empty() || slug == "browser-webview" {
         slug = "connector".to_string();
@@ -8243,8 +8266,7 @@ impl DelegationRepo for SessionCommandState {
         &self,
         child_session_id: &SessionId,
     ) -> Result<Option<Delegation>> {
-        DelegationRepo::get_delegation_by_child_session(&self.session_repo, child_session_id)
-            .await
+        DelegationRepo::get_delegation_by_child_session(&self.session_repo, child_session_id).await
     }
 
     async fn list_delegations_by_status(
@@ -8588,7 +8610,10 @@ mod tests {
         let runtime = state
             .provider_runtime_config("claude_code", Some(&selected))
             .expect("account resolves");
-        assert_eq!(runtime.config_dir.as_deref(), Some(zedy.config_dir.as_str()));
+        assert_eq!(
+            runtime.config_dir.as_deref(),
+            Some(zedy.config_dir.as_str())
+        );
         assert!(state
             .provider_runtime_config("codex", Some(&selected))
             .is_err());
@@ -8642,7 +8667,9 @@ mod tests {
             .expect("move codex");
         let moved = state.peek_session(&codex.id).await.unwrap().unwrap();
         assert_eq!(
-            moved.provider_runtime.and_then(|runtime| runtime.account_id),
+            moved
+                .provider_runtime
+                .and_then(|runtime| runtime.account_id),
             Some(codex_work.id.clone())
         );
         assert_eq!(
@@ -8682,7 +8709,10 @@ mod tests {
             .await
             .is_err());
         let back = state.peek_session(&claude.id).await.unwrap().unwrap();
-        assert_eq!(back.provider_runtime.and_then(|runtime| runtime.account_id), None);
+        assert_eq!(
+            back.provider_runtime.and_then(|runtime| runtime.account_id),
+            None
+        );
     }
 
     #[test]
@@ -8711,7 +8741,10 @@ mod tests {
                 }),
             )
             .expect("codex account resolves");
-        assert_eq!(runtime.config_dir.as_deref(), Some(work.config_dir.as_str()));
+        assert_eq!(
+            runtime.config_dir.as_deref(),
+            Some(work.config_dir.as_str())
+        );
     }
 
     #[test]
@@ -8938,9 +8971,13 @@ mod tests {
             (None, Some(ProviderApprovalPolicy::ReadOnly))
         );
         let grok = dcc_providers::grok_acp::stable_grok_capabilities();
-        assert!(!grok.approval_policies.contains(&ProviderApprovalPolicy::ReadOnly));
+        assert!(!grok
+            .approval_policies
+            .contains(&ProviderApprovalPolicy::ReadOnly));
         assert_eq!(ephemeral_turn_mode(&grok), (Some(true), None));
-        assert!(EPHEMERAL_READ_ONLY_INSTRUCTIONS.contains("do not fetch, pull or reach the network"));
+        assert!(
+            EPHEMERAL_READ_ONLY_INSTRUCTIONS.contains("do not fetch, pull or reach the network")
+        );
         assert!(EPHEMERAL_READ_ONLY_INSTRUCTIONS.contains("do not ask the user questions"));
     }
 
@@ -8983,7 +9020,10 @@ mod tests {
         assert!(first.contains("dcc_browser_context"));
         assert!(first.contains("401 or 403"));
         assert!(first.contains("dcc_computer_request_control"));
-        assert!(first.contains("\n\nSIMULATOR\n[End DCC host tool routing]"), "the turn's simulator guidance");
+        assert!(
+            first.contains("\n\nSIMULATOR\n[End DCC host tool routing]"),
+            "the turn's simulator guidance"
+        );
         assert!(first.contains("sign-in, MFA, CAPTCHA"));
         assert!(first.contains("not an automatic fallback"));
 
@@ -9622,7 +9662,10 @@ mod tests {
         assert_eq!(limit.resets_at.as_deref(), Some(resets_at.as_str()));
         // Off by default.
         assert!(!limit.auto_resume);
-        assert_eq!(usage_limit_phase(&limit, Utc::now()).phase, UsageLimitPhase::Waiting);
+        assert_eq!(
+            usage_limit_phase(&limit, Utc::now()).phase,
+            UsageLimitPhase::Waiting
+        );
         // The turn ended (the queue is free to move once the task resumes)
         // and the queued follow-up is still there.
         let events = state
@@ -9639,11 +9682,20 @@ mod tests {
         assert_eq!(objective.status, ObjectiveStatus::Active);
         assert_eq!(objective.consecutive_failures, 0);
         // Automatic resume never runs before the reset or without the choice.
-        assert!(state.resume_after_usage_limit(&session.id, true).await.is_err());
-        state.set_session_auto_resume(&session.id, true).await.unwrap();
+        assert!(state
+            .resume_after_usage_limit(&session.id, true)
+            .await
+            .is_err());
+        state
+            .set_session_auto_resume(&session.id, true)
+            .await
+            .unwrap();
         let limit = state.session_usage_limit(&session.id).unwrap().unwrap();
         assert!(limit.auto_resume);
-        assert!(state.resume_after_usage_limit(&session.id, true).await.is_err());
+        assert!(state
+            .resume_after_usage_limit(&session.id, true)
+            .await
+            .is_err());
 
         // The global preference is what a task without its own choice uses.
         let other = sample_session("limit-other");
@@ -9655,7 +9707,10 @@ mod tests {
             })
             .unwrap();
         assert!(state.session_auto_resume_enabled(&other.id).unwrap());
-        state.set_session_auto_resume(&other.id, false).await.unwrap();
+        state
+            .set_session_auto_resume(&other.id, false)
+            .await
+            .unwrap();
         assert!(!state.session_auto_resume_enabled(&other.id).unwrap());
     }
 
@@ -9688,7 +9743,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            state.session_usage_limit(&session.id).unwrap().unwrap().resets_at,
+            state
+                .session_usage_limit(&session.id)
+                .unwrap()
+                .unwrap()
+                .resets_at,
             None
         );
         let resets_at = (Utc::now() + ChronoDuration::minutes(5)).to_rfc3339();
@@ -9697,7 +9756,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            state.session_usage_limit(&session.id).unwrap().unwrap().resets_at,
+            state
+                .session_usage_limit(&session.id)
+                .unwrap()
+                .unwrap()
+                .resets_at,
             Some(resets_at)
         );
     }
@@ -12203,12 +12266,10 @@ mod tests {
             self.config
                 .lock()
                 .map(|config| {
-                    config
-                        .clone()
-                        .map(|server| EphemeralMcpProjectionLease {
-                            servers: vec![server],
-                            lease_id,
-                        })
+                    config.clone().map(|server| EphemeralMcpProjectionLease {
+                        servers: vec![server],
+                        lease_id,
+                    })
                 })
                 .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))
         }
@@ -12264,7 +12325,9 @@ mod tests {
                 updated_at: "2026-10-19T00:00:00Z".to_string(),
             };
             definition.synchronize_trust_fingerprint();
-            repo.save_mcp_definition(&definition).await.expect("definition");
+            repo.save_mcp_definition(&definition)
+                .await
+                .expect("definition");
         }
         for id in ["lost", "expired"] {
             repo.save_mcp_connection_check(&McpConnectionCheck {
@@ -12454,7 +12517,10 @@ mod tests {
         );
         assert_eq!(connector_server_name("Ação!", &taken), "dcc-a-o");
         assert_eq!(connector_server_name("   ", &taken), "dcc-connector");
-        assert_eq!(connector_server_name("Browser Webview", &taken), "dcc-connector");
+        assert_eq!(
+            connector_server_name("Browser Webview", &taken),
+            "dcc-connector"
+        );
         taken.insert("dcc-clickup".to_string());
         assert_eq!(connector_server_name("ClickUp", &taken), "dcc-clickup-2");
         let long = connector_server_name(&"a".repeat(200), &taken);

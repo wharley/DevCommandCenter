@@ -5,6 +5,7 @@
 // The HTTP API's endpoint index is one `json!` literal past the default depth.
 #![recursion_limit = "256"]
 
+pub mod agent_memory_tools;
 pub mod agent_requests;
 pub mod agent_tool_access;
 pub mod ai_memory_sidecar;
@@ -14,13 +15,12 @@ pub mod browser_input;
 pub mod browser_mcp_bridge;
 pub mod command_api;
 pub mod computer_use_commands;
-pub mod database;
 pub mod daemon_client;
 pub mod daemon_runtime;
+pub mod database;
 pub mod decision_provider_settings;
 pub mod delta_compaction_worker;
 pub mod desktop_agent_requests;
-pub mod agent_memory_tools;
 pub mod device_tools;
 pub mod embedded_http;
 pub mod host;
@@ -38,6 +38,7 @@ pub mod prompt_attachments;
 pub mod quick_composer_journal;
 pub mod remote_connector;
 pub mod remote_push;
+pub mod review_tools;
 pub mod routine_tools;
 pub mod runtime;
 pub mod shell_env;

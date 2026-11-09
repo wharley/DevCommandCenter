@@ -167,6 +167,24 @@ fn answers_wait_for_the_desktop_and_options_fill_the_field(cx: &mut TestAppConte
     cx.run_until_parked();
     // The desktop isn't there in tests: the request comes back to waiting.
     view.read_with(cx, |view, _| assert_eq!(view.sending("p1"), None));
+    // "Recusar com motivo": the field opens; an empty reason sends nothing,
+    // a written one goes (and holds the buttons while it travels).
+    view.update_in(cx, |view, window, cx| {
+        view.open_reason("p1".into(), window, cx)
+    });
+    view.update(cx, |view, cx| {
+        let input = view.reason_input("p1").expect("the reason field");
+        view.deny_with_reason("p1".into(), "Bash".into(), cx);
+        assert_eq!(view.sending("p1"), None, "nothing written");
+        input.update(cx, |input, cx| {
+            input.set_text("use o script do projeto", cx)
+        });
+        view.deny_with_reason("p1".into(), "Bash".into(), cx);
+        assert_eq!(view.sending("p1"), Some(super::requests::Sending::Deny));
+        assert!(view.reason_input("p1").is_none(), "the field closes");
+    });
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| assert_eq!(view.sending("p1"), None));
 }
 
 /// An attached audio file plays in place; one that is gone stays a chip.

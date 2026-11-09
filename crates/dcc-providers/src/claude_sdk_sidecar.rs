@@ -29,8 +29,7 @@ use crate::claude_mcp::{
 };
 use crate::common::{
     apply_claude_account_environment, apply_cli_spawn_environment, augmented_path, now_iso,
-    open_in_browser,
-    parse_provider_stream_line, ParsedProviderLine, ProviderStreamState,
+    open_in_browser, parse_provider_stream_line, ParsedProviderLine, ProviderStreamState,
 };
 
 #[derive(Clone)]
@@ -429,8 +428,14 @@ async fn run_claude_browser_sign_in(
     let _stdin = child.stdin.take();
     let output = Arc::new(std::sync::Mutex::new(String::new()));
     for stream in [
-        child.stdout.take().map(|out| Box::new(out) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
-        child.stderr.take().map(|err| Box::new(err) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+        child
+            .stdout
+            .take()
+            .map(|out| Box::new(out) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+        child
+            .stderr
+            .take()
+            .map(|err| Box::new(err) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
     ]
     .into_iter()
     .flatten()
@@ -1216,6 +1221,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
                     "type": "permission_response",
                     "requestId": response.request_id,
                     "behavior": response.behavior,
+                    "message": response.message,
                 });
                 let serialized = serde_json::to_string(&payload).map_err(|error| {
                     CoreError::Provider(format!(
@@ -1443,12 +1449,8 @@ impl Provider for ClaudeSdkSidecarAdapter {
         scratch_dir: &std::path::Path,
     ) -> Result<ProviderAccountStatus> {
         let executable = self.resolve_claude_executable().await?;
-        run_claude_browser_sign_in(&executable.path, runtime, scratch_dir, open_in_browser)
-            .await?;
-        Ok(self
-            .account_status(runtime)
-            .await?
-            .unwrap_or_default())
+        run_claude_browser_sign_in(&executable.path, runtime, scratch_dir, open_in_browser).await?;
+        Ok(self.account_status(runtime).await?.unwrap_or_default())
     }
 
     async fn account_usage(
@@ -2092,7 +2094,10 @@ done
         .await
         .expect("sign-in finishes");
 
-        assert_eq!(opened.into_inner().unwrap(), vec![LOCAL_SIGN_IN_LINK.to_string()]);
+        assert_eq!(
+            opened.into_inner().unwrap(),
+            vec![LOCAL_SIGN_IN_LINK.to_string()]
+        );
         assert_eq!(
             fs::read_to_string(root.join("config-dir")).unwrap(),
             root.join("zedy").display().to_string()
@@ -2111,7 +2116,10 @@ done
             .await
             .expect_err("no page was opened");
 
-        assert!(error.to_string().contains("stopped before opening"), "{error}");
+        assert!(
+            error.to_string().contains("stopped before opening"),
+            "{error}"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

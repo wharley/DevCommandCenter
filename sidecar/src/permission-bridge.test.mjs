@@ -132,3 +132,18 @@ test("an already aborted permission settles without waiting for a response", asy
 	assert.equal(result.behavior, "deny");
 	assert.equal(state.pendingPermissions.size, 0);
 });
+
+test("a denial carries the person's reason to the model", async () => {
+	const state = { pendingPermissions: new Map(), permissionMessages: new Map() };
+	const controller = new AbortController();
+	const request = handlePermissionRequest("Bash", { command: "rm -rf dist" }, {
+		toolUseID: "with-reason",
+		signal: controller.signal,
+	}, state, () => {});
+	state.permissionMessages.set("with-reason", "use o script de limpeza do projeto");
+	state.pendingPermissions.get("with-reason").resolve("deny");
+	const result = await request;
+	assert.equal(result.behavior, "deny");
+	assert.match(result.message, /use o script de limpeza do projeto/);
+	assert.equal(state.permissionMessages.size, 0);
+});

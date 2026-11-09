@@ -1,6 +1,7 @@
-//! "Conversa" on an agent's page, driven headlessly: the agent's own
-//! conversation is the card, not a row of its conversations; "Continuar
-//! conversa" opens the latest one; a person's agent has one too.
+//! An agent's page in tabs, driven headlessly: picking the agent opens its
+//! "Conversa" (the room on it alone), "Conversa completa" opens its latest
+//! own conversation, and "Configuração" is the page, whose rows are its
+//! task conversations, not its own.
 
 use gpui::{AppContext, Modifiers, TestAppContext, WindowAppearance};
 
@@ -50,7 +51,7 @@ fn agent(id: &str, preset: &str, sessions: Vec<AgentSession>) -> AgentRecord {
 }
 
 #[gpui::test]
-fn the_agents_own_conversation_is_its_card(cx: &mut TestAppContext) {
+fn picking_an_agent_opens_its_conversation_tab(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
         crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
@@ -100,8 +101,8 @@ fn the_agents_own_conversation_is_its_card(cx: &mut TestAppContext) {
         .detach();
     });
     cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-conversation").is_some());
-    // Only the task conversation is a row; the home ones are the card.
+    // Built on its own, the page shows its settings: only the task
+    // conversation is a row, the home ones are the "Conversa" tab.
     assert!(cx.debug_bounds("agent-session-0").is_some());
     assert!(cx.debug_bounds("agent-session-1").is_none());
     page.update(cx, |page, cx| {
@@ -116,13 +117,31 @@ fn the_agents_own_conversation_is_its_card(cx: &mut TestAppContext) {
         );
     });
 
-    let open = cx.debug_bounds("agent-conversation-open").unwrap();
-    cx.simulate_click(open.center(), Modifiers::none());
+    // Picking it in the team column opens its conversation.
+    let row = cx.debug_bounds("team-agent-0").unwrap();
+    cx.simulate_click(row.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("team-room").is_some());
+    assert!(cx.debug_bounds("agent-session-0").is_none());
+    let whole = cx.debug_bounds("agent-tab-whole").unwrap();
+    cx.simulate_click(whole.center(), Modifiers::none());
     cx.run_until_parked();
     assert_eq!(events.borrow().as_slice(), ["w-home s-home"]);
 
-    // Every agent talks in the room, a person's own too.
-    page.update(cx, |page, cx| page.show("a-3".into(), cx));
+    // "Configuração" is the page again.
+    let settings = cx.debug_bounds("agent-tabs-1").unwrap();
+    cx.simulate_click(settings.center(), Modifiers::none());
     cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-conversation").is_some());
+    assert!(cx.debug_bounds("agent-session-0").is_some());
+    assert!(cx.debug_bounds("team-room").is_none());
+
+    // A person's agent with no conversation yet: the field waits for it.
+    page.update(cx, |page, cx| page.show_conversation("a-3".into(), cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-empty").is_some());
+    assert!(cx.debug_bounds("agent-tab-whole").is_none());
+    page.update(cx, |page, cx| {
+        let room = page.room.as_ref().unwrap().0.read(cx);
+        assert_eq!(room.focus.as_deref(), Some("a-3"));
+    });
 }

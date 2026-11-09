@@ -495,7 +495,11 @@ mod tests {
         let restored = repo
             .restore_agent_memory_version(&agent, versions[0].id)
             .unwrap();
-        assert_eq!(restored[1].project_id.as_deref(), Some("checkout"));
+        // Both notes may share a millisecond: the project's is found, not
+        // taken by its place.
+        assert!(restored
+            .iter()
+            .any(|note| note.project_id.as_deref() == Some("checkout")));
         assert_eq!(repo.agent_memory(&agent).unwrap(), restored);
     }
 }

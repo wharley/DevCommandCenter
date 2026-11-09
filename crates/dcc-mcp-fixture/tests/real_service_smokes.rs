@@ -212,6 +212,7 @@ where
                 Input::PermissionResponse(dcc_core::ports::provider::ProviderPermissionResponse {
                     request_id,
                     behavior: if allow { "allow" } else { "deny" }.to_string(),
+                    message: None,
                 }),
             )
             .await

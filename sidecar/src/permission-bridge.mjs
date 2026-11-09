@@ -81,10 +81,15 @@ export async function handlePermissionRequest(
 		behavior,
 	});
 
+	// The person's reason, when they wrote one ("Recusar com motivo").
+	const reason = state.permissionMessages?.get(requestId);
+	state.permissionMessages?.delete(requestId);
 	if (aborted || behavior !== "allow") {
 		return {
 			behavior: "deny",
-			message: "User denied tool execution.",
+			message: reason
+				? `The person denied this tool call in DCC: ${reason}`
+				: "User denied tool execution.",
 		};
 	}
 

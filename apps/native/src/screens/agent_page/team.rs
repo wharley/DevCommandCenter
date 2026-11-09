@@ -32,8 +32,10 @@ impl AgentPage {
         cx.notify();
     }
 
+    /// The room, on the whole team or on one agent (`focus`).
     pub(super) fn room_element(
         &mut self,
+        focus: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -62,6 +64,7 @@ impl AgentPage {
                 room
             }
         };
+        room.update(cx, |room, cx| room.set_focus(focus, cx));
         if let Some(draft) = self.room_draft.take() {
             let input = room.read(cx).input.clone();
             input.update(cx, |area, cx| area.set_text(&draft, cx));
@@ -98,7 +101,7 @@ impl AgentPage {
             .when(!current, |row| {
                 row.hover(move |style| style.bg(colors.accent.opacity(0.5)))
             })
-            .on_click(cx.listener(move |page, _, _, cx| page.show(id.clone(), cx)))
+            .on_click(cx.listener(move |page, _, _, cx| page.show_conversation(id.clone(), cx)))
             .child(MoodAvatarView::new(
                 SharedString::from(format!("team-face-{index}")),
                 avatar,
@@ -168,7 +171,7 @@ impl AgentPage {
     }
 
     /// The agent picked is shown (not "Novo agente" in the editor).
-    fn editor_is_for_agent(&self, cx: &gpui::App) -> bool {
+    pub(super) fn editor_is_for_agent(&self, cx: &gpui::App) -> bool {
         self.editor
             .as_ref()
             .is_none_or(|(editor, _)| !editor.read(cx).is_new())
