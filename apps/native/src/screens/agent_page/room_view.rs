@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use super::room::{Pending, TeamRoom};
+use super::room_timeline::Slot;
 use crate::agent::{AgentAvatarView, Mood, MoodAvatarView};
 use crate::data::agents::{AgentRecord, AgentState};
 use crate::data::team_room::{Receipt, RoomLine, Speaker};
@@ -350,40 +351,43 @@ impl Render for TeamRoom {
         };
         let unread = cards.iter().filter(|card| card.unread).count()
             + checks.iter().filter(|card| card.unread).count();
-        // The room's lines, the inbox's cards and the check-in's, in time order.
-        let mut timeline: Vec<(&str, Option<usize>, Option<usize>)> = lines
-            .iter()
-            .enumerate()
-            .map(|(index, line)| (line.at.as_str(), Some(index), None))
-            .chain(
-                cards
-                    .iter()
-                    .enumerate()
-                    .map(|(index, card)| (card.at.as_str(), None, Some(index))),
-            )
-            .chain(
-                checks
-                    .iter()
-                    .enumerate()
-                    .map(|(index, card)| (card.at.as_str(), None, Some(cards.len() + index))),
-            )
-            .collect();
-        timeline.sort_by(|left, right| left.0.cmp(right.0));
+        // DCC's own cards sit at their time (`room_timeline`).
+        let recap_at = whole
+            .then(|| self.sidebar.read(cx).recap_window())
+            .flatten()
+            .map(|window| window.to);
+        let bulletin_at = whole
+            .then(|| dcc_core::domain::agent_bulletin::week_before(chrono::Local::now(), 1).to);
+        let timeline = super::room_timeline::order(
+            lines.iter().map(|line| line.at.as_str()),
+            cards.iter().map(|card| card.at.as_str()),
+            checks.iter().map(|card| card.at.as_str()),
+            recap_at.as_deref(),
+            bulletin_at.as_deref(),
+        );
         let mut rows: Vec<AnyElement> = Vec::new();
-        for (_, line, card) in timeline {
-            if let Some(index) = card.and_then(|index| index.checked_sub(cards.len())) {
-                rows.push(self.check_in_row(index, &checks[index], cx));
-                continue;
-            }
-            if let Some(index) = card {
-                let card = &cards[index];
-                if let Some(agent) = Self::agent(&agents, &card.agent_id) {
-                    rows.push(self.card_row(index, card, agent, cx));
+        for slot in timeline {
+            let index = match slot {
+                Slot::CheckIn(index) => {
+                    rows.push(self.check_in_row(index, &checks[index], cx));
+                    continue;
                 }
-                continue;
-            }
-            let Some(index) = line else {
-                continue;
+                Slot::Card(index) => {
+                    let card = &cards[index];
+                    if let Some(agent) = Self::agent(&agents, &card.agent_id) {
+                        rows.push(self.card_row(index, card, agent, cx));
+                    }
+                    continue;
+                }
+                Slot::Recap => {
+                    rows.extend(self.recap_card(cx));
+                    continue;
+                }
+                Slot::Bulletin => {
+                    rows.push(self.bulletin_card(&agents, cx));
+                    continue;
+                }
+                Slot::Line(index) => index,
             };
             let line = &lines[index];
             let Some(agent) = Self::agent(&agents, &line.agent_id) else {
@@ -421,9 +425,8 @@ impl Render for TeamRoom {
             }
         }
         // What DCC itself has for the person now: the day's recap, the space.
+        // The space is what holds now, after everything.
         if whole {
-            rows.extend(self.recap_card(cx));
-            rows.push(self.bulletin_card(&agents, cx));
             rows.extend(self.cleanup_card(cx));
         }
         rows.extend(self.limit_rows(&shown, cx));

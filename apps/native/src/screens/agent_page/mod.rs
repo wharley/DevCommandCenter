@@ -53,6 +53,7 @@ mod room_recap;
 mod room_routines;
 #[cfg(test)]
 mod room_tests;
+mod room_timeline;
 mod room_view;
 mod routines;
 mod spend;
