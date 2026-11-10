@@ -4,8 +4,8 @@
 //! to address one and who would answer now.
 
 use gpui::{
-    AnyElement, Context, ExternalPaths, FontWeight, IntoElement, Render, SharedString, Window, div,
-    list, prelude::*, px,
+    AnyElement, Context, FontWeight, IntoElement, Render, SharedString, Window, div, list,
+    prelude::*, px,
 };
 
 use super::room::TeamRoom;
@@ -15,7 +15,6 @@ use crate::data::team_room::RoomLine;
 use crate::i18n::{Args, I18n, Locale, Translate};
 use crate::markdown::{MarkdownStyle, render_markdown};
 use crate::theme::ActiveTheme;
-use crate::ui::{Button, ButtonSize, pulse_spinner};
 
 /// The face's side, and so the column the words line up in.
 const FACE: f32 = 32.0;
@@ -134,102 +133,10 @@ impl TeamRoom {
             )
             .into_any_element()
     }
-
-    fn composer(&self, dock: Option<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        let drop_border = crate::theme::color::mix_oklab(colors.accent_calm, 0.7, colors.border);
-        let text = self.input.read(cx).text().trim().to_string();
-        let next = (!text.is_empty())
-            .then(|| self.pick(&text, cx))
-            .flatten()
-            .map(|(agent, reason)| {
-                cx.t_with(
-                    "agents.room.next",
-                    &Args::default()
-                        .with("agent", agent.name.clone())
-                        .with("reason", cx.t(reason.i18n_key()).to_string()),
-                )
-            })
-            .unwrap_or_else(|| cx.t("agents.room.hint"));
-        let blank = text.is_empty();
-        let docked = dock.is_some();
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .px(px(24.0))
-            .py(px(16.0))
-            .border_t_1()
-            .border_color(colors.border.opacity(0.7))
-            .child(
-                div()
-                    .flex()
-                    .items_end()
-                    .gap(px(8.0))
-                    .child(
-                        // The approvals sit right on the field, as wide as it.
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .children(dock)
-                            .child(
-                                div()
-                                    .id("room-input")
-                                    .debug_selector(|| "room-input".into())
-                                    .relative()
-                                    .on_drop(cx.listener(|room, paths: &ExternalPaths, _, cx| {
-                                        room.add_paths(paths.paths(), cx)
-                                    }))
-                                    .drag_over::<ExternalPaths>(move |style, _, _, _| {
-                                        style.border_color(drop_border)
-                                    })
-                                    .flex_1()
-                                    .min_w_0()
-                                    .min_h(px(40.0))
-                                    .px(px(12.0))
-                                    .py(px(10.0))
-                                    .rounded(px(12.0))
-                                    .when(docked, |field| field.rounded_t(px(0.0)))
-                                    .border_1()
-                                    .border_color(colors.input)
-                                    .bg(crate::ui::input_fill(cx.theme()))
-                                    .text_size(px(13.0))
-                                    .child(self.input.clone())
-                                    .children(self.mention_popup(cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("room-send")
-                            .size(ButtonSize::Default)
-                            .disabled(blank || self.sending)
-                            .on_click(cx.listener(|room, _, _, cx| room.send(cx)))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .when(self.sending, |label| {
-                                        label.child(pulse_spinner("room-sending", 14.0))
-                                    })
-                                    .child(cx.t("agents.room.send")),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .debug_selector(|| "room-next".into())
-                    .text_size(px(11.0))
-                    .text_color(colors.muted_foreground)
-                    .child(next),
-            )
-            .into_any_element()
-    }
 }
 
 impl Render for TeamRoom {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
         // The rows are read again only when the room's data moved, not on a
         // frame the shared clock alone asked for (`room_list`).
@@ -310,6 +217,6 @@ impl Render for TeamRoom {
                     .size_full(),
                 ),
             )
-            .child(self.composer(dock, cx))
+            .child(self.composer(dock, window, cx))
     }
 }

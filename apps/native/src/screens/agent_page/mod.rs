@@ -66,6 +66,7 @@ mod room_checkins;
 mod room_cleanup;
 mod room_day;
 mod room_delivery;
+mod room_composer;
 mod room_dock;
 mod room_failure;
 #[cfg(test)]

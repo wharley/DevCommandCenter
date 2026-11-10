@@ -190,6 +190,17 @@ fn the_room_shows_the_team_together_and_sends_to_who_answers(cx: &mut TestAppCon
     cx.run_until_parked();
     assert_eq!(events.borrow().as_slice(), ["w-home s-home"]);
 
+    // The field's bar: attach, "@" and send; "@" starts a mention.
+    assert!(cx.debug_bounds("room-attach").is_some());
+    let at = cx.debug_bounds("room-at").unwrap();
+    cx.simulate_click(at.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(
+        room.read_with(cx, |room, cx| room.input.read(cx).text().to_string()),
+        "@"
+    );
+    assert!(cx.debug_bounds("room-mentions").is_some());
+
     // "@" opens the team above the field; a pick becomes "@Pesquisa ".
     room.update(cx, |room, cx| {
         room.input.update(cx, |area, cx| area.set_text("@", cx));

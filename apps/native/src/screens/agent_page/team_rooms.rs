@@ -128,7 +128,7 @@ impl AgentPage {
                 .into_any_element(),
             self.room_line(
                 "team-room-row".into(),
-                "messages-square",
+                "hash",
                 cx.t("agents.rooms.geral"),
                 None,
                 (
@@ -141,7 +141,7 @@ impl AgentPage {
         for (index, (id, name)) in listed.iter().enumerate() {
             rows.push(self.room_line(
                 format!("team-room-{index}"),
-                "folder",
+                "hash",
                 name.clone().into(),
                 Some(id.clone()),
                 (

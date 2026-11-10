@@ -49,7 +49,7 @@ impl TeamRoom {
                 .flex_col()
                 .overflow_hidden()
                 // Its bottom edge is the field's top one.
-                .rounded_t(px(12.0))
+                .rounded_t(px(super::room_composer::CORNER))
                 .border_1()
                 .border_b_0()
                 .border_color(amber.opacity(0.6))
