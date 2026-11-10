@@ -33,6 +33,7 @@ pub mod keep_awake;
 pub mod menu_bar_snapshot;
 pub mod named_events;
 pub mod open_task_tool;
+pub mod overview_own_tasks;
 pub mod overview_tool;
 pub mod pairing;
 pub mod prompt_attachments;

@@ -23,6 +23,7 @@ pub mod state;
 pub mod task_gate;
 pub mod task_group;
 mod task_finished;
+mod task_adoption;
 mod agent_task_policy;
 pub mod terminal_arbiter;
 pub mod turn_review;

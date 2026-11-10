@@ -9,11 +9,6 @@ use gpui::Context;
 use super::{AgentPage, AgentPageEvent};
 use crate::data::agents::{AgentRecord, AgentSession};
 
-/// The agent's latest conversation in the Geral room, if it has one.
-pub(crate) fn home_session(agent: &AgentRecord) -> Option<&AgentSession> {
-    room_session(agent, None)
-}
-
 /// The agent's latest conversation in `room` (none: the Geral room).
 pub(crate) fn room_session<'a>(
     agent: &'a AgentRecord,
@@ -33,7 +28,8 @@ impl AgentPage {
         let Some(data) = self.sidebar.read(cx).agent_page(&self.agent_id) else {
             return;
         };
-        if let Some(session) = home_session(&data.agent) {
+        let room = self.agent_room(cx);
+        if let Some(session) = room_session(&data.agent, room.as_deref()) {
             cx.emit(AgentPageEvent::OpenSession {
                 task_id: session.workspace_id.clone(),
                 session_id: session.session_id.clone(),

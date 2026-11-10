@@ -118,3 +118,51 @@ fn each_room_shows_its_own_conversations(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("team-room-picker").is_some());
 }
+
+#[gpui::test]
+fn the_agents_conversation_tab_switches_rooms(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("dev".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(1400.0)));
+    let mut dev = dev();
+    // It talked in the Checkout's room last.
+    dev.sessions[1].updated_at = "2026-11-10T12:00:00Z".into();
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![dev],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.show_conversation("dev".into(), cx);
+    });
+    cx.run_until_parked();
+    let room = page.update(cx, |page, _| page.room.as_ref().unwrap().0.clone());
+    let shown = |cx: &mut gpui::VisualTestContext| {
+        room.update(cx, |room, _| {
+            room.feeds
+                .iter()
+                .map(|feed| feed.session_id.clone())
+                .collect::<Vec<_>>()
+        })
+    };
+    assert!(cx.debug_bounds("agent-room-chips").is_some());
+    assert_eq!(shown(cx), ["s-checkout"]);
+    let geral = cx.debug_bounds("agent-room-0").unwrap();
+    cx.simulate_click(geral.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(shown(cx), ["s-geral"]);
+}

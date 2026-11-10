@@ -1938,7 +1938,10 @@ pub async fn message_task(
     if message.is_empty() {
         return Err("the message cannot be empty".to_string());
     }
-    let task = delegation_for_parent(state, parent_session_id, task_id).await?;
+    // Its own task, or one the same agent opened from another room, which
+    // moves here (`task_adoption`).
+    let (task, moved) =
+        crate::task_adoption::task_for_agent(state, parent_session_id, task_id).await?;
     if task.kind != DelegationKind::Task || task.status != DelegationStatus::Running {
         return Err("only an open task takes messages; propose a new task instead".to_string());
     }
@@ -1964,6 +1967,10 @@ pub async fn message_task(
     // A task the person completed, archived or deleted is done with.
     if let Some(why) = crate::task_finished::finished_task(state, &child_session_id).await? {
         return Err(crate::task_finished::finished_error(why));
+    }
+    // Every check passed: a task taken over from another room is this one's now.
+    if moved {
+        crate::task_adoption::keep_moved(state, &task).await?;
     }
     let prompt = format!(
         "{DCC_TURN_PREFIX}Message from the session that coordinates this task:\n\n{message}"
@@ -3929,6 +3936,76 @@ mod tests {
                 queued[0].starts_with("[DCC] Message from the session that coordinates this task:")
             );
             assert!(queued[0].ends_with("add tests"));
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn an_agent_continues_its_task_from_another_room() {
+            use dcc_core::domain::agent::{ResidentAgentDraft, ReviewerPresetText};
+            use dcc_core::domain::agent_conversation::home_project_id;
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let draft = |name: &str| {
+                let mut draft = ResidentAgentDraft::reviewer(&ReviewerPresetText::default());
+                draft.name = name.into();
+                draft
+            };
+            let dev = state.save_resident_agent(None, draft("Dev")).unwrap();
+            let other = state.save_resident_agent(None, draft("Suporte")).unwrap();
+            // The Dev's Geral conversation ("parent") opened the task; it
+            // also talks in the Checkout's room.
+            for (id, agent, room) in [
+                ("parent", &dev, None),
+                ("dev-checkout", &dev, Some("checkout")),
+                ("sup-geral", &other, None),
+            ] {
+                let mut home = session(id, "codex");
+                home.project_id = ProjectId(home_project_id(&agent.id));
+                SessionRepo::save_session(state, &home)
+                    .await
+                    .expect("save home");
+                state.bind_session_agent(&home.id, &agent.id).unwrap();
+                if let Some(room) = room {
+                    state.set_session_room(&home.id, room).unwrap();
+                }
+            }
+            let task = open_task(state).await;
+            // The task is mid-turn: the message waits as a turn of its own.
+            append(
+                state,
+                "child",
+                started("c-1", "Task from Dev Command Center."),
+            )
+            .await;
+            append(
+                state,
+                "dev-checkout",
+                started("p-1", "continua a tarefa do domínio"),
+            )
+            .await;
+            message_task(
+                state,
+                &SessionId("dev-checkout".to_string()),
+                &task.id.0,
+                "confere o cache também",
+            )
+            .await
+            .expect("its own task, from another room");
+            // It moved: its statuses come to the Checkout's room now.
+            assert_eq!(
+                load(state, &task.id).await.parent_session_id,
+                SessionId("dev-checkout".to_string())
+            );
+            // Another agent's conversation cannot take it.
+            append(state, "sup-geral", started("p-2", "manda pro Dev")).await;
+            let error = message_task(
+                state,
+                &SessionId("sup-geral".to_string()),
+                &task.id.0,
+                "faz isso",
+            )
+            .await
+            .expect_err("not its task");
+            assert!(error.contains("task not found"), "{error}");
         }
 
         #[tokio::test(flavor = "current_thread")]

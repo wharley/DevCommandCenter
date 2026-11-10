@@ -8,7 +8,7 @@
 use gpui::{AnyElement, Context, FontWeight, SharedString, Window, div, prelude::*, px};
 
 use super::AgentPage;
-use super::conversation::home_session;
+use super::conversation::room_session;
 use crate::agent::AgentAvatarView;
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
@@ -66,14 +66,16 @@ impl AgentPage {
             };
             let _ = page.update(cx, |page, cx| page.set_tab(tab, cx));
         });
-        let whole =
-            (self.tab == AgentTab::Conversation && home_session(&agent).is_some()).then(|| {
-                Button::new("agent-tab-whole")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::Sm)
-                    .on_click(cx.listener(|page, _, _, cx| page.open_conversation(cx)))
-                    .child(cx.t("agents.tabs.whole"))
-            });
+        let room = self.agent_room(cx);
+        let whole = (self.tab == AgentTab::Conversation
+            && room_session(&agent, room.as_deref()).is_some())
+        .then(|| {
+            Button::new("agent-tab-whole")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::Sm)
+                .on_click(cx.listener(|page, _, _, cx| page.open_conversation(cx)))
+                .child(cx.t("agents.tabs.whole"))
+        });
         Some(
             div()
                 .flex()
@@ -115,6 +117,9 @@ impl AgentPage {
         let Some(head) = self.tab_head(cx) else {
             return self.settings_body(window, cx);
         };
+        let chips = (self.tab == AgentTab::Conversation)
+            .then(|| self.agent_room_chips(cx))
+            .flatten();
         let body = match self.tab {
             AgentTab::Conversation => self.room_element(Some(self.agent_id.clone()), window, cx),
             AgentTab::Settings => self.settings_body(window, cx),
@@ -126,6 +131,7 @@ impl AgentPage {
             .min_h_0()
             .bg(cx.theme().colors.background)
             .child(head)
+            .children(chips)
             .child(div().flex_1().min_h_0().child(body))
             .into_any_element()
     }

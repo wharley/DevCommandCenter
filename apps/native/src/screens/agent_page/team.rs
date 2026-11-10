@@ -81,9 +81,9 @@ impl AgentPage {
                 room
             }
         };
-        // One agent's "Conversa" is its Geral conversation for now.
+        // One agent's "Conversa" shows the room picked for it (slice 5).
         let project = if focus.is_some() {
-            None
+            self.agent_room(cx)
         } else {
             self.room_project.clone()
         };

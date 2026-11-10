@@ -250,6 +250,14 @@ pub async fn dispatch(sessions: &SessionCommandState, session_id: &str) -> Value
     .await
     .map_err(|error| error.to_string())
     .and_then(|result| result);
+    // The tasks it opened from any room, with ids to continue them here.
+    let own = crate::overview_own_tasks::own_open_tasks(sessions, session_id).await;
+    let overview = overview.map(|mut overview| {
+        if !own.is_empty() {
+            overview["yourOpenTasks"] = json!(own);
+        }
+        overview
+    });
     match overview {
         Ok(overview) => text(
             serde_json::to_string_pretty(&overview).unwrap_or_default(),

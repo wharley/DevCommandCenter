@@ -32,7 +32,7 @@ impl SessionCommandState {
             format!(" Its folder is {path}.")
         };
         let room = format!(
-            "<dcc_room project=\"{name}\">\nThis conversation is the team room of the project \"{name}\".{folder} What the person asks here is about it unless they name another project: open its tasks in \"{name}\" and, for where things stand, look at its tasks first.\n</dcc_room>"
+            "<dcc_room project=\"{name}\">\nThis conversation is the team room of the project \"{name}\".{folder} What the person asks here is about it unless they name another project: open its tasks in \"{name}\" and, for where things stand, look at its tasks first. A task you opened from another room shows in dcc_overview's yourOpenTasks: continue it from here with dcc_task_message and it moves to this room.\n</dcc_room>"
         );
         Ok(Some(match context_block(&name, &project_files(&path)) {
             Some(context) => format!("{room}\n\n{context}"),

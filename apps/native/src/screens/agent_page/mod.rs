@@ -20,6 +20,7 @@ use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
 use crate::ui::{Icon, Tracked};
 
+mod agent_room_switch;
 #[cfg(test)]
 mod chain_tests;
 mod conversation;
@@ -138,6 +139,9 @@ pub struct AgentPage {
     pub(crate) rooms: Vec<String>,
     /// "Nova sala" lists the projects with no room.
     pub(crate) room_picker: bool,
+    /// The room the agent's "Conversa" tab shows when the person picked
+    /// one; none: the room it talked in last (`agent_room_switch`).
+    pub(crate) agent_room: Option<Option<String>>,
     /// The agent's page on its conversation or its settings (`page_tabs`).
     pub(crate) tab: page_tabs::AgentTab,
     /// The agent proposed the editor holds ("Editar antes").
@@ -213,6 +217,7 @@ impl AgentPage {
             room_project: None,
             rooms: crate::data::agent_rooms::load(),
             room_picker: false,
+            agent_room: None,
             tab: Default::default(),
             editing_proposal: None,
             room_draft: None,
@@ -237,6 +242,7 @@ impl AgentPage {
             self.agent_id = agent_id;
             self.role_open = false;
             self.editor = None;
+            self.agent_room = None;
         }
         if let Some(memory) = &self.memory {
             let agent_id = self.agent_id.clone();
