@@ -10,7 +10,7 @@
  */
 import { pathBasename, splitPrompt } from "./attachments.ts";
 import { t, toolStepParts } from "./labels.ts";
-import type { ChatMessage } from "./threadEvents.ts";
+import type { ChatMessage, ThreadState } from "./threadEvents.ts";
 
 export type TraceStep = Extract<
 	ChatMessage,
@@ -132,27 +132,12 @@ export function firstLine(text: string): string {
 }
 
 /**
- * Running = anything in flight: a streaming answer, a live tool call or
- * reasoning block, or a prompt that hasn't produced output yet. Walking
- * backwards means the freshest signal wins.
+ * Running = the desktop's own rule: the latest turn started and has not
+ * completed or been stopped (`ThreadState.openTurnId`). A step left open in
+ * the history says nothing — a turn that ended closes them.
  */
-export function isThreadRunning(messages: ChatMessage[]): boolean {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (!m) continue;
-		if (m.kind === "assistant") return !m.completed && !m.aborted;
-		if (m.kind === "tool") {
-			if (m.status === "running") return true;
-			continue;
-		}
-		if (m.kind === "reasoning") {
-			if (!m.completed) return true;
-			continue;
-		}
-		if (m.kind === "user") return true;
-		if (m.kind === "system") return false;
-	}
-	return false;
+export function isThreadRunning(state: Pick<ThreadState, "openTurnId">): boolean {
+	return state.openTurnId !== null && state.openTurnId !== undefined;
 }
 
 /** The first prompt, trimmed to a header-sized line. */

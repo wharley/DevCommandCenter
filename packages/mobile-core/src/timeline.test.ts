@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyEvents, createThreadState, type RawSessionEvent } from "./threadEvents.ts";
-import { agentTurnHeads, groupMessages, isThreadRunning, stepLabel, threadApprovalPolicy, threadTitle, traceTitle, type TraceStep } from "./timeline.ts";
+import { agentTurnHeads, groupMessages, isThreadRunning, stepIsLive, stepLabel, threadApprovalPolicy, threadTitle, traceTitle, type TraceStep } from "./timeline.ts";
 
 let seq = 0;
 function ev(type: string, extra: Record<string, unknown> = {}): RawSessionEvent {
@@ -18,7 +18,7 @@ describe("timeline", () => {
 		]);
 		const items = groupMessages(state.messages);
 		expect(items.map((i) => i.type)).toEqual(["single", "trace", "single"]);
-		expect(isThreadRunning(state.messages)).toBe(true);
+		expect(isThreadRunning(state)).toBe(true);
 		expect(threadTitle(state.messages)).toBe("conserte o build");
 
 		const done = applyEvents(state, [
@@ -31,7 +31,32 @@ describe("timeline", () => {
 		const folded = groupMessages(done.messages);
 		expect(folded.map((i) => i.type)).toEqual(["single", "trace", "single"]);
 		expect(folded[1]?.type === "trace" && folded[1].steps.length).toBe(3);
-		expect(isThreadRunning(done.messages)).toBe(false);
+		expect(isThreadRunning(done)).toBe(false);
+	});
+
+	it("is running by the turn, never by a step left open", () => {
+		// A reasoning block and a tool call that never heard their end.
+		const state = applyEvents(createThreadState(), [
+			ev("turn_started", { turnId: "t", prompt: "veja" }),
+			ev("turn_delta", { turnId: "t", content: "olhando" }),
+			ev("turn_reasoning_started", { turnId: "t", reasoningId: "r" }),
+			ev("turn_tool_call_started", { turnId: "t", toolCallId: "c", toolName: "Bash" }),
+		]);
+		expect(isThreadRunning(state)).toBe(true);
+		const done = applyEvents(state, [ev("turn_completed", { turnId: "t" })]);
+		expect(isThreadRunning(done)).toBe(false);
+		const steps = done.messages.filter((m): m is TraceStep => m.kind === "reasoning" || m.kind === "tool");
+		expect(steps.some(stepIsLive)).toBe(false);
+		// The earlier state is left as it was read.
+		expect(isThreadRunning(state)).toBe(true);
+		// Another turn's end closes nothing; a stop and the session's end do.
+		const next = applyEvents(done, [ev("turn_started", { turnId: "u", prompt: "de novo" }), ev("turn_completed", { turnId: "t" })]);
+		expect(isThreadRunning(next)).toBe(true);
+		expect(isThreadRunning(applyEvents(next, [ev("turn_aborted", { turnId: "u" })]))).toBe(false);
+		expect(isThreadRunning(applyEvents(next, [ev("session_aborted", {})]))).toBe(false);
+		// A turn that ended with no answer at all is over too.
+		const silent = applyEvents(createThreadState(), [ev("turn_started", { turnId: "s", prompt: "oi" }), ev("turn_completed", { turnId: "s" })]);
+		expect(isThreadRunning(silent)).toBe(false);
 	});
 
 	it("marks the first agent item after each prompt as a turn head", () => {

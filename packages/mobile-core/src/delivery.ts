@@ -217,8 +217,17 @@ export function commitModeFor(summary: DeliverySummary, forge: DeliveryForge | n
 	});
 }
 
-/** Actions the phone offers. Merge, base sync and conflict review stay on the desktop. */
-export const PHONE_ACTIONS = new Set<ExecutionDockActionId>(["commit", "commit-and-push", "push", "create-pr", "create-draft-pr", "open-pr"]);
+/** Actions the phone offers. Only the conflict review stays on the desktop. */
+export const PHONE_ACTIONS = new Set<ExecutionDockActionId>([
+	"commit",
+	"commit-and-push",
+	"push",
+	"sync-base",
+	"create-pr",
+	"create-draft-pr",
+	"open-pr",
+	"merge",
+]);
 
 export function deliveryActions(summary: DeliverySummary, forge: DeliveryForge | null, busy: boolean): {
 	mode: CommitMode;
@@ -244,16 +253,23 @@ export function deliveryActions(summary: DeliverySummary, forge: DeliveryForge |
 	const concrete = all.map((action): ExecutionDockAction => {
 		if (action.id !== "primary") return action;
 		const id: ExecutionDockActionId | null =
-			action.mode === "commit-and-push" || action.mode === "push" || action.mode === "open-pr"
+			action.mode === "commit-and-push" ||
+			action.mode === "push" ||
+			action.mode === "open-pr" ||
+			action.mode === "merge" ||
+			action.mode === "sync-base"
 				? action.mode
 				: action.mode === "create-pr"
 					? "create-pr"
 					: null;
 		return id ? { ...action, id } : action;
 	});
-	const actions = concrete.filter((action) => PHONE_ACTIONS.has(action.id));
-	const primaryId = concrete[0]?.primary && PHONE_ACTIONS.has(concrete[0].id) ? concrete[0].id : null;
 	const conflicts = summary.conflictCount > 0 || summary.mergeInProgress;
+	const actions = concrete
+		.filter((action) => PHONE_ACTIONS.has(action.id))
+		// With conflicts open, bringing the base in again is the desktop's.
+		.map((action) => (action.id === "sync-base" && conflicts ? { ...action, disabled: true } : action));
+	const primaryId = concrete[0]?.primary && PHONE_ACTIONS.has(concrete[0].id) ? concrete[0].id : null;
 	const pr = forge?.pullRequest ?? null;
 	const desktopOnly = conflicts
 		? "Há conflitos para resolver: faça isso no computador."
@@ -261,9 +277,7 @@ export function deliveryActions(summary: DeliverySummary, forge: DeliveryForge |
 			? "O PR está em conflito com a base: resolva no computador."
 			: pr && mode === "fix"
 				? "O PR tem checks falhando ou está bloqueado: peça a correção ao agente ou veja no computador."
-				: pr && mode === "merge"
-					? "Mesclar o PR fica no computador."
-					: null;
+				: null;
 	return { mode, actions, primaryId, desktopOnly };
 }
 
@@ -283,6 +297,8 @@ export function deliveryActionLabel(action: ExecutionDockAction, requestLabel = 
 			return t("commit.modes.open-pr.idle", { requestLabel });
 		case "sync-base":
 			return t("composer.executionDock.actions.syncBase");
+		case "merge":
+			return t("commit.modes.merge.idle", { requestLabel });
 		default:
 			return action.mode ? t(`commit.modes.${action.mode}.idle` as Parameters<typeof t>[0], { requestLabel }) : "";
 	}

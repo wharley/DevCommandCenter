@@ -5,8 +5,9 @@
  * deterministic message, editable), push and "Atualizar e enviar", the PR
  * (draft or not, title and description editable like the desktop's modal),
  * PR/CI state, and completing or archiving the task. The next step and the
- * actions offered are the desktop's (`deliveryActions`); conflicts, merge
- * and base sync stay on the computer. Push and archive ask first.
+ * actions offered are the desktop's (`deliveryActions`), merging the PR and
+ * bringing the base in among them; only resolving conflicts stays on the
+ * computer. Push, base sync, merge and archive ask first.
  */
 import {
 	changeTotals,
@@ -34,7 +35,7 @@ import { HighlightedCode, languageOf } from "@/ui/RichText";
 import { GroupedList, SheetHeader, SheetScroll } from "@/ui/surfaces";
 import Feather from "@expo/vector-icons/Feather";
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -95,14 +96,17 @@ export default function DeliveryScreen() {
 		void load();
 	}, [load]);
 
+	/** What the desktop answered to the last action that worked. */
+	const last = useRef<unknown>(null);
 	const run = async (what: Busy, action: string, payload?: unknown, done?: string) => {
 		setBusy(what);
 		setNotice(null);
 		try {
-			await backend.request("POST", `${base}/${action}`, payload, SLOW);
+			const answer = await backend.request<unknown>("POST", `${base}/${action}`, payload, SLOW);
 			haptic("success");
 			setBehind(null);
 			if (done) setNotice(done);
+			last.current = answer;
 			return true;
 		} catch (err) {
 			const code = err instanceof ApiError ? (err.body as { error?: { code?: string; outcome?: { target?: string } } } | null)?.error : null;
@@ -149,9 +153,33 @@ export default function DeliveryScreen() {
 	const shown = tab === "local" ? summary.changes : summary.branchChanges;
 	// The footer holds the next step plus one git alternative; PR actions sit in the PR card.
 	const primary = actions.find((a) => a.id === primaryId) ?? null;
-	const isPrAction = (a: ExecutionDockAction) => a.id === "create-pr" || a.id === "create-draft-pr" || a.id === "open-pr";
-	const footerAlt = actions.find((a) => a.id !== primaryId && !isPrAction(a) && !a.disabled) ?? null;
-	const inCard = actions.filter((a) => a.id !== primaryId && a !== footerAlt);
+	const isPrAction = (a: ExecutionDockAction) =>
+		a.id === "create-pr" || a.id === "create-draft-pr" || a.id === "open-pr" || a.id === "merge";
+	// Bringing the base in has its own row; it never crowds the footer or the PR card.
+	const syncBase = actions.find((a) => a.id === "sync-base") ?? null;
+	const footerAlt = actions.find((a) => a.id !== primaryId && a !== syncBase && !isPrAction(a) && !a.disabled) ?? null;
+	const inCard = actions.filter((a) => a.id !== primaryId && a !== footerAlt && a !== syncBase && isPrAction(a));
+	const baseName = summary.baseBranch || pr?.baseBranch || "base";
+
+	/** "Atualizar com a base": the desktop merges the base into the task's branch. */
+	const updateFromBase = async () => {
+		const ok = await run("sync-base", "sync-base", {});
+		if (!ok) return;
+		const out = (last.current ?? {}) as { updated?: boolean; conflictCount?: number };
+		if ((out.conflictCount ?? 0) > 0) {
+			haptic("warning");
+			setNotice(`A ${baseName} entrou com ${out.conflictCount} conflito(s): resolva no computador.`);
+		} else {
+			setNotice(out.updated === false ? `Já está em dia com a ${baseName}.` : `Atualizado com a ${baseName}.`);
+		}
+	};
+
+	/** "Mesclar": the PR is merged, then the task is completed, as on the desktop. */
+	const merge = async () => {
+		if (!(await run("merge", "merge", undefined, "PR mesclado."))) return;
+		const done = await run("complete", "complete");
+		if (done) router.back();
+	};
 
 	const press = (action: ExecutionDockAction) => {
 		haptic("tap");
@@ -172,6 +200,20 @@ export default function DeliveryScreen() {
 			case "open-pr":
 				if (pr?.url) void Linking.openURL(pr.url);
 				return;
+			case "sync-base":
+				return confirm(
+					`Atualizar com a ${baseName}?`,
+					`O que entrou na ${baseName} é trazido para ${summary.branch ?? "a branch da tarefa"}. Se der conflito, a resolução fica no computador.`,
+					"Atualizar",
+					() => void updateFromBase(),
+				);
+			case "merge":
+				return confirm(
+					`Mesclar o PR${pr?.number ? ` #${pr.number}` : ""}?`,
+					`${ci ? `${ci}. ` : ""}Ele entra na ${baseName} pelo método padrão do repositório e a tarefa é concluída. Não dá para desfazer daqui.`,
+					"Mesclar",
+					() => void merge(),
+				);
 		}
 	};
 
@@ -360,6 +402,22 @@ export default function DeliveryScreen() {
 						</View>
 					) : null}
 				</View>
+
+				{syncBase && syncBase.id !== primaryId ? (
+					<Pressable
+						onPress={() => press(syncBase)}
+						disabled={syncBase.disabled || busy !== null}
+						accessibilityRole="button"
+						accessibilityLabel={`Atualizar com a ${baseName}`}
+						style={({ pressed }) => [styles.card, styles.baseRow, (syncBase.disabled || busy !== null) && { opacity: 0.45 }, pressed && { opacity: 0.7 }]}
+					>
+						{busy === "sync-base" ? <ActivityIndicator size="small" color={color.fg} /> : <Feather name="refresh-cw" size={15} color={color.mute} />}
+						<View style={{ flex: 1 }}>
+							<Text style={styles.strong}>Atualizar com a {baseName}</Text>
+							<Text style={styles.muted}>Traz o que entrou na base para a branch da tarefa.</Text>
+						</View>
+					</Pressable>
+				) : null}
 
 				{desktopOnly ? <Text style={styles.muted}>{desktopOnly}</Text> : null}
 
@@ -647,6 +705,7 @@ const useStyles = makeStyles((color) =>
 		openFileText: { color: color.fg, fontSize: 13, fontWeight: "500" },
 		card: { gap: 8, padding: 14, borderRadius: radius.lg, backgroundColor: color.panel },
 		cardHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+		baseRow: { flexDirection: "row", alignItems: "center", gap: 12 },
 		taskRow: { flexDirection: "row", gap: 8 },
 		cardAction: { flexDirection: "row", alignItems: "center", gap: 6, height: 36, paddingHorizontal: 14, borderRadius: 999, backgroundColor: color.chip },
 		cardActionText: { color: color.fg, fontSize: 13, fontWeight: "600" },

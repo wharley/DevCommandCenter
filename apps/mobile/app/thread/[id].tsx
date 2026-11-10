@@ -143,14 +143,14 @@ export default function ThreadScreen() {
 
 	// Opening the thread reads the task's latest result ("Resultado novo" goes away).
 	const seenWorkspace = meta?.workspaceId ?? null;
-	const finished = !isThreadRunning(snapshot.state.messages) && !snapshot.loading;
+	const finished = !isThreadRunning(snapshot.state) && !snapshot.loading;
 	useEffect(() => {
 		if (seenWorkspace && finished) markWorkspaceSeen(seenWorkspace);
 	}, [seenWorkspace, finished]);
 
 	// The diff chip: what the workspace changed, read on open and again when a turn starts or ends.
 	const diffWorkspace = meta?.workspaceId ?? null;
-	const turnRunning = isThreadRunning(snapshot.state.messages);
+	const turnRunning = isThreadRunning(snapshot.state);
 	useEffect(() => {
 		if (!diffWorkspace) return;
 		let cancelled = false;
@@ -189,7 +189,7 @@ export default function ThreadScreen() {
 	);
 	const { state, questions } = snapshot;
 	const items = useMemo(() => groupMessages(state.messages), [state.messages]);
-	const running = useMemo(() => isThreadRunning(state.messages), [state.messages]);
+	const running = useMemo(() => isThreadRunning(state), [state]);
 	const title = useMemo(() => meta?.threadTitle?.trim() || threadTitle(state.messages) || "Sessão", [meta, state.messages]);
 	const waitingOnYou =
 		questions.length > 0 ||

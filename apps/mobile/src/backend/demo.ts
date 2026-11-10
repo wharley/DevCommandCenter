@@ -390,6 +390,12 @@ export class DemoBackend implements Backend {
 				if (input.includeLocalChanges === true && state.changes.length > 0) commit(true);
 				state.pr = { number: 19, state: "OPEN", isDraft: input.draft === true, headBranch: comb?.branch ?? null, mergeStateStatus: "CLEAN", url: "https://github.com/demo/loja/pull/19", title: typeof input.title === "string" && input.title ? input.title : title };
 				return { ok: true };
+			case "merge":
+				if (!state.pr || state.pr.state !== "OPEN") throw new ApiError(400, "Não há PR aberto para mesclar.");
+				state.pr = { ...state.pr, state: "MERGED" };
+				return { ok: true };
+			case "sync-base":
+				return { branch: comb?.branch ?? "", baseBranch: "main", remote: "origin", updated: false, conflictCount: 0 };
 			case "complete":
 			case "archive":
 				if (comb) comb.status = action === "complete" ? "completed" : "archived";

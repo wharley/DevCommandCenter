@@ -103,6 +103,12 @@ export type ThreadState = {
 	byTool: Map<string, number>;
 	byReasoning: Map<string, number>;
 	byPermission: Map<string, number>;
+	/**
+	 * The turn in flight, as the desktop counts it: opened by `turn_started`,
+	 * closed by that turn's `turn_completed`/`turn_aborted` or the session's
+	 * end. What "running" means on the phone — never a step left open.
+	 */
+	openTurnId: string | null;
 };
 
 type CorePayload = Record<string, unknown>;
@@ -115,7 +121,32 @@ export function createThreadState(): ThreadState {
 		byTool: new Map(),
 		byReasoning: new Map(),
 		byPermission: new Map(),
+		openTurnId: null,
 	};
+}
+
+/**
+ * A turn is over: it stops being the one in flight, and a step of it that
+ * never heard its own end (a reasoning block or a tool call cut short) is
+ * closed with it, so nothing in the thread keeps spinning.
+ */
+function closeTurn(state: ThreadState, turnId: string | null) {
+	const closing = turnId ?? state.openTurnId;
+	if (closing === null) return;
+	if (state.openTurnId === closing) state.openTurnId = null;
+	for (let i = state.messages.length - 1; i >= 0; i--) {
+		const msg = state.messages[i];
+		if (!msg) continue;
+		if (msg.kind === "user") {
+			if (msg.turnId === closing) break;
+			continue;
+		}
+		if (msg.kind === "reasoning" && msg.turnId === closing && !msg.completed) {
+			state.messages[i] = { ...msg, completed: true };
+		} else if (msg.kind === "tool" && msg.turnId === closing && msg.status === "running") {
+			state.messages[i] = { ...msg, status: "completed" };
+		}
+	}
 }
 
 export function applyEvents(state: ThreadState, events: RawSessionEvent[]): ThreadState {
@@ -131,6 +162,7 @@ export function applyEvents(state: ThreadState, events: RawSessionEvent[]): Thre
 		byTool: new Map(state.byTool),
 		byReasoning: new Map(state.byReasoning),
 		byPermission: new Map(state.byPermission),
+		openTurnId: state.openTurnId ?? null,
 	};
 
 	for (const event of ordered) {
@@ -442,10 +474,12 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 			break;
 
 		case "session_completed":
+			closeTurn(state, null);
 			pushSystem(state, event.eventId, "Sessão finalizada", event.occurredAt);
 			break;
 
 		case "session_aborted":
+			closeTurn(state, null);
 			pushSystem(state, event.eventId, "Sessão abortada", event.occurredAt);
 			break;
 
@@ -478,6 +512,7 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 
 		case "turn_started": {
 			const text = typeof kind.prompt === "string" ? kind.prompt : "";
+			state.openTurnId = turnId;
 			const refs = state.byTurn.get(turnId) ?? {};
 			if (refs.user !== undefined) {
 				break;
@@ -534,6 +569,7 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 		}
 
 		case "turn_completed": {
+			closeTurn(state, turnId);
 			const refs = state.byTurn.get(turnId);
 			if (refs?.assistant !== undefined) {
 				const msg = state.messages[refs.assistant] as Extract<
@@ -546,6 +582,7 @@ function applyOne(state: ThreadState, event: RawSessionEvent) {
 		}
 
 		case "turn_aborted": {
+			closeTurn(state, turnId);
 			const refs = state.byTurn.get(turnId);
 			if (refs?.assistant !== undefined) {
 				const msg = state.messages[refs.assistant] as Extract<
