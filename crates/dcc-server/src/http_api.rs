@@ -86,12 +86,16 @@ mod menu_bar;
 mod mobile;
 mod mobile_agents;
 mod mobile_room;
+mod mobile_room_send;
+mod mobile_rooms;
 mod pr_review_requests;
 mod provider_accounts;
 mod provider_usage;
 mod providers;
 mod pull_request_hub;
 mod remote_devices;
+mod room_feed;
+mod room_line_json;
 mod shortcuts;
 mod skills;
 mod task_proposals;
@@ -701,8 +705,9 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             get(attention::list_task_proposals),
         )
         .route("/api/v1/mobile/agents", get(mobile_agents::agents))
+        .route("/api/v1/mobile/rooms", get(mobile_rooms::list))
         .route("/api/v1/mobile/room", get(mobile_room::room))
-        .route("/api/v1/mobile/room/messages", post(mobile_room::send))
+        .route("/api/v1/mobile/room/messages", post(mobile_room_send::send))
         .route(
             "/api/v1/task-proposals/:proposal_id/start",
             post(task_proposals::start),
@@ -7211,18 +7216,35 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{same}");
         assert_eq!(same["unchanged"], true);
-        // The Reviewer takes it, but its conversation starts on the desktop.
+        assert_eq!(room["approvals"], json!([]));
+        assert_eq!(room["working"], json!([]));
+        let (status, project) = get_json(&fixture.app, "/api/v1/mobile/room?room=checkout").await;
+        assert_eq!(status, StatusCode::OK, "{project}");
+        assert_eq!(project["room"], "checkout");
+        assert_eq!(project["lines"], json!([]));
+        // The rooms: Geral, and no project room yet.
+        let (status, rooms) = get_json(&fixture.app, "/api/v1/mobile/rooms").await;
+        assert_eq!(status, StatusCode::OK, "{rooms}");
+        assert_eq!(rooms["rooms"].as_array().unwrap().len(), 1, "{rooms}");
+        assert_eq!(rooms["rooms"][0]["id"], Value::Null);
+        assert_eq!(rooms["rooms"][0]["name"], "Geral");
+        assert_eq!(rooms["rooms"][0]["needsYou"], false);
+        let snapshot = rooms["snapshotId"].as_str().unwrap().to_string();
+        let (_, same) = get_json(
+            &fixture.app,
+            &format!("/api/v1/mobile/rooms?after={snapshot}"),
+        )
+        .await;
+        assert_eq!(same["unchanged"], true);
+        // A project with no room left: nothing is sent.
         let (status, refused) = post_json(
             &fixture.app,
             "/api/v1/mobile/room/messages",
-            json!({ "text": "o CI falhou" }),
+            json!({ "text": "o CI falhou", "room": "gone" }),
         )
         .await;
         assert_eq!(status, StatusCode::CONFLICT, "{refused}");
-        assert!(
-            refused.to_string().contains("roomNoConversation"),
-            "{refused}"
-        );
+        assert!(refused.to_string().contains("roomNotFound"), "{refused}");
         let (status, _) = post_json(
             &fixture.app,
             "/api/v1/mobile/room/messages",
@@ -7235,6 +7257,9 @@ mod tests {
         ));
         assert!(crate::remote_connector::remote_path_allowed(
             "/api/v1/mobile/room/messages"
+        ));
+        assert!(crate::remote_connector::remote_path_allowed(
+            "/api/v1/mobile/rooms?after=x"
         ));
     }
 

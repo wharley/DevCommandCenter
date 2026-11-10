@@ -5,27 +5,22 @@
 
 use std::collections::HashMap;
 
-use dcc_core::domain::delegation::{Delegation, DelegationKind, DelegationStatus};
+use dcc_core::domain::delegation::Delegation;
+use dcc_core::domain::task_report::{
+    is_task, lines_changed, report_state, report_task_id, report_title,
+};
 
 use super::agents::AgentRecord;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReportState {
-    Working,
-    /// It ended a turn and waits on the person.
-    TurnEnded,
-    Closed,
-    Failed,
-}
+pub use dcc_core::domain::task_report::ReportState;
 
-impl ReportState {
-    pub fn i18n_key(self) -> &'static str {
-        match self {
-            Self::Working => "agents.report.state.working",
-            Self::TurnEnded => "agents.report.state.turnEnded",
-            Self::Closed => "agents.report.state.closed",
-            Self::Failed => "agents.report.state.failed",
-        }
+/// The i18n key of where a task stands.
+pub fn state_key(state: ReportState) -> &'static str {
+    match state {
+        ReportState::Working => "agents.report.state.working",
+        ReportState::TurnEnded => "agents.report.state.turnEnded",
+        ReportState::Closed => "agents.report.state.closed",
+        ReportState::Failed => "agents.report.state.failed",
     }
 }
 
@@ -46,20 +41,6 @@ pub struct TaskReport {
     /// The session that ran it, for its turns' captures once the checkout
     /// is gone (`task_changes`).
     pub session_id: Option<String>,
-}
-
-/// `"3 file(s), +40/-12"` → (40, 12).
-fn lines_changed(summary: Option<&str>) -> (u64, u64) {
-    let Some((_, lines)) = summary.and_then(|summary| summary.split_once(", +")) else {
-        return (0, 0);
-    };
-    let Some((added, removed)) = lines.split_once("/-") else {
-        return (0, 0);
-    };
-    (
-        added.trim().parse().unwrap_or(0),
-        removed.trim().parse().unwrap_or(0),
-    )
 }
 
 fn seconds_between(start: Option<&str>, end: &str) -> Option<i64> {
@@ -84,29 +65,13 @@ pub fn by_delegation(
         .collect();
     delegations
         .iter()
-        .filter(|delegation| delegation.kind == DelegationKind::Task)
+        .filter(|delegation| is_task(delegation))
         .map(|delegation| {
-            let state = match delegation.status {
-                DelegationStatus::Failed | DelegationStatus::Cancelled => ReportState::Failed,
-                DelegationStatus::Completed | DelegationStatus::ReviewPending => {
-                    ReportState::Closed
-                }
-                _ if delegation.reported_turn_id.is_some() => ReportState::TurnEnded,
-                _ => ReportState::Working,
-            };
             let (additions, deletions) = lines_changed(delegation.diff_summary.as_deref());
             let report = TaskReport {
-                title: delegation
-                    .title
-                    .clone()
-                    .filter(|title| !title.trim().is_empty())
-                    .unwrap_or_else(|| delegation.id.0.clone()),
-                state,
-                task_id: delegation
-                    .budget
-                    .new_task
-                    .as_ref()
-                    .and_then(|target| target.workspace_id.clone()),
+                title: report_title(delegation),
+                state: report_state(delegation),
+                task_id: report_task_id(delegation),
                 provider_id: delegation.target_provider_id.0.clone(),
                 agent_id: owner
                     .get(delegation.parent_session_id.0.as_str())

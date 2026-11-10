@@ -17,19 +17,9 @@ use crate::ui::{TextInput, Toaster};
 /// The providers that pass a denial's reason to the model themselves.
 const READS_DENIAL_REASON: [&str; 1] = ["claude_code"];
 
-/// Whether "Sempre permitir" fits the tool: a connector's, not DCC's own.
-pub(crate) fn may_always_allow(tool_name: &str) -> bool {
-    tool_name.starts_with("mcp__dcc-") && !tool_name.starts_with("mcp__dcc-browser-webview__")
-}
-
-/// A connector's tool by its own name (`slack_search_channels`), not the
-/// long name the provider sees (`mcp__dcc-<id>__slack_search_channels`).
-pub(crate) fn short_tool(tool_name: &str) -> &str {
-    tool_name
-        .strip_prefix("mcp__")
-        .and_then(|rest| rest.split_once("__"))
-        .map_or(tool_name, |(_, tool)| tool)
-}
+/// Whether "Sempre permitir" fits the tool and a connector's tool by its own
+/// name: the rule the phone's room shares (`dcc_core::domain::room_approval`).
+pub(crate) use dcc_core::domain::room_approval::{may_always_allow, short_tool};
 
 /// The next message that carries a reason to a provider that cannot read it
 /// with the denial.

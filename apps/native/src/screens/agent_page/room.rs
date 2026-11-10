@@ -472,7 +472,10 @@ impl TeamRoom {
             );
         }
         cx.notify();
-        let effort = agent.provider_id.as_ref().and(agent.effort.clone());
+        let effort = dcc_core::domain::agent_run::agent_run_effort(
+            agent.provider_id.as_deref(),
+            agent.effort.as_deref(),
+        );
         // A message the person sends runs in the mode set for the agent.
         let conversation_mode =
             super::editor_task_mode::wire_mode(agent.tool_access.conversation_approval);

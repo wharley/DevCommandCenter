@@ -87,14 +87,7 @@ impl TeamRoom {
             .as_ref()
             .filter(|(id, _)| *id == approval.request.request_id)
             .map(|(_, input)| input.clone());
-        let detail = approval
-            .request
-            .command
-            .clone()
-            .or_else(|| approval.request.file.clone())
-            .or_else(|| approval.request.description.clone())
-            .map(|detail| detail.lines().next().unwrap_or_default().to_string())
-            .filter(|detail| !detail.is_empty());
+        let detail = approval.request.detail();
         let button = |id: &str, label: SharedString, variant: ButtonVariant| {
             Button::new(SharedString::from(format!("room-approval-{id}-{index}")))
                 .variant(variant)

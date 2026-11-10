@@ -9,7 +9,7 @@ use gpui::{AnyElement, Context, FontWeight, Hsla, SharedString, div, prelude::*,
 
 use super::room::{RoomEvent, TeamRoom};
 use crate::agent::AgentAvatarView;
-use crate::data::task_reports::{ReportState, TaskReport, duration_label};
+use crate::data::task_reports::{ReportState, TaskReport, duration_label, state_key};
 use crate::data::team_room::RoomLine;
 use crate::i18n::{Args, Translate};
 use crate::project::ProviderIcon;
@@ -127,7 +127,7 @@ impl TeamRoom {
                             ))
                     }));
                 let detail = [
-                    Some(cx.t(task.state.i18n_key()).to_string()),
+                    Some(cx.t(state_key(task.state)).to_string()),
                     task.seconds.map(duration_label),
                     (task.files > 0).then(|| {
                         cx.t_with("agents.report.files", &Args::count(task.files as i64))

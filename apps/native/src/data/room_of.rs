@@ -5,6 +5,9 @@
 
 use std::collections::HashMap;
 
+/// The room of something of `project` (`dcc_core::domain::room_presence`).
+pub use dcc_core::domain::room_presence::room_for;
+
 use super::room_inbox::{CardKind, InboxCard};
 use super::tasks::{Project, TaskSummary};
 
@@ -34,12 +37,6 @@ pub fn card_project(
         }
         CardKind::PrReview { pr_id, .. } => label_project(pr_labels.get(pr_id)?, projects),
     }
-}
-
-/// The room of something of `project`: its room when it has one, else
-/// the Geral room (none).
-pub fn room_for(project: Option<String>, rooms: &[String]) -> Option<String> {
-    project.filter(|project| rooms.contains(project))
 }
 
 #[cfg(test)]

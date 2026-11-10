@@ -1,7 +1,8 @@
 //! What a resident agent runs on in the team room: its own provider and
-//! model, else the composer's.
+//! model, else the composer's (`dcc_core::domain::agent_run`, the rule the
+//! phone's room shares).
 
-use dcc_core::domain::provider::HealthStatus;
+use dcc_core::domain::agent_run::{AgentRunError, agent_run_pick};
 
 use crate::data::agents::AgentRecord;
 use crate::i18n::{Args, Translate};
@@ -16,41 +17,18 @@ pub(crate) fn agent_execution(
 ) -> Result<(String, Option<String>), gpui::SharedString> {
     let catalog = composer.catalog.clone().unwrap_or_default();
     let selected = composer.selected_provider_id();
-    let wanted = agent.provider_id.clone().or_else(|| selected.clone());
-    let provider = wanted
-        .and_then(|id| catalog.iter().find(|provider| provider.id.0 == id).cloned())
-        .filter(|provider| provider.enabled)
-        .ok_or_else(|| {
-            cx.t_with(
-                "agents.call.providerUnavailable",
-                &Args::default().with("agent", agent.name.clone()),
-            )
-        })?;
-    let uses_selection =
-        agent.provider_id.is_none() && selected.as_deref() == Some(provider.id.0.as_str());
-    if uses_selection && let HealthStatus::Unhealthy { reason } = &provider.health {
-        return Err(reason.clone().into());
+    let selected_model = composer.selected_model_id();
+    match agent_run_pick(
+        agent.provider_id.as_deref(),
+        agent.model.as_deref(),
+        &catalog,
+        (selected.as_deref(), selected_model.as_deref()),
+    ) {
+        Ok(pick) => Ok((pick.provider_id, pick.model)),
+        Err(AgentRunError::Unavailable) => Err(cx.t_with(
+            "agents.call.providerUnavailable",
+            &Args::default().with("agent", agent.name.clone()),
+        )),
+        Err(AgentRunError::Unhealthy(reason)) => Err(reason.into()),
     }
-    let model = if uses_selection {
-        composer.selected_model_id()
-    } else {
-        agent
-            .model
-            .clone()
-            .filter(|model| {
-                provider
-                    .models
-                    .iter()
-                    .any(|candidate| &candidate.id == model)
-            })
-            .or_else(|| {
-                provider
-                    .models
-                    .iter()
-                    .find(|model| model.recommended)
-                    .map(|model| model.id.clone())
-            })
-            .or_else(|| provider.models.first().map(|model| model.id.clone()))
-    };
-    Ok((provider.id.0.clone(), model))
 }

@@ -12,13 +12,11 @@ use crate::theme::ActiveTheme;
 /// One choice per project (a project can have several checkouts), labeled by
 /// its first one's name, in the sidebar's order.
 pub(crate) fn project_options(projects: &[Project]) -> Vec<(String, String)> {
-    let mut options: Vec<(String, String)> = Vec::new();
-    for project in projects {
-        if !options.iter().any(|(id, _)| id == &project.project_id) {
-            options.push((project.project_id.clone(), project.display_name.clone()));
-        }
-    }
-    options
+    dcc_core::domain::room_list::project_names(
+        projects
+            .iter()
+            .map(|project| (project.project_id.as_str(), project.display_name.as_str())),
+    )
 }
 
 impl AgentEditor {

@@ -37,25 +37,9 @@ pub fn save(rooms: &[String]) {
     let _ = std::fs::write(path, serde_json::to_string(rooms).unwrap_or_default());
 }
 
-/// The rooms to list, `(project id, name)`: the ones made first, in order,
-/// then the projects agents talk in (`talked`), from the person's
-/// `projects` as `(id, name)`.
-pub fn rooms(
-    saved: &[String],
-    talked: impl IntoIterator<Item = String>,
-    projects: &[(String, String)],
-) -> Vec<(String, String)> {
-    let mut listed: Vec<(String, String)> = Vec::new();
-    for id in saved.iter().cloned().chain(talked) {
-        if listed.iter().any(|(kept, _)| *kept == id) {
-            continue;
-        }
-        if let Some((_, name)) = projects.iter().find(|(project, _)| *project == id) {
-            listed.push((id, name.clone()));
-        }
-    }
-    listed
-}
+/// The rooms to list, `(project id, name)`: the order the phone's list
+/// shares (`dcc_core::domain::room_list`).
+pub use dcc_core::domain::room_list::rooms;
 
 /// The projects agents talk in, from their conversations.
 pub fn talked(agents: &[AgentRecord]) -> Vec<String> {
@@ -71,23 +55,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn made_rooms_come_first_then_the_ones_talked_in() {
-        let projects = [
-            ("checkout".to_string(), "Checkout".to_string()),
-            ("app".to_string(), "vendeagora-app".to_string()),
-        ];
-        let listed = rooms(
-            &["checkout".into(), "gone".into()],
-            ["app".to_string(), "checkout".to_string()],
-            &projects,
-        );
-        assert_eq!(
-            listed,
-            [
-                ("checkout".to_string(), "Checkout".to_string()),
-                ("app".to_string(), "vendeagora-app".to_string())
-            ]
-        );
+    fn a_missing_file_holds_no_rooms() {
         let dir = tempfile::tempdir().unwrap();
         assert!(load_from(&dir.path().join("none.json")).is_empty());
     }

@@ -56,6 +56,21 @@ impl SqliteSessionRepo {
         )
         .ok()
     }
+
+    /// What tells a conversation's history changed, without reading it:
+    /// how many events, the highest sequence and the newest row (a rewind
+    /// that drops events and writes new ones moves the last). The phone's
+    /// rooms keep a conversation's lines until this moves.
+    pub fn session_event_stamp(&self, session_id: &SessionId) -> Result<(i64, i64, i64)> {
+        let conn = self.conn.lock().map_err(repository_error)?;
+        conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(sequence), 0), COALESCE(MAX(rowid), 0)
+               FROM dcc_session_events WHERE session_id = ?1",
+            params![session_id.0],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(repository_error)
+    }
 }
 
 #[cfg(test)]
@@ -81,5 +96,6 @@ mod tests {
             .unwrap();
         assert_eq!(repo.session_room(&SessionId("s-2".into())).unwrap(), None);
         assert_eq!(repo.project_name_and_path("nope"), None);
+        assert_eq!(repo.session_event_stamp(&session).unwrap(), (0, 0, 0));
     }
 }
