@@ -483,6 +483,8 @@
       "placeholderProject": "Escreva para a equipe do {{project}} · @ para chamar alguém",
       "taskRunning": "{{agent}} · “{{task}}” rodando há {{time}}",
       "taskRunningNow": "{{agent}} · “{{task}}” começou agora",
+      "atWork": "{{agent}} trabalhando em “{{task}}” há {{time}}",
+      "atWorkNow": "{{agent}} começou a trabalhar em “{{task}}”",
       "approval": "{{agent}} quer usar {{tool}}",
       "placeholderAgent": "Escreva para o {{agent}}",
       "emptyAgent": "Escreva para o {{agent}}. A resposta chega aqui; a conversa completa, com as ferramentas, abre em \"Conversa completa\".",

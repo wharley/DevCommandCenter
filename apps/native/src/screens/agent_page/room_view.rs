@@ -11,7 +11,7 @@ use gpui::{
 
 use super::room::{Pending, TeamRoom};
 use super::room_timeline::Slot;
-use crate::agent::{AgentAvatarView, Mood, MoodAvatarView};
+use crate::agent::AgentAvatarView;
 use crate::data::agents::{AgentRecord, AgentState};
 use crate::data::team_room::{Receipt, RoomLine, Speaker};
 use crate::i18n::{Args, I18n, Locale, Translate};
@@ -39,49 +39,6 @@ impl TeamRoom {
             Some(reason) => format!("{to} · {}", cx.t(reason.i18n_key())).into(),
             None => to,
         }
-    }
-
-    fn person_line(
-        &self,
-        key: String,
-        text: String,
-        note: SharedString,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        // Images and links go under the words.
-        let (text, images) = crate::data::message_links::split_images(&text);
-        let thumbs = self.image_thumbs(&key, images, cx);
-        let (words, links) = crate::data::message_links::split_links(&text);
-        let chips = self.link_chips(&key, links, cx);
-        let bubble = (!words.is_empty()).then(|| {
-            div()
-                .max_w(px(520.0))
-                .px(px(12.0))
-                .py(px(8.0))
-                .rounded(px(14.0))
-                .bg(colors.accent)
-                .text_size(px(13.0))
-                .line_height(px(20.0))
-                .text_color(colors.foreground)
-                .child(words)
-        });
-        div()
-            .debug_selector(move || key.clone())
-            .flex()
-            .flex_col()
-            .items_end()
-            .gap(px(4.0))
-            .children(bubble)
-            .children(thumbs)
-            .children(chips)
-            .child(
-                div()
-                    .text_size(px(11.0))
-                    .text_color(colors.muted_foreground)
-                    .child(note),
-            )
-            .into_any_element()
     }
 
     fn receipt_text(receipt: Receipt, cx: &gpui::App) -> Option<String> {
@@ -201,65 +158,6 @@ impl TeamRoom {
                     .children(self.report_card(index, line, cx))
                     .children(self.rule_field(line, cx)),
             )
-            .into_any_element()
-    }
-
-    /// "Revisor está trabalhando…" / "Revisor precisa de você".
-    fn busy_line(
-        &self,
-        agent: &AgentRecord,
-        state: AgentState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        let needs_you = state == AgentState::NeedsYou;
-        let text = cx.t_with(
-            if needs_you {
-                "agents.room.needsYou"
-            } else {
-                "agents.room.working"
-            },
-            &Args::default().with("agent", agent.name.clone()),
-        );
-        let agent_id = agent.id.clone();
-        let id = agent.id.clone();
-        div()
-            .debug_selector(move || format!("room-busy-{id}"))
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .child(MoodAvatarView::new(
-                SharedString::from(format!("room-busy-face-{}", agent.id)),
-                &agent.avatar,
-                if needs_you {
-                    Mood::NeedsYou
-                } else {
-                    Mood::Working
-                },
-                28.0,
-            ))
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(colors.muted_foreground)
-                    .child(text),
-            )
-            .when(needs_you, |row| {
-                row.child(
-                    div()
-                        .id(SharedString::from(format!("room-busy-open-{agent_id}")))
-                        .text_size(px(12.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(colors.foreground)
-                        .cursor_pointer()
-                        .on_click(
-                            cx.listener(move |room, _, _, cx| {
-                                room.open_conversation(&agent_id, cx)
-                            }),
-                        )
-                        .child(cx.t("agents.room.open")),
-                )
-            })
             .into_any_element()
     }
 
@@ -501,6 +399,8 @@ impl Render for TeamRoom {
         }
         // Tasks opened here that still run.
         rows.extend(self.running_rows(&agents, cx));
+        // Agents at work in this project's tasks, however they got there.
+        rows.extend(self.at_work_rows(&agents, cx));
         // An approval is answered here; its agent needs no "precisa de você".
         let asking: Vec<String> = self
             .approvals(&agents)

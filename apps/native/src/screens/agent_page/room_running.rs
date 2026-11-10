@@ -1,17 +1,19 @@
-//! The tasks this room's agents opened that are still running, under the
-//! conversation: "Dev · “Investigar…” rodando há 12 min", working until the
-//! task ends its turn, a click opening it — so an agent's "Iniciei a
-//! tarefa" is not read as the work being done.
+//! What is going on now, under the room's conversation, the way Slack shows
+//! who is typing: the tasks this room's agents opened that still run ("Dev ·
+//! “Investigar…” rodando há 12 min"), and every agent at work in a task of
+//! the room's project however it got there — a trigger included ("Revisor ·
+//! Gatilho · CI falhou · trabalhando em “Código de rastreio” há 1 min").
+//! Each works until the turn ends, a click opening it; the result card
+//! takes its place.
 
-use gpui::{AnyElement, Context, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, Context};
 
 use super::room::{RoomEvent, TeamRoom};
-use crate::agent::AgentAvatarView;
+use crate::data::agent_triggers::AgentTriggers;
 use crate::data::agents::AgentRecord;
+use crate::data::room_of::room_for;
 use crate::i18n::{Args, Translate};
-use crate::screens::sidebar::RunningTask;
-use crate::theme::ActiveTheme;
-use crate::ui::spinner;
+use crate::screens::sidebar::{AgentAtWork, RunningTask};
 
 /// "3 min", "1 h 5 min"; under a minute, "agora".
 pub(crate) fn elapsed(started_at: Option<&str>, now_ms: i64) -> Option<String> {
@@ -46,7 +48,6 @@ impl TeamRoom {
         agents: &[AgentRecord],
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let colors = cx.theme().colors.clone();
         let now = chrono::Utc::now().timestamp_millis();
         self.running_here(cx)
             .into_iter()
@@ -66,47 +67,88 @@ impl TeamRoom {
                         .with("time", time),
                 );
                 let id = task.task_id.clone();
-                Some(
-                    div()
-                        .id(SharedString::from(format!("room-running-{index}")))
-                        .debug_selector(move || format!("room-running-{index}"))
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
-                        .px(px(12.0))
-                        .py(px(8.0))
-                        .rounded(px(12.0))
-                        .border_1()
-                        .border_color(colors.border.opacity(0.7))
-                        .bg(colors.card)
-                        .cursor_pointer()
-                        .hover(|row| row.bg(colors.accent.opacity(0.4)))
-                        .on_click(
-                            cx.listener(move |_, _, _, cx| {
-                                cx.emit(RoomEvent::OpenTask(id.clone()))
-                            }),
-                        )
-                        .child(AgentAvatarView::new(
-                            SharedString::from(format!("room-running-face-{index}")),
-                            &agent.avatar,
-                            None,
-                            22.0,
-                        ))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(px(12.5))
-                                .text_color(colors.foreground)
-                                .child(text),
-                        )
-                        .child(spinner(
-                            SharedString::from(format!("room-running-spin-{index}")),
-                            14.0,
-                        ))
-                        .into_any_element(),
-                )
+                Some(self.live_row(
+                    format!("room-running-{index}"),
+                    agent,
+                    None,
+                    text,
+                    move |_, cx| cx.emit(RoomEvent::OpenTask(id.clone())),
+                    cx,
+                ))
+            })
+            .collect()
+    }
+}
+
+impl TeamRoom {
+    /// The agents at work in a task of this room's project.
+    fn at_work_here(&self, cx: &gpui::App) -> Vec<AgentAtWork> {
+        let opened: Vec<String> = self
+            .running_here(cx)
+            .into_iter()
+            .map(|task| task.task_id)
+            .collect();
+        self.sidebar
+            .read(cx)
+            .agents_at_work()
+            .into_iter()
+            .filter(|work| {
+                self.shows(&work.agent_id)
+                    && !opened.contains(&work.task_id)
+                    && room_for(Some(work.project_id.clone()), &self.rooms) == self.room
+            })
+            .collect()
+    }
+
+    pub(super) fn at_work_rows(
+        &self,
+        agents: &[AgentRecord],
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let now = chrono::Utc::now().timestamp_millis();
+        let runs = cx
+            .try_global::<AgentTriggers>()
+            .map(|triggers| triggers.runs().to_vec())
+            .unwrap_or_default();
+        self.at_work_here(cx)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, work)| {
+                let agent = agents.iter().find(|agent| agent.id == work.agent_id)?;
+                let time = elapsed(work.started_at.as_deref(), now).unwrap_or_default();
+                let started = work
+                    .started_at
+                    .as_deref()
+                    .and_then(crate::data::time::parse_ms)
+                    .unwrap_or(now);
+                let chip =
+                    crate::data::room_inbox::woken_by(&runs, &agent.id, &work.task_id, started)
+                        .map(|trigger| cx.t(&format!("agents.room.card.trigger.{}", trigger.id())));
+                let text = cx.t_with(
+                    if time.is_empty() {
+                        "agents.room.atWorkNow"
+                    } else {
+                        "agents.room.atWork"
+                    },
+                    &Args::default()
+                        .with("agent", agent.name.clone())
+                        .with("task", work.task_name.clone())
+                        .with("time", time),
+                );
+                let (task, session) = (work.task_id.clone(), work.session_id.clone());
+                Some(self.live_row(
+                    format!("room-at-work-{index}"),
+                    agent,
+                    chip,
+                    text,
+                    move |_, cx| {
+                        cx.emit(RoomEvent::OpenSession {
+                            task_id: task.clone(),
+                            session_id: session.clone(),
+                        })
+                    },
+                    cx,
+                ))
             })
             .collect()
     }

@@ -54,6 +54,7 @@ mod room;
 mod room_approvals;
 #[cfg(test)]
 mod room_approvals_tests;
+mod room_bubble;
 mod room_bulletin;
 mod room_cards;
 mod room_checkins;
@@ -72,7 +73,10 @@ mod room_reactions;
 mod room_recap;
 mod room_report;
 mod room_routines;
+mod room_live;
 mod room_running;
+#[cfg(test)]
+mod room_running_tests;
 mod room_select;
 #[cfg(test)]
 mod room_select_tests;

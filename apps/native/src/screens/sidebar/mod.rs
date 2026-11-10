@@ -6,7 +6,7 @@ mod actions;
 mod agent_badge;
 mod agent_tasks;
 mod agents;
-pub use agent_tasks::RunningTask;
+pub use agent_tasks::{AgentAtWork, RunningTask};
 pub use agents::AgentPageData;
 mod arrival;
 mod attention;

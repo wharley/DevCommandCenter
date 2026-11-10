@@ -68,7 +68,7 @@ pub struct InboxSources<'a> {
     pub now_ms: i64,
 }
 
-fn woken_by(runs: &[Run], agent: &str, target: &str, at_ms: i64) -> Option<Trigger> {
+pub(crate) fn woken_by(runs: &[Run], agent: &str, target: &str, at_ms: i64) -> Option<Trigger> {
     runs.iter()
         .filter(|run| run.agent_id == agent && run.target == target)
         .filter_map(|run| parse_ms(&run.at).map(|ran| (ran, run.trigger)))

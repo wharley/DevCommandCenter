@@ -483,6 +483,8 @@
       "placeholderProject": "Write to the {{project}} team · @ to call someone",
       "taskRunning": "{{agent}} · “{{task}}” running for {{time}}",
       "taskRunningNow": "{{agent}} · “{{task}}” just started",
+      "atWork": "{{agent}} working in “{{task}}” for {{time}}",
+      "atWorkNow": "{{agent}} started working in “{{task}}”",
       "approval": "{{agent}} wants to use {{tool}}",
       "placeholderAgent": "Write to {{agent}}",
       "emptyAgent": "Write to {{agent}}. The answer comes here; the whole conversation, with its tools, opens in \"Whole conversation\".",
