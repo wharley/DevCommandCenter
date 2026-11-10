@@ -329,7 +329,7 @@ export function splitMentions(body: string, agents: ReadonlyArray<{ id: string; 
 		const match = opens
 			? names.find((name) => {
 					const end = index + 1 + name.plain.length;
-					return flat.startsWith(name.plain, index + 1) && !/[\p{L}\p{N}_]/u.test(body[end] ?? "");
+					return flat.startsWith(name.plain, index + 1) && !/[A-Za-z0-9_\u00C0-\u024F]/.test(body[end] ?? "");
 				})
 			: undefined;
 		if (!match) {
