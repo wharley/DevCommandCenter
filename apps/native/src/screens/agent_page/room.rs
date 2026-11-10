@@ -92,6 +92,8 @@ pub struct TeamRoom {
     pub(crate) room: Option<String>,
     /// Bumped on each switch of room, so a read of the room before is dropped.
     pub(crate) room_generation: u64,
+    /// The projects that have a room, for where each card shows.
+    pub(crate) rooms: Vec<String>,
     /// Agents proposed that the person answered here, gone at once.
     pub(crate) answered_proposals: Vec<String>,
     /// 👍 / 👎 changed here, by answer, before the feed reads them again.
@@ -183,6 +185,7 @@ impl TeamRoom {
             focus: None,
             room: None,
             room_generation: 0,
+            rooms: Vec::new(),
             answered_proposals: Vec::new(),
             reacted: HashMap::new(),
             rule: None,

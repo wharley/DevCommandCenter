@@ -46,9 +46,44 @@ impl TeamRoom {
         }
     }
 
+    /// "Marcar tudo como lido": the Geral room marks everything, as before;
+    /// a project's room only its own cards and check-ins.
     pub(crate) fn mark_all_read(&mut self, cx: &mut Context<Self>) {
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.mark_inbox_read(cx));
+        if self.is_geral() {
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.mark_inbox_read(cx));
+            cx.notify();
+            return;
+        }
+        let cards: Vec<InboxCard> = self
+            .cards(cx)
+            .into_iter()
+            .filter(|card| card.unread && self.card_room(card, cx) == self.room)
+            .collect();
+        let checks: Vec<String> = self
+            .check_ins(cx)
+            .into_iter()
+            .filter(|check| check.unread && self.check_in_room(check) == self.room)
+            .map(|check| check.key)
+            .collect();
+        for card in cards {
+            match &card.kind {
+                CardKind::PrReview { pr_id, .. } => {
+                    crate::data::pr_review_jobs::PrReviewJobs::mark_seen(cx, pr_id)
+                }
+                _ => self
+                    .sidebar
+                    .update(cx, |sidebar, cx| sidebar.mark_card_read(&card, cx)),
+            }
+        }
+        if cx.has_global::<crate::data::check_ins::CheckIns>() {
+            cx.update_global::<crate::data::check_ins::CheckIns, _>(|all, _| {
+                for key in &checks {
+                    all.mark_read(key);
+                }
+            });
+        }
+        self.sidebar.update(cx, |_, cx| cx.notify());
         cx.notify();
     }
 

@@ -87,7 +87,17 @@ impl AgentPage {
         } else {
             self.room_project.clone()
         };
+        let rooms: Vec<String> = {
+            let sidebar = self.sidebar.read(cx);
+            let projects = super::editor_projects::project_options(sidebar.projects());
+            let talked = crate::data::agent_rooms::talked(sidebar.agents());
+            crate::data::agent_rooms::rooms(&self.rooms, talked, &projects)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect()
+        };
         room.update(cx, |room, cx| {
+            room.rooms = rooms;
             room.set_room(project, cx);
             room.set_focus(focus, cx);
         });

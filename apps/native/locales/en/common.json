@@ -422,7 +422,7 @@
       "pullRequests": "Pull request reviews",
       "showRole": "See this agent's role",
       "roleHint": "The role is maintained by DCC and improves with each version. To adapt it to your project, use the extra instructions under “Edit”.",
-      "howToCallAgent": "This agent works in a task: call it from its icon in the task header. To ask or request something, talk to it in the team room.",
+      "howToCallAgent": "This agent works in a task: call it from its icon in the task header. To ask or request something, talk to it in a room (General or the project's).",
       "agentSessions": "In tasks",
       "agentNoSessions": "No tasks yet. When you call it in a task, it shows here."
     },

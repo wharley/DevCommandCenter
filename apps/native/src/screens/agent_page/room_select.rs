@@ -3,9 +3,14 @@
 //! switch clears what was shown and reads the new room's; a read still on
 //! its way from the room before is dropped by its generation.
 
+use std::collections::HashMap;
+
 use gpui::Context;
 
 use super::room::TeamRoom;
+use crate::data::check_ins::CheckIn;
+use crate::data::room_inbox::InboxCard;
+use crate::data::room_of::{card_project, room_for};
 use crate::i18n::{Args, Translate};
 
 impl TeamRoom {
@@ -62,5 +67,36 @@ impl TeamRoom {
     /// the week, proposals, sources) live there for now.
     pub(crate) fn is_geral(&self) -> bool {
         self.room.is_none()
+    }
+
+    /// The room `card` shows in: its project's, or Geral.
+    pub(crate) fn card_room(&self, card: &InboxCard, cx: &gpui::App) -> Option<String> {
+        let labels: HashMap<String, String> = crate::data::pr_review_jobs::PrReviewJobs::all(cx)
+            .into_iter()
+            .map(|job| (job.pr_id, job.label))
+            .collect();
+        let sidebar = self.sidebar.read(cx);
+        room_for(
+            card_project(card, sidebar.tasks(), sidebar.projects(), &labels),
+            &self.rooms,
+        )
+    }
+
+    /// The room a check-in shows in.
+    pub(crate) fn check_in_room(&self, check: &CheckIn) -> Option<String> {
+        room_for(check.project_id.clone(), &self.rooms)
+    }
+
+    /// The unread cards and check-ins of each room (none: Geral), for the
+    /// dots in the column.
+    pub(crate) fn unread_by_room(&self, cx: &gpui::App) -> HashMap<Option<String>, usize> {
+        let mut unread: HashMap<Option<String>, usize> = HashMap::new();
+        for card in self.cards(cx).iter().filter(|card| card.unread) {
+            *unread.entry(self.card_room(card, cx)).or_default() += 1;
+        }
+        for check in self.check_ins(cx).iter().filter(|check| check.unread) {
+            *unread.entry(self.check_in_room(check)).or_default() += 1;
+        }
+        unread
     }
 }

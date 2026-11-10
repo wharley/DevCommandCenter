@@ -40,12 +40,14 @@ impl AgentPage {
         icon: &'static str,
         label: SharedString,
         project: Option<String>,
+        unread: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let current = self.room_open
             && self.editor.is_none()
             && self.room_project.as_deref() == project.as_deref();
+        let dot_key = key.clone();
         div()
             .id(SharedString::from(key.clone()))
             .debug_selector(move || key.clone())
@@ -73,7 +75,27 @@ impl AgentPage {
                     .justify_center()
                     .child(Icon::new(icon).size(16.0)),
             )
-            .child(div().truncate().child(label))
+            .child(div().flex_1().min_w_0().truncate().child(label))
+            // What is new in the room, as the room's own bar counts it.
+            .when(unread > 0, |row| {
+                row.child(
+                    div()
+                        .debug_selector(move || format!("{dot_key}-unread"))
+                        .flex_none()
+                        .min_w(px(18.0))
+                        .h(px(18.0))
+                        .px(px(5.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(crate::theme::tailwind::SKY_500.hsla())
+                        .text_size(px(10.5))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(gpui::white())
+                        .child(unread.to_string()),
+                )
+            })
             .into_any_element()
     }
 
@@ -83,6 +105,11 @@ impl AgentPage {
         let projects = self.project_names(cx);
         let talked = agent_rooms::talked(self.sidebar.read(cx).agents());
         let listed = agent_rooms::rooms(&self.rooms, talked, &projects);
+        let unread = self
+            .room
+            .as_ref()
+            .map(|(room, _)| room.read(cx).unread_by_room(cx))
+            .unwrap_or_default();
         let mut rows = vec![
             div()
                 .px(px(8.0))
@@ -94,6 +121,7 @@ impl AgentPage {
                 "messages-square",
                 cx.t("agents.rooms.geral"),
                 None,
+                unread.get(&None).copied().unwrap_or(0),
                 cx,
             ),
         ];
@@ -103,6 +131,7 @@ impl AgentPage {
                 "folder",
                 name.clone().into(),
                 Some(id.clone()),
+                unread.get(&Some(id.clone())).copied().unwrap_or(0),
                 cx,
             ));
         }

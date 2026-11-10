@@ -127,7 +127,18 @@ impl MemoryCard {
                 // Another agent's page by now.
                 if card.agent_id == agent {
                     match answer {
-                        Ok(memory) => card.memory = Some(memory),
+                        Ok(memory) => {
+                            // The first read opens where the notes are: the
+                            // person's, else the project noted last.
+                            if card.memory.is_none() && card.layer.is_none() {
+                                card.layer = super::memory_layers::opening_layer(
+                                    memory.notes.iter().map(|note| {
+                                        (note.project_id.as_deref(), note.updated_at.as_str())
+                                    }),
+                                );
+                            }
+                            card.memory = Some(memory);
+                        }
                         Err(error) => Toaster::error(error.to_string(), cx),
                     }
                 }

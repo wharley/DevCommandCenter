@@ -128,3 +128,46 @@ impl MemoryCard {
         .into_any_element()
     }
 }
+
+/// Where the memory opens, from each note's `(project, updated at)`: the
+/// person's layer when it has notes (or none has any), else the project
+/// whose note changed last.
+pub(crate) fn opening_layer<'a>(
+    notes: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
+) -> Option<String> {
+    let mut last: Option<(&str, &str)> = None;
+    for (project, at) in notes {
+        let project = project?;
+        if last.is_none_or(|(_, seen)| at > seen) {
+            last = Some((project, at));
+        }
+    }
+    last.map(|(project, _)| project.to_string())
+}
+
+#[cfg(test)]
+mod opening_tests {
+    fn note<'a>(project: Option<&'a str>, at: &'a str) -> (Option<&'a str>, &'a str) {
+        (project, at)
+    }
+
+    #[test]
+    fn the_memory_opens_where_the_notes_are() {
+        // Only the Checkout's: it opens there.
+        let checkout = [note(Some("checkout"), "2026-11-10T13:30:00Z")];
+        assert_eq!(super::opening_layer(checkout).as_deref(), Some("checkout"));
+        // The last project noted wins.
+        let two = [
+            note(Some("checkout"), "2026-11-10T13:30:00Z"),
+            note(Some("omni"), "2026-11-10T14:00:00Z"),
+        ];
+        assert_eq!(super::opening_layer(two).as_deref(), Some("omni"));
+        // The person's notes: their layer, as before.
+        let mine = [
+            note(None, "2026-11-10T12:00:00Z"),
+            note(Some("omni"), "2026-11-10T14:00:00Z"),
+        ];
+        assert_eq!(super::opening_layer(mine), None);
+        assert_eq!(super::opening_layer([]), None);
+    }
+}

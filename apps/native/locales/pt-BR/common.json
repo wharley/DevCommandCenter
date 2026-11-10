@@ -422,7 +422,7 @@
       "pullRequests": "Revisões de Pull Requests",
       "showRole": "Ver o papel deste agente",
       "roleHint": "O papel é mantido pelo DCC e melhora a cada versão. Para ajustá-lo ao seu projeto, use as instruções extras em “Editar”.",
-      "howToCallAgent": "Este agente trabalha numa tarefa: chame pelo ícone dele no cabeçalho da tarefa. Para perguntar ou pedir algo, fale com ele na Sala da equipe.",
+      "howToCallAgent": "Este agente trabalha numa tarefa: chame pelo ícone dele no cabeçalho da tarefa. Para perguntar ou pedir algo, fale com ele numa Sala (a Geral ou a do projeto).",
       "agentSessions": "Em tarefas",
       "agentNoSessions": "Nenhuma tarefa ainda. Quando você o chamar numa tarefa, ela aparece aqui."
     },

@@ -355,10 +355,11 @@ impl Render for TeamRoom {
             .filter(|line| self.shows(&line.agent_id))
             .cloned()
             .collect();
-        // DCC's own cards live in the Geral room for now.
+        // Each card in its project's room, else in Geral; the rest of DCC's
+        // own (the day, the week, limits, proposals) stays in Geral.
         let geral = self.is_geral();
-        let mut cards = if geral { self.cards(cx) } else { Vec::new() };
-        cards.retain(|card| self.shows(&card.agent_id));
+        let mut cards = self.cards(cx);
+        cards.retain(|card| self.shows(&card.agent_id) && self.card_room(card, cx) == self.room);
         // On one agent, only what is its own; the room's cards stay there.
         let whole = self.focus.is_none();
         let shown: Vec<AgentRecord> = agents
@@ -366,8 +367,11 @@ impl Render for TeamRoom {
             .filter(|agent| self.shows(&agent.id))
             .cloned()
             .collect();
-        let checks = if whole && geral {
+        let checks: Vec<_> = if whole {
             self.check_ins(cx)
+                .into_iter()
+                .filter(|check| self.check_in_room(check) == self.room)
+                .collect()
         } else {
             Vec::new()
         };
