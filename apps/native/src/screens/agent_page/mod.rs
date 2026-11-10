@@ -52,6 +52,8 @@ mod report_tests;
 mod room;
 mod room_bulletin;
 mod room_cards;
+mod room_failure;
+mod room_links;
 mod room_checkins;
 mod room_cleanup;
 mod room_focus;

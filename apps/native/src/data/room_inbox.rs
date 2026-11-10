@@ -38,6 +38,8 @@ pub enum CardKind {
         pr_id: String,
         failed: bool,
         running: bool,
+        /// Why it failed, as the provider said it.
+        reason: Option<String>,
     },
 }
 
@@ -163,6 +165,9 @@ pub fn cards(sources: &InboxSources<'_>) -> Vec<InboxCard> {
                 pr_id: job.pr_id.clone(),
                 failed: job.status == JobStatus::Failed,
                 running,
+                reason: (job.status == JobStatus::Failed)
+                    .then(|| job.error.clone())
+                    .flatten(),
             },
             title,
             trigger: job.by_trigger.then_some(Trigger::PrUpdated),

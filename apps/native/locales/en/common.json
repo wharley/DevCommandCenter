@@ -465,6 +465,7 @@
         "reviewed": "{{agent}} reviewed {{task}}",
         "reviewing": "{{agent}} is reviewing {{task}}",
         "reviewFailed": "{{agent}} could not review {{task}}",
+        "signInExpired": "The provider's sign-in expired. Sign in again in Settings › Providers or pick another account in Runs on.",
         "trigger": {
           "prUpdated": "Trigger · PR updated",
           "ciFailed": "Trigger · CI failed",

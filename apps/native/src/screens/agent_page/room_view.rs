@@ -48,24 +48,29 @@ impl TeamRoom {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
+        // Links go under the words as chips.
+        let (words, links) = crate::data::message_links::split_links(&text);
+        let chips = self.link_chips(&key, links, cx);
+        let bubble = (!words.is_empty()).then(|| {
+            div()
+                .max_w(px(520.0))
+                .px(px(12.0))
+                .py(px(8.0))
+                .rounded(px(14.0))
+                .bg(colors.accent)
+                .text_size(px(13.0))
+                .line_height(px(20.0))
+                .text_color(colors.foreground)
+                .child(words)
+        });
         div()
             .debug_selector(move || key.clone())
             .flex()
             .flex_col()
             .items_end()
             .gap(px(4.0))
-            .child(
-                div()
-                    .max_w(px(520.0))
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .rounded(px(14.0))
-                    .bg(colors.accent)
-                    .text_size(px(13.0))
-                    .line_height(px(20.0))
-                    .text_color(colors.foreground)
-                    .child(text),
-            )
+            .children(bubble)
+            .children(chips)
             .child(
                 div()
                     .text_size(px(11.0))

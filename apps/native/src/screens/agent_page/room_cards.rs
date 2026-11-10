@@ -77,6 +77,13 @@ impl TeamRoom {
             )
         });
         let text = cx.t_with(key, &args);
+        let reason = match &card.kind {
+            CardKind::PrReview {
+                reason: Some(reason),
+                ..
+            } => Some(super::room_failure::reason_line(reason, cx)),
+            _ => None,
+        };
         let trigger = card.trigger.map(|trigger| {
             div()
                 .flex_none()
@@ -130,15 +137,27 @@ impl TeamRoom {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .text_size(px(12.5))
-                    .font_weight(if card.unread {
-                        FontWeight::MEDIUM
-                    } else {
-                        FontWeight::NORMAL
-                    })
-                    .text_color(colors.foreground)
-                    .child(text),
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(12.5))
+                            .font_weight(if card.unread {
+                                FontWeight::MEDIUM
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .text_color(colors.foreground)
+                            .child(text),
+                    )
+                    .children(reason.map(|reason| {
+                        div()
+                            .debug_selector(move || format!("room-card-reason-{index}"))
+                            .text_size(px(11.0))
+                            .text_color(colors.muted_foreground)
+                            .child(reason)
+                    })),
             )
             .child(
                 div()

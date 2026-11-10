@@ -465,6 +465,7 @@
         "reviewed": "{{agent}} revisou {{task}}",
         "reviewing": "{{agent}} está revisando {{task}}",
         "reviewFailed": "{{agent}} não conseguiu revisar {{task}}",
+        "signInExpired": "O login do provider expirou. Entre de novo em Configurações › Providers ou escolha outra conta em Roda em.",
         "trigger": {
           "prUpdated": "Gatilho · PR atualizado",
           "ciFailed": "Gatilho · CI falhou",

@@ -41,10 +41,26 @@ pub(super) async fn save(
     Path(agent_id): Path<String>,
     Json(draft): Json<dcc_core::domain::agent::ResidentAgentDraft>,
 ) -> Result<Json<Value>, HttpApiError> {
+    let before = backend
+        .sessions
+        .resident_agent(agent_id.trim())
+        .ok()
+        .flatten()
+        .map(|agent| agent.tool_access);
     let agent = backend
         .sessions
         .save_resident_agent(Some(agent_id.trim()), draft)
         .map_err(|error| HttpApiError::bad_request(error.to_string()))?;
+    // A changed access reaches its conversations on their next turn.
+    if before.as_ref() != Some(&agent.tool_access) {
+        let sessions = backend.sessions.clone();
+        let id = agent.id.clone();
+        tokio::spawn(async move {
+            if let Err(error) = sessions.refresh_agent_tools(&id).await {
+                eprintln!("[DCC] agent tools refresh failed: {error}");
+            }
+        });
+    }
     Ok(Json(json!({ "agent": agent })))
 }
 

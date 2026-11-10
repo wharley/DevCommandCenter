@@ -8,6 +8,8 @@ mod agent_reactions;
 mod agent_reads;
 mod agent_routines;
 mod agent_sources;
+mod agent_tools_refresh;
+mod claude_turn_usage;
 mod pr_review_requests;
 pub use agent_proposals::ProposedAgent;
 pub use agent_sources::ProposedSource;
@@ -7127,8 +7129,18 @@ impl SessionCommandState {
                             .await
                             .clone());
                         if let Some(turn_id) = turn_id {
+                            let turn_id = TurnId(turn_id);
+                            // Claude reports the session's totals; the turn
+                            // keeps its share.
+                            let models = if binding.provider_id == "claude_code" {
+                                state
+                                    .claude_turn_usage(&session_id, &turn_id, &models)
+                                    .await
+                            } else {
+                                models
+                            };
                             if let Err(error) = state
-                                .record_turn_usage(&session_id, &TurnId(turn_id), &at, &models)
+                                .record_turn_usage(&session_id, &turn_id, &at, &models)
                                 .await
                             {
                                 eprintln!("[DCC] turn usage persistence failed: {error}");
