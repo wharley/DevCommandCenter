@@ -1982,6 +1982,8 @@ struct ActiveCodexMcpToolCall {
     turn_id: Option<String>,
     wire_server_name: String,
     tool_name: String,
+    /// The call's arguments, to tell apart parallel calls on one server.
+    arguments: Value,
     approval_claimed: bool,
 }
 
@@ -2062,6 +2064,7 @@ fn update_active_codex_mcp_tool_calls(
             turn_id,
             wire_server_name,
             tool_name,
+            arguments: item.get("arguments").cloned().unwrap_or(Value::Null),
             approval_claimed: false,
         },
     );
@@ -2112,17 +2115,22 @@ fn claim_codex_mcp_tool_approval(
         )?),
     };
 
-    let mut candidates = active_calls.values_mut().filter(|call| {
-        !call.approval_claimed
-            && call.wire_server_name == wire_server_name
-            && requested_turn_id
-                .as_ref()
-                .is_none_or(|turn_id| call.turn_id.as_ref() == Some(turn_id))
-    });
-    let call = candidates.next()?;
-    if candidates.next().is_some() {
-        return None;
-    }
+    let mut candidates: Vec<&mut ActiveCodexMcpToolCall> = active_calls
+        .values_mut()
+        .filter(|call| {
+            !call.approval_claimed
+                && call.wire_server_name == wire_server_name
+                && requested_turn_id
+                    .as_ref()
+                    .is_none_or(|turn_id| call.turn_id.as_ref() == Some(turn_id))
+        })
+        .collect();
+    let shapes: Vec<(&str, &Value)> = candidates
+        .iter()
+        .map(|call| (call.tool_name.as_str(), &call.arguments))
+        .collect();
+    let picked = crate::codex_mcp_match::pick_call(&shapes, params)?;
+    let call = candidates.swap_remove(picked);
 
     call.approval_claimed = true;
     let request_id = Uuid::new_v4().to_string();
@@ -6036,6 +6044,7 @@ unified_exec                         stable             true
                     turn_id: Some("turn-1".to_string()),
                     wire_server_name: "dcc-session-0".to_string(),
                     tool_name: "fixture.one".to_string(),
+                    arguments: Value::Null,
                     approval_claimed: false,
                 },
             ),
@@ -6046,6 +6055,7 @@ unified_exec                         stable             true
                     turn_id: Some("turn-1".to_string()),
                     wire_server_name: "dcc-session-0".to_string(),
                     tool_name: "fixture.two".to_string(),
+                    arguments: Value::Null,
                     approval_claimed: false,
                 },
             ),

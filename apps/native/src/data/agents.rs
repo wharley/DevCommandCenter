@@ -199,12 +199,34 @@ pub fn lead<T>(agents: &[T], state: impl Fn(&T) -> AgentState) -> Option<&T> {
         .find_map(|wanted| agents.iter().find(|agent| state(agent) == wanted))
 }
 
+/// When a conversation last changed: the session's row is not touched when
+/// a turn starts, ends or waits on the person, so the latest of those counts
+/// too (the team room reads a conversation again when this moves).
+pub(crate) fn changed_at(summary: &dcc_core::domain::session::WorkspaceSessionSummary) -> String {
+    latest([
+        Some(summary.session.updated_at.as_str()),
+        summary.last_turn_started_at.as_deref(),
+        summary.last_turn_completed_at.as_deref(),
+        summary.last_turn_awaiting_since.as_deref(),
+    ])
+}
+
+fn latest<const N: usize>(moments: [Option<&str>; N]) -> String {
+    moments
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or_default()
+        .to_string()
+}
+
 /// The agents and their sessions' state, read only. The built-in agents are
 /// seeded by the desktop.
 pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
     let agents = sessions.list_stored_resident_agents(&ReviewerPresetText::default())?;
     let bindings = sessions.list_agent_session_bindings()?;
-    let mut inputs: HashMap<String, (SessionActivityInput, Option<String>)> = HashMap::new();
+    let mut inputs: HashMap<String, (SessionActivityInput, Option<String>, String)> =
+        HashMap::new();
     let mut workspaces: Vec<&str> = bindings
         .iter()
         .map(|binding| binding.workspace_id.as_str())
@@ -214,9 +236,14 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
     for workspace_id in workspaces {
         for summary in sessions.list_workspace_sessions(&WorkspaceId(workspace_id.to_string()))? {
             let completed = summary.last_turn_completed_at.clone();
+            let changed = changed_at(&summary);
             inputs.insert(
                 summary.session.id.0.clone(),
-                (SessionActivityInput::from_summary(&summary), completed),
+                (
+                    SessionActivityInput::from_summary(&summary),
+                    completed,
+                    changed,
+                ),
             );
         }
     }
@@ -231,11 +258,15 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                     AgentSession {
                         session_id: binding.session_id.clone(),
                         workspace_id: binding.workspace_id.clone(),
-                        state: session_state(input.map(|(input, _)| input)),
-                        completed_at: input.and_then(|(_, completed)| completed.clone()),
+                        state: session_state(input.map(|(input, _, _)| input)),
+                        completed_at: input.and_then(|(_, completed, _)| completed.clone()),
                         project_id: binding.project_id.clone(),
                         title: binding.title.clone(),
-                        updated_at: binding.updated_at.clone(),
+                        updated_at: input
+                            .map(|(_, _, changed)| changed.as_str())
+                            .filter(|changed| *changed > binding.updated_at.as_str())
+                            .unwrap_or(&binding.updated_at)
+                            .to_string(),
                     }
                 })
                 .collect();
@@ -265,6 +296,15 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_turn_ending_changes_the_conversation() {
+        // The row stays at the person's message; the turn ended after it.
+        let row = "2026-11-10T10:56:28.899763+00:00";
+        let ended = "2026-11-10T10:56:53.434238+00:00";
+        assert_eq!(super::latest([Some(row), None, Some(ended), None]), ended);
+        assert_eq!(super::latest([Some(row), None, None, None]), row);
+    }
+
     use super::*;
 
     fn input(state: Option<&str>, awaiting: Option<&str>) -> SessionActivityInput {

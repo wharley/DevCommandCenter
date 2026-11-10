@@ -5,6 +5,7 @@ pub mod claude_sdk_sidecar;
 pub mod codex;
 pub mod codex_app_server;
 mod codex_mcp;
+mod codex_mcp_match;
 pub mod common;
 pub mod cursor;
 mod cursor_acp;
