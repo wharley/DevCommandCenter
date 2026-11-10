@@ -17,8 +17,9 @@ impl SessionCommandState {
         let home = self
             .session_repo
             .is_agent_home_session(session_id, agent_id)?;
+        // In a project's room, the project's notes too.
         let project = if home {
-            None
+            self.session_room(session_id)?
         } else {
             self.memory_project_of_session(session_id)?
         };

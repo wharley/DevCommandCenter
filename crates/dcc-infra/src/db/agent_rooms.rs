@@ -45,11 +45,12 @@ impl SqliteSessionRepo {
         .map_err(repository_error)
     }
 
-    /// The project's name and folder as the person registered it.
+    /// The project's name (as the sidebar shows it) and folder.
     pub fn project_name_and_path(&self, project_id: &str) -> Option<(String, String)> {
         let conn = self.conn.lock().ok()?;
         conn.query_row(
-            "SELECT name, path FROM projects WHERE id = ?1",
+            "SELECT COALESCE(NULLIF(display_name, ''), name), root_path FROM dcc_repositories
+             WHERE project_id = ?1 ORDER BY updated_at DESC LIMIT 1",
             params![project_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )

@@ -156,11 +156,29 @@ fn needs_you(
         .collect()
 }
 
+/// The name of `project_id` as the overview lists projects.
+fn project_label(conn: &Connection, project_id: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT MIN(COALESCE(NULLIF(display_name, ''), name)) FROM dcc_repositories WHERE project_id = ?1",
+        [project_id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .ok()
+    .flatten()
+}
+
+/// In a project's room, its items first (the order stays otherwise).
+fn room_first(items: &mut [Value], room: &str) {
+    items.sort_by_key(|item| item.get("project").and_then(Value::as_str) != Some(room));
+}
+
 /// The overview as the agent reads it. `attention` is DCC's "Precisa de
-/// você" list, or `None` when it could not be read.
+/// você" list, or `None` when it could not be read; `room` is the project
+/// whose room the agent talks in.
 pub fn read_overview(
     db_path: &std::path::Path,
     attention: Option<&[AttentionItem]>,
+    room: Option<&str>,
 ) -> Result<Value, String> {
     let mut conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|error| error.to_string())?;
@@ -176,13 +194,26 @@ pub fn read_overview(
             .map(task_view)
             .collect()
     };
-    Ok(json!({
+    let mut needs = needs_you(attention, &labels, &tasks);
+    let mut running = pick(&["running"]);
+    let mut recent = pick(&["completed", "aborted"]);
+    let room = room.and_then(|project| project_label(&conn, project));
+    if let Some(room) = room.as_deref() {
+        for items in [&mut needs, &mut running, &mut recent] {
+            room_first(items, room);
+        }
+    }
+    let mut overview = json!({
         "now": chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
         "projects": projects,
-        "needsYou": needs_you(attention, &labels, &tasks),
-        "running": pick(&["running"]),
-        "recent": pick(&["completed", "aborted"]),
-    }))
+        "needsYou": needs,
+        "running": running,
+        "recent": recent,
+    });
+    if let Some(room) = room {
+        overview["room"] = json!(room);
+    }
+    Ok(overview)
 }
 
 pub async fn dispatch(sessions: &SessionCommandState, session_id: &str) -> Value {
@@ -208,11 +239,17 @@ pub async fn dispatch(sessions: &SessionCommandState, session_id: &str) -> Value
                 .collect::<Vec<_>>()
         });
     let db_path = sessions.database_file().to_path_buf();
-    let overview =
-        tokio::task::spawn_blocking(move || read_overview(&db_path, attention.as_deref()))
-            .await
-            .map_err(|error| error.to_string())
-            .and_then(|result| result);
+    // In a project's room, its project first.
+    let room = sessions
+        .session_room(&SessionId(session_id.to_string()))
+        .ok()
+        .flatten();
+    let overview = tokio::task::spawn_blocking(move || {
+        read_overview(&db_path, attention.as_deref(), room.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())
+    .and_then(|result| result);
     match overview {
         Ok(overview) => text(
             serde_json::to_string_pretty(&overview).unwrap_or_default(),
@@ -225,6 +262,21 @@ pub async fn dispatch(sessions: &SessionCommandState, session_id: &str) -> Value
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rooms_project_comes_first() {
+        let mut items = vec![
+            json!({"task": "a", "project": "OmniFast"}),
+            json!({"task": "b", "project": "Checkout"}),
+            json!({"task": "c", "project": "OmniFast"}),
+        ];
+        room_first(&mut items, "Checkout");
+        let order: Vec<&str> = items
+            .iter()
+            .map(|item| item["task"].as_str().unwrap())
+            .collect();
+        assert_eq!(order, ["b", "a", "c"]);
+    }
 
     #[test]
     fn the_overview_takes_no_arguments_and_skips_the_homes() {
@@ -266,7 +318,8 @@ mod tests {
             item("w", AttentionReason::Completed, None),
             item("h", AttentionReason::Input, None),
         ];
-        let overview = read_overview(&db, Some(&attention)).unwrap();
+        let overview = read_overview(&db, Some(&attention), None).unwrap();
+        assert!(overview.get("room").is_none());
         assert_eq!(overview["projects"], json!(["Loja"]));
         assert_eq!(overview["running"][0]["task"], "Checkout");
         assert_eq!(overview["running"].as_array().unwrap().len(), 1);
@@ -286,7 +339,10 @@ mod tests {
         )
         .is_ok());
 
-        let fallback = read_overview(&db, None).unwrap();
+        let fallback = read_overview(&db, None, None).unwrap();
         assert_eq!(fallback["needsYou"], json!([]));
+        // In the room of project "p": it says so.
+        let in_room = read_overview(&db, None, Some("p")).unwrap();
+        assert_eq!(in_room["room"], "Loja");
     }
 }

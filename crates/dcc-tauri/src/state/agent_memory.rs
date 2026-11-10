@@ -21,11 +21,6 @@ impl SessionCommandState {
         Ok(memory_block(&notes, project_id, can_remember))
     }
 
-    /// The project whose notes a turn of `session_id` carries.
-    pub fn memory_project_of_session(&self, session_id: &SessionId) -> Result<Option<String>> {
-        self.session_repo.memory_project_of_session(&session_id.0)
-    }
-
     /// The project of a checkout, for a pull request review run there.
     pub fn memory_project_of_root(&self, root: &str) -> Result<Option<String>> {
         self.session_repo.memory_project_of_root(root)
