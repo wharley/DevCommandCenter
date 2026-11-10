@@ -8,7 +8,7 @@ use dcc_core::domain::agent::REVIEWER_PRESET;
 use gpui::{AnyElement, BorrowAppContext, Context, FontWeight, SharedString, div, prelude::*, px};
 
 use super::AgentPage;
-use crate::data::agent_triggers::{AgentTriggers, DAILY_RUNS, TARGET_RUNS, Trigger};
+use crate::data::agent_triggers::{AgentTriggers, TARGET_RUNS, Trigger};
 use crate::i18n::{Args, Translate};
 use crate::screens::sidebar::AgentPageData;
 use crate::theme::ActiveTheme;
@@ -86,13 +86,20 @@ impl AgentPage {
             .map(|trigger| self.trigger_row(&agent_id, trigger, cx))
             .collect();
         let wake = self.wake_rows(&agent_id, cx);
-        let limits = cx.t_with(
-            "agents.triggers.limits",
-            &Args::default()
-                .with("daily", DAILY_RUNS.to_string())
-                .with("target", TARGET_RUNS.to_string())
-                .with("today", today.to_string()),
-        );
+        let ceiling = self.ceiling_row(&agent_id, cx);
+        let daily = cx
+            .try_global::<AgentTriggers>()
+            .and_then(|triggers| triggers.daily_ceiling(&agent_id));
+        let args = Args::default()
+            .with("target", TARGET_RUNS.to_string())
+            .with("today", today.to_string());
+        let limits = match daily {
+            Some(daily) => cx.t_with(
+                "agents.triggers.limits",
+                &args.with("daily", daily.to_string()),
+            ),
+            None => cx.t_with("agents.triggers.limitsNoCeiling", &args),
+        };
         Some(
             Self::card(cx)
                 .debug_selector(|| "agent-triggers".into())
@@ -112,6 +119,7 @@ impl AgentPage {
                 )
                 .children(rows)
                 .children(wake)
+                .children(ceiling)
                 .child(
                     div()
                         .debug_selector(|| "agent-triggers-limits".into())

@@ -27,6 +27,7 @@ fn source(id: &str, watch: &str, proposed: bool) -> AgentSource {
         proposed,
         last_checked_at: None,
         created_at: "2026-11-09T10:00:00Z".into(),
+        room: None,
     }
 }
 
@@ -67,6 +68,32 @@ fn sources_show_as_cards_lines_and_on_the_page(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     assert!(cx.debug_bounds("room-source-proposal-0").is_some());
+    // One asked in the Checkout's room shows there, not in Geral.
+    cx.update(|_, cx| {
+        let mut asked_in_checkout = source("s-3", "#checkout-alertas", true);
+        asked_in_checkout.room = Some("checkout".into());
+        cx.set_global(Sources {
+            list: vec![asked_in_checkout],
+        });
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-source-proposal-0").is_none());
+    page.update(cx, |page, cx| {
+        page.open_room_of(Some("checkout".into()), cx)
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("room-source-proposal-0").is_some());
+    // Back to Geral and to the sources it started with.
+    cx.update(|_, cx| {
+        cx.set_global(Sources {
+            list: vec![
+                source("s-1", "menções a mim", false),
+                source("s-2", "#suporte-privado", true),
+            ],
+        });
+    });
+    page.update(cx, |page, cx| page.open_room(None, cx));
+    cx.run_until_parked();
     page.update(cx, |page, cx| {
         let room = page.room.as_ref().unwrap().0.clone();
         room.update(cx, |room, cx| {

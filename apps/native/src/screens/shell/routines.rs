@@ -103,7 +103,7 @@ impl Shell {
                 }
                 Ok(()) => {}
             }
-            let Some(send) = self.home_send(&agent, routine_prompt(routine), cx) else {
+            let Some(send) = self.home_send(&agent, None, routine_prompt(routine), cx) else {
                 continue;
             };
             cx.update_global::<AgentTriggers, _>(|triggers, _| {

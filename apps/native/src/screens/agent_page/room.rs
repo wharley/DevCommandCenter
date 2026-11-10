@@ -268,6 +268,10 @@ impl TeamRoom {
                     room.sync(cx);
                     return;
                 }
+                // A turn moved: the cards it may have proposed show now.
+                if !read.is_empty() {
+                    room.refresh_proposed(cx);
+                }
                 room.take(read);
                 cx.notify();
                 // It may have changed again meanwhile.

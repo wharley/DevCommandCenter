@@ -60,6 +60,22 @@ impl AgentPage {
             "agents.sources.every",
             &Args::default().with("minutes", source.every_minutes.to_string()),
         );
+        // The room its news wakes the agent in, when not Geral.
+        let room = source.room.as_deref().map(|room| {
+            let name = self
+                .sidebar
+                .read(cx)
+                .projects()
+                .iter()
+                .find(|project| project.project_id == room)
+                .map(|project| project.display_name.clone())
+                .unwrap_or_else(|| room.to_string());
+            cx.t_with("agents.sources.inRoom", &Args::default().with("room", name))
+        });
+        let every = match room {
+            Some(room) => format!("{every} · {room}").into(),
+            None => every,
+        };
         let detail = match source.last_checked_at.as_deref() {
             Some(at) => format!(
                 "{every} · {}",

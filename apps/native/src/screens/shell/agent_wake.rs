@@ -1,12 +1,12 @@
 //! Waking an agent in its own conversation with a request DCC writes (a
-//! routine's, a source's news): the conversation it has, or a new one in its
-//! home, on its own provider (else the composer's), with approval "ask".
-//! Shared by the routines' and the sources' clocks.
+//! routine's, a source's news): its conversation in the room the request
+//! belongs to (a source's room, else Geral), or a new one there, on its own
+//! provider (else the composer's), with approval "ask". Shared by the
+//! routines' and the sources' clocks.
 
 use gpui::App;
 
 use super::Shell;
-use super::check_in::home_session;
 use super::review_trigger::review_run;
 use crate::data::agent_conversation::ConversationStart;
 use crate::data::agents::AgentRecord;
@@ -19,6 +19,8 @@ pub(super) struct HomeSend {
     agent_id: String,
     agent_name: String,
     existing: Option<String>,
+    /// The project whose room it wakes in; none: Geral.
+    room: Option<String>,
     home_task: Option<String>,
     title: String,
     run: AgentRun,
@@ -30,6 +32,7 @@ impl Shell {
     pub(super) fn home_send(
         &self,
         agent: &AgentRecord,
+        room: Option<&str>,
         prompt: String,
         cx: &App,
     ) -> Option<HomeSend> {
@@ -51,10 +54,31 @@ impl Shell {
                 &Args::default().with("agent", agent.name.clone()),
             )
             .to_string();
+        // A project's room names its conversation after the project too.
+        let project = room.and_then(|room| {
+            self.sidebar
+                .read(cx)
+                .projects()
+                .iter()
+                .find(|project| project.project_id == room)
+                .map(|project| project.display_name.clone())
+        });
+        let title = match project {
+            Some(project) => format!("{title} · {project}"),
+            None => title,
+        };
+        let home = dcc_core::domain::agent_conversation::home_project_id(&agent.id);
+        let existing = agent
+            .sessions
+            .iter()
+            .filter(|session| session.project_id == home && session.room.as_deref() == room)
+            .max_by(|left, right| left.updated_at.cmp(&right.updated_at))
+            .map(|session| session.session_id.clone());
         Some(HomeSend {
             agent_id: agent.id.clone(),
             agent_name: agent.name.clone(),
-            existing: home_session(agent),
+            existing,
+            room: room.map(str::to_string),
             home_task,
             title,
             run,
@@ -76,8 +100,7 @@ pub(super) fn send_home(api: &DesktopApi, send: HomeSend) -> Result<(), String> 
                 provider: &send.run.provider_id,
                 model: send.run.model.as_deref(),
                 runtime: send.run.provider_runtime.clone(),
-                // Events wake an agent in the Geral room.
-                room: None,
+                room: send.room.as_deref(),
             })
             .map_err(|error| error.to_string())?
             .1

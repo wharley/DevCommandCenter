@@ -2710,6 +2710,12 @@ impl SqliteSessionRepo {
         )?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "may_call_json", "TEXT NULL")?;
         SqliteWorkspaceRepo::ensure_column(&conn, "dcc_agents", "account_id", "TEXT NULL")?;
+        SqliteWorkspaceRepo::ensure_column(
+            &conn,
+            "dcc_agent_sources",
+            "room_project_id",
+            "TEXT NULL",
+        )?;
         Self::retire_presets(&conn)?;
         Self::reviewer_without_tasks(&conn)?;
         SqliteWorkspaceRepo::ensure_column(

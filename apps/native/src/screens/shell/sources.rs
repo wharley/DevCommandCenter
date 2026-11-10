@@ -94,7 +94,8 @@ impl Shell {
             if !cx.default_global::<Reading>().0.insert(source.id.clone()) {
                 continue;
             }
-            let Some(send) = self.home_send(&agent, String::new(), cx) else {
+            let Some(send) = self.home_send(&agent, source.room.as_deref(), String::new(), cx)
+            else {
                 cx.default_global::<Reading>().0.remove(&source.id);
                 continue;
             };

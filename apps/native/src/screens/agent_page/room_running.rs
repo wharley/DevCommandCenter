@@ -27,18 +27,23 @@ pub(crate) fn elapsed(started_at: Option<&str>, now_ms: i64) -> Option<String> {
 }
 
 impl TeamRoom {
-    /// The running tasks opened from this room's conversations.
+    /// The running tasks opened from this room's conversations, and in a
+    /// project's room every task of the project an agent opened from any
+    /// room — the project's work shows in its room, as Tucano posts a
+    /// project's events in its channel.
     fn running_here(&self, cx: &gpui::App) -> Vec<RunningTask> {
         self.sidebar
             .read(cx)
             .running_agent_tasks()
             .into_iter()
             .filter(|task| {
-                self.shows(&task.agent_id)
-                    && self
-                        .feeds
-                        .iter()
-                        .any(|feed| feed.session_id == task.session_id)
+                let asked_here = self
+                    .feeds
+                    .iter()
+                    .any(|feed| feed.session_id == task.session_id);
+                let of_this_project = self.room.is_some()
+                    && room_for(Some(task.project_id.clone()), &self.rooms) == self.room;
+                self.shows(&task.agent_id) && (asked_here || of_this_project)
             })
             .collect()
     }

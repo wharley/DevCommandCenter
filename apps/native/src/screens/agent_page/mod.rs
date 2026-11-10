@@ -67,13 +67,14 @@ mod room_images;
 mod room_images_tests;
 mod room_limits;
 mod room_links;
+mod room_live;
 mod room_mentions;
 mod room_proposals;
 mod room_reactions;
 mod room_recap;
+mod room_refresh;
 mod room_report;
 mod room_routines;
-mod room_live;
 mod room_running;
 #[cfg(test)]
 mod room_running_tests;
@@ -98,6 +99,7 @@ mod team_rooms;
 #[cfg(test)]
 mod tests;
 mod triggers;
+mod triggers_ceiling;
 #[cfg(test)]
 mod triggers_tests;
 mod triggers_wake;

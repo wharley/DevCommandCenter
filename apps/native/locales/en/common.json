@@ -225,6 +225,7 @@
       "create": "Create",
       "discard": "Discard",
       "every": "every {{minutes}} min",
+      "inRoom": "{{room}} room",
       "lastRead": "last read {{when}}",
       "delete": "Remove"
     },
@@ -263,6 +264,11 @@
     "triggers": {
       "title": "Triggers",
       "limits": "Up to {{daily}} runs a day and {{target}} per PR or task. Today: {{today}}.",
+      "limitsNoCeiling": "No ceiling a day; up to {{target}} per PR or task. Today: {{today}}.",
+      "ceiling": {
+        "title": "Ceiling a day",
+        "none": "No ceiling"
+      },
       "ciFailed": {
         "title": "A task's CI failed",
         "hint": "When the checks of one of your tasks' PRs fail, the agent reads what failed and says the cause and the smallest fix in its conversation in that task. It only reads; who fixes it is up to you.",
@@ -485,6 +491,7 @@
       "taskRunningNow": "{{agent}} · “{{task}}” just started",
       "atWork": "{{agent}} working in “{{task}}” for {{time}}",
       "atWorkNow": "{{agent}} started working in “{{task}}”",
+      "ceiling": "{{agent}} reached today's ceiling of {{count}} triggers: the next ones wait until tomorrow.",
       "approval": "{{agent}} wants to use {{tool}}",
       "placeholderAgent": "Write to {{agent}}",
       "emptyAgent": "Write to {{agent}}. The answer comes here; the whole conversation, with its tools, opens in \"Whole conversation\".",

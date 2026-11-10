@@ -15,6 +15,8 @@ pub struct RunningTask {
     pub agent_id: String,
     /// The agent's conversation that opened it.
     pub session_id: String,
+    /// The task's project, for its room.
+    pub project_id: String,
     /// When its running turn started.
     pub started_at: Option<String>,
 }
@@ -27,13 +29,17 @@ impl Sidebar {
             .opened_tasks
             .iter()
             .filter(|(task, _)| running.contains(*task))
-            .map(|(task, opened)| RunningTask {
+            .map(|(task, opened)| {
+                let summary = data.tasks.iter().find(|summary| summary.id == *task);
+                (task, opened, summary)
+            })
+            .map(|(task, opened, summary)| RunningTask {
                 task_id: task.clone(),
-                name: data
-                    .tasks
-                    .iter()
-                    .find(|summary| summary.id == *task)
+                name: summary
                     .map(|summary| summary.name.clone())
+                    .unwrap_or_default(),
+                project_id: summary
+                    .map(|summary| summary.project_id.clone())
                     .unwrap_or_default(),
                 agent_id: opened.agent_id.clone(),
                 session_id: opened.session_id.clone(),

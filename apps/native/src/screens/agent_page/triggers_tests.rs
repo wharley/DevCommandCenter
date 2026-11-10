@@ -71,6 +71,8 @@ fn the_reviewers_trigger_is_off_until_turned_on(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("agent-triggers").is_some());
     assert!(cx.debug_bounds("agent-triggers-limits").is_some());
+    // "Teto por dia": 5 by default, with 10, 20 and no ceiling to pick.
+    assert!(cx.debug_bounds("agent-triggers-ceiling").is_some());
     // The switch sits inside the card, however long its text.
     let card = cx.debug_bounds("agent-triggers").unwrap();
     let switch = cx.debug_bounds("agent-trigger-prUpdated").unwrap();

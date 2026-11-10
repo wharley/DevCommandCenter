@@ -19,14 +19,32 @@ impl Sidebar {
             .collect();
         let seen = &self.agent_markers.seen;
         let unread = |session: &str, completed: &str| seen.is_unread(session, Some(completed));
-        cards(&InboxSources {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut all = cards(&InboxSources {
             agents: &data.agents,
             task_names: &task_names,
             runs,
             jobs: &self.pr_reviews,
             unread: &unread,
-            now_ms: chrono::Utc::now().timestamp_millis(),
-        })
+            now_ms,
+        });
+        // The tasks agents opened, once done (`room_opened`).
+        all.extend(crate::data::room_opened::opened_cards(
+            &data.opened_tasks,
+            &data.tasks,
+            &data.activities,
+            &unread,
+            now_ms,
+        ));
+        all.sort_by(|left, right| left.at.cmp(&right.at));
+        all
+    }
+
+    /// The tasks agents opened, with the conversation each came from.
+    pub fn opened_tasks(
+        &self,
+    ) -> &std::collections::HashMap<String, crate::data::task_agents::OpenedTask> {
+        &self.state.data.opened_tasks
     }
 
     /// Beside "Agentes": the unread cards (the day's recap and the

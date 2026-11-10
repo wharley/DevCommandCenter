@@ -97,6 +97,13 @@ pub(super) struct Stored {
     /// The latest review activity seen on each pull request, by
     /// `<agent>|<url>`: only what comes after it wakes the agent.
     received: BTreeMap<String, String>,
+    /// When each agent's "review received" was turned on: a pull request
+    /// seen for the first time with activity after it is news (its first
+    /// review is what puts it on the list), before it only where it starts.
+    received_since: BTreeMap<String, String>,
+    /// Each agent's ceiling a day when the person picked one; 0 is none
+    /// (`agent_ceiling`).
+    pub(super) ceilings: BTreeMap<String, usize>,
     /// "Pausar todos": no trigger wakes anyone.
     pub(super) paused: bool,
     /// The hours no trigger wakes anyone (`agent_quiet`).
@@ -192,6 +199,9 @@ impl AgentTriggers {
             self.stored
                 .received
                 .retain(|key, _| !key.starts_with(&prefix));
+            self.stored
+                .received_since
+                .insert(agent_id.to_string(), Utc::now().to_rfc3339());
         }
         self.save();
     }
@@ -220,7 +230,7 @@ impl AgentTriggers {
         }
         self.quiet_check(now)?;
         self.brake_check(agent_id)?;
-        if self.runs_today(agent_id, now) >= DAILY_RUNS {
+        if self.at_ceiling(agent_id, now) {
             return Err(Held::DailyLimit);
         }
         let today = now.with_timezone(&Local).date_naive();
@@ -249,19 +259,32 @@ impl AgentTriggers {
     }
 
     /// A review activity seen on `url`: true when it came after the one
-    /// seen before. The first sight only sets where it starts, so old
-    /// reviews never wake the agent.
+    /// seen before. A pull request seen for the first time is news when its
+    /// activity came after the trigger was turned on (its first review is
+    /// what lists it); older reviews never wake the agent.
     pub fn advance_received(&mut self, agent_id: &str, url: &str, latest: &str) -> bool {
         let key = format!("{agent_id}|{url}");
+        // Turned on before this was kept: from now on.
+        if !self.stored.received_since.contains_key(agent_id) {
+            self.stored
+                .received_since
+                .insert(agent_id.to_string(), Utc::now().to_rfc3339());
+            self.save();
+        }
+        let after = |earlier: &str| match (
+            DateTime::parse_from_rfc3339(latest),
+            DateTime::parse_from_rfc3339(earlier),
+        ) {
+            (Ok(latest), Ok(earlier)) => latest > earlier,
+            _ => false,
+        };
         let news = match self.stored.received.get(&key) {
-            None => false,
-            Some(seen) => match (
-                DateTime::parse_from_rfc3339(latest),
-                DateTime::parse_from_rfc3339(seen),
-            ) {
-                (Ok(latest), Ok(seen)) => latest > seen,
-                _ => false,
-            },
+            None => self
+                .stored
+                .received_since
+                .get(agent_id)
+                .is_some_and(|since| after(since)),
+            Some(seen) => after(seen),
         };
         if news || !self.stored.received.contains_key(&key) {
             self.stored.received.insert(key, latest.to_string());
@@ -314,6 +337,23 @@ impl AgentTriggers {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_pull_requests_first_review_after_the_trigger_wakes_the_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut triggers = AgentTriggers::load(dir.path().join("agent-triggers.json"));
+        triggers.set("rev", Trigger::ReviewReceived, true);
+        let soon = (Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
+        let long_ago = "2026-01-01T10:00:00Z";
+        // Listed for the first time by its first review, after turning on.
+        assert!(triggers.advance_received("rev", "pr/1032", &soon));
+        // Seen again with nothing newer: no news.
+        assert!(!triggers.advance_received("rev", "pr/1032", &soon));
+        // Another pull request whose review came before turning on: only
+        // where it starts.
+        assert!(!triggers.advance_received("rev", "pr/1021", long_ago));
+    }
+
     use super::*;
 
     fn at(text: &str) -> DateTime<Utc> {

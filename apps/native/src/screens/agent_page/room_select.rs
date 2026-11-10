@@ -92,11 +92,32 @@ impl TeamRoom {
     pub(crate) fn unread_by_room(&self, cx: &gpui::App) -> HashMap<Option<String>, usize> {
         let mut unread: HashMap<Option<String>, usize> = HashMap::new();
         for card in self.cards(cx).iter().filter(|card| card.unread) {
-            *unread.entry(self.card_room(card, cx)).or_default() += 1;
+            let room = self.card_room(card, cx);
+            if !self.asked_in(card, &room, cx) {
+                *unread.entry(room).or_default() += 1;
+            }
         }
         for check in self.check_ins(cx).iter().filter(|check| check.unread) {
             *unread.entry(self.check_in_room(check)).or_default() += 1;
         }
         unread
+    }
+
+    /// A result of a task an agent opened, in the room it was asked in:
+    /// that conversation already carries its report, so no card there.
+    pub(crate) fn asked_in(&self, card: &InboxCard, room: &Option<String>, cx: &gpui::App) -> bool {
+        let crate::data::room_inbox::CardKind::TaskResult { workspace_id, .. } = &card.kind else {
+            return false;
+        };
+        let sidebar = self.sidebar.read(cx);
+        let Some(opened) = sidebar.opened_tasks().get(workspace_id) else {
+            return false;
+        };
+        sidebar
+            .agents()
+            .iter()
+            .flat_map(|agent| agent.sessions.iter())
+            .find(|session| session.session_id == opened.session_id)
+            .is_some_and(|session| session.room == *room)
     }
 }

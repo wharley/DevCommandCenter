@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS dcc_agent_sources (
     seen_json TEXT NULL,
     last_checked_at TEXT NULL,
     created_at TEXT NOT NULL,
+    room_project_id TEXT NULL,
     FOREIGN KEY (agent_id) REFERENCES dcc_agents(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_dcc_agent_sources_agent ON dcc_agent_sources(agent_id);
@@ -29,7 +30,7 @@ fn repository_error(error: impl ToString) -> dcc_core::CoreError {
     dcc_core::CoreError::Repository(error.to_string())
 }
 
-const COLUMNS: &str = "s.id, s.agent_id, s.connector_id, s.connector, s.watch, s.tool, s.arguments, s.every_minutes, s.enabled, s.proposed, s.last_checked_at, s.created_at";
+const COLUMNS: &str = "s.id, s.agent_id, s.connector_id, s.connector, s.watch, s.tool, s.arguments, s.every_minutes, s.enabled, s.proposed, s.last_checked_at, s.created_at, s.room_project_id";
 
 fn source_from_row(row: &Row<'_>) -> rusqlite::Result<AgentSource> {
     Ok(AgentSource {
@@ -45,6 +46,7 @@ fn source_from_row(row: &Row<'_>) -> rusqlite::Result<AgentSource> {
         proposed: row.get::<_, i64>(9)? != 0,
         last_checked_at: row.get(10)?,
         created_at: row.get(11)?,
+        room: row.get(12)?,
     })
 }
 
@@ -86,7 +88,7 @@ impl SqliteSessionRepo {
         stored.last_checked_at = None;
         stored.created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
         conn.execute(
-            "INSERT INTO dcc_agent_sources (id, agent_id, connector_id, connector, watch, tool, arguments, every_minutes, enabled, proposed, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 1, ?9)",
+            "INSERT INTO dcc_agent_sources (id, agent_id, connector_id, connector, watch, tool, arguments, every_minutes, enabled, proposed, created_at, room_project_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 1, ?9, ?10)",
             params![
                 stored.id,
                 stored.agent_id,
@@ -96,7 +98,8 @@ impl SqliteSessionRepo {
                 stored.tool,
                 stored.arguments,
                 stored.every_minutes,
-                stored.created_at
+                stored.created_at,
+                stored.room
             ],
         )
         .map_err(repository_error)?;
@@ -133,7 +136,7 @@ impl SqliteSessionRepo {
             &format!("SELECT {COLUMNS}, s.seen_json FROM dcc_agent_sources s WHERE s.id = ?1"),
             params![id],
             |row| {
-                let seen: Option<String> = row.get(12)?;
+                let seen: Option<String> = row.get(13)?;
                 Ok((
                     source_from_row(row)?,
                     seen.and_then(|json| from_str(&json).ok())
@@ -185,6 +188,7 @@ mod tests {
             proposed: false,
             last_checked_at: None,
             created_at: String::new(),
+            room: Some("checkout".into()),
         };
         let proposed = repo.propose_agent_source(&source).unwrap();
         assert!(proposed.proposed);
@@ -194,6 +198,8 @@ mod tests {
         let listed = repo.list_agent_sources().unwrap();
         assert_eq!(listed.len(), 1);
         assert!(!listed[0].proposed && listed[0].enabled);
+        // The room it was asked in is kept.
+        assert_eq!(listed[0].room.as_deref(), Some("checkout"));
         repo.record_agent_source_read(&proposed.id, &["a".into()], "2026-11-09T10:00:00Z")
             .unwrap();
         let (read, seen) = repo.agent_source_with_seen(&proposed.id).unwrap().unwrap();

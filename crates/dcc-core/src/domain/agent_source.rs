@@ -42,6 +42,10 @@ pub struct AgentSource {
     pub proposed: bool,
     pub last_checked_at: Option<String>,
     pub created_at: String,
+    /// The room its news wakes the agent in (`docs/PLANO_SALA_POR_PROJETO`):
+    /// the project of the room it was asked in; none: the Geral room.
+    #[serde(default)]
+    pub room: Option<String>,
 }
 
 impl AgentSource {
@@ -227,6 +231,7 @@ mod tests {
             proposed: false,
             last_checked_at: Some("2026-11-09T10:00:00Z".into()),
             created_at: "2026-11-09T09:00:00Z".into(),
+            room: None,
         }
     }
 

@@ -128,4 +128,58 @@ impl TeamRoom {
             })
             .into_any_element()
     }
+
+    /// "Revisor chegou ao teto de 5 gatilhos hoje…": a trigger held for the
+    /// day is said where the person looks, not only on the agent's page.
+    pub(super) fn held_rows(
+        &self,
+        agents: &[AgentRecord],
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(triggers) = cx.try_global::<crate::data::agent_triggers::AgentTriggers>() else {
+            return Vec::new();
+        };
+        let now = chrono::Utc::now();
+        let held: Vec<AgentRecord> = agents
+            .iter()
+            .filter(|agent| {
+                self.shows(&agent.id)
+                    && triggers.any_on(&agent.id)
+                    && triggers.at_ceiling(&agent.id, now)
+            })
+            .cloned()
+            .collect();
+        let colors = cx.theme().colors.clone();
+        held.into_iter()
+            .map(|agent| {
+                let id = agent.id.clone();
+                div()
+                    .debug_selector(move || format!("room-held-{id}"))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_size(px(12.0))
+                    .text_color(colors.muted_foreground)
+                    .child(AgentAvatarView::new(
+                        SharedString::from(format!("room-held-face-{}", agent.id)),
+                        &agent.avatar,
+                        None,
+                        20.0,
+                    ))
+                    .child(
+                        cx.t_with(
+                            "agents.room.ceiling",
+                            &Args::default().with("agent", agent.name.clone()).with(
+                                "count",
+                                triggers
+                                    .daily_ceiling(&agent.id)
+                                    .unwrap_or_default()
+                                    .to_string(),
+                            ),
+                        ),
+                    )
+                    .into_any_element()
+            })
+            .collect()
+    }
 }

@@ -121,6 +121,8 @@ impl SessionCommandState {
             proposed: true,
             last_checked_at: None,
             created_at: String::new(),
+            // Its news wakes the agent in the room it was asked in.
+            room: self.session_room(session_id)?,
         };
         let stored = self.session_repo.propose_agent_source(&source)?;
         Ok((agent.name, stored))

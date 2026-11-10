@@ -91,9 +91,16 @@ impl TeamRoom {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let colors = cx.theme().colors.clone();
+        // Each proposal in the room it was asked in.
         let proposed: Vec<AgentSource> = cx
             .try_global::<Sources>()
-            .map(|sources| sources.proposed().cloned().collect())
+            .map(|sources| {
+                sources
+                    .proposed()
+                    .filter(|source| source.room == self.room)
+                    .cloned()
+                    .collect()
+            })
             .unwrap_or_default();
         let mut rows = Vec::new();
         for (index, source) in proposed.iter().enumerate() {

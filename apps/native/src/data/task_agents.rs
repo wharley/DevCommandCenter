@@ -17,6 +17,8 @@ use super::agents::{AgentRecord, AgentState};
 pub struct OpenedTask {
     pub agent_id: String,
     pub session_id: String,
+    /// The task's own conversation, where its turns run.
+    pub task_session_id: Option<String>,
 }
 
 /// Task id → who opened it and from which conversation.
@@ -44,6 +46,7 @@ pub fn opened_tasks(
                 OpenedTask {
                     agent_id: agent.to_string(),
                     session_id: parent.to_string(),
+                    task_session_id: delegation.child_session_id.as_ref().map(|id| id.0.clone()),
                 },
             ))
         })
@@ -190,7 +193,9 @@ mod tests {
             by_opener.get("w-campo"),
             Some(&OpenedTask {
                 agent_id: "suporte".into(),
-                session_id: "s-home".into()
+                session_id: "s-home".into(),
+                // The task's own conversation, where its turns run.
+                task_session_id: Some("child".into()),
             })
         );
     }

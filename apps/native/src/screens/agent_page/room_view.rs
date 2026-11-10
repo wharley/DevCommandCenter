@@ -257,7 +257,11 @@ impl Render for TeamRoom {
         // own (the day, the week, limits, proposals) stays in Geral.
         let geral = self.is_geral();
         let mut cards = self.cards(cx);
-        cards.retain(|card| self.shows(&card.agent_id) && self.card_room(card, cx) == self.room);
+        cards.retain(|card| {
+            self.shows(&card.agent_id)
+                && self.card_room(card, cx) == self.room
+                && !self.asked_in(card, &self.room, cx)
+        });
         // On one agent, only what is its own; the room's cards stay there.
         let whole = self.focus.is_none();
         let shown: Vec<AgentRecord> = agents
@@ -367,8 +371,9 @@ impl Render for TeamRoom {
             rows.extend(self.limit_rows(&shown, cx));
             rows.extend(self.routine_cards(&shown, cx));
             rows.extend(self.proposal_cards(&agents, cx));
-            rows.extend(self.source_cards(&shown, cx));
         }
+        // A source's proposal shows in the room it was asked in.
+        rows.extend(self.source_cards(&shown, cx));
         let unread_bar = self.unread_bar(unread, cx);
         let pending: Vec<Pending> = self
             .pending
@@ -401,6 +406,8 @@ impl Render for TeamRoom {
         rows.extend(self.running_rows(&agents, cx));
         // Agents at work in this project's tasks, however they got there.
         rows.extend(self.at_work_rows(&agents, cx));
+        // A trigger held for the day, said here.
+        rows.extend(self.held_rows(&agents, cx));
         // An approval is answered here; its agent needs no "precisa de você".
         let asking: Vec<String> = self
             .approvals(&agents)

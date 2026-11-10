@@ -8,7 +8,7 @@ use gpui::{AnyElement, BorrowAppContext, Context, SharedString, div, prelude::*,
 
 use super::AgentPage;
 use crate::data::agent_quiet::{QUIET_CHOICES, QuietHours};
-use crate::data::agent_triggers::{AgentTriggers, DAILY_RUNS};
+use crate::data::agent_triggers::AgentTriggers;
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
 use crate::ui::ToggleGroup;
@@ -29,7 +29,7 @@ pub(crate) fn next_wake(triggers: &AgentTriggers, agent_id: &str) -> Option<(&'s
             Args::default().with("hour", quiet.to.to_string()),
         ));
     }
-    if triggers.runs_today(agent_id, now) >= DAILY_RUNS {
+    if triggers.at_ceiling(agent_id, now) {
         return Some(("agents.triggers.next.ceiling", Args::default()));
     }
     Some(("agents.triggers.next.check", Args::default()))
