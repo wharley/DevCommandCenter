@@ -5,7 +5,7 @@
 //! Read-only for now: answering, approving and sending stay in the desktop.
 
 mod activity;
-mod approval_reason;
+pub(crate) mod approval_reason;
 mod assistant_row;
 mod audio;
 mod cards;

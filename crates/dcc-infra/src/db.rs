@@ -7963,7 +7963,7 @@ impl SqliteSessionRepo {
             .and_then(|limit| i64::try_from(limit).ok());
         // Everything allowed is stored as nothing; kept when it narrows a
         // tool or sets the mode of its tasks.
-        let access_json = (!draft.tool_access.is_full() || draft.tool_access.tasks_approval.is_some())
+        let access_json = (!draft.tool_access.is_full() || draft.tool_access.has_modes())
             .then(|| to_string(&draft.tool_access))
             .transpose()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;

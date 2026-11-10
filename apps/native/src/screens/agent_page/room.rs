@@ -94,6 +94,10 @@ pub struct TeamRoom {
     pub(crate) room_generation: u64,
     /// The projects that have a room, for where each card shows.
     pub(crate) rooms: Vec<String>,
+    /// Approvals being answered from the room (`room_approvals`).
+    pub(crate) answering: std::collections::HashSet<String>,
+    /// "Recusar com motivo" open on a request, with its field.
+    pub(crate) approval_reason: Option<(String, Entity<crate::ui::TextInput>)>,
     /// Agents proposed that the person answered here, gone at once.
     pub(crate) answered_proposals: Vec<String>,
     /// 👍 / 👎 changed here, by answer, before the feed reads them again.
@@ -186,6 +190,8 @@ impl TeamRoom {
             room: None,
             room_generation: 0,
             rooms: Vec::new(),
+            answering: Default::default(),
+            approval_reason: None,
             answered_proposals: Vec::new(),
             reacted: HashMap::new(),
             rule: None,
@@ -437,6 +443,9 @@ impl TeamRoom {
         }
         cx.notify();
         let effort = agent.provider_id.as_ref().and(agent.effort.clone());
+        // A message the person sends runs in the mode set for the agent.
+        let conversation_mode =
+            super::editor_task_mode::wire_mode(agent.tool_access.conversation_approval);
         // Its own account on its own provider (`provider_runtime::for_agent`).
         let runtime = (!cfg!(test))
             .then(|| crate::data::provider_runtime::for_agent(&agent, &provider))
@@ -467,7 +476,7 @@ impl TeamRoom {
                             provider_id: Some(provider.clone()),
                             model: model.clone(),
                             effort,
-                            approval_policy: Some("ask".into()),
+                            approval_policy: Some(conversation_mode.clone()),
                             plan_mode: false,
                             fast_mode: false,
                             tool_instructions: None,

@@ -51,6 +51,9 @@ mod reaction_tests;
 #[cfg(test)]
 mod report_tests;
 mod room;
+mod room_approvals;
+#[cfg(test)]
+mod room_approvals_tests;
 mod room_bulletin;
 mod room_cards;
 mod room_checkins;

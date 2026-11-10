@@ -41,6 +41,11 @@ pub struct ToolAccess {
     /// Compozy's per-agent mode); missing: ask, as before.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tasks_approval: Option<super::provider::ProviderApprovalPolicy>,
+    /// What its own conversation may do without asking on a message the
+    /// person sends; a wake (a source, a routine, a trigger) still asks.
+    /// Missing: ask, as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_approval: Option<super::provider::ProviderApprovalPolicy>,
 }
 
 /// The group a DCC tool belongs to; none for the agent's own tools.
@@ -72,6 +77,11 @@ fn allows(level: AccessLevel, read_only: bool) -> bool {
 }
 
 impl ToolAccess {
+    /// A mode was set for its tasks or its conversation.
+    pub fn has_modes(&self) -> bool {
+        self.tasks_approval.is_some() || self.conversation_approval.is_some()
+    }
+
     pub fn is_full(&self) -> bool {
         self.groups
             .values()

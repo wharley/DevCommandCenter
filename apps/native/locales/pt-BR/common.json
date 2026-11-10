@@ -483,6 +483,7 @@
       "placeholderProject": "Escreva para a equipe do {{project}} · @ para chamar alguém",
       "taskRunning": "{{agent}} · “{{task}}” rodando há {{time}}",
       "taskRunningNow": "{{agent}} · “{{task}}” começou agora",
+      "approval": "{{agent}} quer usar {{tool}}",
       "placeholderAgent": "Escreva para o {{agent}}",
       "emptyAgent": "Escreva para o {{agent}}. A resposta chega aqui; a conversa completa, com as ferramentas, abre em \"Conversa completa\".",
       "placeholder": "Escreva para a equipe · @ para chamar alguém",
@@ -665,7 +666,8 @@
         "title": "Permissão nas tarefas",
         "ask": "Perguntar",
         "auto": "Auto",
-        "full": "Acesso total"
+        "full": "Acesso total",
+        "conversation": "Permissão na conversa"
       },
       "read": "Ler",
       "write": "Ler e escrever",

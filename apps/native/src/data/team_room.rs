@@ -38,6 +38,20 @@ impl HomeFeed {
         }
     }
 
+    /// A conversation as read, for tests.
+    #[cfg(test)]
+    pub fn with_events(agent_id: &str, session_id: &str, events: Vec<SessionEventRecord>) -> Self {
+        Self {
+            events,
+            ..Self::new(agent_id, session_id)
+        }
+    }
+
+    /// The approval the conversation waits on, if any (`room_approvals`).
+    pub fn pending_approval(&self) -> Option<super::room_approvals::PendingApproval> {
+        super::room_approvals::pending_approval(&self.events)
+    }
+
     /// Reads the events after the ones it has and its turns' tokens.
     pub fn refresh(mut self, db: &Path, updated_at: &str) -> anyhow::Result<Self> {
         let sessions = SqliteSessionRepo::open_read_only(db)?;

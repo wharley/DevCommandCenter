@@ -92,6 +92,7 @@ impl SessionCommandState {
                 groups: proposed.groups,
                 connectors,
                 tasks_approval: None,
+                conversation_approval: None,
             },
         )
         .map_err(invalid)?;

@@ -125,8 +125,10 @@ impl AgentEditor {
                 )
             })
             .collect();
-        // Under "Abrir tarefas": what its tasks may do without asking.
+        // Under "Abrir tarefas": what its tasks may do without asking; then
+        // what its own conversation may do on the person's messages.
         rows.extend(self.task_mode_row(cx));
+        rows.push(self.conversation_mode_row(cx));
         let connectors = self.connector_names.clone();
         rows.extend(
             connectors

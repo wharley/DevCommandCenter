@@ -364,6 +364,7 @@ impl ResidentAgentDraft {
                 .into(),
                 connectors: Default::default(),
                 tasks_approval: None,
+                conversation_approval: None,
             },
             auto_start_tasks: false,
             may_call: Vec::new(),

@@ -501,10 +501,20 @@ impl Render for TeamRoom {
         }
         // Tasks opened here that still run.
         rows.extend(self.running_rows(&agents, cx));
+        // An approval is answered here; its agent needs no "precisa de você".
+        let asking: Vec<String> = self
+            .approvals(&agents)
+            .into_iter()
+            .map(|approval| approval.agent.id)
+            .collect();
+        rows.extend(self.approval_rows(&agents, cx));
         for (agent, state) in self
             .busy(cx)
             .into_iter()
             .filter(|(agent, _)| self.shows(&agent.id))
+            .filter(|(agent, state)| {
+                !(*state == AgentState::NeedsYou && asking.contains(&agent.id))
+            })
         {
             rows.push(self.busy_line(&agent, state, cx));
         }

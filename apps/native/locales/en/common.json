@@ -483,6 +483,7 @@
       "placeholderProject": "Write to the {{project}} team · @ to call someone",
       "taskRunning": "{{agent}} · “{{task}}” running for {{time}}",
       "taskRunningNow": "{{agent}} · “{{task}}” just started",
+      "approval": "{{agent}} wants to use {{tool}}",
       "placeholderAgent": "Write to {{agent}}",
       "emptyAgent": "Write to {{agent}}. The answer comes here; the whole conversation, with its tools, opens in \"Whole conversation\".",
       "placeholder": "Write to the team · @ to call someone",
@@ -665,7 +666,8 @@
         "title": "Permission in its tasks",
         "ask": "Ask",
         "auto": "Auto",
-        "full": "Full access"
+        "full": "Full access",
+        "conversation": "Permission in its conversation"
       },
       "read": "Read",
       "write": "Read and write",
