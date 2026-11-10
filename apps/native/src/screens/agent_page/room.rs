@@ -32,6 +32,15 @@ pub enum RoomEvent {
     OpenPullRequest(String),
     /// A task from the day's recap.
     OpenTask(String),
+    /// A task on its "Mudanças" (the change card).
+    OpenTaskChanges(String),
+    /// The change card's step: the task opens and its own dock shows the
+    /// commit's or the pull request's dialog; nothing runs before the
+    /// person confirms there.
+    DeliverTask {
+        task_id: String,
+        step: crate::data::task_delivery::DeliveryStep,
+    },
     /// An agent's page ("Ajustar" on its limit card).
     OpenAgent(String),
     /// "Criar" on an agent proposed: its conversation, the first request
@@ -70,6 +79,8 @@ pub struct TeamRoom {
     pub(crate) list: super::room_list::RoomList,
     /// Answers' markdown, parsed once per line (`room_markdown`).
     pub(super) markdown: std::cell::RefCell<super::room_markdown::LineMarkdown>,
+    /// The change cards' files, read as they show (`room_changes`).
+    pub(crate) changes: std::cell::RefCell<super::room_changes::RoomChanges>,
     /// The day's recap, read when its card opens.
     pub(crate) recap: super::room_recap::RecapRead,
     pub(crate) recap_open: bool,
@@ -189,6 +200,7 @@ impl TeamRoom {
             ),
             list: Default::default(),
             markdown: Default::default(),
+            changes: Default::default(),
             recap: Default::default(),
             recap_open: false,
             mention: None,

@@ -23,6 +23,8 @@ use crate::ui::{Icon, Tracked};
 mod agent_room_switch;
 #[cfg(test)]
 mod chain_tests;
+#[cfg(test)]
+mod change_card_tests;
 mod conversation;
 #[cfg(test)]
 mod conversation_tests;
@@ -58,9 +60,12 @@ mod room_approvals_tests;
 mod room_bubble;
 mod room_bulletin;
 mod room_cards;
+mod room_change_card;
+mod room_changes;
 mod room_checkins;
 mod room_cleanup;
 mod room_day;
+mod room_delivery;
 mod room_dock;
 mod room_failure;
 #[cfg(test)]
@@ -132,6 +137,14 @@ pub enum AgentPageEvent {
     OpenTask(String),
     /// One of the reviewer's pull request reviews: the hub on its code tab.
     OpenPullRequest(String),
+    /// A task on its "Mudanças", from the room's change card.
+    OpenTaskChanges(String),
+    /// The change card's step: the task's own dock dialog, for the person
+    /// to confirm there.
+    DeliverTask {
+        task_id: String,
+        step: crate::data::task_delivery::DeliveryStep,
+    },
 }
 
 pub struct AgentPage {

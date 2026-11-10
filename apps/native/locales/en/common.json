@@ -239,6 +239,29 @@
         "turnEnded": "Ended its turn",
         "closed": "Closed",
         "failed": "Failed"
+      },
+      "changes": {
+        "more_one": "{{count}} more file",
+        "more_other": "{{count}} more files",
+        "less": "Show less",
+        "rest_one": "{{count}} more in Changes",
+        "rest_other": "{{count}} more in Changes"
+      },
+      "delivery": {
+        "nothing": "Nothing to deliver",
+        "notCommitted": "Not committed",
+        "notPushed": "Committed, not pushed",
+        "local": "Committed, no remote",
+        "noRequest": "Pushed, no {{requestLabel}}",
+        "requestOpen": "{{requestLabel}} #{{number}} open",
+        "requestMerged": "{{requestLabel}} #{{number}} merged",
+        "requestClosed": "{{requestLabel}} #{{number}} closed",
+        "completed": "Task completed",
+        "archived": "Task archived"
+      },
+      "actions": {
+        "changes": "View changes",
+        "openRequest": "Open {{requestLabel}}"
       }
     },
     "reactions": {

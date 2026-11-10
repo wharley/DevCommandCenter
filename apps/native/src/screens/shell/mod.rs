@@ -32,6 +32,7 @@ mod review_received;
 mod review_requests;
 mod review_trigger;
 mod reviewer_in_task;
+mod room_delivery;
 mod routines;
 mod session_search;
 mod settings;

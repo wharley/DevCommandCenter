@@ -39,6 +39,7 @@ mod running;
 mod sections;
 mod skills_count;
 pub mod state;
+pub(crate) mod task_checkout;
 mod tasks_header;
 
 pub use navigation::NavPage;

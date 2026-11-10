@@ -62,6 +62,15 @@ impl AgentPage {
                         room::RoomEvent::OpenTask(task_id) => {
                             cx.emit(AgentPageEvent::OpenTask(task_id.clone()))
                         }
+                        room::RoomEvent::OpenTaskChanges(task_id) => {
+                            cx.emit(AgentPageEvent::OpenTaskChanges(task_id.clone()))
+                        }
+                        room::RoomEvent::DeliverTask { task_id, step } => {
+                            cx.emit(AgentPageEvent::DeliverTask {
+                                task_id: task_id.clone(),
+                                step: *step,
+                            })
+                        }
                         room::RoomEvent::OpenAgent(agent_id) => page.show(agent_id.clone(), cx),
                         room::RoomEvent::AgentCreated {
                             agent_id,

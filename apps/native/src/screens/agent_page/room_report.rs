@@ -2,7 +2,8 @@
 //! completion report, drawn by DCC from what it keeps — no model writes
 //! it): the totals on top, then one row per task with whose it is, where it
 //! stands, how long it ran and a bar of the lines it added and removed,
-//! scaled to the largest of them. A row opens its task.
+//! scaled to the largest of them. A row opens its task; under it, its files
+//! and its delivery (`room_change_card`).
 
 use gpui::{AnyElement, Context, FontWeight, Hsla, SharedString, div, prelude::*, px};
 
@@ -14,6 +15,7 @@ use crate::i18n::{Args, Translate};
 use crate::project::ProviderIcon;
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
+use crate::ui::diff_squares::diff_squares;
 use crate::ui::{Icon, tabular_nums};
 
 /// The widest bar, for the task that changed the most lines.
@@ -68,6 +70,7 @@ impl TeamRoom {
             .text_color(colors.muted_foreground)
             .child(div().text_color(green).child(format!("+{added}")))
             .child(div().text_color(red).child(format!("−{removed}")))
+            .child(diff_squares(added, removed, 7.0, (green, red), cx))
             .child(cx.t_with("agents.report.files", &Args::count(files as i64)))
             .children(longest.map(|seconds| format!("· {}", duration_label(seconds))));
         let head = div()
@@ -135,7 +138,7 @@ impl TeamRoom {
                 .flatten()
                 .collect::<Vec<_>>()
                 .join(" · ");
-                div()
+                let line = div()
                     .id(SharedString::from(format!("room-report-{index}-{row}")))
                     .debug_selector(move || format!("room-report-{index}-{row}"))
                     .flex()
@@ -214,7 +217,13 @@ impl TeamRoom {
                                         div().text_color(red).child(format!("−{}", task.deletions)),
                                     ),
                             ),
-                    )
+                    );
+                // Its files and where its delivery stands (`room_change_card`).
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(line)
+                    .children(self.change_block(index, row, task, cx))
                     .into_any_element()
             })
             .collect();

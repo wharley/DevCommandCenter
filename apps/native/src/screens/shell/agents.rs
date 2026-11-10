@@ -46,6 +46,12 @@ impl Shell {
                             });
                             shell.show(Surface::Conversation, cx);
                         }
+                        AgentPageEvent::OpenTaskChanges(task_id) => {
+                            shell.open_task_changes(task_id, cx)
+                        }
+                        AgentPageEvent::DeliverTask { task_id, step } => {
+                            shell.deliver_task(task_id, *step, cx)
+                        }
                         // `requestOpenPullRequest`
                         AgentPageEvent::OpenPullRequest(pr_id) => {
                             PrReviewJobs::request_open(cx, pr_id);

@@ -15,6 +15,9 @@ pub(super) struct DeliveryLink {
     buttons: Entity<DeliveryButtons>,
     _sync: Subscription,
     _picks: Subscription,
+    /// A step the room's change card asked for, opened once the column
+    /// has read its task (`CodeColumn::follow_requested`).
+    _requested: Subscription,
 }
 
 pub(super) fn link(
@@ -34,11 +37,15 @@ pub(super) fn link(
             DeliveryButtonsEvent::Run(action) => shell.run_delivery(*action, window, cx),
         },
     );
+    let requested = cx.observe_in(column, window, |_, column, window, cx| {
+        column.update(cx, |column, cx| column.follow_requested(window, cx))
+    });
     DeliveryLink {
         overlay,
         buttons,
         _sync: sync,
         _picks: picks,
+        _requested: requested,
     }
 }
 

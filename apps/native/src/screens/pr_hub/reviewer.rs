@@ -192,9 +192,14 @@ impl PrHub {
         if self.filter != crate::data::pr_hub::Filter::All {
             self.filter = crate::data::pr_hub::Filter::All;
         }
-        if self.visible(cx).iter().any(|item| item.id == id) {
+        // The room's change card knows the pull request by its link.
+        let found = self
+            .visible(cx)
+            .into_iter()
+            .find(|item| item.id == id || item.url == id);
+        if let Some(item) = found {
             self.requested = None;
-            self.selected = Some(id);
+            self.selected = Some(item.id);
             self.detail_open = true;
             self.tab = Tab::Code;
             self.ensure_detail(cx);

@@ -43,6 +43,9 @@ pub struct TaskReport {
     pub deletions: u64,
     /// From its start to its last change, in seconds.
     pub seconds: Option<i64>,
+    /// The session that ran it, for its turns' captures once the checkout
+    /// is gone (`task_changes`).
+    pub session_id: Option<String>,
 }
 
 /// `"3 file(s), +40/-12"` → (40, 12).
@@ -112,6 +115,10 @@ pub fn by_delegation(
                 additions,
                 deletions,
                 seconds: seconds_between(delegation.started_at.as_deref(), &delegation.updated_at),
+                session_id: delegation
+                    .child_session_id
+                    .as_ref()
+                    .map(|session| session.0.clone()),
             };
             (delegation.id.0.clone(), report)
         })

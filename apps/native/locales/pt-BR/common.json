@@ -239,6 +239,29 @@
         "turnEnded": "Terminou o turno",
         "closed": "Fechada",
         "failed": "Falhou"
+      },
+      "changes": {
+        "more_one": "mais {{count}} arquivo",
+        "more_other": "mais {{count}} arquivos",
+        "less": "Mostrar menos",
+        "rest_one": "mais {{count}} em Mudanças",
+        "rest_other": "mais {{count}} em Mudanças"
+      },
+      "delivery": {
+        "nothing": "Nada a entregar",
+        "notCommitted": "Sem commit",
+        "notPushed": "Commit feito, sem push",
+        "local": "Commit feito, sem remoto",
+        "noRequest": "Enviado, sem {{requestLabel}}",
+        "requestOpen": "{{requestLabel}} #{{number}} aberto",
+        "requestMerged": "{{requestLabel}} #{{number}} mesclado",
+        "requestClosed": "{{requestLabel}} #{{number}} fechado",
+        "completed": "Tarefa concluída",
+        "archived": "Tarefa arquivada"
+      },
+      "actions": {
+        "changes": "Ver mudanças",
+        "openRequest": "Abrir {{requestLabel}}"
       }
     },
     "reactions": {

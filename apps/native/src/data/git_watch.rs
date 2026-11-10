@@ -66,7 +66,7 @@ const PARALLEL: usize = 8;
 /// Polls a future whose work all blocks, so it finishes in one poll. The
 /// forge code runs its own `block_on` inside, which `futures::block_on`
 /// here would nest (and panic).
-fn run_blocking<F: std::future::Future>(future: F) -> F::Output {
+pub(crate) fn run_blocking<F: std::future::Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
     let mut context = std::task::Context::from_waker(std::task::Waker::noop());
     loop {

@@ -108,6 +108,9 @@ pub struct CodeColumn {
     pub(crate) status_error: Option<String>,
     pub(crate) changes: changes::Changes,
     pub(crate) delivery: delivery::Delivery,
+    /// A step the room's change card asked for, kept across the switch of
+    /// checkout that opening its task brings (`delivery::requested`).
+    pub(crate) requested: Option<delivery::RequestedStep>,
     pub(crate) review: review::Review,
     /// The open conversation and its delegations waiting for review, and
     /// the one under review.
@@ -172,6 +175,7 @@ impl CodeColumn {
             status_error: None,
             changes: changes::Changes::new(),
             delivery: delivery::Delivery::default(),
+            requested: None,
             review: review::Review::default(),
             session_id: None,
             reviewables: Vec::new(),

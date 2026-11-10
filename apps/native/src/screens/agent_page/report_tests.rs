@@ -38,6 +38,7 @@ fn an_answer_to_tasks_carries_their_report(cx: &mut TestAppContext) {
         additions: 30,
         deletions: 4,
         seconds: Some(360),
+        session_id: None,
     };
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {

@@ -19,6 +19,7 @@ mod header;
 mod overlay;
 mod pull;
 mod request;
+mod requested;
 #[cfg(test)]
 mod tests;
 mod toolbar;
@@ -26,6 +27,7 @@ mod toolbar;
 pub use dock::DockControls;
 pub(crate) use header::header;
 pub use overlay::DeliveryOverlay;
+pub(crate) use requested::RequestedStep;
 pub(crate) use toolbar::toolbar;
 
 use dcc_core::domain::commit_mode::{CommitButtonStatus, CommitMode, resolve_commit_mode};
