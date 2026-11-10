@@ -54,6 +54,7 @@ fn line(key: &str, agent: &str, speaker: Speaker, text: &str, at: &str) -> RoomL
             tokens: Some(1200),
         }),
         tasks: Vec::new(),
+        steps: Default::default(),
     }
 }
 

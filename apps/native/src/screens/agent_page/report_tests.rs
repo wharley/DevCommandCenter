@@ -74,6 +74,7 @@ fn an_answer_to_tasks_carries_their_report(cx: &mut TestAppContext) {
                 at: "2026-11-09T10:06:00Z".into(),
                 receipt: None,
                 tasks: vec!["t-1".into(), "unknown".into()],
+                steps: Default::default(),
             }];
             room.take(vec![feed]);
             cx.notify();

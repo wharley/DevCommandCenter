@@ -86,6 +86,7 @@ fn line(index: usize) -> RoomLine {
         ),
         receipt: None,
         tasks: Vec::new(),
+        steps: Default::default(),
     }
 }
 

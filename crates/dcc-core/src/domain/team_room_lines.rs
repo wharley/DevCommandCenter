@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use serde::Serialize;
 
 use crate::domain::session::AssistantMessagePhase;
+use crate::domain::team_room_steps::TurnSteps;
 use crate::domain::timeline::{Role, TimelineMessage};
 
 /// Who said a line.
@@ -41,6 +42,10 @@ pub struct RoomLine {
     /// that ended and the others opened with it), for the room's report.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tasks: Vec<String>,
+    /// What the turn's tool calls did, counted once here (the room's folded
+    /// line); the phone does not read it.
+    #[serde(skip)]
+    pub steps: TurnSteps,
 }
 
 /// The tasks a `[DCC] Task "…" ended a turn` status reports: its own and
@@ -89,7 +94,14 @@ pub fn lines_of(
     let mut answer_of: HashMap<&str, usize> = HashMap::new();
     // The tasks a status reported, by the turn it started.
     let mut reported: HashMap<&str, Vec<String>> = HashMap::new();
+    // The tool calls of each turn, over all its assistant rows.
+    let mut steps: HashMap<&str, TurnSteps> = HashMap::new();
     for message in messages {
+        if let (Role::Assistant, Some(turn)) = (message.role, message.turn_id.as_deref()) {
+            if !message.annotations.is_empty() {
+                steps.entry(turn).or_default().add(&message.annotations);
+            }
+        }
         let at = message
             .created_at
             .clone()
@@ -111,6 +123,7 @@ pub fn lines_of(
                     at,
                     receipt: None,
                     tasks: Vec::new(),
+                    steps: TurnSteps::default(),
                 });
             }
             Role::Assistant
@@ -139,6 +152,7 @@ pub fn lines_of(
                     at: message.turn_ended_at.clone().unwrap_or(at),
                     receipt: Some(receipt),
                     tasks: reported.get(turn).cloned().unwrap_or_default(),
+                    steps: TurnSteps::default(),
                 };
                 match answer_of.get(turn) {
                     Some(&index) => lines[index] = line,
@@ -149,6 +163,11 @@ pub fn lines_of(
                 }
             }
             _ => {}
+        }
+    }
+    for (turn, index) in answer_of {
+        if let Some(steps) = steps.remove(turn) {
+            lines[index].steps = steps;
         }
     }
     lines
@@ -268,5 +287,47 @@ mod tests {
             .unwrap()
             .with_timezone(&chrono::Utc);
         assert_eq!(last_answer(&room, now), Some(("rev".to_string(), 5)));
+    }
+
+    #[test]
+    fn an_answer_carries_the_tool_calls_of_its_whole_turn() {
+        let mut work = message("m-2", Role::Assistant, "t-1", "", "2026-11-07T10:00:10Z");
+        work.annotations = vec![crate::domain::timeline::Annotation::ToolCall(
+            crate::domain::timeline::ToolCall {
+                id: "c".into(),
+                action: "Bash".into(),
+                command: None,
+                file: None,
+                content: String::new(),
+                detail: None,
+                streaming: false,
+                created_at: None,
+                failure: None,
+            },
+        )];
+        // The work sits on a row of its own, after the answer's.
+        let messages = vec![
+            message(
+                "m-1",
+                Role::Assistant,
+                "t-1",
+                "Pronto.",
+                "2026-11-07T10:00:40Z",
+            ),
+            work,
+        ];
+        let lines = lines_of("rev", "s-1", &messages, &HashMap::new());
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].steps.tools, 1);
+        let quiet = vec![message(
+            "m-3",
+            Role::Assistant,
+            "t-2",
+            "Oi.",
+            "2026-11-07T10:01:00Z",
+        )];
+        assert!(lines_of("rev", "s-1", &quiet, &HashMap::new())[0]
+            .steps
+            .is_empty());
     }
 }

@@ -114,6 +114,89 @@ fn an_approval_is_answered_in_the_room(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     assert!(cx.debug_bounds("room-approval-0").is_some());
+    // Docked: right above the field, as wide as it, not in the list.
+    let (dock, field) = (
+        cx.debug_bounds("room-dock").unwrap(),
+        cx.debug_bounds("room-input").unwrap(),
+    );
+    assert!(dock.bottom() <= field.top() + gpui::px(1.0));
+    assert!(field.top() - dock.bottom() < gpui::px(4.0));
+    assert_eq!((dock.left(), dock.right()), (field.left(), field.right()));
     // Its answer is here, not "precisa de você na conversa dele".
     assert!(cx.debug_bounds("room-busy-sup").is_none());
+}
+
+#[gpui::test]
+fn the_dock_stacks_three_and_counts_the_rest(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("sup".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(1400.0)));
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![suporte()],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.open_room(None, cx);
+    });
+    cx.run_until_parked();
+    let room = page.update(cx, |page, _| page.room.as_ref().unwrap().0.clone());
+    room.update(cx, |room, cx| {
+        room.feeds = (0..5)
+            .map(|n| {
+                let session = format!("s-{n}");
+                let started = serde_json::from_value::<SessionEventKind>(serde_json::json!({
+                    "type": "turn_started", "turnId": "t", "prompt": "x",
+                    "planMode": false, "model": null, "evidence": null,
+                    "retryOfTurnId": null, "approvalPolicy": "ask"
+                }))
+                .unwrap();
+                let mut asked = event(
+                    2,
+                    SessionEventKind::TurnPermissionRequested {
+                        turn_id: TurnId("t".into()),
+                        request_id: format!("r-{n}"),
+                        tool_name: "slack_send_message".into(),
+                        title: None,
+                        description: Some("Mensagem".into()),
+                        command: None,
+                        file: None,
+                    },
+                );
+                asked.session_id = SessionId(session.clone());
+                let mut first = event(1, started);
+                first.session_id = SessionId(session.clone());
+                HomeFeed::with_events("sup", &session, vec![first, asked])
+            })
+            .collect();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    for shown in ["room-approval-0", "room-approval-1", "room-approval-2"] {
+        assert!(cx.debug_bounds(shown).is_some());
+    }
+    assert!(cx.debug_bounds("room-approval-3").is_none());
+    // "Recusar com motivo" opens its field inside the dock.
+    let why = cx.debug_bounds("room-approval-why-0").unwrap();
+    cx.simulate_click(why.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    let (dock, approval) = (
+        cx.debug_bounds("room-dock").unwrap(),
+        cx.debug_bounds("room-approval-send-deny-0").unwrap(),
+    );
+    assert!(dock.contains(&approval.center()));
 }

@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use super::room::TeamRoom;
 use super::room_said::Said;
+use super::room_steps::StepsRow;
 use super::room_timeline::Slot;
 use crate::data::agent_mentions::MentionNames;
 use crate::data::agents::AgentRecord;
@@ -47,6 +48,8 @@ pub(crate) enum Row {
         line: RoomLine,
         first: bool,
         said: Option<Rc<Said>>,
+        /// The folded line of the turn's work, open or not (`room_steps`).
+        steps: Option<Rc<StepsRow>>,
     },
     /// Where the local day changes (`room_flow`).
     Day {
@@ -67,15 +70,17 @@ impl Row {
                     line: a,
                     first: fa,
                     said: sa,
+                    steps: ta,
                     ..
                 },
                 Row::Line {
                     line: b,
                     first: fb,
                     said: sb,
+                    steps: tb,
                     ..
                 },
-            ) => a == b && fa == fb && sa == sb,
+            ) => a == b && fa == fb && sa == sb && ta == tb,
             (Row::Day { day: a }, Row::Day { day: b }) => a == b,
             _ => false,
         }
@@ -195,11 +200,15 @@ impl TeamRoom {
                     if known(&line.agent_id) && !quiet {
                         let said = super::room_said::is_message(&line)
                             .then(|| Rc::new(Said::new(&line.text, &mentions)));
+                        let steps = (line.speaker == Speaker::Agent)
+                            .then(|| self.steps_row(&line, cx))
+                            .flatten();
                         rows.push(Row::Line {
                             index,
                             line,
                             first: true,
                             said,
+                            steps,
                         });
                     }
                 }

@@ -108,6 +108,7 @@ fn an_image_goes_with_the_words_and_shows_in_the_bubble(cx: &mut TestAppContext)
             at: "2026-11-10T10:00:00Z".into(),
             receipt: None,
             tasks: Vec::new(),
+            steps: Default::default(),
         }];
         room.take(vec![feed]);
         cx.notify();

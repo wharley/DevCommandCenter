@@ -111,11 +111,12 @@ impl TeamRoom {
         .detach();
     }
 
-    /// 👍 and 👎 beside "Abrir conversa".
+    /// 👍 and 👎 beside "Abrir conversa", in the answer's hover `group`.
     pub(super) fn reaction_buttons(
         &self,
         index: usize,
         line: &RoomLine,
+        group: &SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
@@ -124,6 +125,9 @@ impl TeamRoom {
             let picked = current == Some(reaction);
             let line = line.clone();
             div()
+                // The one given stays; the other shows on the answer's hover.
+                .opacity(if picked { 1.0 } else { 0.0 })
+                .group_hover(group.clone(), |style| style.opacity(1.0))
                 .id(SharedString::from(format!(
                     "room-react-{}-{index}",
                     reaction.key()

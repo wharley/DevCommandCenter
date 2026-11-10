@@ -131,9 +131,11 @@ mod tests {
                 at,
                 receipt: None,
                 tasks: Vec::new(),
+                steps: Default::default(),
             },
             first: true,
             said: None,
+            steps: None,
         }
     }
 

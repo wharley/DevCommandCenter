@@ -19,6 +19,7 @@ fn said(key: &str, speaker: Speaker, text: &str, at: chrono::DateTime<chrono::Lo
         at: at.to_rfc3339(),
         receipt: None,
         tasks: Vec::new(),
+        steps: Default::default(),
     }
 }
 

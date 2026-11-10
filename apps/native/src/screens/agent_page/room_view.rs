@@ -11,7 +11,7 @@ use gpui::{
 use super::room::TeamRoom;
 use crate::agent::AgentAvatarView;
 use crate::data::agents::AgentRecord;
-use crate::data::team_room::{Receipt, RoomLine};
+use crate::data::team_room::RoomLine;
 use crate::i18n::{Args, I18n, Locale, Translate};
 use crate::markdown::{MarkdownStyle, render_markdown};
 use crate::theme::ActiveTheme;
@@ -44,27 +44,6 @@ impl TeamRoom {
         }
     }
 
-    fn receipt_text(receipt: Receipt, cx: &gpui::App) -> Option<String> {
-        let mut parts = Vec::new();
-        if let Some(seconds) = receipt.seconds {
-            parts.push(if seconds < 60 {
-                format!("{seconds} s")
-            } else {
-                format!("{} min {} s", seconds / 60, seconds % 60)
-            });
-        }
-        if let Some(tokens) = receipt.tokens.filter(|tokens| *tokens > 0) {
-            parts.push(
-                cx.t_with(
-                    "agents.room.tokens",
-                    &Args::default().with("count", crate::data::goal::format_tokens(tokens)),
-                )
-                .to_string(),
-            );
-        }
-        (!parts.is_empty()).then(|| parts.join(" · "))
-    }
-
     /// An answer as a flat row: the agent's face, bold name and the time on
     /// one line, the words under; the next answers of a group (`first` is
     /// false) sit under the face with the words alone.
@@ -72,7 +51,7 @@ impl TeamRoom {
     pub(super) fn agent_line(
         &self,
         index: usize,
-        first: bool,
+        (first, steps): (bool, Option<&std::rc::Rc<super::room_steps::StepsRow>>),
         line: &RoomLine,
         agent: &AgentRecord,
         model: &super::room_rows::RoomModel,
@@ -85,11 +64,10 @@ impl TeamRoom {
             .borrow_mut()
             .get(&line.key, &line.text, &model.mentions);
         let when = first.then(|| super::room_flow::clock(&line.at, english(cx)));
-        let receipt = line
-            .receipt
-            .and_then(|receipt| Self::receipt_text(receipt, cx));
-        let agent_id = agent.id.clone();
+        // The row is the hover group of its receipt and reactions.
+        let group = SharedString::from(format!("room-answer-g-{index}"));
         div()
+            .group(group.clone())
             .debug_selector(move || format!("room-answer-{index}"))
             .flex()
             .items_start()
@@ -134,6 +112,7 @@ impl TeamRoom {
                                     .child(when),
                             )
                     }))
+                    .children(steps.map(|steps| self.steps_line(index, line, steps, cx)))
                     .child(
                         div()
                             .text_size(px(13.0))
@@ -149,34 +128,14 @@ impl TeamRoom {
                                 cx,
                             )),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .text_size(px(11.0))
-                            .text_color(colors.muted_foreground)
-                            .children(receipt)
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!("room-open-{index}")))
-                                    .debug_selector(move || format!("room-open-{index}"))
-                                    .cursor_pointer()
-                                    .hover(|link| link.text_color(colors.foreground))
-                                    .on_click(cx.listener(move |room, _, _, cx| {
-                                        room.open_conversation(&agent_id, cx)
-                                    }))
-                                    .child(cx.t("agents.room.open")),
-                            )
-                            .child(self.reaction_buttons(index, line, cx)),
-                    )
+                    .child(self.answer_footer(index, line, &group, steps.is_some(), cx))
                     .children(self.report_card(index, line, cx))
                     .children(self.rule_field(line, cx)),
             )
             .into_any_element()
     }
 
-    fn composer(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn composer(&self, dock: Option<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let drop_border = crate::theme::color::mix_oklab(colors.accent_calm, 0.7, colors.border);
         let text = self.input.read(cx).text().trim().to_string();
@@ -193,6 +152,7 @@ impl TeamRoom {
             })
             .unwrap_or_else(|| cx.t("agents.room.hint"));
         let blank = text.is_empty();
+        let docked = dock.is_some();
         div()
             .flex()
             .flex_col()
@@ -207,28 +167,38 @@ impl TeamRoom {
                     .items_end()
                     .gap(px(8.0))
                     .child(
+                        // The approvals sit right on the field, as wide as it.
                         div()
-                            .id("room-input")
-                            .debug_selector(|| "room-input".into())
-                            .relative()
-                            .on_drop(cx.listener(|room, paths: &ExternalPaths, _, cx| {
-                                room.add_paths(paths.paths(), cx)
-                            }))
-                            .drag_over::<ExternalPaths>(move |style, _, _, _| {
-                                style.border_color(drop_border)
-                            })
                             .flex_1()
                             .min_w_0()
-                            .min_h(px(40.0))
-                            .px(px(12.0))
-                            .py(px(10.0))
-                            .rounded(px(12.0))
-                            .border_1()
-                            .border_color(colors.input)
-                            .bg(crate::ui::input_fill(cx.theme()))
-                            .text_size(px(13.0))
-                            .child(self.input.clone())
-                            .children(self.mention_popup(cx)),
+                            .flex()
+                            .flex_col()
+                            .children(dock)
+                            .child(
+                                div()
+                                    .id("room-input")
+                                    .debug_selector(|| "room-input".into())
+                                    .relative()
+                                    .on_drop(cx.listener(|room, paths: &ExternalPaths, _, cx| {
+                                        room.add_paths(paths.paths(), cx)
+                                    }))
+                                    .drag_over::<ExternalPaths>(move |style, _, _, _| {
+                                        style.border_color(drop_border)
+                                    })
+                                    .flex_1()
+                                    .min_w_0()
+                                    .min_h(px(40.0))
+                                    .px(px(12.0))
+                                    .py(px(10.0))
+                                    .rounded(px(12.0))
+                                    .when(docked, |field| field.rounded_t(px(0.0)))
+                                    .border_1()
+                                    .border_color(colors.input)
+                                    .bg(crate::ui::input_fill(cx.theme()))
+                                    .text_size(px(13.0))
+                                    .child(self.input.clone())
+                                    .children(self.mention_popup(cx)),
+                            ),
                     )
                     .child(
                         Button::new("room-send")
@@ -273,6 +243,8 @@ impl Render for TeamRoom {
             }
             self.list.take(model);
         }
+        // The approvals wait on the field, not in the list.
+        let dock = self.approval_dock(self.approvals(&self.list.model().agents), cx);
         let whole = self.focus.is_none();
         let unread_bar = self.unread_bar(self.list.model().unread, cx);
         let header = whole.then(|| {
@@ -338,6 +310,6 @@ impl Render for TeamRoom {
                     .size_full(),
                 ),
             )
-            .child(self.composer(cx))
+            .child(self.composer(dock, cx))
     }
 }

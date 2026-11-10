@@ -111,6 +111,7 @@ fn sources_show_as_cards_lines_and_on_the_page(cx: &mut TestAppContext) {
                 at: "2026-11-09T10:00:00Z".into(),
                 receipt: None,
                 tasks: Vec::new(),
+                steps: Default::default(),
             }];
             room.take(vec![feed]);
             cx.notify();

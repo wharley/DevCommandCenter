@@ -61,10 +61,11 @@ mod room_cards;
 mod room_checkins;
 mod room_cleanup;
 mod room_day;
+mod room_dock;
 mod room_failure;
-mod room_flow;
 #[cfg(test)]
 mod room_flat_tests;
+mod room_flow;
 mod room_focus;
 mod room_handoff;
 mod room_images;
@@ -82,18 +83,22 @@ mod room_mentions;
 mod room_proposals;
 mod room_reactions;
 mod room_recap;
+mod room_receipt;
 mod room_refresh;
 mod room_report;
 mod room_routines;
-mod room_said;
 mod room_rows;
 mod room_running;
 #[cfg(test)]
 mod room_running_tests;
+mod room_said;
 mod room_select;
 #[cfg(test)]
 mod room_select_tests;
 mod room_sources;
+mod room_steps;
+#[cfg(test)]
+mod room_steps_tests;
 #[cfg(test)]
 mod room_tests;
 mod room_timeline;

@@ -52,6 +52,13 @@ impl HomeFeed {
         super::room_approvals::pending_approval(&self.events)
     }
 
+    /// The tool calls of `turn`, listed when its steps are opened: the
+    /// conversation is projected once, on that click.
+    pub fn steps_of(&self, turn: &str) -> Vec<dcc_core::domain::team_room_steps::Step> {
+        let messages = project_session(&self.events, &self.session_id);
+        dcc_core::domain::team_room_steps::steps_of(&messages, turn)
+    }
+
     /// Reads the events after the ones it has and its turns' tokens.
     pub fn refresh(mut self, db: &Path, updated_at: &str) -> anyhow::Result<Self> {
         let sessions = SqliteSessionRepo::open_read_only(db)?;
@@ -99,6 +106,7 @@ mod tests {
             at: at.into(),
             receipt: None,
             tasks: Vec::new(),
+            steps: Default::default(),
         }
     }
 

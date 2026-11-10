@@ -31,6 +31,7 @@ fn line(key: &str, agent: &str, session: &str, speaker: Speaker, text: &str, at:
         at: at.into(),
         receipt: None,
         tasks: Vec::new(),
+        steps: Default::default(),
     }
 }
 

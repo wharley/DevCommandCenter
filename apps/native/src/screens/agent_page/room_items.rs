@@ -12,6 +12,7 @@ use gpui::{AnyElement, Context, IntoElement, SharedString, Window, div, prelude:
 use super::room::{Pending, TeamRoom};
 use super::room_rows::{RoomModel, Row};
 use super::room_said::Said;
+use super::room_steps::StepsRow;
 use crate::data::agent_mentions::MentionNames;
 use crate::data::agents::{AgentRecord, AgentState};
 use crate::data::team_room::{RoomLine, Speaker};
@@ -98,9 +99,10 @@ impl TeamRoom {
                 line,
                 first,
                 said,
+                steps,
             } => match model.agent(&line.agent_id) {
                 Some(agent) => self.line_rows(
-                    (*index, *first, said.as_ref()),
+                    (*index, *first, said.as_ref(), steps.as_ref()),
                     line,
                     agent,
                     model,
@@ -114,7 +116,7 @@ impl TeamRoom {
 
     fn line_rows(
         &self,
-        (index, first, said): (usize, bool, Option<&Rc<Said>>),
+        (index, first, said, steps): (usize, bool, Option<&Rc<Said>>, Option<&Rc<StepsRow>>),
         line: &RoomLine,
         agent: &AgentRecord,
         model: &RoomModel,
@@ -122,7 +124,8 @@ impl TeamRoom {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         if line.speaker == Speaker::Agent {
-            let mut rows = vec![self.agent_line(index, first, line, agent, model, window, cx)];
+            let mut rows =
+                vec![self.agent_line(index, (first, steps), line, agent, model, window, cx)];
             rows.extend(self.handoff_bar(index, line, agent, &model.agents, cx));
             return rows;
         }
@@ -188,13 +191,13 @@ impl TeamRoom {
         rows.extend(self.at_work_rows(agents, cx));
         // A trigger held for the day, said here.
         rows.extend(self.held_rows(agents, cx));
-        // An approval is answered here; its agent needs no "precisa de você".
+        // An approval is answered in the dock above the field; its agent
+        // needs no "precisa de você".
         let asking: Vec<String> = self
             .approvals(agents)
             .into_iter()
             .map(|approval| approval.agent.id)
             .collect();
-        rows.extend(self.approval_rows(agents, cx));
         for (agent, state) in self
             .busy(cx)
             .into_iter()

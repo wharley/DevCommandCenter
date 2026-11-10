@@ -495,6 +495,16 @@
       "atWorkNow": "{{agent}} started working in “{{task}}”",
       "ceiling": "{{agent}} reached today's ceiling of {{count}} triggers: the next ones wait until tomorrow.",
       "approval": "{{agent}} wants to use {{tool}}",
+      "approvalMore_one": "+{{count}} waiting",
+      "approvalMore_other": "+{{count}} waiting",
+      "steps": {
+        "worked": "Worked {{duration}}",
+        "workedNoDuration": "Worked",
+        "failed_one": "{{count}} failed",
+        "failed_other": "{{count}} failed",
+        "more_one": "+{{count}} step",
+        "more_other": "+{{count}} steps"
+      },
       "placeholderAgent": "Write to {{agent}}",
       "emptyAgent": "Write to {{agent}}. The answer comes here; the whole conversation, with its tools, opens in \"Whole conversation\".",
       "placeholder": "Write to the team · @ to call someone",

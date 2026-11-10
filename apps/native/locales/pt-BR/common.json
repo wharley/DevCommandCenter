@@ -495,6 +495,16 @@
       "atWorkNow": "{{agent}} começou a trabalhar em “{{task}}”",
       "ceiling": "{{agent}} chegou ao teto de {{count}} gatilhos hoje: os próximos esperam até amanhã.",
       "approval": "{{agent}} quer usar {{tool}}",
+      "approvalMore_one": "+{{count}} aguardando",
+      "approvalMore_other": "+{{count}} aguardando",
+      "steps": {
+        "worked": "Trabalhou {{duration}}",
+        "workedNoDuration": "Trabalhou",
+        "failed_one": "{{count}} falhou",
+        "failed_other": "{{count}} falharam",
+        "more_one": "+{{count}} passo",
+        "more_other": "+{{count}} passos"
+      },
       "placeholderAgent": "Escreva para o {{agent}}",
       "emptyAgent": "Escreva para o {{agent}}. A resposta chega aqui; a conversa completa, com as ferramentas, abre em \"Conversa completa\".",
       "placeholder": "Escreva para a equipe · @ para chamar alguém",
