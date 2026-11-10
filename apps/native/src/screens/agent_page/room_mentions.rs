@@ -2,7 +2,8 @@
 //! its mascot, its name and what it does, filtered by what follows the `@`
 //! (`composer::mentions::trigger`, like `@arquivo`); ↑↓ move, Enter or Tab
 //! pick, Esc closes. The pick becomes "@Nome " in the text, which is what
-//! the room's rule reads.
+//! the room's rule reads; a full name typed or picked is tinted in the
+//! agent's color (`tint_mentions`).
 
 use std::ops::Range;
 
@@ -10,6 +11,7 @@ use gpui::{AnyElement, BoxShadow, Context, FontWeight, SharedString, div, point,
 
 use super::room::TeamRoom;
 use crate::agent::AgentAvatarView;
+use crate::data::agent_mentions::MentionNames;
 use crate::data::agents::{AgentRecord, REVIEWER_PRESET};
 use crate::i18n::Translate;
 use crate::screens::composer::mentions::trigger;
@@ -61,6 +63,21 @@ fn what_it_does(agent: &AgentRecord, cx: &gpui::App) -> SharedString {
 }
 
 impl TeamRoom {
+    /// Tints each `@Agent` the field says, in the agent's color: the text
+    /// stays `@Agent` (what the room routes and sends), only its look changes.
+    pub(crate) fn tint_mentions(&mut self, cx: &mut Context<Self>) {
+        let names = MentionNames::new(
+            self.sidebar
+                .read(cx)
+                .agents()
+                .iter()
+                .map(|agent| (agent.name.as_str(), agent.avatar.color.as_str())),
+            crate::agent::avatar_rgb,
+        );
+        let tints = names.find(self.input.read(cx).text());
+        self.input.update(cx, |input, _| input.set_tints(tints));
+    }
+
     /// Opens, filters or closes the list for the `@query` before the caret.
     pub(crate) fn update_mention(&mut self, cx: &mut Context<Self>) {
         let (before, selection) = {

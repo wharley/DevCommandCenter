@@ -102,6 +102,13 @@ fn styled_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
             style.background_color = Some(colors.muted);
             let _ = &mono;
         }
+        if let Some(rgb) = span.style.mention {
+            // The agent's pill: its color's fill, its text a shade deeper.
+            let (fill, text) = crate::ui::mention_tint::colors(rgb, cx);
+            style.color = Some(text);
+            style.background_color = Some(fill);
+            style.font_weight = Some(FontWeight::MEDIUM);
+        }
         if let (true, Some(link)) = (span.style.site, &span.link) {
             // `.composer-link`: the address itself, on a faint fill.
             style.color = Some(site);

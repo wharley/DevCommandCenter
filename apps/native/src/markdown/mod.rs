@@ -3,6 +3,7 @@
 
 mod html;
 mod image;
+pub mod mentions;
 mod parse;
 mod render;
 pub mod selection;

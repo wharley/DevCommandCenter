@@ -17,7 +17,10 @@ use crate::markdown::{MarkdownStyle, render_markdown};
 use crate::theme::ActiveTheme;
 use crate::ui::{Button, ButtonSize, pulse_spinner};
 
-fn english(cx: &gpui::App) -> bool {
+/// The face's side, and so the column the words line up in.
+const FACE: f32 = 32.0;
+
+pub(super) fn english(cx: &gpui::App) -> bool {
     cx.try_global::<I18n>()
         .is_some_and(|i18n| i18n.locale() == Locale::En)
 }
@@ -62,17 +65,26 @@ impl TeamRoom {
         (!parts.is_empty()).then(|| parts.join(" · "))
     }
 
+    /// An answer as a flat row: the agent's face, bold name and the time on
+    /// one line, the words under; the next answers of a group (`first` is
+    /// false) sit under the face with the words alone.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn agent_line(
         &self,
         index: usize,
+        first: bool,
         line: &RoomLine,
         agent: &AgentRecord,
+        model: &super::room_rows::RoomModel,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
-        let blocks = self.markdown.borrow_mut().get(&line.key, &line.text);
-        let when = crate::data::time::medium_date_time(&line.at, english(cx));
+        let blocks = self
+            .markdown
+            .borrow_mut()
+            .get(&line.key, &line.text, &model.mentions);
+        let when = first.then(|| super::room_flow::clock(&line.at, english(cx)));
         let receipt = line
             .receipt
             .and_then(|receipt| Self::receipt_text(receipt, cx));
@@ -82,12 +94,20 @@ impl TeamRoom {
             .flex()
             .items_start()
             .gap(px(10.0))
-            .child(AgentAvatarView::new(
-                SharedString::from(format!("room-face-{index}")),
-                &agent.avatar,
-                None,
-                28.0,
-            ))
+            .child(match first {
+                true => div()
+                    .debug_selector(move || format!("room-face-{index}"))
+                    .flex_none()
+                    .child(AgentAvatarView::new(
+                        SharedString::from(format!("room-face-{index}")),
+                        &agent.avatar,
+                        None,
+                        FACE,
+                    ))
+                    .into_any_element(),
+                // The face's column, empty: the words keep their line.
+                false => div().w(px(FACE)).flex_none().into_any_element(),
+            })
             .child(
                 div()
                     .flex_1()
@@ -95,7 +115,7 @@ impl TeamRoom {
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
-                    .child(
+                    .children(when.map(|when| {
                         div()
                             .flex()
                             .items_baseline()
@@ -103,7 +123,7 @@ impl TeamRoom {
                             .child(
                                 div()
                                     .text_size(px(13.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .font_weight(FontWeight::BOLD)
                                     .text_color(colors.foreground)
                                     .child(agent.name.clone()),
                             )
@@ -112,8 +132,8 @@ impl TeamRoom {
                                     .text_size(px(11.0))
                                     .text_color(colors.muted_foreground)
                                     .child(when),
-                            ),
-                    )
+                            )
+                    }))
                     .child(
                         div()
                             .text_size(px(13.0))
@@ -246,7 +266,11 @@ impl Render for TeamRoom {
         let scope = self.scope();
         if self.list.needs_build(&scope) {
             let model = self.build_rows(cx);
-            self.markdown.borrow_mut().retain(model.answers());
+            {
+                let mut markdown = self.markdown.borrow_mut();
+                markdown.roster(&model.mentions);
+                markdown.retain(model.answers());
+            }
             self.list.take(model);
         }
         let whole = self.focus.is_none();

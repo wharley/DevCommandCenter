@@ -10,6 +10,7 @@ pub mod dialog;
 mod feedback;
 mod icon;
 mod kbd;
+pub mod mention_tint;
 pub mod layer;
 pub mod menu;
 pub mod occlusion;

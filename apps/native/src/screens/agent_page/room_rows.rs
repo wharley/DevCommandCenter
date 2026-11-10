@@ -6,8 +6,12 @@
 use dcc_core::domain::agent_routine::is_quiet;
 use gpui::Context;
 
+use std::rc::Rc;
+
 use super::room::TeamRoom;
+use super::room_said::Said;
 use super::room_timeline::Slot;
+use crate::data::agent_mentions::MentionNames;
 use crate::data::agents::AgentRecord;
 use crate::data::check_ins::CheckIn;
 use crate::data::room_inbox::InboxCard;
@@ -26,11 +30,28 @@ pub(crate) struct Scope {
 /// the tests know it (`room-said-3`, `room-card-0`).
 #[derive(Clone, Debug)]
 pub(crate) enum Row {
-    CheckIn { index: usize, check: CheckIn },
-    Card { index: usize, card: InboxCard },
+    CheckIn {
+        index: usize,
+        check: CheckIn,
+    },
+    Card {
+        index: usize,
+        card: InboxCard,
+    },
     Recap,
     Bulletin,
-    Line { index: usize, line: RoomLine },
+    /// A line; `first` when an answer opens a group (face, name and time),
+    /// `said` the person's message split once (`room_flow`, `room_said`).
+    Line {
+        index: usize,
+        line: RoomLine,
+        first: bool,
+        said: Option<Rc<Said>>,
+    },
+    /// Where the local day changes (`room_flow`).
+    Day {
+        day: chrono::NaiveDate,
+    },
 }
 
 impl Row {
@@ -41,7 +62,21 @@ impl Row {
             (Row::CheckIn { check: a, .. }, Row::CheckIn { check: b, .. }) => a == b,
             (Row::Card { card: a, .. }, Row::Card { card: b, .. }) => a == b,
             (Row::Recap, Row::Recap) | (Row::Bulletin, Row::Bulletin) => true,
-            (Row::Line { line: a, .. }, Row::Line { line: b, .. }) => a == b,
+            (
+                Row::Line {
+                    line: a,
+                    first: fa,
+                    said: sa,
+                    ..
+                },
+                Row::Line {
+                    line: b,
+                    first: fb,
+                    said: sb,
+                    ..
+                },
+            ) => a == b && fa == fb && sa == sb,
+            (Row::Day { day: a }, Row::Day { day: b }) => a == b,
             _ => false,
         }
     }
@@ -51,6 +86,8 @@ impl Row {
 pub(crate) struct RoomModel {
     pub scope: Scope,
     pub agents: Vec<AgentRecord>,
+    /// The team's names, for the mentions in what is drawn.
+    pub mentions: Rc<MentionNames>,
     pub rows: Vec<Row>,
     /// Unread cards and check-ins, for "Marcar tudo como lido".
     pub unread: usize,
@@ -125,6 +162,12 @@ impl TeamRoom {
             recap_at.as_deref(),
             bulletin_at.as_deref(),
         );
+        let mentions = Rc::new(MentionNames::new(
+            agents
+                .iter()
+                .map(|agent| (agent.name.as_str(), agent.avatar.color.as_str())),
+            crate::agent::avatar_rgb,
+        ));
         let known = |id: &str| agents.iter().any(|agent| agent.id == id);
         let mut cards: Vec<Option<InboxCard>> = cards.into_iter().map(Some).collect();
         let mut checks: Vec<Option<CheckIn>> = checks.into_iter().map(Some).collect();
@@ -150,7 +193,14 @@ impl TeamRoom {
                     // A routine with nothing to report stays quiet.
                     let quiet = line.speaker == Speaker::Agent && is_quiet(&line.text);
                     if known(&line.agent_id) && !quiet {
-                        rows.push(Row::Line { index, line });
+                        let said = super::room_said::is_message(&line)
+                            .then(|| Rc::new(Said::new(&line.text, &mentions)));
+                        rows.push(Row::Line {
+                            index,
+                            line,
+                            first: true,
+                            said,
+                        });
                     }
                 }
             }
@@ -158,7 +208,8 @@ impl TeamRoom {
         RoomModel {
             scope: self.scope(),
             agents,
-            rows,
+            mentions,
+            rows: super::room_flow::arrange(rows),
             unread,
         }
     }

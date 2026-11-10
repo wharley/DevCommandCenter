@@ -152,6 +152,7 @@ impl TeamRoom {
             cx.subscribe(&input, |room, _, event, cx| match event {
                 TextAreaEvent::Submitted => room.send(cx),
                 TextAreaEvent::Changed => {
+                    room.tint_mentions(cx);
                     room.update_mention(cx);
                     cx.notify();
                 }

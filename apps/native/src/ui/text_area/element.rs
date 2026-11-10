@@ -234,6 +234,17 @@ fn display(
             background: Some(accents.link.opacity(0.09)),
         });
     }
+    for (range, fill, text) in accents
+        .tints
+        .iter()
+        .filter(|(range, ..)| range.end <= text.len())
+    {
+        spans.push(Span {
+            range: map.to_display(range.start)..map.to_display(range.end),
+            color: *text,
+            background: Some(*fill),
+        });
+    }
     if let Some(command) = area.command.clone().filter(|range| range.end <= text.len()) {
         spans.push(Span {
             range: map.to_display(command.start)..map.to_display(command.end),
@@ -255,6 +266,8 @@ pub(super) struct Accents {
     pub marker: Hsla,
     pub command: Hsla,
     pub link: Hsla,
+    /// Tinted ranges with their fill and text colors.
+    pub tints: Vec<(Range<usize>, Hsla, Hsla)>,
 }
 
 struct Span {
@@ -395,6 +408,16 @@ impl Element for TextAreaElement {
                     crate::theme::Appearance::Light => crate::theme::tailwind::EMERALD_700.hsla(),
                 },
                 link: links::color(cx),
+                tints: self
+                    .area
+                    .read(cx)
+                    .tints
+                    .iter()
+                    .map(|(range, rgb)| {
+                        let (fill, text) = crate::ui::mention_tint::colors(*rgb, cx);
+                        (range.clone(), fill, text)
+                    })
+                    .collect(),
             },
             window,
             cx,

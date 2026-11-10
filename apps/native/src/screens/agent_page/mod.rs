@@ -60,7 +60,11 @@ mod room_bulletin;
 mod room_cards;
 mod room_checkins;
 mod room_cleanup;
+mod room_day;
 mod room_failure;
+mod room_flow;
+#[cfg(test)]
+mod room_flat_tests;
 mod room_focus;
 mod room_handoff;
 mod room_images;
@@ -81,6 +85,7 @@ mod room_recap;
 mod room_refresh;
 mod room_report;
 mod room_routines;
+mod room_said;
 mod room_rows;
 mod room_running;
 #[cfg(test)]

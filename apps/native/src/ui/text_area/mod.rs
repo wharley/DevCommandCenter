@@ -252,6 +252,8 @@ pub struct TextArea {
     links: Vec<(links::Link, Option<Arc<Image>>)>,
     /// A leading `/command` the provider runs, drawn as recognized.
     command: Option<Range<usize>>,
+    /// Ranges the owner has tinted (`0xRRGGBB`): an `@Agent` in its color.
+    tints: Vec<(Range<usize>, u32)>,
     pub(crate) layout: Option<Layout>,
     pub(crate) scroll_y: Pixels,
     /// Scroll so the caret shows at the next frame.
@@ -281,6 +283,7 @@ impl TextArea {
             attachments: false,
             links: Vec::new(),
             command: None,
+            tints: Vec::new(),
             layout: None,
             scroll_y: px(0.0),
             reveal_cursor: false,
@@ -323,6 +326,12 @@ impl TextArea {
     /// The owner's recognized `/command` at the start, if any.
     pub fn set_command_range(&mut self, range: Option<Range<usize>>) {
         self.command = range;
+    }
+
+    /// The owner's tinted ranges of the text; drawn as a pill each, the
+    /// text itself untouched.
+    pub fn set_tints(&mut self, tints: Vec<(Range<usize>, u32)>) {
+        self.tints = tints;
     }
 
     pub fn command_range(&self) -> Option<Range<usize>> {

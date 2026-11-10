@@ -455,6 +455,8 @@
       "whole": "Conversa completa"
     },
     "room": {
+      "today": "Hoje",
+      "yesterday": "Ontem",
       "handoff": {
         "suggests": "{{agent}} sugere passar a vez para {{teammate}}",
         "autoPassed": "Passado automaticamente para {{teammate}}",

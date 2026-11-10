@@ -26,6 +26,11 @@ fn color(name: &str) -> &'static str {
     }
 }
 
+/// The color's value, as `0xRRGGBB`, for tints drawn from it.
+pub fn rgb(name: &str) -> u32 {
+    u32::from_str_radix(color(name).trim_start_matches('#'), 16).unwrap_or(0x356EFF)
+}
+
 pub(super) fn eyes(style: &str) -> String {
     match style {
         "smile" => format!(

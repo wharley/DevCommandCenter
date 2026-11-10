@@ -6,6 +6,6 @@ mod mood;
 mod robot;
 mod shapes;
 
-pub use avatar::AgentAvatarView;
+pub use avatar::{AgentAvatarView, rgb as avatar_rgb};
 pub use mood::{MascotBlink, Mood, MoodAvatarView};
 pub use robot::{AgentMascot, RobotState, robot_key};

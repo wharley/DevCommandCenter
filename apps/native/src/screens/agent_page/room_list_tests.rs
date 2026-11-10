@@ -30,7 +30,7 @@ fn session(id: &str, room: Option<&str>, state: AgentState) -> AgentSession {
     }
 }
 
-fn dev(state: AgentState) -> AgentRecord {
+pub(super) fn dev(state: AgentState) -> AgentRecord {
     AgentRecord {
         id: "dev".into(),
         name: "Dev".into(),
@@ -95,6 +95,15 @@ fn long_room(
     count: usize,
     state: AgentState,
 ) -> (Entity<AgentPage>, Entity<TeamRoom>, &mut VisualTestContext) {
+    room_with_lines(cx, (0..count).map(line).collect(), state)
+}
+
+/// The team room open on Geral with these lines of "Dev".
+pub(super) fn room_with_lines(
+    cx: &mut TestAppContext,
+    lines: Vec<RoomLine>,
+    state: AgentState,
+) -> (Entity<AgentPage>, Entity<TeamRoom>, &mut VisualTestContext) {
     cx.update(|cx| {
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
         crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
@@ -126,7 +135,7 @@ fn long_room(
     room.update(cx, |room, cx| {
         let mut feed = HomeFeed::new("dev", "s-geral");
         feed.read_at = "2026-11-10T10:00:00Z".into();
-        feed.lines = (0..count).map(line).collect();
+        feed.lines = lines;
         room.take(vec![feed]);
         cx.notify();
     });

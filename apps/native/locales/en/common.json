@@ -455,6 +455,8 @@
       "whole": "Whole conversation"
     },
     "room": {
+      "today": "Today",
+      "yesterday": "Yesterday",
       "handoff": {
         "suggests": "{{agent}} suggests passing to {{teammate}}",
         "autoPassed": "Passed on to {{teammate}} automatically",

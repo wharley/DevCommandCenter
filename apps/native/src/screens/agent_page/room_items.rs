@@ -4,11 +4,15 @@
 //! them all the live part, drawn fresh each frame: DCC's own cards for now,
 //! the messages on their way, who is at work, the approvals, who is busy.
 
+use std::rc::Rc;
+
 use dcc_core::domain::team_room::handoff_heading;
 use gpui::{AnyElement, Context, IntoElement, SharedString, Window, div, prelude::*, px};
 
 use super::room::{Pending, TeamRoom};
 use super::room_rows::{RoomModel, Row};
+use super::room_said::Said;
+use crate::data::agent_mentions::MentionNames;
 use crate::data::agents::{AgentRecord, AgentState};
 use crate::data::team_room::{RoomLine, Speaker};
 use crate::i18n::{Args, Translate};
@@ -19,8 +23,12 @@ const GAP: f32 = 18.0;
 /// Above the first row and under the last.
 const EDGE: f32 = 20.0;
 
+/// Between an answer and the next of its group.
+const TIGHT: f32 = 4.0;
+
 /// `content` in the column's width; nothing at all when it draws nothing.
-fn item(content: Vec<AnyElement>, first: bool, last: bool) -> AnyElement {
+/// `tight` when it joins the row above (an answer in a group).
+fn item(content: Vec<AnyElement>, first: bool, last: bool, tight: bool) -> AnyElement {
     if content.is_empty() {
         return div().when(last, |end| end.h(px(EDGE))).into_any_element();
     }
@@ -36,7 +44,13 @@ fn item(content: Vec<AnyElement>, first: bool, last: bool) -> AnyElement {
                 .flex_col()
                 .gap(px(GAP))
                 .px(px(24.0))
-                .pt(px(if first { EDGE } else { GAP }))
+                .pt(px(if first {
+                    EDGE
+                } else if tight {
+                    TIGHT
+                } else {
+                    GAP
+                }))
                 .when(last, |end| end.pb(px(EDGE)))
                 .children(content),
         )
@@ -58,7 +72,8 @@ impl TeamRoom {
             Some(row) => self.row(row, &model, window, cx),
             None => self.tail(&model, cx),
         };
-        item(content, index == 0, index >= model.rows.len())
+        let tight = matches!(model.rows.get(index), Some(Row::Line { first: false, .. }));
+        item(content, index == 0, index >= model.rows.len(), tight)
     }
 
     fn row(
@@ -77,8 +92,21 @@ impl TeamRoom {
                 .collect(),
             Row::Recap => self.recap_card(cx).into_iter().collect(),
             Row::Bulletin => vec![self.bulletin_card(&model.agents, cx)],
-            Row::Line { index, line } => match model.agent(&line.agent_id) {
-                Some(agent) => self.line_rows(*index, line, agent, &model.agents, window, cx),
+            Row::Day { day } => vec![self.day_row(*day, cx)],
+            Row::Line {
+                index,
+                line,
+                first,
+                said,
+            } => match model.agent(&line.agent_id) {
+                Some(agent) => self.line_rows(
+                    (*index, *first, said.as_ref()),
+                    line,
+                    agent,
+                    model,
+                    window,
+                    cx,
+                ),
                 None => Vec::new(),
             },
         }
@@ -86,16 +114,16 @@ impl TeamRoom {
 
     fn line_rows(
         &self,
-        index: usize,
+        (index, first, said): (usize, bool, Option<&Rc<Said>>),
         line: &RoomLine,
         agent: &AgentRecord,
-        agents: &[AgentRecord],
+        model: &RoomModel,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         if line.speaker == Speaker::Agent {
-            let mut rows = vec![self.agent_line(index, line, agent, window, cx)];
-            rows.extend(self.handoff_bar(index, line, agent, agents, cx));
+            let mut rows = vec![self.agent_line(index, first, line, agent, model, window, cx)];
+            rows.extend(self.handoff_bar(index, line, agent, &model.agents, cx));
             return rows;
         }
         if let Some(heading) = handoff_heading(&line.text) {
@@ -125,7 +153,10 @@ impl TeamRoom {
         } else {
             SharedString::default()
         };
-        vec![self.person_line(format!("room-said-{index}"), line.text.clone(), note, cx)]
+        let said = said
+            .cloned()
+            .unwrap_or_else(|| Rc::new(Said::new(&line.text, &model.mentions)));
+        vec![self.person_line(format!("room-said-{index}"), &said, note, cx)]
     }
 
     /// What holds now, after everything: read fresh on each frame it shows.
@@ -150,7 +181,7 @@ impl TeamRoom {
         }
         // A source's proposal shows in the room it was asked in.
         rows.extend(self.source_cards(&shown, cx));
-        rows.extend(self.pending_rows(agents, whole, cx));
+        rows.extend(self.pending_rows(agents, &model.mentions, whole, cx));
         // Tasks opened here that still run.
         rows.extend(self.running_rows(agents, cx));
         // Agents at work in this project's tasks, however they got there.
@@ -184,6 +215,7 @@ impl TeamRoom {
     fn pending_rows(
         &self,
         agents: &[AgentRecord],
+        names: &MentionNames,
         whole: bool,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
@@ -212,7 +244,8 @@ impl TeamRoom {
                 } else {
                     cx.t("agents.room.sending")
                 };
-                self.person_line(format!("room-pending-{index}"), sent.text, note, cx)
+                let said = Said::new(&sent.text, names);
+                self.person_line(format!("room-pending-{index}"), &said, note, cx)
             })
             .collect()
     }

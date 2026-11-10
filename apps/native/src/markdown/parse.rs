@@ -16,6 +16,8 @@ pub struct SpanStyle {
     /// An address written as itself (`https://…`, `www.…`), drawn like the
     /// composer draws it: blue on a faint fill, the site's icon before it.
     pub site: bool,
+    /// An `@Agent` of the team, in its mascot's `0xRRGGBB` (`super::mentions`).
+    pub mention: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
