@@ -6,7 +6,9 @@ use gpui::{AnyElement, Context, SharedString, div, prelude::*, px};
 
 use super::AgentPage;
 use super::editor_projects::project_options;
+use super::team_presence::{presence_mark, rooms_presence};
 use crate::data::agent_rooms;
+use crate::data::room_presence::Presence;
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
 use crate::ui::Icon;
@@ -40,7 +42,7 @@ impl AgentPage {
         icon: &'static str,
         label: SharedString,
         project: Option<String>,
-        unread: usize,
+        (unread, presence): (usize, Option<Presence>),
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
@@ -59,7 +61,12 @@ impl AgentPage {
             .rounded(cx.theme().radius.control)
             .cursor_pointer()
             .text_size(px(13.0))
-            .font_weight(gpui::FontWeight::MEDIUM)
+            // Bold-ish when there is news, as Tucano's unread channels.
+            .font_weight(if unread > 0 {
+                gpui::FontWeight::MEDIUM
+            } else {
+                gpui::FontWeight::NORMAL
+            })
             .text_color(colors.foreground)
             .when(current, |row| row.bg(colors.accent))
             .when(!current, |row| {
@@ -76,6 +83,7 @@ impl AgentPage {
                     .child(Icon::new(icon).size(16.0)),
             )
             .child(div().flex_1().min_w_0().truncate().child(label))
+            .children(presence.map(|presence| presence_mark(&dot_key, presence)))
             // What is new in the room, as the room's own bar counts it.
             .when(unread > 0, |row| {
                 row.child(
@@ -110,6 +118,8 @@ impl AgentPage {
             .as_ref()
             .map(|(room, _)| room.read(cx).unread_by_room(cx))
             .unwrap_or_default();
+        let kept: Vec<String> = listed.iter().map(|(id, _)| id.clone()).collect();
+        let live = rooms_presence(self.sidebar.read(cx), &kept);
         let mut rows = vec![
             div()
                 .px(px(8.0))
@@ -121,7 +131,10 @@ impl AgentPage {
                 "messages-square",
                 cx.t("agents.rooms.geral"),
                 None,
-                unread.get(&None).copied().unwrap_or(0),
+                (
+                    unread.get(&None).copied().unwrap_or(0),
+                    live.get(&None).copied(),
+                ),
                 cx,
             ),
         ];
@@ -131,7 +144,10 @@ impl AgentPage {
                 "folder",
                 name.clone().into(),
                 Some(id.clone()),
-                unread.get(&Some(id.clone())).copied().unwrap_or(0),
+                (
+                    unread.get(&Some(id.clone())).copied().unwrap_or(0),
+                    live.get(&Some(id.clone())).copied(),
+                ),
                 cx,
             ));
         }

@@ -549,9 +549,24 @@
     },
     "team": {
       "title": "Equipe",
-      "new": "Novo agente"
+      "new": "Novo agente",
+      "line": {
+        "needsYou": "Precisa de você",
+        "task": "{{task}} · {{time}}",
+        "taskNow": "{{task}}",
+        "reviewing": "Revisando {{label}}",
+        "replying": "Respondendo…",
+        "ceiling": "No teto de gatilhos de hoje",
+        "sources_one": "Vigiando {{count}} fonte",
+        "sources_other": "Vigiando {{count}} fontes",
+        "triggers": "De olho nos gatilhos",
+        "newResult": "Resultado novo",
+        "idle": "Disponível"
+      }
     },
     "rooms": {
+      "running": "Rodando nesta sala",
+      "waiting": "Esperando você nesta sala",
       "title": "Salas",
       "geral": "Geral",
       "new": "Nova sala",

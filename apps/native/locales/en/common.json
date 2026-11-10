@@ -549,9 +549,24 @@
     },
     "team": {
       "title": "Team",
-      "new": "New agent"
+      "new": "New agent",
+      "line": {
+        "needsYou": "Needs you",
+        "task": "{{task}} · {{time}}",
+        "taskNow": "{{task}}",
+        "reviewing": "Reviewing {{label}}",
+        "replying": "Replying…",
+        "ceiling": "At today's trigger ceiling",
+        "sources_one": "Watching {{count}} source",
+        "sources_other": "Watching {{count}} sources",
+        "triggers": "Keeping an eye on triggers",
+        "newResult": "New result",
+        "idle": "Available"
+      }
     },
     "rooms": {
+      "running": "Running in this room",
+      "waiting": "Waiting on you in this room",
       "title": "Rooms",
       "geral": "General",
       "new": "New room",

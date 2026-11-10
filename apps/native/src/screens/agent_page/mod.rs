@@ -112,7 +112,11 @@ mod sources;
 mod sources_tests;
 mod spend;
 mod team;
+mod team_presence;
 mod team_rooms;
+mod team_state;
+#[cfg(test)]
+mod team_state_tests;
 #[cfg(test)]
 mod tests;
 mod triggers;

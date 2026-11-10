@@ -6,6 +6,7 @@ use gpui::{
     AnyElement, AppContext, Context, IntoElement, Render, SharedString, Window, div, prelude::*, px,
 };
 
+use super::team_state::{TeamFacts, Tone, state_line};
 use super::{AgentPage, AgentPageEvent, room};
 use crate::agent::{Mood, MoodAvatarView};
 use crate::data::agents::AgentState;
@@ -117,12 +118,12 @@ impl AgentPage {
         name: String,
         avatar: &dcc_core::domain::agent::AgentAvatar,
         mood: Mood,
+        line: (SharedString, Tone),
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let current = !self.room_open && self.agent_id == id && self.editor_is_for_agent(cx);
-        let mood_text = cx.t(mood.i18n_key());
-        let urgent = mood == Mood::NeedsYou;
+        let (line, tone) = line;
         div()
             .id(SharedString::from(format!("team-agent-{index}")))
             .debug_selector(move || format!("team-agent-{index}"))
@@ -166,12 +167,12 @@ impl AgentPage {
                         div()
                             .truncate()
                             .text_size(px(11.0))
-                            .text_color(if urgent {
-                                crate::theme::tailwind::AMBER_600.hsla()
-                            } else {
-                                colors.muted_foreground
+                            .text_color(match tone {
+                                Tone::Urgent => crate::theme::tailwind::AMBER_600.hsla(),
+                                Tone::Active => crate::theme::tailwind::GREEN_600.hsla(),
+                                Tone::Quiet => colors.muted_foreground,
                             })
-                            .child(mood_text),
+                            .child(line),
                     ),
             )
             .into_any_element()
@@ -187,6 +188,7 @@ impl AgentPage {
     fn team_column(&self, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let sidebar = self.sidebar.read(cx);
+        let facts = TeamFacts::read(sidebar);
         let agents: Vec<_> = sidebar
             .agents()
             .iter()
@@ -194,19 +196,21 @@ impl AgentPage {
                 let mood = sidebar
                     .mood(&agent.id, cx)
                     .unwrap_or_else(|| Mood::of(AgentState::Idle, false, false));
+                let line = state_line(agent, mood, &facts, cx);
                 (
                     agent.id.clone(),
                     agent.name.clone(),
                     agent.avatar.clone(),
                     mood,
+                    line,
                 )
             })
             .collect();
         let rows: Vec<AnyElement> = agents
             .into_iter()
             .enumerate()
-            .map(|(index, (id, name, avatar, mood))| {
-                self.team_row(index, id, name, &avatar, mood, cx)
+            .map(|(index, (id, name, avatar, mood, line))| {
+                self.team_row(index, id, name, &avatar, mood, line, cx)
             })
             .collect();
         let creating = !self.editor_is_for_agent(cx);
