@@ -34,6 +34,7 @@ mod editor_look;
 mod editor_projects;
 mod editor_role;
 mod editor_sections;
+mod editor_task_mode;
 mod editor_templates;
 mod execution;
 mod memory;
@@ -52,19 +53,26 @@ mod report_tests;
 mod room;
 mod room_bulletin;
 mod room_cards;
-mod room_failure;
-mod room_links;
 mod room_checkins;
 mod room_cleanup;
+mod room_failure;
 mod room_focus;
 mod room_handoff;
+mod room_images;
+#[cfg(test)]
+mod room_images_tests;
 mod room_limits;
+mod room_links;
 mod room_mentions;
 mod room_proposals;
 mod room_reactions;
 mod room_recap;
 mod room_report;
 mod room_routines;
+mod room_running;
+mod room_select;
+#[cfg(test)]
+mod room_select_tests;
 mod room_sources;
 #[cfg(test)]
 mod room_tests;
@@ -79,6 +87,7 @@ mod sources;
 mod sources_tests;
 mod spend;
 mod team;
+mod team_rooms;
 #[cfg(test)]
 mod tests;
 mod triggers;
@@ -114,6 +123,12 @@ pub struct AgentPage {
     pub(crate) room: Option<(Entity<room::TeamRoom>, Subscription)>,
     /// The room is on screen instead of an agent's page.
     pub(crate) room_open: bool,
+    /// The project whose room is open; none: the Geral room.
+    pub(crate) room_project: Option<String>,
+    /// The project rooms made with "Nova sala" (`data::agent_rooms`).
+    pub(crate) rooms: Vec<String>,
+    /// "Nova sala" lists the projects with no room.
+    pub(crate) room_picker: bool,
     /// The agent's page on its conversation or its settings (`page_tabs`).
     pub(crate) tab: page_tabs::AgentTab,
     /// The agent proposed the editor holds ("Editar antes").
@@ -186,6 +201,9 @@ impl AgentPage {
             memory: None,
             room: None,
             room_open: false,
+            room_project: None,
+            rooms: crate::data::agent_rooms::load(),
+            room_picker: false,
             tab: Default::default(),
             editing_proposal: None,
             room_draft: None,

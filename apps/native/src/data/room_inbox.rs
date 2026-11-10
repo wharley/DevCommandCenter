@@ -208,6 +208,7 @@ mod tests {
             project_id: project.into(),
             title: Some(format!("Conversa {id}")),
             updated_at: "2026-11-07T11:00:00Z".into(),
+            room: None,
         }
     }
 

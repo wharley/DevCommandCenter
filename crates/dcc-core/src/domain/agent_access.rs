@@ -37,6 +37,10 @@ pub struct ToolAccess {
     pub groups: BTreeMap<String, AccessLevel>,
     /// By connector definition id; missing: read and write.
     pub connectors: BTreeMap<String, AccessLevel>,
+    /// What the tasks it opens may do without asking (Monocode's and
+    /// Compozy's per-agent mode); missing: ask, as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tasks_approval: Option<super::provider::ProviderApprovalPolicy>,
 }
 
 /// The group a DCC tool belongs to; none for the agent's own tools.

@@ -48,6 +48,7 @@ impl Sidebar {
     /// `useAgentsQuery`: each agent's state across its sessions; the
     /// reviewer's pull request reviews count too.
     pub(super) fn agent_views(&self) -> Vec<AgentView<'_>> {
+        let running = self.running_agent_tasks();
         self.state
             .data
             .agents
@@ -75,6 +76,13 @@ impl Sidebar {
                         (state, job.unread())
                     }));
                 }
+                // A task it opened that still runs: it is at work, not done.
+                sessions.extend(
+                    running
+                        .iter()
+                        .filter(|task| task.agent_id == agent.id)
+                        .map(|_| (AgentState::Working, false)),
+                );
                 AgentView {
                     agent,
                     state: aggregate(&sessions),

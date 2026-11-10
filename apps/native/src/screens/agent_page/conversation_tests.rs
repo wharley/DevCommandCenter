@@ -21,6 +21,7 @@ fn session(id: &str, task: &str, project: &str, updated_at: &str) -> AgentSessio
         project_id: project.into(),
         title: None,
         updated_at: updated_at.into(),
+        room: None,
     }
 }
 

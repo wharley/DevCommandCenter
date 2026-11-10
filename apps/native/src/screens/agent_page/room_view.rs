@@ -5,7 +5,8 @@
 
 use dcc_core::domain::team_room::handoff_heading;
 use gpui::{
-    AnyElement, Context, FontWeight, IntoElement, Render, SharedString, Window, div, prelude::*, px,
+    AnyElement, Context, ExternalPaths, FontWeight, IntoElement, Render, SharedString, Window, div,
+    prelude::*, px,
 };
 
 use super::room::{Pending, TeamRoom};
@@ -48,7 +49,9 @@ impl TeamRoom {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
-        // Links go under the words as chips.
+        // Images and links go under the words.
+        let (text, images) = crate::data::message_links::split_images(&text);
+        let thumbs = self.image_thumbs(&key, images, cx);
         let (words, links) = crate::data::message_links::split_links(&text);
         let chips = self.link_chips(&key, links, cx);
         let bubble = (!words.is_empty()).then(|| {
@@ -70,6 +73,7 @@ impl TeamRoom {
             .items_end()
             .gap(px(4.0))
             .children(bubble)
+            .children(thumbs)
             .children(chips)
             .child(
                 div()
@@ -261,6 +265,7 @@ impl TeamRoom {
 
     fn composer(&self, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
+        let drop_border = crate::theme::color::mix_oklab(colors.accent_calm, 0.7, colors.border);
         let text = self.input.read(cx).text().trim().to_string();
         let next = (!text.is_empty())
             .then(|| self.pick(&text, cx))
@@ -290,8 +295,15 @@ impl TeamRoom {
                     .gap(px(8.0))
                     .child(
                         div()
+                            .id("room-input")
                             .debug_selector(|| "room-input".into())
                             .relative()
+                            .on_drop(cx.listener(|room, paths: &ExternalPaths, _, cx| {
+                                room.add_paths(paths.paths(), cx)
+                            }))
+                            .drag_over::<ExternalPaths>(move |style, _, _, _| {
+                                style.border_color(drop_border)
+                            })
                             .flex_1()
                             .min_w_0()
                             .min_h(px(40.0))
@@ -343,7 +355,9 @@ impl Render for TeamRoom {
             .filter(|line| self.shows(&line.agent_id))
             .cloned()
             .collect();
-        let mut cards = self.cards(cx);
+        // DCC's own cards live in the Geral room for now.
+        let geral = self.is_geral();
+        let mut cards = if geral { self.cards(cx) } else { Vec::new() };
         cards.retain(|card| self.shows(&card.agent_id));
         // On one agent, only what is its own; the room's cards stay there.
         let whole = self.focus.is_none();
@@ -352,7 +366,7 @@ impl Render for TeamRoom {
             .filter(|agent| self.shows(&agent.id))
             .cloned()
             .collect();
-        let checks = if whole {
+        let checks = if whole && geral {
             self.check_ins(cx)
         } else {
             Vec::new()
@@ -360,11 +374,11 @@ impl Render for TeamRoom {
         let unread = cards.iter().filter(|card| card.unread).count()
             + checks.iter().filter(|card| card.unread).count();
         // DCC's own cards sit at their time (`room_timeline`).
-        let recap_at = whole
+        let recap_at = (whole && geral)
             .then(|| self.sidebar.read(cx).recap_window())
             .flatten()
             .map(|window| window.to);
-        let bulletin_at = whole
+        let bulletin_at = (whole && geral)
             .then(|| dcc_core::domain::agent_bulletin::week_before(chrono::Local::now(), 1).to);
         let timeline = super::room_timeline::order(
             lines.iter().map(|line| line.at.as_str()),
@@ -444,13 +458,15 @@ impl Render for TeamRoom {
         }
         // What DCC itself has for the person now: the day's recap, the space.
         // The space is what holds now, after everything.
-        if whole {
+        if whole && geral {
             rows.extend(self.cleanup_card(cx));
         }
-        rows.extend(self.limit_rows(&shown, cx));
-        rows.extend(self.routine_cards(&shown, cx));
-        rows.extend(self.proposal_cards(&agents, cx));
-        rows.extend(self.source_cards(&shown, cx));
+        if geral {
+            rows.extend(self.limit_rows(&shown, cx));
+            rows.extend(self.routine_cards(&shown, cx));
+            rows.extend(self.proposal_cards(&agents, cx));
+            rows.extend(self.source_cards(&shown, cx));
+        }
         let unread_bar = self.unread_bar(unread, cx);
         let pending: Vec<Pending> = self
             .pending
@@ -479,6 +495,8 @@ impl Render for TeamRoom {
                 cx,
             ));
         }
+        // Tasks opened here that still run.
+        rows.extend(self.running_rows(&agents, cx));
         for (agent, state) in self
             .busy(cx)
             .into_iter()
@@ -525,7 +543,14 @@ impl Render for TeamRoom {
                                 .text_size(px(16.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(colors.foreground)
-                                .child(cx.t("agents.room.title")),
+                                .debug_selector(|| "room-title".into())
+                                .child(match self.room_name(cx) {
+                                    Some(project) => cx.t_with(
+                                        "agents.room.projectTitle",
+                                        &Args::default().with("project", project),
+                                    ),
+                                    None => cx.t("agents.room.title"),
+                                }),
                         )
                         .children(self.pause_button(cx)),
                 )
@@ -533,7 +558,13 @@ impl Render for TeamRoom {
                     div()
                         .text_size(px(12.0))
                         .text_color(colors.muted_foreground)
-                        .child(cx.t("agents.room.subtitle")),
+                        .child(match self.room_name(cx) {
+                            Some(project) => cx.t_with(
+                                "agents.room.projectSubtitle",
+                                &Args::default().with("project", project),
+                            ),
+                            None => cx.t("agents.room.subtitle"),
+                        }),
                 )
                 .children(unread_bar)
         });

@@ -32,12 +32,14 @@ mod pr_review_requests;
 mod reviewer_access;
 mod session_stall;
 mod usage_marks;
+mod agent_rooms;
 use agent_memory::AGENT_MEMORY_TABLE_SQL;
 use agent_proposals::AGENT_PROPOSAL_TABLE_SQL;
 use agent_reactions::AGENT_REACTION_TABLE_SQL;
 use agent_routines::AGENT_ROUTINE_TABLE_SQL;
 use agent_sources::AGENT_SOURCE_TABLE_SQL;
 use usage_marks::USAGE_MARK_TABLE_SQL;
+use agent_rooms::AGENT_ROOM_TABLE_SQL;
 use pr_review_requests::PR_REVIEW_REQUEST_TABLE_SQL;
 pub use workspace_ports::{port_block_is_free, PORT_BLOCK_SIZE, PORT_BLOCK_START};
 
@@ -559,6 +561,9 @@ pub struct AgentSessionBinding {
     pub project_id: String,
     pub title: Option<String>,
     pub updated_at: String,
+    /// The project whose room the conversation is in; none: the Geral room.
+    #[serde(default)]
+    pub room: Option<String>,
 }
 
 /// What moved in the person's tasks during a window, for the daily
@@ -2673,7 +2678,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{PROVIDER_NATIVE_REWIND_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{AGENT_MEMORY_TABLE_SQL}\n{AGENT_ROUTINE_TABLE_SQL}\n{AGENT_SOURCE_TABLE_SQL}\n{PR_REVIEW_REQUEST_TABLE_SQL}\n{AGENT_PROPOSAL_TABLE_SQL}\n{AGENT_REACTION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{USAGE_MARK_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}\n{SCHEMA_MARKER_TABLE_SQL}\n{DELTA_COMPACTION_TABLE_SQL}"
+            "PRAGMA foreign_keys = ON;\n{WORKSPACE_TABLE_SQL}\n{SESSION_TABLE_SQL}\n{BROWSER_LOCATION_TABLE_SQL}\n{PROVIDER_AVAILABILITY_TABLE_SQL}\n{SESSION_OBJECTIVE_TABLE_SQL}\n{PROVIDER_NATIVE_SESSION_TABLE_SQL}\n{PROVIDER_NATIVE_REWIND_TABLE_SQL}\n{RESIDENT_AGENT_TABLE_SQL}\n{AGENT_MEMORY_TABLE_SQL}\n{AGENT_ROUTINE_TABLE_SQL}\n{AGENT_SOURCE_TABLE_SQL}\n{PR_REVIEW_REQUEST_TABLE_SQL}\n{AGENT_PROPOSAL_TABLE_SQL}\n{AGENT_REACTION_TABLE_SQL}\n{USAGE_TABLE_SQL}\n{USAGE_MARK_TABLE_SQL}\n{AGENT_ROOM_TABLE_SQL}\n{TURN_CHANGE_SET_TABLE_SQL}\n{GUARDED_UNDO_TABLE_SQL}\n{DELEGATION_TABLE_SQL}\n{DELEGATION_WORKTREE_OPERATION_TABLE_SQL}\n{DELEGATION_APPLY_TRANSACTION_TABLE_SQL}\n{SCHEMA_MARKER_TABLE_SQL}\n{DELTA_COMPACTION_TABLE_SQL}"
         ))
         .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         Self::drop_redundant_event_sequence_index(&conn)?;
@@ -7956,8 +7961,9 @@ impl SqliteSessionRepo {
         let limit = draft
             .monthly_token_limit
             .and_then(|limit| i64::try_from(limit).ok());
-        // Everything allowed is stored as nothing.
-        let access_json = (!draft.tool_access.is_full())
+        // Everything allowed is stored as nothing; kept when it narrows a
+        // tool or sets the mode of its tasks.
+        let access_json = (!draft.tool_access.is_full() || draft.tool_access.tasks_approval.is_some())
             .then(|| to_string(&draft.tool_access))
             .transpose()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
@@ -8076,7 +8082,7 @@ impl SqliteSessionRepo {
             .lock()
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let mut statement = conn
-            .prepare("SELECT b.session_id, b.agent_id, s.workspace_id, s.project_id, t.title, s.updated_at FROM dcc_session_agents b JOIN dcc_agents a ON a.id = b.agent_id AND a.deleted_at IS NULL JOIN dcc_sessions s ON s.id = b.session_id LEFT JOIN dcc_threads t ON t.session_id = s.id WHERE t.archived_at IS NULL ORDER BY s.updated_at DESC, b.session_id")
+            .prepare("SELECT b.session_id, b.agent_id, s.workspace_id, s.project_id, t.title, s.updated_at, r.project_id FROM dcc_session_agents b JOIN dcc_agents a ON a.id = b.agent_id AND a.deleted_at IS NULL JOIN dcc_sessions s ON s.id = b.session_id LEFT JOIN dcc_threads t ON t.session_id = s.id LEFT JOIN dcc_agent_rooms r ON r.session_id = b.session_id WHERE t.archived_at IS NULL ORDER BY s.updated_at DESC, b.session_id")
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;
         let bindings = statement
             .query_map([], |row| {
@@ -8087,6 +8093,7 @@ impl SqliteSessionRepo {
                     project_id: row.get(3)?,
                     title: row.get(4)?,
                     updated_at: row.get(5)?,
+                    room: row.get(6)?,
                 })
             })
             .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())

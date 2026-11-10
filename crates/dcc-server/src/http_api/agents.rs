@@ -8,6 +8,9 @@ use super::*;
 #[serde(rename_all = "camelCase")]
 pub(super) struct BindInput {
     agent_id: String,
+    /// The project whose room this conversation is in; none: the Geral room.
+    #[serde(default)]
+    room_project_id: Option<String>,
 }
 
 pub(super) async fn bind_session(
@@ -15,10 +18,17 @@ pub(super) async fn bind_session(
     Path(session_id): Path<String>,
     Json(input): Json<BindInput>,
 ) -> Result<Json<Value>, HttpApiError> {
+    let session = SessionId(session_id);
     backend
         .sessions
-        .bind_session_agent(&SessionId(session_id), input.agent_id.trim())
+        .bind_session_agent(&session, input.agent_id.trim())
         .map_err(|error| HttpApiError::bad_request(error.to_string()))?;
+    if let Some(project) = input.room_project_id.as_deref() {
+        backend
+            .sessions
+            .set_session_room(&session, project)
+            .map_err(|error| HttpApiError::bad_request(error.to_string()))?;
+    }
     Ok(Json(json!({ "ok": true })))
 }
 

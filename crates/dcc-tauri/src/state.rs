@@ -6,6 +6,7 @@ mod agent_memory;
 mod agent_proposals;
 mod agent_reactions;
 mod agent_reads;
+mod agent_rooms;
 mod agent_routines;
 mod agent_sources;
 mod agent_tools_refresh;

@@ -37,6 +37,8 @@ pub struct ConversationStart<'a> {
     /// What the conversation starts with, its account included
     /// (`provider_runtime::for_agent`).
     pub runtime: Option<dcc_core::ports::provider::ProviderRuntimeConfig>,
+    /// The project whose room the conversation is in; none: the Geral room.
+    pub room: Option<&'a str>,
 }
 
 impl DesktopApi {
@@ -83,7 +85,7 @@ impl DesktopApi {
             Some(start.agent_name),
             start.runtime.clone(),
         )?;
-        if let Err(error) = self.bind_session_agent(&session, start.agent_id) {
+        if let Err(error) = self.bind_session_agent_in(&session, start.agent_id, start.room) {
             // Without the binding it would be a plain session with no role.
             let _ = self.close_session(&session, true);
             return Err(error);

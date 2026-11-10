@@ -91,6 +91,7 @@ impl SessionCommandState {
             ToolAccess {
                 groups: proposed.groups,
                 connectors,
+                tasks_approval: None,
             },
         )
         .map_err(invalid)?;

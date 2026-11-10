@@ -19,7 +19,7 @@ pub(crate) mod header;
 #[cfg(test)]
 mod header_tests;
 mod hover_actions;
-mod image;
+pub(crate) mod image;
 mod paced;
 mod permission_panel;
 mod proposal_card;

@@ -12,7 +12,6 @@ use std::sync::{Mutex, OnceLock};
 use dcc_core::application::SendTurnInput;
 use dcc_core::domain::agent::ReviewerPresetText;
 use dcc_core::domain::agent_chain::{auto_handoff_prompt, next_step};
-use dcc_core::domain::agent_conversation::home_project_id;
 use dcc_core::domain::provider::ProviderApprovalPolicy;
 use dcc_core::domain::session::{SessionEventKind, SessionId, SessionProjection};
 use dcc_core::domain::team_room::{handoff, Teammate};
@@ -106,14 +105,12 @@ async fn pass_if_allowed(
     let Some(step) = next_step(&prompt, &agent.may_call, mate.id, mate.preset) else {
         return Ok(());
     };
-    let home = home_project_id(mate.id);
+    // The teammate's conversation in the same room; none there yet waits
+    // for the person's click on the card, which makes it.
+    let room = state.session_room(session_id).map_err(text)?;
     let Some(to_session) = state
-        .agent_session_bindings()
+        .agent_room_session(mate.id, room.as_deref())
         .map_err(text)?
-        .into_iter()
-        .filter(|binding| binding.agent_id == mate.id && binding.project_id == home)
-        .max_by(|left, right| left.updated_at.cmp(&right.updated_at))
-        .map(|binding| binding.session_id)
     else {
         return Ok(());
     };

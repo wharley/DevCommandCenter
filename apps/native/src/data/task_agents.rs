@@ -11,6 +11,45 @@ use dcc_core::domain::delegation::Delegation;
 
 use super::agents::{AgentRecord, AgentState};
 
+/// A task an agent opened from one of its conversations, and from which:
+/// the team room shows it running in that conversation's room.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenedTask {
+    pub agent_id: String,
+    pub session_id: String,
+}
+
+/// Task id → who opened it and from which conversation.
+pub fn opened_tasks(
+    agents: &[AgentRecord],
+    delegations: &[Delegation],
+) -> HashMap<String, OpenedTask> {
+    let owner: HashMap<&str, &str> = agents
+        .iter()
+        .flat_map(|agent| {
+            agent
+                .sessions
+                .iter()
+                .map(move |session| (session.session_id.as_str(), agent.id.as_str()))
+        })
+        .collect();
+    delegations
+        .iter()
+        .filter_map(|delegation| {
+            let task = delegation.budget.new_task.as_ref()?.workspace_id.clone()?;
+            let parent = delegation.parent_session_id.0.as_str();
+            let agent = owner.get(parent)?;
+            Some((
+                task,
+                OpenedTask {
+                    agent_id: agent.to_string(),
+                    session_id: parent.to_string(),
+                },
+            ))
+        })
+        .collect()
+}
+
 /// Task id → agent id.
 pub fn by_task(agents: &[AgentRecord], delegations: &[Delegation]) -> HashMap<String, String> {
     let owner: HashMap<&str, &str> = agents
@@ -63,6 +102,7 @@ mod tests {
             project_id: project.into(),
             title: None,
             updated_at: "2026-11-09T10:00:00Z".into(),
+            room: None,
         }
     }
 
@@ -144,5 +184,14 @@ mod tests {
         assert_eq!(tasks.get("w-shopify").map(String::as_str), Some("rev"));
         // A proposal not started yet has no task, and a home is no task.
         assert_eq!(tasks.len(), 2);
+        // Who opened which, and from which conversation.
+        let by_opener = opened_tasks(&agents, &[opened("s-home", Some("w-campo"))]);
+        assert_eq!(
+            by_opener.get("w-campo"),
+            Some(&OpenedTask {
+                agent_id: "suporte".into(),
+                session_id: "s-home".into()
+            })
+        );
     }
 }

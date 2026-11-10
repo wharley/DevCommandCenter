@@ -1,0 +1,84 @@
+//! The room an agent's conversation belongs to (`docs/PLANO_SALA_POR_PROJETO`):
+//! every conversation of an agent runs in its home; the ones of a project's
+//! room are marked here with the project, the rest are the Geral room's.
+
+use super::*;
+
+pub(super) const AGENT_ROOM_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS dcc_agent_rooms (
+    session_id TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+"#;
+
+fn repository_error(error: impl ToString) -> dcc_core::CoreError {
+    dcc_core::CoreError::Repository(error.to_string())
+}
+
+impl SqliteSessionRepo {
+    /// Marks `session_id` as the conversation of `project_id`'s room.
+    pub fn set_session_room(&self, session_id: &SessionId, project_id: &str) -> Result<()> {
+        let project_id = project_id.trim();
+        if project_id.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().map_err(repository_error)?;
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        conn.execute(
+            "INSERT INTO dcc_agent_rooms (session_id, project_id, created_at) VALUES (?1, ?2, ?3) ON CONFLICT(session_id) DO NOTHING",
+            params![session_id.0, project_id, now],
+        )
+        .map_err(repository_error)?;
+        Ok(())
+    }
+
+    /// The project whose room `session_id` is in; none: the Geral room.
+    pub fn session_room(&self, session_id: &SessionId) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(repository_error)?;
+        conn.query_row(
+            "SELECT project_id FROM dcc_agent_rooms WHERE session_id = ?1",
+            params![session_id.0],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(repository_error)
+    }
+
+    /// The project's name and folder as the person registered it.
+    pub fn project_name_and_path(&self, project_id: &str) -> Option<(String, String)> {
+        let conn = self.conn.lock().ok()?;
+        conn.query_row(
+            "SELECT name, path FROM projects WHERE id = ?1",
+            params![project_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_conversation_keeps_its_room() {
+        let repo = SqliteSessionRepo::from_connection(Arc::new(Mutex::new(
+            Connection::open_in_memory().unwrap(),
+        )))
+        .unwrap();
+        let session = SessionId("s-1".into());
+        assert_eq!(repo.session_room(&session).unwrap(), None);
+        repo.set_session_room(&session, "checkout").unwrap();
+        repo.set_session_room(&session, "other").unwrap();
+        assert_eq!(
+            repo.session_room(&session).unwrap().as_deref(),
+            Some("checkout")
+        );
+        // A blank project is the Geral room: nothing kept.
+        repo.set_session_room(&SessionId("s-2".into()), " ")
+            .unwrap();
+        assert_eq!(repo.session_room(&SessionId("s-2".into())).unwrap(), None);
+        assert_eq!(repo.project_name_and_path("nope"), None);
+    }
+}

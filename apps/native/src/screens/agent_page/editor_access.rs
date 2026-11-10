@@ -125,6 +125,8 @@ impl AgentEditor {
                 )
             })
             .collect();
+        // Under "Abrir tarefas": what its tasks may do without asking.
+        rows.extend(self.task_mode_row(cx));
         let connectors = self.connector_names.clone();
         rows.extend(
             connectors

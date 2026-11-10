@@ -105,6 +105,7 @@ fn the_room_shows_the_team_together_and_sends_to_who_answers(cx: &mut TestAppCon
         project_id: "dcc-agent-rev".into(),
         title: None,
         updated_at: "2026-11-07T10:01:00Z".into(),
+        room: None,
     };
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {
@@ -272,6 +273,7 @@ fn what_an_agent_finished_in_a_task_is_a_card_until_it_is_read(cx: &mut TestAppC
         project_id: "p-1".into(),
         title: Some("Checkout".into()),
         updated_at: done,
+        room: None,
     };
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {
@@ -359,6 +361,7 @@ fn an_agent_suggests_a_teammate_and_only_the_persons_click_passes_it(cx: &mut Te
         project_id: format!("dcc-agent-{agent}"),
         title: None,
         updated_at: "2026-11-07T10:01:00Z".into(),
+        room: None,
     };
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {

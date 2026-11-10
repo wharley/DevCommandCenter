@@ -79,7 +79,8 @@ pub(super) fn agents_view(
             let home = home_project_id(&agent.id);
             let home_session = sessions
                 .iter()
-                .filter(|binding| binding.project_id == home)
+                // The phone talks in the Geral room for now.
+                .filter(|binding| binding.project_id == home && binding.room.is_none())
                 .max_by(|left, right| left.updated_at.cmp(&right.updated_at))
                 .map(|binding| binding.session_id.clone());
             let last = sessions
@@ -215,6 +216,7 @@ mod tests {
             project_id: project.into(),
             title: Some(format!("Tarefa {session}")),
             updated_at: at.into(),
+            room: None,
         }
     }
 

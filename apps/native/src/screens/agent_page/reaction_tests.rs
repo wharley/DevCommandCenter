@@ -49,6 +49,7 @@ fn an_answer_is_marked_and_a_thumbs_down_keeps_a_rule(cx: &mut TestAppContext) {
         project_id: "dcc-agent-rev".into(),
         title: None,
         updated_at: "2026-11-09T10:01:00Z".into(),
+        room: None,
     }];
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {

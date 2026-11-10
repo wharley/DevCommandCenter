@@ -104,6 +104,7 @@ fn agents_waiting_are_counted_beside_agentes(cx: &mut TestAppContext) {
                 project_id: "p".into(),
                 title: None,
                 updated_at: String::new(),
+                room: None,
             })
             .into_iter()
             .collect(),

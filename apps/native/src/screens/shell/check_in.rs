@@ -59,13 +59,13 @@ fn announce(trigger: Trigger, agent: &str, item: &CheckIn, done: &Result<(), Str
     crate::ui::attention::notify_away(&title, &format!("{} · {what}", item.place));
 }
 
-/// The agent's own conversation, when it has one.
+/// The agent's own conversation in the Geral room, when it has one.
 pub(super) fn home_session(agent: &AgentRecord) -> Option<String> {
     let home = home_project_id(&agent.id);
     agent
         .sessions
         .iter()
-        .filter(|session| session.project_id == home)
+        .filter(|session| session.project_id == home && session.room.is_none())
         .max_by(|left, right| left.updated_at.cmp(&right.updated_at))
         .map(|session| session.session_id.clone())
 }
@@ -235,6 +235,8 @@ impl Shell {
                                 provider: &run.provider_id,
                                 model: run.model.as_deref(),
                                 runtime: run.provider_runtime.clone(),
+                                // Events wake an agent in the Geral room.
+                                room: None,
                             })
                             .map_err(|error| error.to_string())?
                             .1

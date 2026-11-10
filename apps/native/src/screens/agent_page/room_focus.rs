@@ -9,7 +9,6 @@ use gpui::Context;
 
 use super::room::TeamRoom;
 use crate::data::agents::AgentRecord;
-use crate::i18n::{Args, Translate};
 
 impl TeamRoom {
     /// The agent the room shows alone, or the whole team (`None`).
@@ -21,13 +20,7 @@ impl TeamRoom {
         self.mention = None;
         // The new conversation opens at its bottom.
         self.shown = usize::MAX;
-        let placeholder = match self.focused(cx) {
-            Some(agent) => cx.t_with(
-                "agents.room.placeholderAgent",
-                &Args::default().with("agent", agent.name),
-            ),
-            None => cx.t("agents.room.placeholder"),
-        };
+        let placeholder = self.placeholder_text(cx);
         self.input
             .update(cx, |area, cx| area.set_placeholder(placeholder, cx));
         cx.notify();

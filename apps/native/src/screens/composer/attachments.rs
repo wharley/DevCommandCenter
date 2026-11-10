@@ -45,7 +45,18 @@ impl Composer {
         if !self.session.usable() || paths.is_empty() {
             return;
         }
-        let chips: Vec<Chip> = paths.iter().map(|path| self.chip_for(path)).collect();
+        // An image whose path has a space goes as a copy without it, so the
+        // provider attaches it (`image_for_prompt`).
+        let chips: Vec<Chip> = paths
+            .iter()
+            .map(|path| {
+                if is_image_path(&path.to_string_lossy()) {
+                    self.chip_for(&dcc_infra::prompt_attachments::image_for_prompt(path))
+                } else {
+                    self.chip_for(path)
+                }
+            })
+            .collect();
         self.input.update(cx, |input, cx| {
             for chip in chips {
                 input.insert_chip(chip, None, cx);

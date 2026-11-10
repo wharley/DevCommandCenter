@@ -51,6 +51,11 @@ impl SessionCommandState {
             Some(team) => format!("{}\n\n{team}", conversation_block()),
             None => conversation_block(),
         };
+        // In a project's room: which project it is.
+        let conversation = match self.room_block(session_id)? {
+            Some(room) => format!("{conversation}\n\n{room}"),
+            None => conversation,
+        };
         Ok(Some(match memory {
             Some(memory) => format!("{conversation}\n\n{memory}"),
             None => conversation,

@@ -44,6 +44,8 @@ pub struct AgentSession {
     /// The conversation's title, when the task has no name here.
     pub title: Option<String>,
     pub updated_at: String,
+    /// The project whose room the conversation is in; none: the Geral room.
+    pub room: Option<String>,
 }
 
 /// An agent as stored, with its sessions' live state; whether a finished
@@ -262,6 +264,7 @@ pub fn load(sessions: &SqliteSessionRepo) -> anyhow::Result<Vec<AgentRecord>> {
                         completed_at: input.and_then(|(_, completed, _)| completed.clone()),
                         project_id: binding.project_id.clone(),
                         title: binding.title.clone(),
+                        room: binding.room.clone(),
                         updated_at: input
                             .map(|(_, _, changed)| changed.as_str())
                             .filter(|changed| *changed > binding.updated_at.as_str())

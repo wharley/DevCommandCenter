@@ -1108,10 +1108,15 @@ pub async fn run_delegation(
         &input.mode,
         &budget,
     )?;
-    let parent_policy = SessionEventRepo::list_events_by_session(state, &parent.id)
-        .await
-        .ok()
-        .and_then(|events| latest_turn_approval_policy(&events));
+    // An agent's own conversation: its tasks take the mode the person set
+    // for the agent, not the conversation's "ask".
+    let parent_policy = match crate::agent_task_policy::for_agent_parent(state, &parent.id) {
+        Some(policy) => Some(policy),
+        None => SessionEventRepo::list_events_by_session(state, &parent.id)
+            .await
+            .ok()
+            .and_then(|events| latest_turn_approval_policy(&events)),
+    };
     budget.approval_policy = if is_task && allow_file_edits {
         task_approval_policy(
             &provider_approval_policies(&target_provider_id),
@@ -1956,6 +1961,10 @@ pub async fn message_task(
         .child_session_id
         .clone()
         .ok_or_else(|| "the task has no conversation".to_string())?;
+    // A task the person completed, archived or deleted is done with.
+    if let Some(why) = crate::task_finished::finished_task(state, &child_session_id).await? {
+        return Err(crate::task_finished::finished_error(why));
+    }
     let prompt = format!(
         "{DCC_TURN_PREFIX}Message from the session that coordinates this task:\n\n{message}"
     );
@@ -3920,6 +3929,34 @@ mod tests {
                 queued[0].starts_with("[DCC] Message from the session that coordinates this task:")
             );
             assert!(queued[0].ends_with("add tests"));
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn a_task_the_person_finished_takes_no_more_messages() {
+            let fixture = fixture().await;
+            let state = &fixture.state;
+            let task = open_task(state).await;
+            append(state, "parent", started("p-1", "a tarefa já foi mergeada")).await;
+            // The person merged the task: it moved to "Concluídas".
+            let workspaces = SqliteWorkspaceRepo::open(state.db_path()).expect("workspace repo");
+            let mut workspace =
+                WorkspaceRepo::get_workspace(&workspaces, &WorkspaceId("workspace".to_string()))
+                    .await
+                    .expect("read")
+                    .expect("workspace");
+            workspace.state = WorkspaceState::Completed;
+            workspaces.save_workspace(&workspace).await.expect("save");
+            let error = message_task(
+                state,
+                &SessionId("parent".to_string()),
+                &task.id.0,
+                "corrige o botão",
+            )
+            .await
+            .expect_err("a finished task takes no messages");
+            assert!(error.contains("completed"), "{error}");
+            assert!(error.contains("dcc_open_task"), "{error}");
+            assert!(queued_prompts(state, "child").await.is_empty());
         }
 
         #[tokio::test(flavor = "current_thread")]

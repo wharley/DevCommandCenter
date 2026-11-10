@@ -20,6 +20,8 @@ impl AgentPage {
     /// The team room, with `draft` in its field when given.
     pub fn open_room(&mut self, draft: Option<String>, cx: &mut Context<Self>) {
         self.room_open = true;
+        // The Geral room; `open_room_of` picks a project's.
+        self.room_project = None;
         self.editor = None;
         self.room_draft = draft;
         // The limit may have changed in Settings meanwhile.
@@ -79,7 +81,16 @@ impl AgentPage {
                 room
             }
         };
-        room.update(cx, |room, cx| room.set_focus(focus, cx));
+        // One agent's "Conversa" is its Geral conversation for now.
+        let project = if focus.is_some() {
+            None
+        } else {
+            self.room_project.clone()
+        };
+        room.update(cx, |room, cx| {
+            room.set_room(project, cx);
+            room.set_focus(focus, cx);
+        });
         if let Some(draft) = self.room_draft.take() {
             let input = room.read(cx).input.clone();
             input.update(cx, |area, cx| area.set_text(&draft, cx));
@@ -148,40 +159,6 @@ impl AgentPage {
                             .child(mood_text),
                     ),
             )
-            .into_any_element()
-    }
-
-    /// "Sala da equipe", first in the column.
-    fn room_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        let current = self.room_open && self.editor.is_none();
-        div()
-            .id("team-room-row")
-            .debug_selector(|| "team-room-row".into())
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .px(px(8.0))
-            .h(px(40.0))
-            .rounded(cx.theme().radius.control)
-            .cursor_pointer()
-            .text_size(px(13.0))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(colors.foreground)
-            .when(current, |row| row.bg(colors.accent))
-            .when(!current, |row| {
-                row.hover(move |style| style.bg(colors.accent.opacity(0.5)))
-            })
-            .on_click(cx.listener(|page, _, _, cx| page.open_room(None, cx)))
-            .child(
-                div()
-                    .flex()
-                    .size(px(30.0))
-                    .items_center()
-                    .justify_center()
-                    .child(Icon::new("messages-square").size(16.0)),
-            )
-            .child(cx.t("agents.room.title"))
             .into_any_element()
     }
 
@@ -265,7 +242,7 @@ impl AgentPage {
             .py(px(16.0))
             .border_r_1()
             .border_color(colors.border.opacity(0.7))
-            .child(self.room_row(cx))
+            .children(self.rooms_section(cx))
             .child(
                 div()
                     .px(px(8.0))

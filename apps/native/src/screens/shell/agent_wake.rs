@@ -76,6 +76,8 @@ pub(super) fn send_home(api: &DesktopApi, send: HomeSend) -> Result<(), String> 
                 provider: &send.run.provider_id,
                 model: send.run.model.as_deref(),
                 runtime: send.run.provider_runtime.clone(),
+                // Events wake an agent in the Geral room.
+                room: None,
             })
             .map_err(|error| error.to_string())?
             .1

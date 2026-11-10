@@ -952,9 +952,19 @@ impl DesktopApi {
 
     /// `bindSessionAgent`: the session runs as this agent from now on.
     pub fn bind_session_agent(&self, session_id: &str, agent_id: &str) -> Result<(), ApiError> {
+        self.bind_session_agent_in(session_id, agent_id, None)
+    }
+
+    /// The binding, with the project whose room the conversation is in.
+    pub fn bind_session_agent_in(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+        room: Option<&str>,
+    ) -> Result<(), ApiError> {
         self.post(
             &format!("/api/v1/sessions/{}/agent", encode(session_id)),
-            &json!({ "agentId": agent_id }),
+            &json!({ "agentId": agent_id, "roomProjectId": room }),
         )
         .map(|_| ())
     }

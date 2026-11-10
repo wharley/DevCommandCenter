@@ -9,13 +9,21 @@ use gpui::Context;
 use super::{AgentPage, AgentPageEvent};
 use crate::data::agents::{AgentRecord, AgentSession};
 
-/// The agent's latest conversation in its home, if it has one.
+/// The agent's latest conversation in the Geral room, if it has one.
 pub(crate) fn home_session(agent: &AgentRecord) -> Option<&AgentSession> {
+    room_session(agent, None)
+}
+
+/// The agent's latest conversation in `room` (none: the Geral room).
+pub(crate) fn room_session<'a>(
+    agent: &'a AgentRecord,
+    room: Option<&str>,
+) -> Option<&'a AgentSession> {
     let home = home_project_id(&agent.id);
     agent
         .sessions
         .iter()
-        .filter(|session| session.project_id == home)
+        .filter(|session| session.project_id == home && session.room.as_deref() == room)
         .max_by(|left, right| left.updated_at.cmp(&right.updated_at))
 }
 

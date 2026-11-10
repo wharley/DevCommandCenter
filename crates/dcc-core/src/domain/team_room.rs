@@ -39,21 +39,10 @@ impl RouteReason {
     }
 }
 
-const REVIEWER_WORDS: &[&str] = &[
-    "pull request",
-    "review",
-    "revis",
-    "diff",
-    "commit",
-    "merge",
-    "check",
-    "tarefa",
-    "task",
-    "bug",
-    "teste",
-    "falhou",
-    "failing",
-];
+/// What only a review asks for. Words any talk about code has ("tarefa",
+/// "merge", "bug", "teste") are left to the subject, so a conversation with
+/// a teammate is not taken over by the Reviewer.
+const REVIEWER_WORDS: &[&str] = &["pull request", "review", "revis", "diff"];
 /// Short words that only count on their own.
 const REVIEWER_TOKENS: &[&str] = &["pr", "prs", "ci"];
 
@@ -263,6 +252,14 @@ mod tests {
         assert_eq!(
             who("e o outro?", Some(("res", 90))),
             ("rev", RouteReason::Default)
+        );
+        // Talk about a task, a merge or a bug stays with whoever answered.
+        assert_eq!(
+            who(
+                "essa tarefa que voce alterou ja foi feito merge, cria uma nova",
+                Some(("res", 3))
+            ),
+            ("res", RouteReason::Continues)
         );
         // "price" has no "pr" on its own.
         assert_eq!(who("qual o price?", None), ("rev", RouteReason::Default));

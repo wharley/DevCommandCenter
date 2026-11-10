@@ -88,6 +88,10 @@ pub struct TeamRoom {
     pub(crate) cleanup_path: Option<PathBuf>,
     /// The one agent shown, on its page's "Conversa" (`room_focus`).
     pub(crate) focus: Option<String>,
+    /// The project whose room this is; none: the Geral room.
+    pub(crate) room: Option<String>,
+    /// Bumped on each switch of room, so a read of the room before is dropped.
+    pub(crate) room_generation: u64,
     /// Agents proposed that the person answered here, gone at once.
     pub(crate) answered_proposals: Vec<String>,
     /// 👍 / 👎 changed here, by answer, before the feed reads them again.
@@ -99,13 +103,16 @@ pub struct TeamRoom {
 
 impl EventEmitter<RoomEvent> for TeamRoom {}
 
-/// Every conversation an agent has in its home.
-fn home_sessions(agent: &AgentRecord) -> impl Iterator<Item = &AgentSession> {
+/// Every conversation an agent has in `room` (none: the Geral room).
+fn home_sessions<'a>(
+    agent: &'a AgentRecord,
+    room: Option<&'a str>,
+) -> impl Iterator<Item = &'a AgentSession> {
     let home = home_project_id(&agent.id);
     agent
         .sessions
         .iter()
-        .filter(move |session| session.project_id == home)
+        .filter(move |session| session.project_id == home && session.room.as_deref() == room)
 }
 
 impl TeamRoom {
@@ -139,6 +146,7 @@ impl TeamRoom {
                 TextAreaEvent::MenuDown => room.move_mention(1, cx),
                 TextAreaEvent::MenuAccept => room.accept_mention(None, cx),
                 TextAreaEvent::Cancelled => room.close_mention(cx),
+                TextAreaEvent::PastedNonText => room.paste_image(cx),
                 _ => {}
             }),
         ];
@@ -173,6 +181,8 @@ impl TeamRoom {
             cleanup: Default::default(),
             cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
             focus: None,
+            room: None,
+            room_generation: 0,
             answered_proposals: Vec::new(),
             reacted: HashMap::new(),
             rule: None,
@@ -195,7 +205,7 @@ impl TeamRoom {
             .agents()
             .iter()
             .flat_map(|agent| {
-                home_sessions(agent).map(|session| {
+                home_sessions(agent, self.room.as_deref()).map(|session| {
                     (
                         agent.id.clone(),
                         session.session_id.clone(),
@@ -225,6 +235,7 @@ impl TeamRoom {
         }
         self.reading = true;
         let db = self.db_path.clone();
+        let generation = self.room_generation;
         cx.spawn(async move |this, cx| {
             let read: Vec<HomeFeed> = cx
                 .background_executor()
@@ -243,6 +254,11 @@ impl TeamRoom {
                 .await;
             let _ = this.update(cx, |room, cx| {
                 room.reading = false;
+                // Read for the room before a switch: the new one reads its own.
+                if room.room_generation != generation {
+                    room.sync(cx);
+                    return;
+                }
                 room.take(read);
                 cx.notify();
                 // It may have changed again meanwhile.
@@ -309,7 +325,7 @@ impl TeamRoom {
             .agents()
             .iter()
             .filter_map(|agent| {
-                let state = home_sessions(agent)
+                let state = home_sessions(agent, self.room.as_deref())
                     .map(|session| session.state)
                     .find(|state| matches!(state, AgentState::Working | AgentState::NeedsYou))?;
                 Some((agent.clone(), state))
@@ -324,7 +340,7 @@ impl TeamRoom {
             .agents()
             .iter()
             .find(|agent| agent.id == agent_id)
-            .and_then(super::conversation::home_session)
+            .and_then(|agent| super::conversation::room_session(agent, self.room.as_deref()))
         else {
             return;
         };
@@ -335,7 +351,8 @@ impl TeamRoom {
     }
 
     pub(crate) fn send(&mut self, cx: &mut Context<Self>) {
-        let text = self.input.read(cx).text().trim().to_string();
+        // Its images go as `@/path.png`, as the composer sends them.
+        let text = self.prompt_text(cx);
         if text.is_empty() || self.sending {
             return;
         }
@@ -378,8 +395,9 @@ impl TeamRoom {
             Toaster::error(cx.t("native.desktopClosed"), cx);
             return false;
         };
-        let existing =
-            super::conversation::home_session(&agent).map(|session| session.session_id.clone());
+        let existing = super::conversation::room_session(&agent, self.room.as_deref())
+            .map(|session| session.session_id.clone());
+        let room = self.room.clone();
         let home_task = self
             .sidebar
             .read(cx)
@@ -391,6 +409,11 @@ impl TeamRoom {
                 &Args::default().with("agent", agent.name.clone()),
             )
             .to_string();
+        // A project's room names its conversations after the project too.
+        let title = match self.room_name(cx) {
+            Some(project) => format!("{title} · {project}"),
+            None => title,
+        };
         let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         if let Some(reason) = reason {
             self.reasons
@@ -432,6 +455,7 @@ impl TeamRoom {
                                     provider: &provider,
                                     model: model.as_deref(),
                                     runtime: runtime.clone(),
+                                    room: room.as_deref(),
                                 })?
                                 .1
                             }

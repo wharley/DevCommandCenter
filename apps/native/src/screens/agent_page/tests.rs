@@ -21,6 +21,7 @@ fn session(id: &str, task: &str, state: AgentState) -> AgentSession {
         project_id: "p-1".into(),
         title: Some(format!("Conversa {id}")),
         updated_at: "2026-10-27T10:05:00Z".into(),
+        room: None,
     }
 }
 

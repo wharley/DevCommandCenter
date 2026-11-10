@@ -478,6 +478,11 @@
       },
       "title": "Sala da equipe",
       "subtitle": "Escreva para a equipe. Com @ você escolhe quem responde; sem @, o DCC escolhe pela regra.",
+      "projectTitle": "Sala · {{project}}",
+      "projectSubtitle": "Aqui os agentes já sabem que é o {{project}}: peça sem dizer o projeto. Com @ você escolhe quem responde.",
+      "placeholderProject": "Escreva para a equipe do {{project}} · @ para chamar alguém",
+      "taskRunning": "{{agent}} · “{{task}}” rodando há {{time}}",
+      "taskRunningNow": "{{agent}} · “{{task}}” começou agora",
       "placeholderAgent": "Escreva para o {{agent}}",
       "emptyAgent": "Escreva para o {{agent}}. A resposta chega aqui; a conversa completa, com as ferramentas, abre em \"Conversa completa\".",
       "placeholder": "Escreva para a equipe · @ para chamar alguém",
@@ -523,6 +528,13 @@
     "team": {
       "title": "Equipe",
       "new": "Novo agente"
+    },
+    "rooms": {
+      "title": "Salas",
+      "geral": "Geral",
+      "new": "Nova sala",
+      "pick": "Sala de qual projeto?",
+      "none": "Todos os projetos já têm sala."
     },
     "editor": {
       "extra": "Instruções extras",
@@ -649,6 +661,12 @@
       "none": "Sem acesso",
       "tasksOff": "Não abre",
       "tasksOn": "Abre tarefas",
+      "mode": {
+        "title": "Permissão nas tarefas",
+        "ask": "Perguntar",
+        "auto": "Auto",
+        "full": "Acesso total"
+      },
       "read": "Ler",
       "write": "Ler e escrever",
       "groups": {

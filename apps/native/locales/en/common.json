@@ -478,6 +478,11 @@
       },
       "title": "Team room",
       "subtitle": "Write to the team. With @ you pick who answers; without it, DCC picks by rule.",
+      "projectTitle": "Room · {{project}}",
+      "projectSubtitle": "Here the agents know it is {{project}}: ask without naming the project. With @ you pick who answers.",
+      "placeholderProject": "Write to the {{project}} team · @ to call someone",
+      "taskRunning": "{{agent}} · “{{task}}” running for {{time}}",
+      "taskRunningNow": "{{agent}} · “{{task}}” just started",
       "placeholderAgent": "Write to {{agent}}",
       "emptyAgent": "Write to {{agent}}. The answer comes here; the whole conversation, with its tools, opens in \"Whole conversation\".",
       "placeholder": "Write to the team · @ to call someone",
@@ -523,6 +528,13 @@
     "team": {
       "title": "Team",
       "new": "New agent"
+    },
+    "rooms": {
+      "title": "Rooms",
+      "geral": "General",
+      "new": "New room",
+      "pick": "A room for which project?",
+      "none": "Every project has a room already."
     },
     "editor": {
       "extra": "Extra instructions",
@@ -649,6 +661,12 @@
       "none": "No access",
       "tasksOff": "Doesn't open",
       "tasksOn": "Opens tasks",
+      "mode": {
+        "title": "Permission in its tasks",
+        "ask": "Ask",
+        "auto": "Auto",
+        "full": "Full access"
+      },
       "read": "Read",
       "write": "Read and write",
       "groups": {

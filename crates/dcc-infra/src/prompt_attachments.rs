@@ -23,6 +23,24 @@ pub fn save_temp_image(bytes: &[u8], extension: &str) -> std::io::Result<PathBuf
     Ok(path)
 }
 
+/// The image as a prompt can reference it: providers read `@/path.png` up
+/// to the first space, so one whose path has a space (a CleanShot capture,
+/// "Screenshot 2026-11-10 at 12.06.png") is copied to the temp dir as
+/// `dcc_img_<uuid>`; any other path, or a copy that fails, stays as it is.
+pub fn image_for_prompt(path: &Path) -> PathBuf {
+    if !path.to_string_lossy().chars().any(char::is_whitespace) {
+        return path.to_path_buf();
+    }
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("png")
+        .to_ascii_lowercase();
+    std::fs::read(path)
+        .and_then(|bytes| save_temp_image(&bytes, &extension))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// Writes any other file under `dcc_file_<uuid>/` keeping a readable name, so
 /// the agent sees `relatorio.pdf` rather than an opaque id.
 pub fn save_temp_file(bytes: &[u8], name: &str) -> std::io::Result<PathBuf> {
@@ -160,6 +178,25 @@ pub fn read_image_data_url(path: &Path, max_bytes: u64) -> Option<String> {
 }
 
 #[cfg(test)]
+mod image_for_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn an_image_with_a_space_is_copied_without_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let shot = dir.path().join("CleanShot 2026-11-10 at 12.06.37.png");
+        std::fs::write(&shot, b"png").unwrap();
+        let copied = image_for_prompt(&shot);
+        assert_ne!(copied, shot);
+        assert!(!copied.to_string_lossy().contains(' '));
+        assert_eq!(std::fs::read(&copied).unwrap(), b"png");
+        let _ = std::fs::remove_file(&copied);
+        let plain = dir.path().join("shot.png");
+        assert_eq!(image_for_prompt(&plain), plain);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -211,7 +248,9 @@ mod tests {
             Some(&b"OggS-fixture"[..])
         );
         assert!(read_audio_bytes(&voice, 4).is_none());
-        assert!(read_audio_bytes(Path::new("WhatsApp-Audio.opus"), AUDIO_PREVIEW_MAX_BYTES).is_none());
+        assert!(
+            read_audio_bytes(Path::new("WhatsApp-Audio.opus"), AUDIO_PREVIEW_MAX_BYTES).is_none()
+        );
         let notes = save_temp_file(b"hello", "notas.md").unwrap();
         assert!(read_audio_bytes(&notes, AUDIO_PREVIEW_MAX_BYTES).is_none());
         std::fs::remove_dir_all(voice.parent().unwrap()).unwrap();

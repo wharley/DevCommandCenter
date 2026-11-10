@@ -1,7 +1,7 @@
 //! "Roda em" driven headlessly, the way it failed before: open it, go to
 //! Codex, pick a model and "Alto" — the agent keeps all three.
 
-use gpui::{AppContext, Modifiers, TestAppContext, WindowAppearance};
+use gpui::{Modifiers, TestAppContext, WindowAppearance};
 
 use super::editor::AgentEditor;
 use crate::theme::{Theme, ThemePreference};
@@ -90,4 +90,34 @@ fn a_model_and_its_effort_are_picked_from_the_panel(cx: &mut TestAppContext) {
     click(cx, "agent-runs-tab-codex");
     click(cx, "agent-runs-model-0");
     editor.update(cx, |editor, _| assert_eq!(editor.account_id, None));
+}
+
+#[gpui::test]
+fn the_tasks_mode_shows_while_the_agent_opens_tasks(cx: &mut TestAppContext) {
+    use dcc_core::domain::agent_access::AccessLevel;
+    use dcc_core::domain::provider::ProviderApprovalPolicy;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        AgentEditor::new(super::editor_role::blank_agent(), catalog(), window, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1100.0), gpui::px(4000.0)));
+    cx.run_until_parked();
+    // It opens tasks by default: the mode is there, on "Perguntar".
+    assert!(cx.debug_bounds("agent-editor-task-mode").is_some());
+    editor.update(cx, |editor, cx| {
+        assert_eq!(editor.tool_access.tasks_approval, None);
+        editor.tool_access.tasks_approval = Some(ProviderApprovalPolicy::FullAccess);
+        editor
+            .tool_access
+            .groups
+            .insert("tasks".into(), AccessLevel::None);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    // "Não abre": no mode to pick.
+    assert!(cx.debug_bounds("agent-editor-task-mode").is_none());
 }

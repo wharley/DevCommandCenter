@@ -168,6 +168,7 @@ mod tests {
             project_id: "p".into(),
             title: None,
             updated_at: at.into(),
+            room: None,
         };
         let reviewer = AgentRecord {
             projects: Vec::new(),

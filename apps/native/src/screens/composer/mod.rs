@@ -21,7 +21,7 @@ pub(crate) mod mentions;
 mod objective;
 mod picker;
 mod popups;
-mod prompt;
+pub(crate) mod prompt;
 mod queue;
 mod settings;
 mod slash;

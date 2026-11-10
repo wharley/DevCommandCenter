@@ -52,7 +52,10 @@ fn homes(repo: &SqliteSessionRepo) -> Result<Homes, String> {
         .list_agent_session_bindings()
         .map_err(|error| error.to_string())?
         .into_iter()
-        .filter(|binding| binding.project_id == home_project_id(&binding.agent_id))
+        // The phone shows the Geral room for now.
+        .filter(|binding| {
+            binding.project_id == home_project_id(&binding.agent_id) && binding.room.is_none()
+        })
         .filter(|binding| agents.iter().any(|agent| agent.id == binding.agent_id))
         .collect();
     homes.sort_by(|left, right| left.updated_at.cmp(&right.updated_at));
