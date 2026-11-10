@@ -1,11 +1,12 @@
 /**
- * The team room while its screen is open (`@dcc/mobile-core` teamRoom):
+ * A room while its screen is open (`@dcc/mobile-core` teamRoom) — Geral, or
+ * a project's with `room`; its approvals are answered here too:
  * read on open, after the stream's lifecycle events (a turn started or
  * ended), on reconnect, when the app comes back to the front and right
  * after a message goes — always sending back the `snapshotId` held, so an
  * unchanged answer is a few bytes over the relay and no event is read.
  */
-import { parseRoom, parseRoomSent, type RoomLine, type RoomSent } from "@dcc/mobile-core";
+import { parseRoom, parseRoomSent, type RoomApproval, type RoomLine, type RoomSent } from "@dcc/mobile-core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { ApiError, errorMessage, type Backend } from "./types";
@@ -15,7 +16,15 @@ const SETTLE_MS = 600;
 
 export type TeamRoomState = {
 	lines: RoomLine[];
+	/** The permission requests waiting in the room. */
+	approvals: RoomApproval[];
+	/** The agents mid-turn in the room; null when the desktop does not say. */
+	working: string[] | null;
+	/** The approvals being answered now, by request. */
+	answering: ReadonlySet<string>;
 	loading: boolean;
+	/** Allows or denies one approval; resolves to an error text, or null. */
+	answer: (approval: RoomApproval, allow: boolean) => Promise<string | null>;
 	/** The message goes to whoever the desktop's rule picks. */
 	send: (text: string) => Promise<RoomSent>;
 };
@@ -23,7 +32,7 @@ export type TeamRoomState = {
 /** What the person reads when a message could not go. */
 export function sendError(error: unknown): string {
 	if (error instanceof ApiError && JSON.stringify(error.body ?? "").includes("roomNoConversation")) {
-		return "Esse agente ainda não tem conversa: comece por ele na Sala do Mac.";
+		return "Esse agente ainda não tem conversa nesta sala: comece por ele no Mac, ou atualize o DCC de lá.";
 	}
 	if (error instanceof ApiError && JSON.stringify(error.body ?? "").includes("agentLimitReached")) {
 		return "Esse agente chegou ao limite do mês. Libere no Mac, na página dele, para continuar.";
@@ -34,8 +43,11 @@ export function sendError(error: unknown): string {
 	return errorMessage(error, "Falha ao enviar.");
 }
 
-export function useTeamRoom(backend: Backend): TeamRoomState {
+export function useTeamRoom(backend: Backend, roomId: string | null = null): TeamRoomState {
 	const [lines, setLines] = useState<RoomLine[]>([]);
+	const [approvals, setApprovals] = useState<RoomApproval[]>([]);
+	const [working, setWorking] = useState<string[] | null>(null);
+	const [answering, setAnswering] = useState<ReadonlySet<string>>(() => new Set());
 	const [loading, setLoading] = useState(true);
 	const snapshot = useRef<string | null>(null);
 	const reading = useRef(false);
@@ -45,7 +57,8 @@ export function useTeamRoom(backend: Backend): TeamRoomState {
 		if (reading.current) return;
 		reading.current = true;
 		const after = snapshot.current;
-		const query = after ? `?after=${encodeURIComponent(after)}` : "";
+		const params = [roomId ? `room=${encodeURIComponent(roomId)}` : null, after ? `after=${encodeURIComponent(after)}` : null].filter(Boolean);
+		const query = params.length > 0 ? `?${params.join("&")}` : "";
 		backend
 			.request("GET", `/api/v1/mobile/room${query}`)
 			.then((data) => {
@@ -55,7 +68,11 @@ export function useTeamRoom(backend: Backend): TeamRoomState {
 					return;
 				}
 				snapshot.current = read.snapshotId;
-				if (!read.unchanged) setLines(read.lines);
+				if (!read.unchanged) {
+					setLines(read.lines);
+					setApprovals(read.approvals);
+					setWorking(read.working);
+				}
 			})
 			// Older desktops have no route: an empty room.
 			.catch(() => {})
@@ -63,7 +80,7 @@ export function useTeamRoom(backend: Backend): TeamRoomState {
 				reading.current = false;
 				setLoading(false);
 			});
-	}, [backend]);
+	}, [backend, roomId]);
 
 	useEffect(() => {
 		refresh();
@@ -89,14 +106,41 @@ export function useTeamRoom(backend: Backend): TeamRoomState {
 
 	const send = useCallback(
 		async (text: string) => {
-			const data = await backend.request("POST", "/api/v1/mobile/room/messages", { text });
+			const data = await backend.request("POST", "/api/v1/mobile/room/messages", roomId ? { text, room: roomId } : { text });
 			const sent = parseRoomSent(data);
 			if (!sent) throw new Error("Resposta inesperada do computador.");
 			refresh();
 			return sent;
 		},
+		[backend, refresh, roomId],
+	);
+
+	const answer = useCallback(
+		async (approval: RoomApproval, allow: boolean) => {
+			setAnswering((current) => new Set(current).add(approval.requestId));
+			try {
+				await backend.request("POST", `/api/v1/sessions/${encodeURIComponent(approval.sessionId)}/respond-permission`, {
+					sessionId: approval.sessionId,
+					requestId: approval.requestId,
+					behavior: allow ? "allow" : "deny",
+				});
+				// Gone from the room at once; the next read confirms it.
+				setApprovals((current) => current.filter((item) => item.requestId !== approval.requestId));
+				refresh();
+				return null;
+			} catch (error) {
+				refresh();
+				return errorMessage(error, "Não foi possível responder.");
+			} finally {
+				setAnswering((current) => {
+					const next = new Set(current);
+					next.delete(approval.requestId);
+					return next;
+				});
+			}
+		},
 		[backend, refresh],
 	);
 
-	return { lines, loading, send };
+	return { lines, approvals, working, answering, loading, send, answer };
 }

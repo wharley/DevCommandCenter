@@ -1,17 +1,29 @@
 /**
- * The team room on the phone, as on the Mac: one conversation with the
- * resident agents. The person writes once; with `@Nome` they pick who
- * answers, without it the desktop's rule does (the Reviewer's job, who
- * answered last, the Reviewer). Each answer comes in that agent's own
- * conversation and shows here with its mascot and receipt; "Abrir conversa"
- * opens the whole of it. `?to=Nome` opens with "@Nome " in the field.
+ * A room on the phone, as on the Mac: Geral, or a project's (`?room=<id>`,
+ * `&name=`), one conversation with the resident agents. The person writes
+ * once; with `@Nome` they pick who answers, without it the desktop's rule
+ * does. Answers read as flat rows under each agent's mascot; an approval an
+ * agent waits on is answered right on the field; files, photos and
+ * dictation go in as in a task. `?to=Nome` opens with "@Nome " written.
  */
-import { applyFileMention, findActiveFileMention, matchingAgents, roomReasonLabel, type ResidentAgent, type RoomLine } from "@dcc/mobile-core";
+import {
+	applyFileMention,
+	findActiveFileMention,
+	matchingAgents,
+	roomItems,
+	roomReasonLabel,
+	type ResidentAgent,
+	type RoomApproval,
+	type RoomItem,
+} from "@dcc/mobile-core";
 import { useResidentAgents } from "@/backend/residentAgents";
+import { markRoomSeen } from "@/backend/roomsSeen";
 import { useBackend } from "@/backend/session";
 import { sendError, useTeamRoom } from "@/backend/teamRoom";
-import { AgentLine, BusyLine, PersonLine, TeamChips } from "@/screens/roomParts";
+import { useDictation } from "@/dictation/useDictation";
+import { AgentLine, ApprovalDock, DayPill, MentionList, PersonLine, WorkingLine } from "@/screens/roomParts";
 import { makeStyles, useTheme } from "@/theme";
+import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
 import { Glass, GlassButton } from "@/ui/glass";
 import { haptic } from "@/ui/haptics";
@@ -29,49 +41,82 @@ export default function TeamRoomScreen() {
 	const { color } = useTheme();
 	const styles = useStyles();
 	const insets = useSafeAreaInsets();
-	const { to } = useLocalSearchParams<{ to?: string }>();
+	const params = useLocalSearchParams<{ to?: string; room?: string; name?: string }>();
+	const roomId = params.room || null;
+	const roomName = roomId ? params.name || "Projeto" : "Geral";
 	const agents = useResidentAgents();
-	const room = useTeamRoom(backend);
-	const [text, setText] = useState(to ? `@${to} ` : "");
+	const room = useTeamRoom(backend, roomId);
+	const [text, setText] = useState(params.to ? `@${params.to} ` : "");
 	const [selection, setSelection] = useState({ start: text.length, end: text.length });
 	const [forced, setForced] = useState<{ start: number; end: number } | undefined>(undefined);
 	const [sending, setSending] = useState(false);
 	const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
 	const [dockHeight, setDockHeight] = useState(120);
-	const list = useRef<FlatList<RoomLine>>(null);
+	const attachments = useAttachments(backend);
+	const dictation = useDictation(text, setText);
+	const input = useRef<TextInput>(null);
+	const list = useRef<FlatList<RoomItem>>(null);
 	const keyboardOpen = useKeyboardState((keyboard) => keyboard.isVisible);
 
 	const byId = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents]);
+	const items = useMemo(() => roomItems(room.lines), [room.lines]);
 	const mention = findActiveFileMention(text, selection.end);
-	const team = mention ? matchingAgents(agents, mention.query) : agents;
-	const busy = agents.filter((agent) => agent.state === "working" || agent.state === "needsYou");
+	const matches = mention ? matchingAgents(agents, mention.query) : [];
+	// Who works in this room; an older desktop only says how each agent is anywhere.
+	const working = room.working
+		? agents.filter((agent) => room.working!.includes(agent.id))
+		: roomId
+			? []
+			: agents.filter((agent) => agent.state === "working");
+
+	const lastAt = room.lines.at(-1)?.at ?? null;
+	useEffect(() => {
+		// Open is read: what is on screen stops being news on the home.
+		if (!room.loading) markRoomSeen(roomId, lastAt);
+	}, [roomId, lastAt, room.loading]);
 
 	useEffect(() => {
-		if (room.lines.length > 0) requestAnimationFrame(() => list.current?.scrollToEnd({ animated: false }));
-	}, [room.lines.length]);
+		if (items.length > 0) requestAnimationFrame(() => list.current?.scrollToEnd({ animated: false }));
+	}, [items.length, working.length]);
 
 	const address = (agent: ResidentAgent) => {
-		if (mention) {
-			const next = applyFileMention(text, mention, agent.name);
-			setText(next.text);
-			setForced({ start: next.cursor, end: next.cursor });
-			return;
-		}
-		const rest = text.replace(/^@\S+\s*/, "");
-		const next = `@${agent.name} ${rest}`;
-		setText(next);
-		setForced({ start: next.length, end: next.length });
+		if (!mention) return;
+		const next = applyFileMention(text, mention, agent.name);
+		setText(next.text);
+		setForced({ start: next.cursor, end: next.cursor });
+		// The pick keeps the person writing.
+		input.current?.focus();
 	};
 
+	/** The `@` button: starts a mention where the person writes. */
+	const startMention = () => {
+		haptic("tap");
+		const at = selection.end;
+		const glued = at > 0 && !/\s/.test(text[at - 1] ?? "");
+		const insert = glued ? " @" : "@";
+		const next = text.slice(0, at) + insert + text.slice(at);
+		setText(next);
+		setSelection({ start: at + insert.length, end: at + insert.length });
+		setForced({ start: at + insert.length, end: at + insert.length });
+		input.current?.focus();
+	};
+
+	const uploading = attachments.items.some((item) => item.status === "uploading");
+	const hasReady = attachments.items.some((item) => item.status === "ready");
+	const canSend = (text.trim().length > 0 || hasReady) && !uploading && !sending;
+
 	const send = async () => {
-		const message = text.trim();
-		if (!message || sending) return;
+		if (!canSend) return;
+		if (dictation.listening) dictation.stop();
+		const message = attachments.queue.prompt(text);
+		if (!message) return;
 		setSending(true);
 		setNotice(null);
 		try {
 			const sent = await room.send(message);
 			haptic("success");
 			setText("");
+			attachments.queue.clear();
 			setNotice({ text: `Foi para ${sent.agentName} · ${roomReasonLabel(sent.reason)}`, error: false });
 		} catch (error) {
 			haptic("warning");
@@ -81,20 +126,39 @@ export default function TeamRoomScreen() {
 		}
 	};
 
+	const answer = (approval: RoomApproval, allow: boolean) => {
+		haptic(allow ? "success" : "warning");
+		void room.answer(approval, allow).then((failed) => failed && setNotice({ text: failed, error: true }));
+	};
+
 	const goBack = () => (router.canGoBack() ? router.back() : router.replace("/"));
 	const headerSpace = insets.top + 6 + 48 + 6;
 	const dockBottom = keyboardOpen ? 8 : Math.max(insets.bottom, 8);
-	const canSend = text.trim().length > 0 && !sending;
+	const subtitle =
+		room.approvals.length > 0
+			? "precisa de você"
+			: working.length === 1
+				? `${working[0]!.name} está trabalhando`
+				: working.length > 1
+					? `${working.length} agentes trabalhando`
+					: `${agents.length} ${agents.length === 1 ? "agente" : "agentes"} · @ escolhe quem responde`;
 
-	const renderItem = ({ item }: { item: RoomLine }) => {
-		const agent = byId.get(item.agentId);
-		if (item.speaker === "person") return <PersonLine line={item} agent={agent} />;
+	const renderItem = ({ item }: { item: RoomItem }) => {
+		if (item.type === "day") return <DayPill label={item.label} />;
+		const agent = byId.get(item.line.agentId);
+		if (item.line.speaker === "person") return <PersonLine line={item.line} agent={agent} team={agents} />;
 		if (!agent) return null;
 		return (
 			<AgentLine
-				line={item}
+				line={item.line}
 				agent={agent}
-				onOpen={() => router.push({ pathname: "/thread/[id]", params: { id: item.sessionId } })}
+				first={item.first}
+				onOpen={() => router.push({ pathname: "/thread/[id]", params: { id: item.line.sessionId } })}
+				onTask={(task, where) =>
+					where === "thread" && task.sessionId
+						? router.push({ pathname: "/thread/[id]", params: { id: task.sessionId } })
+						: router.push({ pathname: "/delivery/[id]", params: { id: task.workspaceId } })
+				}
 			/>
 		);
 	};
@@ -109,11 +173,15 @@ export default function TeamRoomScreen() {
 				) : (
 					<FlatList
 						ref={list}
-						data={room.lines}
-						keyExtractor={(line) => line.key}
+						data={items}
+						keyExtractor={(item) => item.key}
 						renderItem={renderItem}
 						contentContainerStyle={[styles.listContent, { paddingTop: headerSpace, paddingBottom: dockHeight + dockBottom + 20 }]}
-						ItemSeparatorComponent={() => <View style={{ height: 14 }} />}
+						ItemSeparatorComponent={({ leadingItem }) => {
+							const next = items[items.indexOf(leadingItem as RoomItem) + 1];
+							// Answers of one group sit close; a new speaker gets air.
+							return <View style={{ height: next?.type === "line" && !next.first ? 8 : 18 }} />;
+						}}
 						keyboardShouldPersistTaps="handled"
 						onContentSizeChange={() => list.current?.scrollToEnd({ animated: false })}
 						ListHeaderComponent={
@@ -123,14 +191,16 @@ export default function TeamRoomScreen() {
 						}
 						ListEmptyComponent={
 							<Text style={styles.empty}>
-								Ninguém falou ainda. Pergunte o que precisa de você hoje ou peça para o @Revisor olhar um PR.
+								{roomId
+									? `Ninguém falou em ${roomName} ainda. Peça algo do projeto: aqui os agentes já sabem que é ele.`
+									: "Ninguém falou ainda. Pergunte o que precisa de você hoje ou peça para o @Revisor olhar um PR."}
 							</Text>
 						}
 						ListFooterComponent={
-							busy.length > 0 ? (
-								<View style={styles.busyList}>
-									{busy.map((agent) => (
-										<BusyLine key={agent.id} agent={agent} />
+							working.length > 0 ? (
+								<View style={styles.working}>
+									{working.map((agent) => (
+										<WorkingLine key={agent.id} agent={agent} />
 									))}
 								</View>
 							) : null
@@ -144,42 +214,53 @@ export default function TeamRoomScreen() {
 				<View style={[styles.header, { top: insets.top + 6 }]}>
 					<GlassButton icon="chevron-left" accessibilityLabel="Voltar" onPress={goBack} />
 					<View style={styles.titleBlock}>
-						<Text style={styles.title} accessibilityRole="header">
-							Sala da equipe
+						<Text style={styles.title} accessibilityRole="header" numberOfLines={1}>
+							<Text style={styles.hash}># </Text>
+							{roomName}
 						</Text>
-						<Mono style={styles.subtitle} numberOfLines={1}>
-							com @ você escolhe quem responde
+						<Mono style={[styles.subtitle, room.approvals.length > 0 && { color: color.wait }, working.length > 0 && room.approvals.length === 0 && { color: color.accent }]} numberOfLines={1}>
+							{subtitle}
 						</Mono>
 					</View>
 					<View style={{ width: 44 }} />
 				</View>
 
 				<View style={[styles.dock, { bottom: dockBottom }]} onLayout={(event) => setDockHeight(event.nativeEvent.layout.height)}>
-					<TeamChips agents={team} onPick={address} />
+					<MentionList agents={matches} onPick={address} />
 					{notice ? (
 						<Pressable onPress={() => setNotice(null)}>
 							<Text style={[styles.notice, notice.error && styles.error]}>{notice.text}</Text>
 						</Pressable>
 					) : null}
-					<Glass radius={26} style={styles.capsule}>
-						<View style={styles.composerRow}>
-							<TextInput
-								value={text}
-								onChangeText={setText}
-								selection={forced}
-								onSelectionChange={(event) => {
-									setSelection(event.nativeEvent.selection);
-									setForced(undefined);
-								}}
-								placeholder="Escreva para a equipe · @ para chamar alguém"
-								placeholderTextColor={color.faint}
-								style={styles.input}
-								multiline
-								autoCorrect={false}
-								autoFocus={!!to}
-								editable={!sending}
-								accessibilityLabel="Mensagem para a equipe"
-							/>
+					<ApprovalDock approvals={room.approvals} answering={room.answering} onAnswer={answer} />
+					<Glass radius={24} style={styles.card}>
+						<AttachmentTray attachments={attachments} />
+						<DictationStatus dictation={dictation} />
+						<TextInput
+							ref={input}
+							value={text}
+							onChangeText={setText}
+							selection={forced}
+							onSelectionChange={(event) => {
+								setSelection(event.nativeEvent.selection);
+								setForced(undefined);
+							}}
+							placeholder={roomId ? `Escreva para a equipe do ${roomName}` : "Escreva para a equipe"}
+							placeholderTextColor={color.faint}
+							style={styles.input}
+							multiline
+							autoCorrect={false}
+							autoFocus={!!params.to}
+							editable={!sending && !dictation.listening}
+							accessibilityLabel={`Mensagem para a sala ${roomName}`}
+						/>
+						<View style={styles.bar}>
+							<AttachButton attachments={attachments} disabled={sending} />
+							<Pressable onPress={startMention} disabled={sending} accessibilityRole="button" accessibilityLabel="Chamar um agente" hitSlop={4} style={styles.tool}>
+								<Feather name="at-sign" size={18} color={color.mute} />
+							</Pressable>
+							<MicButton dictation={dictation} disabled={sending} />
+							<View style={{ flex: 1 }} />
 							<Pressable
 								onPress={() => {
 									haptic("tap");
@@ -190,11 +271,7 @@ export default function TeamRoomScreen() {
 								accessibilityRole="button"
 								accessibilityLabel="Enviar"
 							>
-								{sending ? (
-									<ActivityIndicator size="small" color={color.accentInk} />
-								) : (
-									<Feather name="arrow-up" size={18} color={color.accentInk} />
-								)}
+								{sending ? <ActivityIndicator size="small" color={color.accentInk} /> : <Feather name="arrow-up" size={18} color={color.accentInk} />}
 							</Pressable>
 						</View>
 					</Glass>
@@ -210,33 +287,19 @@ const useStyles = makeStyles((color) =>
 		frame: { flex: 1 },
 		header: { position: "absolute", left: 16, right: 16, flexDirection: "row", alignItems: "center", gap: 10 },
 		titleBlock: { flex: 1, minWidth: 0, alignItems: "center" },
-		title: { color: color.fg, fontSize: 16, fontWeight: "600", letterSpacing: -0.2 },
+		title: { color: color.fg, fontSize: 17, fontWeight: "600", letterSpacing: -0.2 },
+		hash: { color: color.faint, fontWeight: "500" },
 		subtitle: { fontSize: 11, color: color.mute, marginTop: 3 },
 		listContent: { paddingHorizontal: 16 },
 		empty: { color: color.mute, fontSize: 14, lineHeight: 20, marginTop: 24 },
-		busyList: { gap: 8, marginTop: 14 },
+		working: { gap: 10, marginTop: 18 },
 		dock: { position: "absolute", left: 12, right: 12, gap: 8 },
 		notice: { color: color.mute, fontSize: 12, paddingHorizontal: 8 },
 		error: { color: color.danger },
-		capsule: { paddingHorizontal: 8, paddingVertical: 8 },
-		composerRow: { flexDirection: "row", alignItems: "flex-end", gap: 6 },
-		input: {
-			flex: 1,
-			maxHeight: 140,
-			minHeight: 40,
-			color: color.fg,
-			paddingHorizontal: 6,
-			paddingTop: 10,
-			paddingBottom: 10,
-			fontSize: 16,
-		},
-		sendButton: {
-			width: 40,
-			height: 40,
-			borderRadius: 20,
-			backgroundColor: color.accent,
-			alignItems: "center",
-			justifyContent: "center",
-		},
+		card: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 8 },
+		input: { maxHeight: 140, minHeight: 40, color: color.fg, paddingHorizontal: 6, paddingTop: 10, paddingBottom: 6, fontSize: 16 },
+		bar: { flexDirection: "row", alignItems: "center", gap: 4 },
+		tool: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+		sendButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: color.accent, alignItems: "center", justifyContent: "center" },
 	}),
 );

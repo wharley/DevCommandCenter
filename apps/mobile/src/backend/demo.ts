@@ -4,6 +4,7 @@
  * does, with fictional projects, and plays an agent that streams, asks for a
  * permission and finishes — so every screen works exactly as when paired.
  */
+import { DemoRooms } from "./demoRooms";
 import {
 	base64Size,
 	classifySession,
@@ -68,6 +69,8 @@ export class DemoBackend implements Backend {
 	private readonly agentAnswers = new Map<string, { requestId: string; decision: string; by: string; at: string }>();
 	/** Git state per workspace for the delivery screen. */
 	private readonly delivery = new Map<string, DemoDelivery>();
+	/** The team's rooms (`demoRooms`). */
+	private readonly rooms: DemoRooms;
 
 	constructor(now = Date.now()) {
 		const fixture = demoFixture(now);
@@ -75,6 +78,19 @@ export class DemoBackend implements Backend {
 		this.combs = fixture.combs;
 		this.repositories = fixture.repositories;
 		this.eventCounter = 1000;
+		this.rooms = new DemoRooms(
+			now,
+			() => {
+				for (const sub of this.subs) sub.handlers.onEvent({ event: "rooms", data: {} });
+			},
+			(run, ms) => {
+				const timer = setTimeout(() => {
+					this.timers.delete(timer);
+					run();
+				}, ms);
+				this.timers.add(timer);
+			},
+		);
 		// The checkout session starts blocked on a permission; allowing it
 		// finishes the turn like a live agent would.
 		this.parked.set("demo-p1", {
@@ -190,6 +206,8 @@ export class DemoBackend implements Backend {
 
 	private route(method: string, url: URL, body: unknown): unknown {
 		const path = url.pathname;
+		const room = this.rooms.handle(method, url, body);
+		if (room !== undefined) return room;
 		if (method === "GET" && path === "/api/v1/mobile/agent-requests") return { requests: this.agentRequests };
 		if (method === "GET" && path === "/api/v1/mobile/attention") return { items: this.attention() };
 		const fileRoute = /^\/api\/v1\/mobile\/workspaces\/([^/]+)\/(patch|file)$/.exec(path);
