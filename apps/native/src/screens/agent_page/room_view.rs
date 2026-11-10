@@ -3,21 +3,19 @@
 //! receipt), who is at work or waiting, and the field with the team's names
 //! to address one and who would answer now.
 
-use dcc_core::domain::team_room::handoff_heading;
 use gpui::{
     AnyElement, Context, ExternalPaths, FontWeight, IntoElement, Render, SharedString, Window, div,
-    prelude::*, px,
+    list, prelude::*, px,
 };
 
-use super::room::{Pending, TeamRoom};
-use super::room_timeline::Slot;
+use super::room::TeamRoom;
 use crate::agent::AgentAvatarView;
-use crate::data::agents::{AgentRecord, AgentState};
-use crate::data::team_room::{Receipt, RoomLine, Speaker};
+use crate::data::agents::AgentRecord;
+use crate::data::team_room::{Receipt, RoomLine};
 use crate::i18n::{Args, I18n, Locale, Translate};
-use crate::markdown::{MarkdownStyle, parse, render_markdown};
+use crate::markdown::{MarkdownStyle, render_markdown};
 use crate::theme::ActiveTheme;
-use crate::ui::{Button, ButtonSize, spinner};
+use crate::ui::{Button, ButtonSize, pulse_spinner};
 
 fn english(cx: &gpui::App) -> bool {
     cx.try_global::<I18n>()
@@ -25,12 +23,14 @@ fn english(cx: &gpui::App) -> bool {
 }
 
 impl TeamRoom {
-    fn agent<'a>(agents: &'a [AgentRecord], id: &str) -> Option<&'a AgentRecord> {
-        agents.iter().find(|agent| agent.id == id)
-    }
-
     /// "→ Revisor · pelo papel".
-    fn routed(&self, agent: &str, text: &str, name: &str, cx: &gpui::App) -> SharedString {
+    pub(super) fn routed(
+        &self,
+        agent: &str,
+        text: &str,
+        name: &str,
+        cx: &gpui::App,
+    ) -> SharedString {
         let to = cx.t_with(
             "agents.room.to",
             &Args::default().with("agent", name.to_string()),
@@ -62,7 +62,7 @@ impl TeamRoom {
         (!parts.is_empty()).then(|| parts.join(" · "))
     }
 
-    fn agent_line(
+    pub(super) fn agent_line(
         &self,
         index: usize,
         line: &RoomLine,
@@ -71,12 +71,7 @@ impl TeamRoom {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
-        let blocks = self
-            .markdown
-            .borrow_mut()
-            .entry(format!("{}:{}", line.key, line.text.len()))
-            .or_insert_with(|| std::rc::Rc::new(parse(&line.text)))
-            .clone();
+        let blocks = self.markdown.borrow_mut().get(&line.key, &line.text);
         let when = crate::data::time::medium_date_time(&line.at, english(cx));
         let receipt = line
             .receipt
@@ -226,7 +221,7 @@ impl TeamRoom {
                                     .items_center()
                                     .gap(px(6.0))
                                     .when(self.sending, |label| {
-                                        label.child(spinner("room-sending", 14.0))
+                                        label.child(pulse_spinner("room-sending", 14.0))
                                     })
                                     .child(cx.t("agents.room.send")),
                             ),
@@ -244,206 +239,18 @@ impl TeamRoom {
 }
 
 impl Render for TeamRoom {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors.clone();
-        let agents: Vec<AgentRecord> = self.sidebar.read(cx).agents().to_vec();
-        let lines: Vec<RoomLine> = self
-            .lines()
-            .into_iter()
-            .filter(|line| self.shows(&line.agent_id))
-            .cloned()
-            .collect();
-        // Each card in its project's room, else in Geral; the rest of DCC's
-        // own (the day, the week, limits, proposals) stays in Geral.
-        let geral = self.is_geral();
-        let mut cards = self.cards(cx);
-        cards.retain(|card| {
-            self.shows(&card.agent_id)
-                && self.card_room(card, cx) == self.room
-                && !self.asked_in(card, &self.room, cx)
-        });
-        // On one agent, only what is its own; the room's cards stay there.
+        // The rows are read again only when the room's data moved, not on a
+        // frame the shared clock alone asked for (`room_list`).
+        let scope = self.scope();
+        if self.list.needs_build(&scope) {
+            let model = self.build_rows(cx);
+            self.markdown.borrow_mut().retain(model.answers());
+            self.list.take(model);
+        }
         let whole = self.focus.is_none();
-        let shown: Vec<AgentRecord> = agents
-            .iter()
-            .filter(|agent| self.shows(&agent.id))
-            .cloned()
-            .collect();
-        let checks: Vec<_> = if whole {
-            self.check_ins(cx)
-                .into_iter()
-                .filter(|check| self.check_in_room(check) == self.room)
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let unread = cards.iter().filter(|card| card.unread).count()
-            + checks.iter().filter(|card| card.unread).count();
-        // DCC's own cards sit at their time (`room_timeline`).
-        let recap_at = (whole && geral)
-            .then(|| self.sidebar.read(cx).recap_window())
-            .flatten()
-            .map(|window| window.to);
-        let bulletin_at = (whole && geral)
-            .then(|| dcc_core::domain::agent_bulletin::week_before(chrono::Local::now(), 1).to);
-        let timeline = super::room_timeline::order(
-            lines.iter().map(|line| line.at.as_str()),
-            cards.iter().map(|card| card.at.as_str()),
-            checks.iter().map(|card| card.at.as_str()),
-            recap_at.as_deref(),
-            bulletin_at.as_deref(),
-        );
-        let mut rows: Vec<AnyElement> = Vec::new();
-        for slot in timeline {
-            let index = match slot {
-                Slot::CheckIn(index) => {
-                    rows.push(self.check_in_row(index, &checks[index], cx));
-                    continue;
-                }
-                Slot::Card(index) => {
-                    let card = &cards[index];
-                    if let Some(agent) = Self::agent(&agents, &card.agent_id) {
-                        rows.push(self.card_row(index, card, agent, cx));
-                    }
-                    continue;
-                }
-                Slot::Recap => {
-                    rows.extend(self.recap_card(cx));
-                    continue;
-                }
-                Slot::Bulletin => {
-                    rows.push(self.bulletin_card(&agents, cx));
-                    continue;
-                }
-                Slot::Line(index) => index,
-            };
-            let line = &lines[index];
-            let Some(agent) = Self::agent(&agents, &line.agent_id) else {
-                continue;
-            };
-            match line.speaker {
-                Speaker::Person => match handoff_heading(&line.text) {
-                    Some(heading) => {
-                        let automatic =
-                            dcc_core::domain::agent_chain::passed_answer(&line.text).is_some();
-                        rows.push(self.passed_line(index, heading, automatic, cx))
-                    }
-                    None if line
-                        .text
-                        .starts_with(dcc_core::domain::agent_routine::ROUTINE_MARK) =>
-                    {
-                        rows.extend(self.routine_line(index, &line.text, cx))
-                    }
-                    None if line
-                        .text
-                        .starts_with(dcc_core::domain::agent_source::SOURCE_MARK) =>
-                    {
-                        rows.extend(self.source_line(index, &line.text, cx))
-                    }
-                    None => {
-                        let note = if whole {
-                            self.routed(&agent.id, &line.text, &agent.name, cx)
-                        } else {
-                            SharedString::default()
-                        };
-                        rows.push(self.person_line(
-                            format!("room-said-{index}"),
-                            line.text.clone(),
-                            note,
-                            cx,
-                        ));
-                    }
-                },
-                // A routine with nothing to report stays quiet.
-                Speaker::Agent if dcc_core::domain::agent_routine::is_quiet(&line.text) => {}
-                Speaker::Agent => {
-                    rows.push(self.agent_line(index, line, agent, window, cx));
-                    rows.extend(self.handoff_bar(index, line, agent, &agents, cx));
-                }
-            }
-        }
-        // What DCC itself has for the person now: the day's recap, the space.
-        // The space is what holds now, after everything.
-        if whole && geral {
-            rows.extend(self.cleanup_card(cx));
-        }
-        if geral {
-            rows.extend(self.limit_rows(&shown, cx));
-            rows.extend(self.routine_cards(&shown, cx));
-            rows.extend(self.proposal_cards(&agents, cx));
-        }
-        // A source's proposal shows in the room it was asked in.
-        rows.extend(self.source_cards(&shown, cx));
-        let unread_bar = self.unread_bar(unread, cx);
-        let pending: Vec<Pending> = self
-            .pending
-            .iter()
-            .filter(|sent| self.shows(&sent.agent_id))
-            .cloned()
-            .collect();
-        for (index, sent) in pending.iter().enumerate() {
-            let name = Self::agent(&agents, &sent.agent_id)
-                .map(|agent| agent.name.clone())
-                .unwrap_or_default();
-            let note: SharedString = if whole {
-                format!(
-                    "{} · {}",
-                    self.routed(&sent.agent_id, &sent.text, &name, cx),
-                    cx.t("agents.room.sending")
-                )
-                .into()
-            } else {
-                cx.t("agents.room.sending")
-            };
-            rows.push(self.person_line(
-                format!("room-pending-{index}"),
-                sent.text.clone(),
-                note,
-                cx,
-            ));
-        }
-        // Tasks opened here that still run.
-        rows.extend(self.running_rows(&agents, cx));
-        // Agents at work in this project's tasks, however they got there.
-        rows.extend(self.at_work_rows(&agents, cx));
-        // A trigger held for the day, said here.
-        rows.extend(self.held_rows(&agents, cx));
-        // An approval is answered here; its agent needs no "precisa de você".
-        let asking: Vec<String> = self
-            .approvals(&agents)
-            .into_iter()
-            .map(|approval| approval.agent.id)
-            .collect();
-        rows.extend(self.approval_rows(&agents, cx));
-        for (agent, state) in self
-            .busy(cx)
-            .into_iter()
-            .filter(|(agent, _)| self.shows(&agent.id))
-            .filter(|(agent, state)| {
-                !(*state == AgentState::NeedsYou && asking.contains(&agent.id))
-            })
-        {
-            rows.push(self.busy_line(&agent, state, cx));
-        }
-        if rows.len() != self.shown {
-            self.shown = rows.len();
-            self.scroll.scroll_to_bottom();
-        }
-        let empty_text = match self.focused(cx) {
-            Some(agent) => cx.t_with(
-                "agents.room.emptyAgent",
-                &Args::default().with("agent", agent.name),
-            ),
-            None => cx.t("agents.room.empty"),
-        };
-        let empty = rows.is_empty().then(|| {
-            div()
-                .debug_selector(|| "room-empty".into())
-                .text_size(px(13.0))
-                .line_height(px(20.0))
-                .text_color(colors.muted_foreground)
-                .child(empty_text)
-        });
+        let unread_bar = self.unread_bar(self.list.model().unread, cx);
         let header = whole.then(|| {
             div()
                 .flex()
@@ -489,6 +296,7 @@ impl Render for TeamRoom {
                 )
                 .children(unread_bar)
         });
+        let room = cx.entity();
         div()
             .debug_selector(|| "team-room".into())
             .flex()
@@ -499,24 +307,12 @@ impl Render for TeamRoom {
             // On one agent, its page draws the head.
             .children(header)
             .child(
-                div()
-                    .id("room-lines")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .child(
-                        div()
-                            .mx_auto()
-                            .max_w(px(760.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(18.0))
-                            .px(px(24.0))
-                            .py(px(20.0))
-                            .children(empty)
-                            .children(rows),
-                    ),
+                div().id("room-lines").flex_1().min_h_0().child(
+                    list(self.list.state.clone(), move |index, window, cx| {
+                        room.update(cx, |room, cx| room.render_item(index, window, cx))
+                    })
+                    .size_full(),
+                ),
             )
             .child(self.composer(cx))
     }

@@ -13,11 +13,14 @@ use std::time::Duration;
 use dcc_core::domain::agent::AgentAvatar;
 use gpui::{App, Global, Window, div, img, prelude::*, px};
 
-use super::avatar::{Face, badge, draw, eyes, image};
+use super::avatar::{BOB, Face, badge, draw, eyes, image};
 use crate::data::agents::AgentState;
+use crate::ui::pulse::Rate;
 
 /// Where the eyes look while reading, in a cycle (left to right and back).
 const LOOKS: [f32; 6] = [-3.0, -1.5, 0.0, 1.5, 3.0, 0.0];
+/// One cycle of the reading look.
+const LOOK_CYCLE: Duration = Duration::from_millis(2400);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mood {
@@ -127,6 +130,8 @@ pub struct MoodAvatarView {
     avatar: AgentAvatar,
     mood: Mood,
     size: f32,
+    /// Moves on the shared clock (`ui::pulse`) instead of a timer of its own.
+    clock: bool,
 }
 
 impl MoodAvatarView {
@@ -141,7 +146,14 @@ impl MoodAvatarView {
             avatar: avatar.clone(),
             mood,
             size,
+            clock: false,
         }
+    }
+
+    /// Moves on the shared clock (`ui::pulse`).
+    pub fn on_clock(mut self) -> Self {
+        self.clock = true;
+        self
     }
 }
 
@@ -154,32 +166,45 @@ impl RenderOnce for MoodAvatarView {
                 .size(px(size))
                 .flex_shrink_0()
         };
+        let reader = avatar.clone();
+        let look = move |frame: gpui::Div, delta: f32| {
+            let step = ((delta * LOOKS.len() as f32) as usize).min(LOOKS.len() - 1);
+            frame.child(face(&reader, LOOKS[step], false))
+        };
+        let bob = move |frame: gpui::Div, delta: f32| {
+            let wave = (1.0 - (delta * std::f32::consts::TAU).cos()) / 2.0;
+            frame.top(px(size * (0.06 - 0.14 * wave)))
+        };
+        let clock = self.clock;
         match mood {
             // Looks along the lines, a step at a time.
+            Mood::Reading if clock => {
+                let frame = div().relative().size(px(size));
+                crate::ui::pulse_loop(self.id, LOOK_CYCLE, Rate::Low, move |delta| {
+                    look(frame, delta)
+                })
+                .into_any_element()
+            }
             Mood::Reading => crate::ui::animated(
                 div().relative().size(px(size)),
                 self.id,
-                crate::ui::looping(Duration::from_millis(2400)),
+                crate::ui::looping(LOOK_CYCLE),
                 cx,
-                move |frame, delta| {
-                    let step = ((delta * LOOKS.len() as f32) as usize).min(LOOKS.len() - 1);
-                    frame.child(face(&avatar, LOOKS[step], false))
-                },
+                look,
             ),
             // `dcc-agent-bob`, as a working session's mascot.
-            Mood::Working => crate::ui::animated(
-                div()
+            Mood::Working => {
+                let frame = div()
                     .relative()
                     .size(px(size))
-                    .child(face(&avatar, 0.0, false)),
-                self.id,
-                crate::ui::looping(Duration::from_millis(1100)),
-                cx,
-                move |frame, delta| {
-                    let wave = (1.0 - (delta * std::f32::consts::TAU).cos()) / 2.0;
-                    frame.top(px(size * (0.06 - 0.14 * wave)))
-                },
-            ),
+                    .child(face(&avatar, 0.0, false));
+                if clock {
+                    crate::ui::pulse_loop(self.id, BOB, Rate::Half, move |delta| bob(frame, delta))
+                        .into_any_element()
+                } else {
+                    crate::ui::animated(frame, self.id, crate::ui::looping(BOB), cx, bob)
+                }
+            }
             _ => div()
                 .relative()
                 .size(px(size))

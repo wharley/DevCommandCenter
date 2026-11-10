@@ -12,6 +12,8 @@ use gpui::{App, Image, ImageFormat, Window, div, img, prelude::*, px};
 use crate::data::agents::AgentState;
 
 const INK: &str = "#0b1220";
+/// One `dcc-agent-bob`.
+pub(super) const BOB: Duration = Duration::from_millis(1100);
 
 fn color(name: &str) -> &'static str {
     match name {
@@ -176,7 +178,7 @@ impl RenderOnce for AgentAvatarView {
         crate::ui::animated(
             frame,
             self.id,
-            crate::ui::looping(Duration::from_millis(1100)),
+            crate::ui::looping(BOB),
             cx,
             move |frame, delta| {
                 let wave = (1.0 - (delta * std::f32::consts::TAU).cos()) / 2.0;

@@ -14,6 +14,8 @@ pub mod layer;
 pub mod menu;
 pub mod occlusion;
 pub mod popover;
+pub mod pulse;
+mod pulse_loop;
 mod resize_handle;
 pub mod scrollbar;
 mod surface;
@@ -38,6 +40,7 @@ pub use feedback::{
 pub use icon::Icon;
 pub use kbd::{command_key, shortcut_keys};
 pub use menu::{ItemStyle, Menu, MenuAlign, MenuEntry, MenuItem};
+pub use pulse_loop::{Looping, PulseSpinner, pulse_loop, pulse_spinner};
 pub use resize_handle::ResizeHandle;
 pub use scrollbar::ListScrollbar;
 pub use surface::{card_shadow, input_fill, surface_edge};

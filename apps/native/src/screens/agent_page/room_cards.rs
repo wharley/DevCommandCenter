@@ -14,7 +14,7 @@ use crate::data::room_inbox::{CardKind, InboxCard};
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
-use crate::ui::{Button, ButtonSize, ButtonVariant, spinner};
+use crate::ui::{Button, ButtonSize, ButtonVariant, pulse_spinner};
 
 impl TeamRoom {
     /// The inbox's cards now, with what woke each agent.
@@ -106,7 +106,7 @@ impl TeamRoom {
             CardKind::PrReview { failed: true, .. } => ("agents.room.card.reviewFailed", false),
         };
         let working = matches!(card.kind, CardKind::PrReview { running: true, .. }).then(|| {
-            spinner(
+            pulse_spinner(
                 SharedString::from(format!("room-card-working-{index}")),
                 14.0,
             )

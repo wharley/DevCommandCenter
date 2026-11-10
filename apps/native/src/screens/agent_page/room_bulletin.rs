@@ -17,7 +17,7 @@ use crate::data::agents::AgentRecord;
 use crate::i18n::{Args, I18n, Locale, Translate};
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
-use crate::ui::{Icon, spinner};
+use crate::ui::{Icon, pulse_spinner};
 
 /// The two weeks as read, for the week they were read for.
 #[derive(Clone, Debug, Default)]
@@ -308,7 +308,7 @@ impl TeamRoom {
                     .px(px(10.0))
                     .text_size(px(12.0))
                     .text_color(colors.muted_foreground)
-                    .child(spinner("bulletin-loading", 14.0))
+                    .child(pulse_spinner("bulletin-loading", 14.0))
                     .child(cx.t("agents.bulletin.loading"))
                     .into_any_element(),
                 Some(weeks) if weeks.is_empty() => div()

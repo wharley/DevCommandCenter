@@ -66,9 +66,14 @@ mod room_handoff;
 mod room_images;
 #[cfg(test)]
 mod room_images_tests;
+mod room_items;
 mod room_limits;
 mod room_links;
+mod room_list;
+#[cfg(test)]
+mod room_list_tests;
 mod room_live;
+mod room_markdown;
 mod room_mentions;
 mod room_proposals;
 mod room_reactions;
@@ -76,6 +81,7 @@ mod room_recap;
 mod room_refresh;
 mod room_report;
 mod room_routines;
+mod room_rows;
 mod room_running;
 #[cfg(test)]
 mod room_running_tests;
@@ -504,12 +510,11 @@ impl AgentPage {
             .flex()
             .items_center()
             .gap(px(20.0))
-            .child(crate::agent::MoodAvatarView::new(
-                "agent-page-avatar",
-                &agent.avatar,
-                mood,
-                88.0,
-            ))
+            // On the room's clock, as the column's and the room's mascots.
+            .child(
+                crate::agent::MoodAvatarView::new("agent-page-avatar", &agent.avatar, mood, 88.0)
+                    .on_clock(),
+            )
             .child(
                 div()
                     .flex_1()

@@ -1,7 +1,8 @@
 //! The room's live lines, the way Slack shows who is typing: one shape for
 //! everything at work now (`live_row`: the agent's face, a trigger's chip,
 //! what it does, a spinner, a click opening it) and "Revisor está
-//! trabalhando…" / "precisa de você" for an agent's own conversation.
+//! trabalhando…" / "precisa de você" for an agent's own conversation. What
+//! moves here moves on the shared clock (`ui::pulse`).
 
 use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*, px};
 
@@ -10,7 +11,7 @@ use crate::agent::{AgentAvatarView, Mood, MoodAvatarView};
 use crate::data::agents::{AgentRecord, AgentState};
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
-use crate::ui::spinner;
+use crate::ui::pulse_spinner;
 
 impl TeamRoom {
     /// One thing at work now: `key` names it for tests.
@@ -66,7 +67,10 @@ impl TeamRoom {
                     .text_color(colors.foreground)
                     .child(text),
             )
-            .child(spinner(SharedString::from(format!("{key}-spin")), 14.0))
+            .child(pulse_spinner(
+                SharedString::from(format!("{key}-spin")),
+                14.0,
+            ))
             .into_any_element()
     }
 
@@ -94,16 +98,19 @@ impl TeamRoom {
             .flex()
             .items_center()
             .gap(px(10.0))
-            .child(MoodAvatarView::new(
-                SharedString::from(format!("room-busy-face-{}", agent.id)),
-                &agent.avatar,
-                if needs_you {
-                    Mood::NeedsYou
-                } else {
-                    Mood::Working
-                },
-                28.0,
-            ))
+            .child(
+                MoodAvatarView::new(
+                    SharedString::from(format!("room-busy-face-{}", agent.id)),
+                    &agent.avatar,
+                    if needs_you {
+                        Mood::NeedsYou
+                    } else {
+                        Mood::Working
+                    },
+                    28.0,
+                )
+                .on_clock(),
+            )
             .child(
                 div()
                     .text_size(px(12.0))

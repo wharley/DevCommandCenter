@@ -18,8 +18,7 @@ impl TeamRoom {
         }
         self.focus = focus;
         self.mention = None;
-        // The new conversation opens at its bottom.
-        self.shown = usize::MAX;
+        // The new conversation opens at its bottom (`room_list`).
         let placeholder = self.placeholder_text(cx);
         self.input
             .update(cx, |area, cx| area.set_placeholder(placeholder, cx));

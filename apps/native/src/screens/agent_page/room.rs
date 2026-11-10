@@ -10,11 +10,10 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use dcc_core::domain::agent_conversation::home_project_id;
 use dcc_core::domain::team_room::{RouteReason, Teammate, route};
-use gpui::{AppContext, Context, Entity, EventEmitter, ScrollHandle, Subscription, Window};
+use gpui::{AppContext, Context, Entity, EventEmitter, Subscription, Window};
 
 use super::execution::agent_execution;
 use crate::data::agent_conversation::ConversationStart;
@@ -22,7 +21,6 @@ use crate::data::agents::{AgentRecord, AgentSession, AgentState};
 use crate::data::desktop_api::{DesktopApi, TurnOptions};
 use crate::data::team_room::{HomeFeed, RoomLine, Speaker, last_answer, merged};
 use crate::i18n::{Args, Translate};
-use crate::markdown::Block;
 use crate::screens::composer::Composer;
 use crate::screens::sidebar::Sidebar;
 use crate::ui::{TextArea, TextAreaEvent, Toaster};
@@ -68,10 +66,10 @@ pub struct TeamRoom {
     pub(crate) sending: bool,
     /// The suggestions to pass the turn the person already acted on.
     pub(crate) handoffs: crate::data::room_handoffs::Handoffs,
-    pub(super) scroll: ScrollHandle,
-    /// How many lines it showed, to follow new ones to the bottom.
-    pub(super) shown: usize,
-    pub(super) markdown: std::cell::RefCell<HashMap<String, Rc<Vec<Block>>>>,
+    /// The conversation's rows, virtualized (`room_list`).
+    pub(crate) list: super::room_list::RoomList,
+    /// Answers' markdown, parsed once per line (`room_markdown`).
+    pub(super) markdown: std::cell::RefCell<super::room_markdown::LineMarkdown>,
     /// The day's recap, read when its card opens.
     pub(crate) recap: super::room_recap::RecapRead,
     pub(crate) recap_open: bool,
@@ -104,7 +102,7 @@ pub struct TeamRoom {
     pub(crate) reacted: HashMap<String, Option<dcc_core::domain::agent_reaction::Reaction>>,
     /// "Guardar como regra?" after a 👎 (`room_reactions`).
     pub(crate) rule: Option<super::room_reactions::RuleDraft>,
-    _subscriptions: [Subscription; 5],
+    _subscriptions: [Subscription; 8],
 }
 
 impl EventEmitter<RoomEvent> for TeamRoom {}
@@ -142,6 +140,15 @@ impl TeamRoom {
             cx.observe_global::<crate::data::routines::Routines>(|_, cx| cx.notify()),
             // The sources proposed, as their clock reads them.
             cx.observe_global::<crate::data::agent_sources::Sources>(|_, cx| cx.notify()),
+            // A frame the shared clock alone asked for keeps the rows.
+            cx.observe_self(|room, cx| {
+                let tick = crate::ui::pulse::took_tick(cx.entity_id(), cx);
+                room.list.notified(tick);
+            }),
+            // Read by the rows but kept apart from the sidebar: a trigger
+            // run (cards, a held trigger) and a pull request review.
+            cx.observe_global::<crate::data::agent_triggers::AgentTriggers>(|_, cx| cx.notify()),
+            cx.observe_global::<crate::data::pr_review_jobs::PrReviewJobs>(|_, cx| cx.notify()),
             cx.subscribe(&input, |room, _, event, cx| match event {
                 TextAreaEvent::Submitted => room.send(cx),
                 TextAreaEvent::Changed => {
@@ -175,8 +182,7 @@ impl TeamRoom {
             handoffs: crate::data::room_handoffs::Handoffs::load(
                 (!cfg!(test)).then(|| crate::prefs::native_file("room-handoffs.json")),
             ),
-            scroll: ScrollHandle::new(),
-            shown: 0,
+            list: Default::default(),
             markdown: Default::default(),
             recap: Default::default(),
             recap_open: false,
@@ -438,6 +444,8 @@ impl TeamRoom {
             at,
         });
         self.sending = true;
+        // What the person just sent shows: back to the bottom.
+        self.list.follow();
         // Talking to the agent lifts its brake (`agent_brake`).
         if cx.has_global::<crate::data::agent_triggers::AgentTriggers>() {
             gpui::BorrowAppContext::update_global::<crate::data::agent_triggers::AgentTriggers, _>(

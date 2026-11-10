@@ -138,12 +138,17 @@ impl AgentPage {
                 row.hover(move |style| style.bg(colors.accent.opacity(0.5)))
             })
             .on_click(cx.listener(move |page, _, _, cx| page.show_conversation(id.clone(), cx)))
-            .child(MoodAvatarView::new(
-                SharedString::from(format!("team-face-{index}")),
-                avatar,
-                mood,
-                30.0,
-            ))
+            // On the room's clock: the column's bob and the room's land in
+            // one frame.
+            .child(
+                MoodAvatarView::new(
+                    SharedString::from(format!("team-face-{index}")),
+                    avatar,
+                    mood,
+                    30.0,
+                )
+                .on_clock(),
+            )
             .child(
                 div()
                     .flex()
