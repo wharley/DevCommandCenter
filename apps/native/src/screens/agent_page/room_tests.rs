@@ -12,7 +12,12 @@ use crate::screens::composer::Composer;
 use crate::screens::sidebar::Sidebar;
 use crate::theme::{Theme, ThemePreference};
 
-fn agent(id: &str, name: &str, preset: &str, sessions: Vec<AgentSession>) -> AgentRecord {
+pub(super) fn agent(
+    id: &str,
+    name: &str,
+    preset: &str,
+    sessions: Vec<AgentSession>,
+) -> AgentRecord {
     AgentRecord {
         id: id.into(),
         name: name.into(),

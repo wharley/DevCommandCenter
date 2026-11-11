@@ -581,7 +581,8 @@
         "tag": "Check-in",
         "reviewRequested": "A PR asks for your review: {{title}}",
         "issueAssigned": "An issue for you: {{title}}",
-        "taskStalled": "{{title}} has had no sign of life for {{minutes}} min"
+        "taskStalled": "{{title}} has had no sign of life for {{minutes}} min",
+        "github": "GitHub"
       },
       "pause": "Pause agents",
       "resume": "Resume agents",

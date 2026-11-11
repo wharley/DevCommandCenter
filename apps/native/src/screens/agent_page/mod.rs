@@ -138,6 +138,8 @@ mod room_task_live;
 #[cfg(test)]
 mod room_task_live_tests;
 #[cfg(test)]
+mod room_checkin_tests;
+#[cfg(test)]
 mod room_tests;
 mod room_timeline;
 mod room_view;

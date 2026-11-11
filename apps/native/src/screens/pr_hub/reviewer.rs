@@ -203,9 +203,16 @@ impl PrHub {
             self.detail_open = true;
             self.tab = Tab::Code;
             self.ensure_detail(cx);
-        } else if matches!(self.list, Some(Ok(_))) && self.search.read(cx).text().is_empty() {
-            // Gone (merged, closed): stop waiting for it.
+        } else if !self.fetching
+            && matches!(self.list, Some(Ok(_)))
+            && self.search.read(cx).text().is_empty()
+        {
+            // Gone (merged, closed), or in a repository that is no project
+            // here: stop waiting; one known by its link opens on GitHub.
             self.requested = None;
+            if id.starts_with("https://") {
+                cx.open_url(&id);
+            }
         }
         cx.notify();
     }

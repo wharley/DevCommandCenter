@@ -1,8 +1,9 @@
 //! The check-in's cards in the team room (`data::check_ins`): a pull
 //! request asking for the person's review, an issue assigned to them, a
 //! task with no sign of life — found with no model. A card opens where the
-//! thing is (the pull request or issue on GitHub, the task's conversation)
-//! and is read from then on.
+//! thing is in DCC (the pull request in Pull Requests, the task's
+//! conversation; an issue, which DCC has no screen for, on GitHub), a pull
+//! request's card keeps "GitHub ↗" beside it, and is read from then on.
 
 use gpui::{AnyElement, BorrowAppContext, Context, FontWeight, SharedString, div, prelude::*, px};
 
@@ -20,21 +21,68 @@ impl TeamRoom {
             .unwrap_or_default()
     }
 
-    fn open_check_in(&mut self, card: &CheckIn, cx: &mut Context<Self>) {
+    fn mark_check_in_read(&mut self, card: &CheckIn, cx: &mut Context<Self>) {
         if cx.has_global::<CheckIns>() {
             cx.update_global::<CheckIns, _>(|checks, _| checks.mark_read(&card.key));
             // The count beside "Agentes".
             self.sidebar.update(cx, |_, cx| cx.notify());
         }
+    }
+
+    fn open_check_in(&mut self, card: &CheckIn, cx: &mut Context<Self>) {
+        self.mark_check_in_read(card, cx);
         match (&card.workspace_id, &card.session_id, &card.url) {
             (Some(task), Some(session), _) => cx.emit(RoomEvent::OpenSession {
                 task_id: task.clone(),
                 session_id: session.clone(),
             }),
+            // Pull Requests finds it by its link, under "Todos".
+            (_, _, Some(url)) if card.kind == CheckInKind::ReviewRequested => {
+                cx.emit(RoomEvent::OpenPullRequest(url.clone()))
+            }
             (_, _, Some(url)) => cx.open_url(url),
             _ => {}
         }
         cx.notify();
+    }
+
+    /// "GitHub ↗" on a pull request's card: the page itself, in the browser.
+    fn open_check_in_on_github(&mut self, card: &CheckIn, cx: &mut Context<Self>) {
+        self.mark_check_in_read(card, cx);
+        if let Some(url) = &card.url {
+            cx.open_url(url);
+        }
+        cx.notify();
+    }
+
+    fn check_in_github_button(
+        &self,
+        index: usize,
+        card: &CheckIn,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if card.kind != CheckInKind::ReviewRequested || card.url.is_none() {
+            return None;
+        }
+        let opened = card.clone();
+        Some(
+            Button::new(SharedString::from(format!("room-check-in-github-{index}")))
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::Xs)
+                .on_click(cx.listener(move |room, _, _, cx| {
+                    cx.stop_propagation();
+                    room.open_check_in_on_github(&opened, cx);
+                }))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .child(cx.t("agents.room.checkIn.github"))
+                        .child(Icon::new("external-link").size(12.0)),
+                )
+                .into_any_element(),
+        )
     }
 
     pub(super) fn check_in_row(
@@ -115,6 +163,7 @@ impl TeamRoom {
                         )
                     }),
             )
+            .children(self.check_in_github_button(index, card, cx))
             .child(
                 div()
                     .flex_none()
