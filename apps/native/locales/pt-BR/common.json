@@ -522,6 +522,21 @@
       "approval": "{{agent}} quer usar {{tool}}",
       "approvalMore_one": "+{{count}} aguardando",
       "approvalMore_other": "+{{count}} aguardando",
+      "question": {
+        "asks": "{{agent}} pergunta",
+        "step": "{{current}} de {{total}}",
+        "other": "Outra coisa",
+        "otherPlaceholder": "Escreva sua resposta",
+        "back": "Voltar",
+        "next": "Próxima",
+        "review": "Revisar",
+        "reviewTitle": "Suas respostas",
+        "send": "Enviar",
+        "sending": "Enviando…",
+        "more_one": "+{{count}} pergunta esperando",
+        "more_other": "+{{count}} perguntas esperando",
+        "failed": "Não foi possível enviar a resposta."
+      },
       "steps": {
         "worked": "Trabalhou {{duration}}",
         "workedNoDuration": "Trabalhou",

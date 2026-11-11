@@ -1,7 +1,7 @@
 /**
  * The rooms of the demo desktop (`demo.ts`): three resident agents, Geral
- * and two project rooms with a few lines, one approval waiting in a room
- * and an agent that answers what the person writes. Same paths and shapes
+ * and two project rooms with a few lines, one approval and one question
+ * waiting in a room and an agent that answers what the person writes. Same paths and shapes
  * as the real desktop (`/api/v1/mobile/rooms`, `/mobile/room`, `/mobile/agents`).
  */
 import { ApiError } from "./types";
@@ -33,11 +33,26 @@ const ROOMS: Array<{ id: string | null; name: string }> = [
 /** The session a demo line opens: one of the demo's finished threads. */
 const THREAD = "demo-s4";
 const APPROVAL_SESSION = "demo-room-dev";
+const QUESTION_SESSION = "demo-room-rev";
+/** The Reviewer's question in the site's room, as the thread's card reads it. */
+const QUESTION = [
+	{
+		id: "fix",
+		header: "Link do passo 3",
+		question: "Corrijo o link antigo agora ou deixo só o comentário?",
+		options: [
+			{ label: "Corrigir agora", description: "Faço o commit na tarefa do PR 18" },
+			{ label: "Só comentar", description: "Quem abriu o PR corrige" },
+		],
+	},
+	{ id: "merge", header: "Depois", question: "Posso aprovar o PR quando o check passar?", options: [] },
+];
 
 export class DemoRooms {
 	private readonly lines = new Map<string, Line[]>();
 	private readonly working = new Map<string, Set<string>>();
 	private approvalOpen = true;
+	private questionOpen = true;
 	private version = 0;
 	private counter = 0;
 
@@ -78,7 +93,10 @@ export class DemoRooms {
 		const busy = new Set([...this.working.values()].flatMap((set) => [...set]));
 		return AGENTS.map((agent) => ({
 			...agent,
-			state: this.approvalOpen && agent.id === "demo-dev" ? "needsYou" : busy.has(agent.id) ? "working" : agent.id === "demo-sup" ? "watching" : "asleep",
+			state:
+				(this.approvalOpen && agent.id === "demo-dev") || (this.questionOpen && agent.id === "demo-rev")
+					? "needsYou"
+					: busy.has(agent.id) ? "working" : agent.id === "demo-sup" ? "watching" : "asleep",
 			conversationSessionId: THREAD,
 			last: null,
 		}));
@@ -95,7 +113,7 @@ export class DemoRooms {
 					? { agentId: last.agentId, agentName: AGENTS.find((a) => a.id === last.agentId)?.name ?? "", speaker: last.speaker, text: last.text.replace(/\s+/g, " ").slice(0, 140), at: last.at }
 					: null,
 				working: [...(this.working.get(key) ?? [])],
-				needsYou: this.approvalOpen && key === "loja",
+				needsYou: (this.approvalOpen && key === "loja") || (this.questionOpen && key === "site"),
 				running: key === "loja",
 				at: last?.at ?? null,
 			};
@@ -151,6 +169,10 @@ export class DemoRooms {
 						this.approvalOpen && key === "loja"
 							? [{ sessionId: APPROVAL_SESSION, requestId: "demo-room-p1", agentId: "demo-dev", agentName: "Dev", toolName: "Bash", summary: "yarn test checkout" }]
 							: [],
+					questions:
+						this.questionOpen && key === "site"
+							? [{ sessionId: QUESTION_SESSION, requestId: "demo-room-q1", agentId: "demo-rev", agentName: "Revisor", questions: QUESTION }]
+							: [],
 					working: [...(this.working.get(key) ?? [])],
 				}
 			);
@@ -159,6 +181,27 @@ export class DemoRooms {
 		if (method === "POST" && path === `/api/v1/sessions/${APPROVAL_SESSION}/respond-permission`) {
 			if (!this.approvalOpen) throw new ApiError(409, "Já foi respondido em outro lugar.");
 			this.approvalOpen = false;
+			this.version += 1;
+			this.notify();
+			return { ok: true };
+		}
+		if (method === "POST" && path === `/api/v1/sessions/${QUESTION_SESSION}/respond-user-input`) {
+			if (!this.questionOpen) throw new ApiError(409, "Já foi respondido em outro lugar.");
+			this.questionOpen = false;
+			const answers = Array.isArray((body as { answers?: unknown })?.answers)
+				? ((body as { answers: Array<{ answer?: unknown }> }).answers.map((a) => String(a.answer ?? "")).filter(Boolean))
+				: [];
+			const list = this.lines.get("site") ?? [];
+			list.push({
+				key: `demo-site-answer-${list.length}`,
+				agentId: "demo-rev",
+				sessionId: THREAD,
+				speaker: "agent",
+				text: `Combinado: ${answers.join(" · ") || "sigo com o padrão"}.`,
+				at: new Date().toISOString(),
+				receipt: { seconds: 6, tokens: 900 },
+			});
+			this.lines.set("site", list);
 			this.version += 1;
 			this.notify();
 			return { ok: true };

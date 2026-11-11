@@ -78,6 +78,11 @@ impl HomeFeed {
         super::room_approvals::pending_approval(&self.events)
     }
 
+    /// The question the conversation waits on, if any (`room_questions`).
+    pub fn pending_question(&self) -> Option<super::room_questions::PendingQuestion> {
+        super::room_questions::pending_question(&self.events)
+    }
+
     /// The tool calls of `turn`, listed when its steps are opened: the
     /// conversation is projected once, on that click.
     pub fn steps_of(&self, turn: &str) -> Vec<dcc_core::domain::team_room_steps::Step> {

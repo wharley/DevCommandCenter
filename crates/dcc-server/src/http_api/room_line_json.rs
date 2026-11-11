@@ -1,7 +1,7 @@
 //! A room's line as the phone gets it: the line, what its turn did counted
 //! by kind (the desktop's folded "Trabalhou 4 min · rodou 1 comando", worded
-//! on the phone) and the tasks it reports, to open them; and an approval a
-//! room's conversation waits on, to answer it in place.
+//! on the phone) and the tasks it reports, to open them; and an approval or
+//! a question a room's conversation waits on, to answer it in place.
 
 use std::collections::HashMap;
 
@@ -9,6 +9,7 @@ use dcc_core::domain::agent_routine::{is_quiet, routine_request, ROUTINE_MARK};
 use dcc_core::domain::agent_source::{source_request, SOURCE_MARK};
 use dcc_core::domain::delegation::Delegation;
 use dcc_core::domain::room_approval::{may_always_allow, short_tool, PendingApproval};
+use dcc_core::domain::room_question::PendingQuestion;
 use dcc_core::domain::task_report::{lines_changed, report_state, report_task_id, report_title};
 use dcc_core::domain::team_room_lines::{RoomLine, Speaker};
 use serde_json::{json, Map, Value};
@@ -163,6 +164,24 @@ pub(super) fn approval_json(
     })
 }
 
+/// A question waiting in the room: its questions as the thread reads them
+/// (`id`, `header`, `question`, `options`), answered with the session's
+/// `respond-user-input`.
+pub(super) fn question_json(
+    session_id: &str,
+    agent_id: &str,
+    agent_name: &str,
+    request: &PendingQuestion,
+) -> Value {
+    json!({
+        "sessionId": session_id,
+        "requestId": request.request_id,
+        "agentId": agent_id,
+        "agentName": agent_name,
+        "questions": request.questions,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,5 +305,31 @@ mod tests {
         assert_eq!(value["summary"], "Envia no #geral");
         assert_eq!(value["mayAlwaysAllow"], true);
         assert_eq!(value["agentName"], "Dev");
+    }
+
+    #[test]
+    fn a_question_carries_the_threads_shape() {
+        use dcc_core::ports::provider::{ProviderUserInputOption, ProviderUserInputQuestion};
+        let request = PendingQuestion {
+            request_id: "q-1".into(),
+            questions: vec![ProviderUserInputQuestion {
+                id: "env".into(),
+                header: "Destino".into(),
+                question: "Qual ambiente?".into(),
+                options: vec![ProviderUserInputOption {
+                    label: "staging".into(),
+                    description: "Seguro".into(),
+                }],
+            }],
+        };
+        let value = question_json("s", "dev", "Dev", &request);
+        assert_eq!(
+            value,
+            json!({
+                "sessionId": "s", "requestId": "q-1", "agentId": "dev", "agentName": "Dev",
+                "questions": [{ "id": "env", "header": "Destino", "question": "Qual ambiente?",
+                    "options": [{ "label": "staging", "description": "Seguro" }] }]
+            })
+        );
     }
 }

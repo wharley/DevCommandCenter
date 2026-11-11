@@ -1,3 +1,5 @@
+import { parseAgentQuestions, type AgentQuestion } from "./questions.ts";
+
 /**
  * The team room as the desktop serves it to the phone
  * (`GET /api/v1/mobile/room`): the latest lines of every agent's own
@@ -58,6 +60,16 @@ export type RoomApproval = {
 	summary: string;
 };
 
+/** An agent's question waiting in the room (its ask-user tool); answered with the session's `respond-user-input`. */
+export type RoomQuestion = {
+	sessionId: string;
+	requestId: string;
+	agentId: string;
+	agentName: string;
+	/** The same shape the thread's question card reads. */
+	questions: AgentQuestion[];
+};
+
 export type RoomSnapshot =
 	| { unchanged: true; snapshotId: string }
 	| {
@@ -66,6 +78,8 @@ export type RoomSnapshot =
 			lines: RoomLine[];
 			/** Empty on a desktop that does not serve them yet. */
 			approvals: RoomApproval[];
+			/** Empty on a desktop that does not serve them yet. */
+			questions: RoomQuestion[];
 			/** The agents mid-turn in the room; null when the desktop does not say. */
 			working: string[] | null;
 	  };
@@ -90,6 +104,17 @@ function parseApproval(raw: unknown): RoomApproval | null {
 		toolName: text(value.toolName) ?? "",
 		summary: text(value.summary) ?? "",
 	};
+}
+
+function parseQuestion(raw: unknown): RoomQuestion | null {
+	if (!raw || typeof raw !== "object") return null;
+	const value = raw as Record<string, unknown>;
+	const sessionId = text(value.sessionId);
+	const requestId = text(value.requestId);
+	const agentId = text(value.agentId);
+	const questions = parseAgentQuestions(value.questions);
+	if (!sessionId || !requestId || !agentId || questions.length === 0) return null;
+	return { sessionId, requestId, agentId, agentName: text(value.agentName) ?? "", questions };
 }
 
 function text(value: unknown): string | null {
@@ -180,6 +205,12 @@ export function parseRoom(data: unknown, after: string | null): RoomSnapshot | n
 			? value.approvals.flatMap((raw) => {
 					const approval = parseApproval(raw);
 					return approval ? [approval] : [];
+				})
+			: [],
+		questions: Array.isArray(value.questions)
+			? value.questions.flatMap((raw) => {
+					const question = parseQuestion(raw);
+					return question ? [question] : [];
 				})
 			: [],
 		working: Array.isArray(value.working) ? value.working.filter((id): id is string => typeof id === "string") : null,
@@ -344,6 +375,11 @@ export function splitMentions(body: string, agents: ReadonlyArray<{ id: string; 
 	}
 	if (from < body.length) parts.push({ text: body.slice(from), agentId: null });
 	return parts;
+}
+
+/** "Dev pergunta" over a question's card. */
+export function questionTitle(question: RoomQuestion): string {
+	return `${question.agentName || "O agente"} pergunta`;
 }
 
 /** "Dev quer rodar um comando" over an approval's summary. */

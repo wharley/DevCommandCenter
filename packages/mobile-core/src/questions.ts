@@ -29,3 +29,31 @@ export function pendingQuestions(events: RawSessionEvent[]): QuestionRequest[] {
 	}
 	return [...pending.values()];
 }
+
+/** The questions of a request as the desktop serves them, the malformed and blank ones left out. */
+export function parseAgentQuestions(raw: unknown): AgentQuestion[] {
+	if (!Array.isArray(raw)) return [];
+	return raw.flatMap((item): AgentQuestion[] => {
+		if (!item || typeof item !== "object") return [];
+		const value = item as Record<string, unknown>;
+		const question = typeof value.question === "string" ? value.question : "";
+		if (!question.trim()) return [];
+		const options = Array.isArray(value.options)
+			? value.options.flatMap((option) => {
+					if (!option || typeof option !== "object") return [];
+					const { label, description } = option as Record<string, unknown>;
+					return typeof label === "string" && label
+						? [{ label, description: typeof description === "string" ? description : "" }]
+						: [];
+				})
+			: [];
+		return [
+			{
+				id: typeof value.id === "string" && value.id ? value.id : question,
+				header: typeof value.header === "string" ? value.header : "",
+				question,
+				options,
+			},
+		];
+	});
+}

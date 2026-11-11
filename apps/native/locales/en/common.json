@@ -522,6 +522,21 @@
       "approval": "{{agent}} wants to use {{tool}}",
       "approvalMore_one": "+{{count}} waiting",
       "approvalMore_other": "+{{count}} waiting",
+      "question": {
+        "asks": "{{agent}} asks",
+        "step": "{{current}} of {{total}}",
+        "other": "Something else",
+        "otherPlaceholder": "Write your answer",
+        "back": "Back",
+        "next": "Next",
+        "review": "Review",
+        "reviewTitle": "Your answers",
+        "send": "Send",
+        "sending": "Sending…",
+        "more_one": "+{{count}} question waiting",
+        "more_other": "+{{count}} questions waiting",
+        "failed": "Couldn't send the answer."
+      },
       "steps": {
         "worked": "Worked {{duration}}",
         "workedNoDuration": "Worked",

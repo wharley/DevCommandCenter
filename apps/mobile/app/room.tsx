@@ -15,6 +15,7 @@ import {
 	type ResidentAgent,
 	type RoomApproval,
 	type RoomItem,
+	type RoomQuestion,
 } from "@dcc/mobile-core";
 import { useResidentAgents } from "@/backend/residentAgents";
 import { markRoomSeen } from "@/backend/roomsSeen";
@@ -22,6 +23,7 @@ import { useBackend } from "@/backend/session";
 import { sendError, useTeamRoom } from "@/backend/teamRoom";
 import { useDictation } from "@/dictation/useDictation";
 import { AgentLine, ApprovalDock, DayPill, MentionList, PersonLine, WorkingLine } from "@/screens/roomParts";
+import { QuestionDock } from "@/screens/roomQuestion";
 import { makeStyles, useTheme } from "@/theme";
 import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
 import { ConnectionBanner } from "@/ui/ConnectionBanner";
@@ -126,6 +128,11 @@ export default function TeamRoomScreen() {
 		}
 	};
 
+	const reply = (question: RoomQuestion, answers: Array<{ question: string; answer: string }>) => {
+		haptic("success");
+		void room.reply(question, answers).then((failed) => failed && setNotice({ text: failed, error: true }));
+	};
+
 	const answer = (approval: RoomApproval, allow: boolean) => {
 		haptic(allow ? "success" : "warning");
 		void room.answer(approval, allow).then((failed) => failed && setNotice({ text: failed, error: true }));
@@ -134,8 +141,9 @@ export default function TeamRoomScreen() {
 	const goBack = () => (router.canGoBack() ? router.back() : router.replace("/"));
 	const headerSpace = insets.top + 6 + 48 + 6;
 	const dockBottom = keyboardOpen ? 8 : Math.max(insets.bottom, 8);
+	const asking = room.approvals.length > 0 || room.questions.length > 0;
 	const subtitle =
-		room.approvals.length > 0
+		asking
 			? "precisa de você"
 			: working.length === 1
 				? `${working[0]!.name} está trabalhando`
@@ -218,7 +226,7 @@ export default function TeamRoomScreen() {
 							<Text style={styles.hash}># </Text>
 							{roomName}
 						</Text>
-						<Mono style={[styles.subtitle, room.approvals.length > 0 && { color: color.wait }, working.length > 0 && room.approvals.length === 0 && { color: color.accent }]} numberOfLines={1}>
+						<Mono style={[styles.subtitle, asking && { color: color.wait }, working.length > 0 && !asking && { color: color.accent }]} numberOfLines={1}>
 							{subtitle}
 						</Mono>
 					</View>
@@ -232,6 +240,7 @@ export default function TeamRoomScreen() {
 							<Text style={[styles.notice, notice.error && styles.error]}>{notice.text}</Text>
 						</Pressable>
 					) : null}
+					<QuestionDock questions={room.questions} answering={room.answering} onAnswer={reply} />
 					<ApprovalDock approvals={room.approvals} answering={room.answering} onAnswer={answer} />
 					<Glass radius={24} style={styles.card}>
 						<AttachmentTray attachments={attachments} />

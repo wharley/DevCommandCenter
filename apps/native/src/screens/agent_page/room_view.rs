@@ -152,8 +152,9 @@ impl Render for TeamRoom {
             }
             self.list.take(model);
         }
-        // The approvals wait on the field, not in the list.
-        let dock = self.approval_dock(self.approvals(&self.list.model().agents), cx);
+        // The questions and approvals wait on the field, not in the list.
+        let question = self.question_card(self.questions(&self.list.model().agents), cx);
+        let dock = self.approval_dock(self.approvals(&self.list.model().agents), question, cx);
         let whole = self.focus.is_none();
         let unread_bar = self.unread_bar(self.list.model().unread, cx);
         let header = whole.then(|| {

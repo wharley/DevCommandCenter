@@ -211,10 +211,13 @@ export function PermissionCard({
 export function QuestionCard({
 	request,
 	busy,
+	title = "o agente perguntou",
 	onSubmit,
 }: {
 	request: QuestionRequest;
 	busy: boolean;
+	/** The eyebrow; the room names the agent ("Revisor pergunta"). */
+	title?: string;
 	onSubmit: (answers: Array<{ question: string; answer: string }>) => void;
 }) {
 	const { color } = useTheme();
@@ -225,7 +228,7 @@ export function QuestionCard({
 		<View style={styles.waitCard}>
 			<View style={styles.waitHead}>
 				<StateDot state="wait" />
-				<Mono style={styles.waitEyebrow}>o agente perguntou</Mono>
+				<Mono style={styles.waitEyebrow}>{title}</Mono>
 			</View>
 			{request.questions.map((q) => (
 				<View key={q.id} style={{ gap: 8 }}>

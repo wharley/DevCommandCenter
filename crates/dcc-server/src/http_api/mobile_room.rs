@@ -1,8 +1,8 @@
 //! A room on the phone (`dcc_core::domain::team_room`): Geral, or with
 //! `room` a project's room — the latest lines of every agent's own
 //! conversation held there together in time, read from DCC's database like
-//! the desktop's room, with the approvals its conversations wait on and who
-//! works there now. A phone that sends back the `snapshotId` it holds as
+//! the desktop's room, with the approvals and the questions its
+//! conversations wait on and who works there now. A phone that sends back the `snapshotId` it holds as
 //! `after` gets `{unchanged, snapshotId}` without a single event read while
 //! no conversation of the room moved. The message the phone writes goes
 //! through `mobile_room_send`.
@@ -13,12 +13,13 @@ use std::path::Path;
 use dcc_core::domain::attention::AttentionReason;
 use dcc_core::domain::delegation::DelegationId;
 use dcc_core::domain::room_approval::pending_approval;
+use dcc_core::domain::room_question::pending_question;
 use dcc_core::domain::task_report::is_task;
 use dcc_core::ports::DelegationRepo;
 use dcc_infra::db::{AgentSessionBinding, SqliteSessionRepo};
 
 use super::room_feed::{read_team, room_lines, Team};
-use super::room_line_json::{approval_json, line_json, task_json};
+use super::room_line_json::{approval_json, line_json, question_json, task_json};
 use super::*;
 
 #[derive(Debug, Default, Deserialize)]
@@ -35,11 +36,17 @@ pub(super) fn room_param(room: Option<String>) -> Option<String> {
         .filter(|room| !room.is_empty())
 }
 
-/// The conversations waiting on a permission, which are read for it.
+/// The conversations waiting on a permission or a question, which are read
+/// for it.
 fn asking<'a>(team: &Team, homes: &[&'a AgentSessionBinding]) -> Vec<&'a AgentSessionBinding> {
     homes
         .iter()
-        .filter(|home| team.waiting(home) == Some(AttentionReason::Permission))
+        .filter(|home| {
+            matches!(
+                team.waiting(home),
+                Some(AttentionReason::Permission | AttentionReason::Input)
+            )
+        })
         .copied()
         .collect()
 }
@@ -51,8 +58,9 @@ fn snapshot_id(
 ) -> Result<String, String> {
     let mut digest = Sha256::new();
     team.digest(homes, &mut digest);
-    // A second question of the same turn, or one of two answered, moves
-    // only the history: read its stamp for the conversations asking.
+    // A second request of the same turn, or one of two answered, moves
+    // only the history: read its stamp for the conversations asking
+    // (a permission or a question).
     for home in asking(team, homes) {
         let (count, sequence, row) = repo
             .session_event_stamp(&SessionId(home.session_id.clone()))
@@ -85,35 +93,43 @@ fn reported_tasks(
     Ok(tasks)
 }
 
-/// The approvals the room's conversations wait on, one per conversation
-/// as the desktop's room asks them.
-fn approvals(
+/// The approvals and the questions the room's conversations wait on, one
+/// of each per conversation as the desktop's room asks them; each history
+/// is read once for both.
+fn requests(
     repo: &SqliteSessionRepo,
     team: &Team,
     homes: &[&AgentSessionBinding],
-) -> Result<Vec<Value>, String> {
-    let mut found = Vec::new();
+) -> Result<(Vec<Value>, Vec<Value>), String> {
+    let (mut approvals, mut questions) = (Vec::new(), Vec::new());
     for home in asking(team, homes) {
         let events = repo
             .list_events_by_session_sync(&SessionId(home.session_id.clone()))
             .map_err(|error| error.to_string())?;
-        let Some(request) = pending_approval(&events) else {
-            continue;
-        };
         let name = team
             .agents
             .iter()
             .find(|agent| agent.id == home.agent_id)
             .map(|agent| agent.name.as_str())
             .unwrap_or_default();
-        found.push(approval_json(
-            &home.session_id,
-            &home.agent_id,
-            name,
-            &request,
-        ));
+        if let Some(request) = pending_approval(&events) {
+            approvals.push(approval_json(
+                &home.session_id,
+                &home.agent_id,
+                name,
+                &request,
+            ));
+        }
+        if let Some(request) = pending_question(&events) {
+            questions.push(question_json(
+                &home.session_id,
+                &home.agent_id,
+                name,
+                &request,
+            ));
+        }
     }
-    Ok(found)
+    Ok((approvals, questions))
 }
 
 fn read_room(db_path: &Path, room: Option<&str>, after: Option<&str>) -> Result<Value, String> {
@@ -127,11 +143,13 @@ fn read_room(db_path: &Path, room: Option<&str>, after: Option<&str>) -> Result<
     let lines = super::room_line_json::shown(room_lines(&repo, &homes)?);
     let tasks = reported_tasks(&repo, &lines)?;
     let lines: Vec<Value> = lines.iter().map(|line| line_json(line, &tasks)).collect();
+    let (approvals, questions) = requests(&repo, &team, &homes)?;
     Ok(json!({
         "snapshotId": snapshot,
         "room": room,
         "lines": lines,
-        "approvals": approvals(&repo, &team, &homes)?,
+        "approvals": approvals,
+        "questions": questions,
         "working": team.working(&homes),
     }))
 }
@@ -167,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_conversations_asking_a_permission_are_read_for_it() {
+    fn only_the_conversations_asking_the_person_are_read_for_it() {
         let mut team = super::super::room_feed::tests::team();
         team.activity.insert(
             "s-new".into(),
@@ -178,6 +196,13 @@ mod tests {
             .iter()
             .map(|home| home.session_id.as_str())
             .collect();
-        assert_eq!(read, ["s-dev-room"]);
+        // A question (`input`) is read as a permission is.
+        assert_eq!(read, ["s-new", "s-dev-room"]);
+        team.activity.insert(
+            "s-new".into(),
+            super::super::room_feed::tests::input(true, None),
+        );
+        let homes = team.room_homes(Some("checkout"));
+        assert_eq!(asking(&team, &homes).len(), 1);
     }
 }

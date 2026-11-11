@@ -3,6 +3,7 @@ import {
 	approvalTitle,
 	handoffHeading,
 	matchingAgents,
+	questionTitle,
 	parseRoom,
 	parseRoomSent,
 	roomDayLabel,
@@ -73,6 +74,43 @@ describe("team room", () => {
 		// An older desktop says neither.
 		const old = parseRoom({ snapshotId: "abc", lines: [] }, null);
 		expect(old && !old.unchanged && [old.approvals, old.working]).toEqual([[], null]);
+	});
+
+	it("reads the questions waiting in a room in the thread's shape", () => {
+		const read = parseRoom(
+			{
+				snapshotId: "abc",
+				lines: [],
+				questions: [
+					{
+						sessionId: "s",
+						requestId: "q-1",
+						agentId: "dev",
+						agentName: "Dev",
+						questions: [
+							{ id: "env", header: "Destino", question: "Qual ambiente?", options: [{ label: "staging", description: "Seguro" }, { label: 7 }] },
+							{ id: "blank", header: "", question: "  ", options: [] },
+							{ header: "Quando", question: "Quando publico?" },
+						],
+					},
+					{ sessionId: "s", requestId: "q-2", agentId: "dev", questions: [] },
+					{ requestId: "q-3", agentId: "dev", questions: [{ question: "Sem sessão?" }] },
+				],
+			},
+			null,
+		);
+		if (!read || read.unchanged) throw new Error("expected a room");
+		expect(read.questions).toHaveLength(1);
+		const question = read.questions[0]!;
+		expect(questionTitle(question)).toBe("Dev pergunta");
+		expect(question.questions).toEqual([
+			{ id: "env", header: "Destino", question: "Qual ambiente?", options: [{ label: "staging", description: "Seguro" }] },
+			{ id: "Quando publico?", header: "Quando", question: "Quando publico?", options: [] },
+		]);
+		expect(questionTitle({ ...question, agentName: "" })).toBe("O agente pergunta");
+		// An older desktop serves none.
+		const old = parseRoom({ snapshotId: "abc", lines: [] }, null);
+		expect(old && !old.unchanged && old.questions).toEqual([]);
 	});
 
 	it("puts a pill at each new day and one face on answers close together", () => {

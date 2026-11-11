@@ -25,22 +25,26 @@ pub(crate) fn split_docked<T>(all: Vec<T>) -> (Vec<T>, usize) {
 }
 
 impl TeamRoom {
-    /// The dock above the field, when something waits for the person.
+    /// The dock above the field, when something waits for the person: the
+    /// question being answered (`room_question_card`) on top, then the
+    /// approvals.
     pub(super) fn approval_dock(
         &self,
         approvals: Vec<RoomApproval>,
+        question: Option<AnyElement>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if approvals.is_empty() {
+        if approvals.is_empty() && question.is_none() {
             return None;
         }
+        let asked = question.is_some();
         let colors = cx.theme().colors.clone();
         let amber = crate::theme::tailwind::AMBER_500.hsla();
         let (shown, more) = split_docked(approvals);
         let rows: Vec<AnyElement> = shown
             .into_iter()
             .enumerate()
-            .map(|(index, approval)| self.dock_row(index, approval, index > 0, cx))
+            .map(|(index, approval)| self.dock_row(index, approval, index > 0 || asked, cx))
             .collect();
         Some(
             div()
@@ -54,6 +58,7 @@ impl TeamRoom {
                 .border_b_0()
                 .border_color(amber.opacity(0.6))
                 .bg(amber.opacity(0.06))
+                .children(question)
                 .children(rows)
                 .when(more > 0, |dock| {
                     dock.child(

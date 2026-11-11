@@ -99,6 +99,7 @@ pub mod recap;
 pub mod remote_access;
 pub mod rewind;
 pub mod room_approvals;
+pub mod room_questions;
 pub mod room_handoffs;
 pub mod room_inbox;
 pub mod room_of;

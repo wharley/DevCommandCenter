@@ -201,12 +201,17 @@ impl TeamRoom {
         let (live, working) = self.live_turn_rows(agents, &model.mentions, window, cx);
         rows.extend(live);
         rows.extend(self.stopped_rows(agents, &working, cx));
-        // An approval is answered in the dock above the field; its agent
-        // needs no "precisa de você".
+        // An approval or a question is answered in the dock above the field;
+        // its agent needs no "precisa de você".
         let asking: Vec<String> = self
             .approvals(agents)
             .into_iter()
             .map(|approval| approval.agent.id)
+            .chain(
+                self.questions(agents)
+                    .into_iter()
+                    .map(|question| question.agent.id),
+            )
             .collect();
         for (agent, state) in self
             .busy(cx)

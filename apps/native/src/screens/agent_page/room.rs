@@ -110,6 +110,8 @@ pub struct TeamRoom {
     pub(crate) answering: std::collections::HashSet<String>,
     /// "Recusar com motivo" open on a request, with its field.
     pub(crate) approval_reason: Option<(String, Entity<crate::ui::TextInput>)>,
+    /// Questions being answered in the room's dock (`room_question`).
+    pub(crate) questions: super::room_question::RoomQuestions,
     /// The answers whose steps are listed open, with those steps read when
     /// they opened (`room_steps`).
     pub(crate) steps_open:
@@ -228,6 +230,7 @@ impl TeamRoom {
             rooms: Vec::new(),
             answering: Default::default(),
             approval_reason: None,
+            questions: Default::default(),
             steps_open: HashMap::new(),
             answered_proposals: Vec::new(),
             reacted: HashMap::new(),
