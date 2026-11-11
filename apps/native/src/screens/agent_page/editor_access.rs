@@ -14,6 +14,8 @@ use crate::ui::ToggleGroup;
 const LEVELS: [AccessLevel; 3] = [AccessLevel::None, AccessLevel::Read, AccessLevel::Write];
 /// Opening tasks has no read-only half: it does or it does not.
 const TASK_LEVELS: [AccessLevel; 2] = [AccessLevel::None, AccessLevel::Write];
+/// GitHub through DCC only reads: off or "Ler", kept as the default level.
+const GITHUB_LEVELS: [AccessLevel; 2] = [AccessLevel::None, AccessLevel::Write];
 
 /// Where a level is set.
 #[derive(Clone)]
@@ -64,17 +66,32 @@ impl AgentEditor {
             Target::Connector(id) => self.tool_access.connector(id),
         };
         let tasks = matches!(target, Target::Group("tasks"));
-        let levels: &'static [AccessLevel] = if tasks { &TASK_LEVELS } else { &LEVELS };
+        let github = matches!(target, Target::Group("github"));
+        // Read and write read the same for a tool that only reads.
+        let current = if github && current == AccessLevel::Read {
+            AccessLevel::Write
+        } else {
+            current
+        };
+        let levels: &'static [AccessLevel] = if tasks {
+            &TASK_LEVELS
+        } else if github {
+            &GITHUB_LEVELS
+        } else {
+            &LEVELS
+        };
         let labels: Vec<SharedString> = levels
             .iter()
             .map(|level| match (level, tasks) {
                 (AccessLevel::None, true) => cx.t("agents.access.tasksOff"),
                 (_, true) => cx.t("agents.access.tasksOn"),
                 (AccessLevel::None, false) => cx.t("agents.access.none"),
+                (_, false) if github => cx.t("agents.access.read"),
                 (AccessLevel::Read, false) => cx.t("agents.access.read"),
                 (AccessLevel::Write, false) => cx.t("agents.access.write"),
             })
             .collect();
+        let hint = github.then(|| cx.t("agents.access.groupHints.github"));
         let picked = levels.iter().position(|level| *level == current);
         let editor = cx.entity().downgrade();
         let group = ToggleGroup::new(SharedString::from(id), labels, picked).on_select(
@@ -104,10 +121,21 @@ impl AgentEditor {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .text_size(px(12.5))
-                    .text_color(colors.foreground)
-                    .child(label),
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(12.5))
+                            .text_color(colors.foreground)
+                            .child(label),
+                    )
+                    .children(hint.map(|hint| {
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(colors.muted_foreground)
+                            .child(hint)
+                    })),
             )
             .child(div().flex_none().child(group))
             .into_any_element()

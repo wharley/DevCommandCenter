@@ -41,6 +41,8 @@ pub mod quick_composer_journal;
 pub mod remote_connector;
 pub mod remote_push;
 pub mod review_tools;
+pub mod github_tool;
+pub mod github_tool_repo;
 pub mod routine_tools;
 pub mod runtime;
 pub mod shell_env;

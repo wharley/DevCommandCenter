@@ -24,8 +24,17 @@ pub enum AccessLevel {
 
 /// The groups of DCC's own tools a person can narrow, in the editor's order.
 /// `tasks`: opening a task in a project (`dcc_open_task`), the Reviewer's
-/// off by default — it reviews; a teammate fixes.
-pub const DCC_TOOL_GROUPS: [&str; 5] = ["browser", "computer", "device", "delegation", "tasks"];
+/// off by default — it reviews; a teammate fixes. `github`: reading pull
+/// requests, checks and deploys through the person's `gh` (`dcc_github`);
+/// every call only reads, so "Ler" and "Ler e escrever" both allow it.
+pub const DCC_TOOL_GROUPS: [&str; 6] = [
+    "browser",
+    "computer",
+    "device",
+    "delegation",
+    "tasks",
+    "github",
+];
 
 /// What the error of a refused call says, so the agent stops trying.
 pub const ACCESS_DENIED: &str = "The person turned this tool off for you in DCC.";
@@ -63,6 +72,8 @@ pub fn dcc_group(tool: &str) -> Option<&'static str> {
         Some("delegation")
     } else if tool == "dcc_open_task" {
         Some("tasks")
+    } else if tool.starts_with("dcc_github") {
+        Some("github")
     } else {
         None
     }
@@ -149,6 +160,13 @@ mod tests {
         assert!(access.allows_connector("github", false));
         assert_eq!(dcc_group("dcc_task_wait"), Some("delegation"));
         assert_eq!(dcc_group("dcc_open_task"), Some("tasks"));
+        assert_eq!(dcc_group("dcc_github"), Some("github"));
+        assert!(access.allows_dcc("dcc_github", true), "missing: allowed");
+        let mut github = ToolAccess::default();
+        github.groups.insert("github".into(), AccessLevel::Read);
+        assert!(github.allows_dcc("dcc_github", true), "read-only tool");
+        github.groups.insert("github".into(), AccessLevel::None);
+        assert!(!github.allows_dcc("dcc_github", true));
         let mut noisy = access.clone();
         noisy.groups.insert("device".into(), AccessLevel::Write);
         noisy.groups.insert("nope".into(), AccessLevel::None);
