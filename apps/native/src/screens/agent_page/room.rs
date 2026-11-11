@@ -58,6 +58,8 @@ pub struct Pending {
     pub agent_id: String,
     pub text: String,
     pub at: String,
+    /// Queued behind the turn at work instead of sent (`room_queue`).
+    pub queued: Option<super::room_queue::Queued>,
 }
 
 pub struct TeamRoom {
@@ -120,6 +122,10 @@ pub struct TeamRoom {
     pub(crate) rule: Option<super::room_reactions::RuleDraft>,
     /// A turn at work shown as it goes (`room_live_poll`, `room_live_turn`).
     pub(crate) live: super::room_live_poll::RoomLive,
+    /// Each room's unsent words, kept while switching (`room_drafts`).
+    pub(crate) drafts: super::room_drafts::RoomDrafts,
+    /// The new lines under the person scrolled up (`room_jump`).
+    pub(crate) jump: super::room_jump::Jump,
     _subscriptions: [Subscription; 8],
 }
 
@@ -227,6 +233,8 @@ impl TeamRoom {
             reacted: HashMap::new(),
             rule: None,
             live: Default::default(),
+            drafts: Default::default(),
+            jump: Default::default(),
             _subscriptions: subscriptions,
         };
         room.reload_cleanup();
@@ -329,6 +337,7 @@ impl TeamRoom {
             }
         }
         self.forget_settled();
+        self.drop_unqueued();
         let feeds = &self.feeds;
         self.pending.retain(|pending| {
             !feeds.iter().flat_map(|feed| &feed.lines).any(|line| {
@@ -445,6 +454,15 @@ impl TeamRoom {
         };
         let existing = super::conversation::room_session(&agent, self.room.as_deref())
             .map(|session| session.session_id.clone());
+        // A turn at work there: it waits for it (`room_queue`).
+        let queued = existing
+            .clone()
+            .filter(|session| self.queues_for(&agent.id, session, cx))
+            .map(|session_id| super::room_queue::Queued {
+                session_id,
+                id: None,
+            });
+        let queue = queued.is_some();
         let room = self.room.clone();
         let home_task = self
             .sidebar
@@ -471,6 +489,7 @@ impl TeamRoom {
             agent_id: agent.id.clone(),
             text: text.clone(),
             at,
+            queued,
         });
         self.sending = true;
         // What the person just sent shows: back to the bottom.
@@ -506,12 +525,19 @@ impl TeamRoom {
                                 .1
                             }
                         };
-                        api.send_turn(&session, &text, None, &options)
+                        if queue {
+                            api.queue_turn_for_id(&session, &text, &options).map(Some)
+                        } else {
+                            api.send_turn(&session, &text, None, &options).map(|_| None)
+                        }
                     }
                 })
                 .await;
             let _ = this.update(cx, |room, cx| {
                 room.sending = false;
+                if let Ok(Some(id)) = &sent {
+                    room.mark_queued(&text, id.clone());
+                }
                 if let Err(error) = sent {
                     room.pending.retain(|pending| pending.text != text);
                     let error = error.to_string();

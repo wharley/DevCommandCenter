@@ -201,6 +201,8 @@ impl Render for TeamRoom {
                 )
                 .children(unread_bar)
         });
+        // Away from the end: back down, with the lines new since.
+        let jump = self.jump_button(cx);
         let room = cx.entity();
         div()
             .debug_selector(|| "team-room".into())
@@ -212,12 +214,18 @@ impl Render for TeamRoom {
             // On one agent, its page draws the head.
             .children(header)
             .child(
-                div().id("room-lines").flex_1().min_h_0().child(
-                    list(self.list.state.clone(), move |index, window, cx| {
-                        room.update(cx, |room, cx| room.render_item(index, window, cx))
-                    })
-                    .size_full(),
-                ),
+                div()
+                    .id("room-lines")
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        list(self.list.state.clone(), move |index, window, cx| {
+                            room.update(cx, |room, cx| room.render_item(index, window, cx))
+                        })
+                        .size_full(),
+                    )
+                    .children(jump),
             )
             .child(self.composer(dock, window, cx))
     }

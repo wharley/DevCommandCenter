@@ -585,7 +585,13 @@
         "stopped": "{{agent}} stopped before finishing",
         "retry": "Try again",
         "retryFailed": "Couldn't try again: {{error}}"
-      }
+      },
+      "queued": "Queued · goes when {{agent}} finishes",
+      "unqueue": "Remove from queue",
+      "unqueueFailed": "Could not remove it from the queue: {{error}}",
+      "jumpTip": "Jump to the end",
+      "newLines_one": "{{count}} new",
+      "newLines_other": "{{count}} new"
     },
     "team": {
       "title": "Team",

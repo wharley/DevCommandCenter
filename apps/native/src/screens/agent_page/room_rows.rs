@@ -96,6 +96,8 @@ pub(crate) struct RoomModel {
     pub rows: Vec<Row>,
     /// Unread cards and check-ins, for "Marcar tudo como lido".
     pub unread: usize,
+    /// The person's and the agents' lines, for "3 novas" (`room_jump`).
+    pub talk: usize,
 }
 
 impl RoomModel {
@@ -214,12 +216,15 @@ impl TeamRoom {
                 }
             }
         }
+        let rows = super::room_flow::arrange(rows);
+        let talk = super::room_jump::talk(&rows);
         RoomModel {
             scope: self.scope(),
             agents,
             mentions,
-            rows: super::room_flow::arrange(rows),
+            rows,
             unread,
+            talk,
         }
     }
 }

@@ -527,6 +527,31 @@ impl DesktopApi {
         .map(|_| ())
     }
 
+    /// `queue_turn`, with the id of the turn queued (to take it out again).
+    pub fn queue_turn_for_id(
+        &self,
+        session_id: &str,
+        prompt: &str,
+        options: &TurnOptions,
+    ) -> Result<String, ApiError> {
+        let mut body = json!({ "sessionId": session_id, "prompt": prompt });
+        TurnOptions {
+            provider_id: None,
+            model: None,
+            ..options.clone()
+        }
+        .write_into(&mut body);
+        let value = self.post(
+            &format!("/api/v1/sessions/{}/queue", encode(session_id)),
+            &body,
+        )?;
+        value
+            .pointer("/queuedTurn/id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| ApiError::Failed("the desktop did not answer a queued turn".into()))
+    }
+
     /// "Orientar o agente agora": guidance into the running turn. A turn
     /// already wrapping up answers `Refused { code: "steer_window_closed" }`.
     pub fn steer_turn(&self, session_id: &str, prompt: &str) -> Result<(), ApiError> {

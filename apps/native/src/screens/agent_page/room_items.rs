@@ -250,18 +250,19 @@ impl TeamRoom {
                     .find(|agent| agent.id == sent.agent_id)
                     .map(|agent| agent.name.clone())
                     .unwrap_or_default();
+                let state = self.pending_note(&sent, &name, cx);
                 let note: SharedString = if whole {
                     format!(
-                        "{} · {}",
+                        "{} · {state}",
                         self.routed(&sent.agent_id, &sent.text, &name, cx),
-                        cx.t("agents.room.sending")
                     )
                     .into()
                 } else {
-                    cx.t("agents.room.sending")
+                    state
                 };
                 let said = Said::new(&sent.text, names);
-                self.person_line(format!("room-pending-{index}"), &said, note, cx)
+                let bubble = self.person_line(format!("room-pending-{index}"), &said, note, cx);
+                self.with_unqueue(index, &sent, bubble, cx)
             })
             .collect()
     }

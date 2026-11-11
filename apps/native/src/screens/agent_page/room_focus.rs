@@ -16,8 +16,11 @@ impl TeamRoom {
         if self.focus == focus {
             return;
         }
+        let before = self.draft_key();
         self.focus = focus;
         self.mention = None;
+        // Its own draft comes back (`room_drafts`).
+        self.swap_draft(before, cx);
         // The new conversation opens at its bottom (`room_list`).
         let placeholder = self.placeholder_text(cx);
         self.input

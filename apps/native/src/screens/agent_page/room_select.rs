@@ -18,11 +18,14 @@ impl TeamRoom {
         if self.room == room {
             return;
         }
+        let before = self.draft_key();
         self.room = room;
         self.room_generation += 1;
         self.feeds.clear();
         self.pending.clear();
         self.mention = None;
+        // Its own draft comes back (`room_drafts`).
+        self.swap_draft(before, cx);
         // The new room opens at its bottom (`room_list`).
         let placeholder = self.placeholder_text(cx);
         self.input

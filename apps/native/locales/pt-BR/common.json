@@ -585,7 +585,13 @@
         "stopped": "{{agent}} parou antes de terminar",
         "retry": "Tentar de novo",
         "retryFailed": "Não deu para tentar de novo: {{error}}"
-      }
+      },
+      "queued": "Na fila · sai quando o {{agent}} terminar",
+      "unqueue": "Tirar da fila",
+      "unqueueFailed": "Não deu para tirar da fila: {{error}}",
+      "jumpTip": "Ir para o fim",
+      "newLines_one": "{{count}} nova",
+      "newLines_other": "{{count}} novas"
     },
     "team": {
       "title": "Equipe",
