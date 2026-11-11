@@ -15,6 +15,7 @@ pub mod agent_quiet;
 pub mod agent_reactions;
 pub mod agent_rooms;
 pub mod agent_sources;
+pub mod agent_replies;
 pub mod agent_triggers;
 pub mod agents;
 pub mod ai_memory;

@@ -254,7 +254,7 @@ export default function TeamRoomScreen() {
 	};
 
 	// Stable, so a row redraws only when its own line moves.
-	const { retry, stop, handoff, steps: loadSteps, react, answerProposal, continueLimit, keepRule } = room;
+	const { retry, stop, handoff, steps: loadSteps, react, answerProposal, continueLimit, answerReply, keepRule } = room;
 	/** The answer whose 👎 asks "Guardar como regra?". */
 	const [rule, setRule] = useState<{ agentId: string } | null>(null);
 	const failed = useCallback((text: string | null) => {
@@ -315,10 +315,16 @@ export default function TeamRoomScreen() {
 		}
 	}, []);
 	const actOnCard = useCallback(
-		(card: RoomCard, action: "create" | "discard" | "continue") => {
-			void (action === "continue" ? continueLimit(card) : answerProposal(card, action)).then(failed);
+		(card: RoomCard, action: "create" | "discard" | "continue" | "send") => {
+			const answered =
+				card.kind === "replyProposal"
+					? answerReply(card, action === "send" ? "send" : "discard")
+					: action === "continue"
+						? continueLimit(card)
+						: answerProposal(card, action === "send" ? "create" : action);
+			void answered.then(failed);
 		},
-		[answerProposal, continueLimit, failed],
+		[answerProposal, answerReply, continueLimit, failed],
 	);
 	const onRetry = useCallback(
 		(turn: RoomStopped) => {

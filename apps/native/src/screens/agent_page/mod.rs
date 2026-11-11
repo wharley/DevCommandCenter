@@ -91,6 +91,7 @@ mod room_images;
 #[cfg(test)]
 mod room_images_tests;
 mod room_items;
+mod room_replies;
 mod room_jump;
 #[cfg(test)]
 mod room_jump_tests;
@@ -139,6 +140,8 @@ mod room_task_live;
 mod room_task_live_tests;
 #[cfg(test)]
 mod room_checkin_tests;
+#[cfg(test)]
+mod room_replies_tests;
 #[cfg(test)]
 mod room_tests;
 mod room_timeline;

@@ -65,13 +65,16 @@ impl AgentEditor {
             Target::Group(group) => self.tool_access.group(group),
             Target::Connector(id) => self.tool_access.connector(id),
         };
-        let tasks = matches!(target, Target::Group("tasks"));
+        // Proposing a reply is on or off, as opening tasks.
+        let replies = matches!(target, Target::Group("replies"));
+        let tasks = matches!(target, Target::Group("tasks")) || replies;
         let github = matches!(target, Target::Group("github"));
-        // Read and write read the same for a tool that only reads.
-        let current = if github && current == AccessLevel::Read {
-            AccessLevel::Write
-        } else {
-            current
+        // Read and write read the same for a tool that only reads; a
+        // proposal writes, so "Ler" leaves it off.
+        let current = match current {
+            AccessLevel::Read if github => AccessLevel::Write,
+            AccessLevel::Read if replies => AccessLevel::None,
+            current => current,
         };
         let levels: &'static [AccessLevel] = if tasks {
             &TASK_LEVELS
@@ -83,6 +86,8 @@ impl AgentEditor {
         let labels: Vec<SharedString> = levels
             .iter()
             .map(|level| match (level, tasks) {
+                (AccessLevel::None, true) if replies => cx.t("agents.access.repliesOff"),
+                (_, true) if replies => cx.t("agents.access.repliesOn"),
                 (AccessLevel::None, true) => cx.t("agents.access.tasksOff"),
                 (_, true) => cx.t("agents.access.tasksOn"),
                 (AccessLevel::None, false) => cx.t("agents.access.none"),
@@ -91,7 +96,13 @@ impl AgentEditor {
                 (AccessLevel::Write, false) => cx.t("agents.access.write"),
             })
             .collect();
-        let hint = github.then(|| cx.t("agents.access.groupHints.github"));
+        let hint = if github {
+            Some(cx.t("agents.access.groupHints.github"))
+        } else if replies {
+            Some(cx.t("agents.access.groupHints.replies"))
+        } else {
+            None
+        };
         let picked = levels.iter().position(|level| *level == current);
         let editor = cx.entity().downgrade();
         let group = ToggleGroup::new(SharedString::from(id), labels, picked).on_select(

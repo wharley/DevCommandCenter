@@ -5,7 +5,8 @@
  * verdict of a pull request review ("Pode aprovar"), the time and a dot
  * while unread; a tap opens where the result is (the task's thread, or a
  * check-in's link). DCC's own cards carry their buttons: "Criar" /
- * "Descartar" on a proposal, "Continuar mesmo assim" on a limit.
+ * "Descartar" on a proposal, "Continuar mesmo assim" on a limit; a reply
+ * an agent proposed shows its text with "Enviar no Slack" / "Descartar".
  */
 import {
 	roomCardDetail,
@@ -36,7 +37,7 @@ export type RoomCardRowProps = {
 	/** One of its buttons is on its way. */
 	busy: boolean;
 	onOpen: (card: RoomCard, where: "thread" | "delivery") => void;
-	onAct: (card: RoomCard, action: "create" | "discard" | "continue") => void;
+	onAct: (card: RoomCard, action: "create" | "discard" | "continue" | "send") => void;
 };
 
 /** "Hoje 09:41", "Ontem 18:02", "3 de nov. 10:00". */
@@ -62,8 +63,9 @@ function CardRowView({ card, agent, busy, onOpen, onAct }: RoomCardRowProps) {
 	const name = agent?.name ?? "O agente";
 	const line = roomCardText(card, name);
 	const trigger = roomTriggerLabel(card.trigger);
-	const own = card.kind === "limit" || card.actions.includes("create");
-	const waiting = card.kind === "taskWaiting";
+	const reply = card.kind === "replyProposal" ? card.reply : null;
+	const own = card.kind === "limit" || card.actions.includes("create") || reply !== null;
+	const waiting = card.kind === "taskWaiting" || reply !== null;
 	const amber = waiting || card.kind === "limit";
 	const opens = card.actions.includes("open");
 	const face =
@@ -102,9 +104,44 @@ function CardRowView({ card, agent, busy, onOpen, onAct }: RoomCardRowProps) {
 						{detail}
 					</Text>
 				))}
+				{reply ? (
+					<View style={styles.quote}>
+						<Text style={styles.quoteText} selectable>
+							{reply.text}
+						</Text>
+					</View>
+				) : null}
+				{reply?.error ? (
+					<Text style={styles.error} numberOfLines={2}>
+						{t("agents.replies.failed", { error: reply.error })}
+					</Text>
+				) : null}
 				{own ? (
 					<View style={styles.actions}>
-						{card.kind === "limit" ? (
+						{reply ? (
+							<>
+								<Button
+									label={t("agents.replies.send", { connector: reply.connector || "app" })}
+									style={styles.action}
+									busy={busy}
+									disabled={busy}
+									onPress={() => {
+										haptic("success");
+										onAct(card, "send");
+									}}
+								/>
+								<Button
+									label={t("agents.replies.discard")}
+									variant="ghost"
+									style={styles.action}
+									disabled={busy}
+									onPress={() => {
+										haptic("tap");
+										onAct(card, "discard");
+									}}
+								/>
+							</>
+						) : card.kind === "limit" ? (
 							<Button
 								label={t("agents.spend.continue")}
 								variant="wait"
@@ -224,6 +261,17 @@ const useStyles = makeStyles((color) =>
 		unread: { fontWeight: "600" },
 		detail: { color: color.mute, fontSize: 12.5, lineHeight: 17 },
 		actions: { flexDirection: "row", gap: 8, marginTop: 4 },
+		quote: {
+			marginTop: 2,
+			paddingHorizontal: 10,
+			paddingVertical: 8,
+			borderRadius: radius.sm,
+			borderLeftWidth: 2,
+			borderLeftColor: alpha(color.waitFill, 0.6),
+			backgroundColor: alpha(color.fg, 0.04),
+		},
+		quoteText: { color: color.fg, fontSize: 13.5, lineHeight: 19 },
+		error: { color: color.danger, fontSize: 12, lineHeight: 16 },
 		action: { flex: 1, minHeight: 38 },
 		link: { alignSelf: "flex-start", paddingTop: 2 },
 		linkText: { color: color.mute, fontSize: 12, fontWeight: "500" },

@@ -62,6 +62,7 @@ mod agent_proposals;
 mod agent_reactions;
 mod agent_routines;
 mod agent_sources;
+mod agent_replies;
 mod agents;
 mod ai_memory;
 mod ai_memory_settings;
@@ -735,6 +736,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/mobile/room/limit",
             post(mobile_room_actions::let_past_limit),
+        )
+        .route(
+            "/api/v1/mobile/room/replies",
+            post(agent_replies::answer),
         )
         .route(
             "/api/v1/task-proposals/:proposal_id/start",

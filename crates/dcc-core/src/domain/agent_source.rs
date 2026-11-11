@@ -187,7 +187,7 @@ pub fn source_prompt(source: &AgentSource, news: &[SourceItem]) -> String {
         .collect();
     let more = news.len().saturating_sub(MAX_NEW_ITEMS);
     format!(
-        "{SOURCE_MARK} \"{}\" ({}): {} new item(s).\n\n{}{}\n\nThis is what the person asked you to watch, not a message they wrote. Act on what needs them: look into it, open a task (it starts or waits as a card, as the person set for you) or pass it to a teammate. If nothing here needs the person, answer exactly {} and nothing else.",
+        "{SOURCE_MARK} \"{}\" ({}): {} new item(s).\n\n{}{}\n\nThis is what the person asked you to watch, not a message they wrote. Act on what needs them: look into it, open a task (it starts or waits as a card, as the person set for you) or pass it to a teammate. When an item is someone asking the person something and you find the answer, propose the reply with dcc_propose_reply (it waits as a card the person sends) instead of only describing it. If nothing here needs the person, answer exactly {} and nothing else.",
         source.watch,
         source.connector,
         news.len(),

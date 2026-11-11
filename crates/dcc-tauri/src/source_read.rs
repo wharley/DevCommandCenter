@@ -49,7 +49,7 @@ fn rpc_error(body: &Value) -> Option<String> {
 }
 
 /// One call of `tool` on the connector, in a session of its own.
-async fn call_once(
+pub(crate) async fn call_once(
     gateway: &ConnectorGateway,
     connector: &McpDefinitionId,
     tool: &str,

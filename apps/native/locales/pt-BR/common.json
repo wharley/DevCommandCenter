@@ -216,6 +216,15 @@
     }
   },
   "agents": {
+    "replies": {
+      "title": "{{agent}} · resposta pronta",
+      "send": "Enviar no {{connector}}",
+      "sending": "Enviando…",
+      "edit": "Editar",
+      "discard": "Descartar",
+      "sent": "Resposta enviada",
+      "failed": "Não enviou: {{error}}"
+    },
     "sources": {
       "title": "Fontes",
       "hint": "O que ele vigia nos seus conectores. O DCC lê sozinho, sem modelo, e só acorda o agente com o que é novo. Para criar, peça na Conversa dele: \"vigia minhas menções no Slack\".",
@@ -766,6 +775,8 @@
       "none": "Sem acesso",
       "tasksOff": "Não abre",
       "tasksOn": "Abre tarefas",
+      "repliesOff": "Não propõe",
+      "repliesOn": "Propõe",
       "mode": {
         "title": "Permissão nas tarefas",
         "ask": "Perguntar",
@@ -781,10 +792,12 @@
         "computer": "Uso do computador",
         "device": "Simulador iOS",
         "delegation": "Delegar tarefas",
-        "github": "GitHub (pelo DCC)"
+        "github": "GitHub (pelo DCC)",
+        "replies": "Propor respostas"
       },
       "groupHints": {
-        "github": "Lê PRs, checks e deploys pelo gh em que você está logado no DCC; nunca escreve no GitHub."
+        "github": "Lê PRs, checks e deploys pelo gh em que você está logado no DCC; nunca escreve no GitHub.",
+        "replies": "Escreve a resposta pronta (no Slack, num comentário) para você enviar; nada sai sem o seu clique."
       }
     },
     "notices": {

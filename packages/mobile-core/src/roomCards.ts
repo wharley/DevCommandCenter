@@ -7,7 +7,9 @@ import type { ResidentAgentAvatar } from "./residentAgents.ts";
  * an agent's conversation in a task that finished or waits on the person,
  * a pull request review with its verdict, a check-in; and DCC's own — an
  * agent past its monthly limit, an agent, routine or source an agent
- * proposed — which the room shows after everything, as the desktop does.
+ * proposed — which the room shows after everything, as the desktop does —
+ * and a reply an agent proposed, at its time, which waits on the person to
+ * send it ("Enviar no Slack") or discard it.
  */
 
 export type RoomCardKind =
@@ -18,11 +20,12 @@ export type RoomCardKind =
 	| "limit"
 	| "agentProposal"
 	| "routineProposal"
-	| "sourceProposal";
+	| "sourceProposal"
+	| "replyProposal";
 
 export type RoomVerdict = "approve" | "requestChanges" | "undecided";
 
-export type RoomCardAction = "open" | "delivery" | "create" | "discard" | "continue";
+export type RoomCardAction = "open" | "delivery" | "create" | "discard" | "continue" | "send";
 
 export type RoomCard = {
 	key: string;
@@ -57,6 +60,8 @@ export type RoomCard = {
 	} | null;
 	routine: { id: string; when: string } | null;
 	source: { id: string; connector: string; watch: string; every: number } | null;
+	/** The reply's text as the agent wrote it, where it goes, and why the last try failed. */
+	reply: { id: string; connector: string; destination: string; text: string; error: string | null } | null;
 };
 
 const KINDS: RoomCardKind[] = [
@@ -68,9 +73,10 @@ const KINDS: RoomCardKind[] = [
 	"agentProposal",
 	"routineProposal",
 	"sourceProposal",
+	"replyProposal",
 ];
 const VERDICTS: RoomVerdict[] = ["approve", "requestChanges", "undecided"];
-const ACTIONS: RoomCardAction[] = ["open", "delivery", "create", "discard", "continue"];
+const ACTIONS: RoomCardAction[] = ["open", "delivery", "create", "discard", "continue", "send"];
 const CHECK_INS = ["reviewRequested", "issueAssigned", "taskStalled"] as const;
 
 /** DCC's own cards: they sit after the lines, not at their time. */
@@ -107,9 +113,13 @@ function parseCard(raw: unknown): RoomCard | null {
 	const proposalId = proposal ? text(proposal.id) : null;
 	const routineId = routine ? text(routine.id) : null;
 	const sourceId = source ? text(source.id) : null;
+	const reply = object(value.reply);
+	const replyId = reply ? text(reply.id) : null;
+	const replyText = reply ? text(reply.text) : null;
 	if (kind === "agentProposal" && !proposalId) return null;
 	if (kind === "routineProposal" && !routineId) return null;
 	if (kind === "sourceProposal" && !sourceId) return null;
+	if (kind === "replyProposal" && (!replyId || !replyText)) return null;
 	return {
 		key,
 		kind,
@@ -151,6 +161,16 @@ function parseCard(raw: unknown): RoomCard | null {
 		source:
 			source && sourceId
 				? { id: sourceId, connector: text(source.connector) ?? "", watch: text(source.watch) ?? "", every: num(source.every) ?? 0 }
+				: null,
+		reply:
+			reply && replyId && replyText
+				? {
+						id: replyId,
+						connector: text(reply.connector) ?? "",
+						destination: text(reply.destination) ?? "",
+						text: replyText,
+						error: text(reply.error),
+					}
 				: null,
 	};
 }
@@ -197,6 +217,8 @@ export function roomCardText(card: RoomCard, agentName: string): string {
 			return t("agents.routines.proposal", { agent: agentName, when: card.routine?.when ?? "" });
 		case "sourceProposal":
 			return t("agents.sources.proposal", { agent: agentName });
+		case "replyProposal":
+			return t("agents.replies.title", { agent: agentName });
 	}
 }
 
@@ -216,6 +238,7 @@ export function roomCardDetail(card: RoomCard): string[] {
 	if (card.source) {
 		return [t("agents.sources.what", { connector: card.source.connector, watch: card.source.watch, every: card.source.every })];
 	}
+	if (card.reply) return [[card.reply.connector, card.reply.destination].filter(Boolean).join(" · ")];
 	return [];
 }
 

@@ -216,6 +216,15 @@
     }
   },
   "agents": {
+    "replies": {
+      "title": "{{agent}} · reply ready",
+      "send": "Send in {{connector}}",
+      "sending": "Sending…",
+      "edit": "Edit",
+      "discard": "Discard",
+      "sent": "Reply sent",
+      "failed": "Not sent: {{error}}"
+    },
     "sources": {
       "title": "Sources",
       "hint": "What it watches in your connectors. DCC reads them itself, with no model, and wakes the agent only with what is new. To add one, ask in its Conversation: \"watch my mentions in Slack\".",
@@ -766,6 +775,8 @@
       "none": "No access",
       "tasksOff": "Doesn't open",
       "tasksOn": "Opens tasks",
+      "repliesOff": "Off",
+      "repliesOn": "Proposes",
       "mode": {
         "title": "Permission in its tasks",
         "ask": "Ask",
@@ -781,10 +792,12 @@
         "computer": "Computer use",
         "device": "iOS Simulator",
         "delegation": "Delegate tasks",
-        "github": "GitHub (through DCC)"
+        "github": "GitHub (through DCC)",
+        "replies": "Propose replies"
       },
       "groupHints": {
-        "github": "Reads pull requests, checks and deploys through the gh you are signed into in DCC; never writes to GitHub."
+        "github": "Reads pull requests, checks and deploys through the gh you are signed into in DCC; never writes to GitHub.",
+        "replies": "Writes the reply ready (in Slack, a comment) for you to send; nothing leaves without your click."
       }
     },
     "notices": {

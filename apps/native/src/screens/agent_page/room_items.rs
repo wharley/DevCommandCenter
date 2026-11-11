@@ -189,6 +189,8 @@ impl TeamRoom {
         }
         // A source's proposal shows in the room it was asked in.
         rows.extend(self.source_cards(&shown, cx));
+        // A reply waits under the answers, in the room it was asked in.
+        rows.extend(self.reply_cards(&shown, cx));
         rows.extend(self.pending_rows(agents, &model.mentions, whole, cx));
         // Tasks opened here that still run.
         rows.extend(self.running_rows(agents, cx));

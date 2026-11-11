@@ -81,7 +81,7 @@ describe("demo rooms", () => {
 	it("shows the desktop's cards, answers a proposal and keeps a reaction", async () => {
 		const demo = new DemoBackend();
 		let geral = await room(demo);
-		expect(geral.cards.map((card) => card.kind)).toEqual(["prReview", "checkIn", "agentProposal"]);
+		expect(geral.cards.map((card) => card.kind)).toEqual(["prReview", "checkIn", "agentProposal", "replyProposal"]);
 		const review = geral.cards.find((card) => card.kind === "prReview")!;
 		expect(roomVerdictLabel(review.verdict!)).toBe("Pode aprovar");
 		const loja = await room(demo, "?room=loja");
@@ -96,6 +96,12 @@ describe("demo rooms", () => {
 		await call(demo, "POST", "/api/v1/mobile/room/proposals", { kind: "agent", id: proposal.proposal!.id, agentId: proposal.agentId, action: "discard" });
 		geral = await room(demo);
 		expect(geral.cards.some((card) => card.kind === "agentProposal")).toBe(false);
+		// A reply an agent proposed waits at its time; "Enviar" takes it away.
+		const reply = geral.cards.find((card) => card.kind === "replyProposal")!;
+		expect(reply.unread && reply.reply?.connector).toBe("Slack");
+		await call(demo, "POST", "/api/v1/mobile/room/replies", { id: reply.reply!.id, action: "send" });
+		geral = await room(demo);
+		expect(geral.cards.some((card) => card.kind === "replyProposal")).toBe(false);
 		// 👎 on the Reviewer's answer stays, and a rule is kept.
 		const answer = geral.lines.find((line) => line.speaker === "agent")!;
 		await call(demo, "POST", "/api/v1/mobile/room/reactions", { sessionId: answer.sessionId, lineKey: answer.key, reaction: "down" });

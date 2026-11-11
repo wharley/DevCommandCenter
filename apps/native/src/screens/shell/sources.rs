@@ -34,7 +34,10 @@ impl SourceClock {
         let tick = (!cfg!(test)).then(|| {
             cx.spawn(async move |this, cx| {
                 loop {
-                    let list = cx.background_executor().spawn(async { read() }).await;
+                    let (list, replies) = cx
+                        .background_executor()
+                        .spawn(async { (read(), crate::data::agent_replies::read()) })
+                        .await;
                     let alive = this.update(cx, |_, cx| {
                         let now = Utc::now();
                         let due: Vec<AgentSource> = list
@@ -43,6 +46,8 @@ impl SourceClock {
                             .cloned()
                             .collect();
                         cx.set_global(Sources { list });
+                        // A reply sent from the phone leaves the desktop's room.
+                        cx.set_global(crate::data::agent_replies::Replies { list: replies });
                         if !due.is_empty() {
                             cx.emit(SourcesDue(due));
                         }

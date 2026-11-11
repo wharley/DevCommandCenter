@@ -27,13 +27,15 @@ pub enum AccessLevel {
 /// off by default — it reviews; a teammate fixes. `github`: reading pull
 /// requests, checks and deploys through the person's `gh` (`dcc_github`);
 /// every call only reads, so "Ler" and "Ler e escrever" both allow it.
-pub const DCC_TOOL_GROUPS: [&str; 6] = [
+/// `replies`: proposing a reply the person sends (`dcc_propose_reply`).
+pub const DCC_TOOL_GROUPS: [&str; 7] = [
     "browser",
     "computer",
     "device",
     "delegation",
     "tasks",
     "github",
+    "replies",
 ];
 
 /// What the error of a refused call says, so the agent stops trying.
@@ -74,6 +76,8 @@ pub fn dcc_group(tool: &str) -> Option<&'static str> {
         Some("tasks")
     } else if tool.starts_with("dcc_github") {
         Some("github")
+    } else if tool == super::agent_reply::PROPOSE_REPLY_TOOL {
+        Some(super::agent_reply::REPLY_GROUP)
     } else {
         None
     }

@@ -128,4 +128,31 @@ describe("room cards", () => {
 		const old = parseRoom({ snapshotId: "s", lines: [] }, null);
 		expect(old && !old.unchanged && old.cards).toEqual([]);
 	});
+
+	it("a proposed reply carries its text, where it goes and why it failed", () => {
+		const [card] = parseRoomCards([
+			{
+				key: "reply:rp-1",
+				kind: "replyProposal",
+				agentId: "sup",
+				title: "#suporte · thread do Guilherme",
+				at: "2026-11-11T22:00:00Z",
+				unread: true,
+				actions: ["send", "discard"],
+				reply: { id: "rp-1", connector: "Slack", destination: "#suporte · thread do Guilherme", text: "Foi na loja 374.", error: "channel_not_found" },
+			},
+		]);
+		expect(card!.reply).toEqual({
+			id: "rp-1",
+			connector: "Slack",
+			destination: "#suporte · thread do Guilherme",
+			text: "Foi na loja 374.",
+			error: "channel_not_found",
+		});
+		expect(card!.actions).toEqual(["send", "discard"]);
+		expect(roomCardText(card!, "Suporte")).toBe("Suporte · resposta pronta");
+		expect(roomCardDetail(card!)).toEqual(["Slack · #suporte · thread do Guilherme"]);
+		// Without its text there is nothing to send.
+		expect(parseRoomCards([{ key: "reply:x", kind: "replyProposal", agentId: "sup", reply: { id: "x" } }])).toEqual([]);
+	});
 });

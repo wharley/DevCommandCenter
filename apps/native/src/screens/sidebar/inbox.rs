@@ -47,16 +47,23 @@ impl Sidebar {
         &self.state.data.opened_tasks
     }
 
-    /// Beside "Agentes": the unread cards (the day's recap and the
-    /// check-in's among them), and whether one waits on the person (amber).
-    pub(super) fn agents_waiting(&self, cx: &gpui::App) -> (usize, bool) {
+    /// Beside "Agentes": the unread cards (the day's recap, the check-in's
+    /// and the replies to send among them), and whether one waits on the
+    /// person (amber).
+    pub(crate) fn agents_waiting(&self, cx: &gpui::App) -> (usize, bool) {
         let (count, waiting) = unread_count(&self.inbox(&[]));
         let checks = cx
             .try_global::<crate::data::check_ins::CheckIns>()
             .map_or(0, |checks| checks.unread());
+        // A reply an agent proposed waits on the person to send it.
+        let replies = self.replies_waiting;
         (
-            count + usize::from(self.recap_unread()) + usize::from(self.bulletin_unread()) + checks,
-            waiting,
+            count
+                + usize::from(self.recap_unread())
+                + usize::from(self.bulletin_unread())
+                + checks
+                + replies,
+            waiting || replies > 0,
         )
     }
 

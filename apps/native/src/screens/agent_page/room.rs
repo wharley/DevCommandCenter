@@ -112,6 +112,8 @@ pub struct TeamRoom {
     pub(crate) approval_reason: Option<(String, Entity<crate::ui::TextInput>)>,
     /// Questions being answered in the room's dock (`room_question`).
     pub(crate) questions: super::room_question::RoomQuestions,
+    /// Replies agents proposed being edited or sent (`room_replies`).
+    pub(crate) replies: super::room_replies::RoomReplies,
     /// The answers whose steps are listed open, with those steps read when
     /// they opened (`room_steps`).
     pub(crate) steps_open:
@@ -233,6 +235,7 @@ impl TeamRoom {
             answering: Default::default(),
             approval_reason: None,
             questions: Default::default(),
+            replies: Default::default(),
             steps_open: HashMap::new(),
             answered_proposals: Vec::new(),
             reacted: HashMap::new(),

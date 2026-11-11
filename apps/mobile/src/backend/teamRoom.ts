@@ -80,6 +80,8 @@ export type TeamRoomState = {
 	answerProposal: (card: RoomCard, action: "create" | "discard") => Promise<string | null>;
 	/** "Continuar mesmo assim" on an agent past its monthly limit. */
 	continueLimit: (card: RoomCard) => Promise<string | null>;
+	/** "Enviar no Slack" / "Descartar" on a reply an agent proposed: the desktop sends it. */
+	answerReply: (card: RoomCard, action: "send" | "discard") => Promise<string | null>;
 };
 
 /** What the person reads when a message could not go. */
@@ -389,6 +391,24 @@ export function useTeamRoom(backend: Backend, roomId: string | null = null, focu
 		[backend, busy, refresh],
 	);
 
+	const answerReply = useCallback(
+		(card: RoomCard, action: "send" | "discard") =>
+			busy(`card:${card.key}`, async () => {
+				if (!card.reply) return null;
+				try {
+					await backend.request("POST", "/api/v1/mobile/room/replies", { id: card.reply.id, action });
+					setCards((current) => current.filter((item) => item.key !== card.key));
+					refresh();
+					return null;
+				} catch (error) {
+					// A failed send stays, with why, on the next read.
+					refresh();
+					return errorMessage(error, action === "send" ? "Não foi possível enviar a resposta." : "Não foi possível descartar.");
+				}
+			}),
+		[backend, busy, refresh],
+	);
+
 	const continueLimit = useCallback(
 		(card: RoomCard) =>
 			busy(`card:${card.key}`, async () => {
@@ -426,5 +446,6 @@ export function useTeamRoom(backend: Backend, roomId: string | null = null, focu
 		keepRule,
 		answerProposal,
 		continueLimit,
+		answerReply,
 	};
 }

@@ -100,7 +100,7 @@ const DELEGATION_MCP_TOOL_NAMES: [&str; 6] = [
 ];
 #[cfg(test)]
 const DCC_MCP_TOOL_COUNT: usize =
-    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 8;
+    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 9;
 /// Starting a delegation prepares a worktree and a child thread before it
 /// returns the task id; the child's turn itself runs in the background.
 const DELEGATE_TASK_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
@@ -1581,6 +1581,9 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
         name if crate::agent_proposal_tool::is_agent_proposal_tool(name) => {
             crate::agent_proposal_tool::call_is_well_formed(&call.arguments)
         }
+        name if crate::reply_tools::is_reply_tool(name) => {
+            crate::reply_tools::call_is_well_formed(&call.arguments)
+        }
         name if crate::source_tools::is_source_tool(name) => {
             crate::source_tools::call_is_well_formed(&call.arguments)
         }
@@ -1745,6 +1748,25 @@ async fn dispatch_tool(
                 &binding.session_id,
                 call.arguments,
             );
+            if response["isError"] == true {
+                ToolDispatch {
+                    response,
+                    outcome: BrowserAuditOutcome::Failed,
+                    grant_state: BrowserAuditGrantState::NotApplicable,
+                }
+            } else {
+                ToolDispatch::executed(response, BrowserAuditGrantState::NotApplicable)
+            }
+        }
+        name if crate::reply_tools::is_reply_tool(name) => {
+            if !bridge.lease_is_current(binding) {
+                return ToolDispatch::computer_error(
+                    "proposing a reply is unavailable for this provider session",
+                );
+            }
+            let response =
+                crate::reply_tools::dispatch(&bridge.sessions, &binding.session_id, call.arguments)
+                    .await;
             if response["isError"] == true {
                 ToolDispatch {
                     response,
@@ -3296,6 +3318,8 @@ fn tools() -> Vec<Value> {
     .chain([crate::agent_proposal_tool::definition()])
     // Something an agent proposes to watch for the person.
     .chain([crate::source_tools::definition()])
+    // A reply an agent proposes, sent only by the person.
+    .chain([crate::reply_tools::definition()])
     // The person's tasks, in an agent's own conversation.
     .chain([crate::overview_tool::definition()])
     // A task in one of the person's projects, from that conversation.
@@ -4669,6 +4693,7 @@ mod tests {
                 "dcc_github",
                 "dcc_propose_agent",
                 "dcc_propose_source",
+                "dcc_propose_reply",
                 "dcc_overview",
                 "dcc_open_task",
             ]

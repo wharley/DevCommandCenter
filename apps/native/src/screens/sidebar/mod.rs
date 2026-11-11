@@ -145,6 +145,10 @@ pub struct Sidebar {
     /// The reviewer's pull request reviews from the hub.
     pr_reviews: Vec<crate::data::pr_review_jobs::PrReviewJob>,
     _pr_reviews: gpui::Subscription,
+    /// The replies agents proposed, waiting on the person (read each minute;
+    /// the sidebar redraws only when their number changes).
+    replies_waiting: usize,
+    _replies: gpui::Subscription,
     /// The conversation on screen, when the task has several.
     selected_session_id: Option<String>,
     /// Skills and instruction files the open task's agents get (footer badge).
@@ -223,6 +227,17 @@ impl Sidebar {
                     cx.notify();
                 },
             ),
+            replies_waiting: 0,
+            _replies: cx.observe_global::<crate::data::agent_replies::Replies>(|sidebar, cx| {
+                let waiting = cx
+                    .global::<crate::data::agent_replies::Replies>()
+                    .list
+                    .len();
+                if waiting != sidebar.replies_waiting {
+                    sidebar.replies_waiting = waiting;
+                    cx.notify();
+                }
+            }),
             selected_session_id: None,
             skill_count: 0,
             terminals: Default::default(),

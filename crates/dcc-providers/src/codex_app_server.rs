@@ -2256,6 +2256,7 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_github"
                 | "dcc_propose_agent"
                 | "dcc_propose_source"
+                | "dcc_propose_reply"
                 | "dcc_overview"
                 | "dcc_open_task"
         )

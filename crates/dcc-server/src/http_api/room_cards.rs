@@ -19,6 +19,7 @@ use std::path::Path;
 use chrono::Local;
 use dcc_core::domain::agent_budget::{month_key, month_start, over_limit};
 use dcc_core::domain::agent_proposal::AgentProposal;
+use dcc_core::domain::agent_reply::AgentReply;
 use dcc_core::domain::agent_routine::{schedule_label, Routine};
 use dcc_core::domain::agent_source::AgentSource;
 use dcc_core::domain::agent_trigger::TriggerRun;
@@ -74,6 +75,8 @@ pub(super) struct CardSources {
     pub agent_proposals: Vec<AgentProposal>,
     pub routines: Vec<Routine>,
     pub sources: Vec<AgentSource>,
+    /// The replies agents proposed, waiting for the person.
+    pub replies: Vec<AgentReply>,
     pub now_ms: i64,
 }
 
@@ -234,6 +237,9 @@ pub(super) fn read_sources(
             .into_iter()
             .filter(|source| source.proposed)
             .collect(),
+        replies: repo
+            .list_pending_agent_replies()
+            .map_err(|error| error.to_string())?,
         now_ms,
     })
 }
@@ -490,7 +496,35 @@ pub(super) fn cards(team: &Team, sources: &CardSources, room: Option<&str>) -> V
         });
         all.push(card);
     }
+    for reply in sources
+        .replies
+        .iter()
+        .filter(|reply| reply.room.as_deref() == room && known(&reply.agent_id))
+    {
+        all.push(reply_json(reply));
+    }
     all
+}
+
+/// A reply an agent proposed: it needs the person until sent or discarded.
+fn reply_json(reply: &AgentReply) -> Value {
+    let mut card = own_json(
+        format!("reply:{}", reply.id),
+        "replyProposal",
+        &reply.agent_id,
+        &reply.destination,
+        Some(&reply.created_at),
+    );
+    card["unread"] = json!(true);
+    card["actions"] = json!(["send", "discard"]);
+    card["reply"] = json!({
+        "id": reply.id,
+        "connector": reply.connector,
+        "destination": reply.destination,
+        "text": reply.text,
+        "error": reply.error,
+    });
+    card
 }
 
 /// What moves the room when its cards change.
@@ -649,6 +683,41 @@ mod tests {
         assert_eq!(geral[0]["actions"], json!(["continue"]));
         assert_eq!(geral[1]["routine"]["when"], "Dias úteis · 09:00");
         assert_eq!(geral[1]["actions"], json!(["create", "discard"]));
+    }
+
+    #[test]
+    fn a_proposed_reply_is_a_card_in_its_room_that_needs_the_person() {
+        let team = team();
+        let mut sources = sources();
+        sources.replies = vec![AgentReply {
+            id: "rp-1".into(),
+            agent_id: "rev".into(),
+            session_id: "s-rev".into(),
+            connector_id: "slack".into(),
+            connector: "Slack".into(),
+            tool: "slack_send_message".into(),
+            arguments: "{}".into(),
+            text_argument: "message".into(),
+            destination: "#suporte · thread do Guilherme".into(),
+            text: "Foi na loja 374.".into(),
+            state: dcc_core::domain::agent_reply::ReplyState::Pending,
+            error: None,
+            created_at: "2026-11-10T11:00:00Z".into(),
+            sent_at: None,
+            room: Some("checkout".into()),
+        }];
+        assert!(cards(&team, &sources, None)
+            .iter()
+            .all(|card| card["kind"] != "replyProposal"));
+        let checkout = cards(&team, &sources, Some("checkout"));
+        let reply = checkout
+            .iter()
+            .find(|card| card["kind"] == "replyProposal")
+            .unwrap();
+        assert_eq!(reply["unread"], true);
+        assert_eq!(reply["actions"], json!(["send", "discard"]));
+        assert_eq!(reply["reply"]["text"], "Foi na loja 374.");
+        assert_eq!(reply["reply"]["connector"], "Slack");
     }
 
     #[test]

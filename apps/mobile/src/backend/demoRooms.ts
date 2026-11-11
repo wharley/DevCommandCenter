@@ -189,6 +189,19 @@ export class DemoRooms {
 				firstRequest: "Teste o checkout-v2 no navegador",
 			},
 		});
+		card("geral", "demo-card-reply", "replyProposal", 10, {
+			agentId: "demo-rev",
+			title: "#suporte · thread da Ana",
+			unread: true,
+			actions: ["send", "discard"],
+			reply: {
+				id: "demo-reply",
+				connector: "Slack",
+				destination: "#suporte · thread da Ana",
+				text: "Oi, Ana! O checkout-v2 já está em produção desde ontem, com a correção do frete.",
+				error: null,
+			},
+		});
 	}
 
 	/** 👍 / 👎 on an answer: kept on its line, as the desktop keeps it. */
@@ -463,6 +476,10 @@ export class DemoRooms {
 		if (method === "POST" && path === "/api/v1/mobile/room/proposals") {
 			const id = (body as { id?: unknown })?.id;
 			return this.answerCard((card) => (card.proposal as { id?: unknown } | undefined)?.id === id);
+		}
+		if (method === "POST" && path === "/api/v1/mobile/room/replies") {
+			const id = (body as { id?: unknown })?.id;
+			return this.answerCard((card) => (card.reply as { id?: unknown } | undefined)?.id === id);
 		}
 		if (method === "POST" && path === "/api/v1/mobile/room/limit") {
 			const agentId = (body as { agentId?: unknown })?.agentId;
