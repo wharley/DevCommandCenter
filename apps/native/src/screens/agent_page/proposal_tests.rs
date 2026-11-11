@@ -100,6 +100,10 @@ fn an_agent_proposed_is_created_or_edited_from_its_card(cx: &mut TestAppContext)
     cx.simulate_click(create.center(), Modifiers::none());
     cx.run_until_parked();
     assert!(cx.debug_bounds("room-agent-proposal-0").is_none());
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     assert_eq!(seen[0].0, "POST /api/v1/agents/rev/proposals/p-1/accept");
     page.update(cx, |page, _| {

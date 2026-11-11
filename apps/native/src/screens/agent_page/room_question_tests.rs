@@ -152,6 +152,10 @@ fn a_question_is_stepped_through_and_sent_from_the_room(cx: &mut TestAppContext)
     assert!(cx.debug_bounds("room-question-field").is_some());
     click(cx, "room-question-main");
     click(cx, "room-question-main");
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     assert_eq!(seen[0].0, "POST /api/v1/sessions/s-sup/respond-user-input");
     let sent: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();

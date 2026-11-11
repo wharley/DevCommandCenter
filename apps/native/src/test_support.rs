@@ -57,6 +57,23 @@ pub fn fake_desktop_answers(
 /// for its path, in order; any other path gets a 404 and is not recorded
 /// (views also read things the test doesn't follow). It stops once every
 /// answer is taken, giving back the recorded requests.
+/// Drives the app (`drive`, usually `cx.run_until_parked()`) until the fake
+/// desktop got every call it waits for, at most 10 s: a call that never
+/// comes fails the test instead of hanging the suite on `join`.
+pub fn desktop_done<T>(desktop: &std::thread::JoinHandle<T>, mut drive: impl FnMut()) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        drive();
+        if desktop.is_finished() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 pub fn fake_desktop_routes(
     routes: Vec<(&'static str, u16, String)>,
 ) -> (u16, std::thread::JoinHandle<Vec<(String, String)>>) {

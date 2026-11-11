@@ -30,6 +30,7 @@ mod agent_spend;
 mod agent_week;
 mod pr_review_requests;
 mod reviewer_access;
+mod last_turn_events;
 mod session_stall;
 mod usage_marks;
 mod agent_rooms;

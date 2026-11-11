@@ -47,6 +47,7 @@ pub mod review_findings;
 pub mod review_thread_detail;
 pub mod review_threads;
 pub mod room_approval;
+pub mod room_notice;
 pub mod room_question;
 pub mod room_list;
 pub mod recent_work;

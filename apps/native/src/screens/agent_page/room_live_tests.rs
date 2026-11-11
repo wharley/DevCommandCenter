@@ -145,7 +145,10 @@ fn a_turn_at_work_shows_live_and_its_answer_takes_its_place(cx: &mut TestAppCont
     });
     let stop = cx.debug_bounds("room-live-stop-0").unwrap();
     cx.simulate_click(stop.center(), Modifiers::none());
-    cx.run_until_parked();
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     assert_eq!(seen[0].0, "POST /api/v1/sessions/s-geral/abort");
 
@@ -217,6 +220,10 @@ fn a_turn_that_stopped_offers_its_prompt_again(cx: &mut TestAppContext) {
     let retry = cx.debug_bounds("room-retry-0").unwrap();
     cx.simulate_click(retry.center(), Modifiers::none());
     cx.run_until_parked();
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     assert_eq!(seen[0].0, "POST /api/v1/sessions/s-geral/turns");
     let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();

@@ -63,6 +63,7 @@ pub fn run() {
         crate::data::pr_news::PrNews::init(cx);
         crate::data::agent_triggers::AgentTriggers::init(cx);
         crate::data::check_ins::CheckIns::init(cx);
+        crate::data::room_notices_pref::RoomNoticesPref::init(cx);
         cx.on_app_quit(|_| {
             crate::data::host::shutdown();
             async {}

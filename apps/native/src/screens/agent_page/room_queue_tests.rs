@@ -73,6 +73,10 @@ fn a_message_to_an_agent_at_work_is_queued(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(room.update(cx, |room, _| room.pending.is_empty()));
     assert!(cx.debug_bounds("room-pending-0").is_none());
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     assert_eq!(seen[0].0, "POST /api/v1/sessions/s-geral/queue");
     let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();

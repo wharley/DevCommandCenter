@@ -634,6 +634,7 @@ impl Settings {
             .children(keep_awake)
             .child(self.usage_limit_card(cx))
             .child(self.cleanup_card(cx))
+            .child(self.room_notices_card(cx))
             .children(browser)
             .child(
                 card(cx)

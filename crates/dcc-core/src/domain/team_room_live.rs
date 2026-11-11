@@ -168,7 +168,7 @@ pub fn moves_only_the_turn(kind: &SessionEventKind) -> bool {
 }
 
 /// The person's own prompt (or one they passed), never DCC's.
-fn retry_prompt(prompt: &TimelineMessage) -> Option<String> {
+pub(crate) fn retry_prompt(prompt: &TimelineMessage) -> Option<String> {
     let text = prompt.content.trim();
     let dcc = prompt.hand_back.is_some() || text.starts_with(DCC_MARK);
     (!dcc && !text.is_empty()).then(|| prompt.content.clone())
@@ -224,7 +224,7 @@ fn live_turn(turn: &str, prompt: &TimelineMessage, rows: &[&TimelineMessage]) ->
 /// A running row's answer so far: its own text (one stream for the whole
 /// turn), or — a turn of several messages, folded while it runs — the
 /// message being written, unless that one is commentary.
-fn answer_text(row: &TimelineMessage) -> Option<String> {
+pub(crate) fn answer_text(row: &TimelineMessage) -> Option<String> {
     if row.assistant_phase == Some(AssistantMessagePhase::Commentary) {
         return None;
     }

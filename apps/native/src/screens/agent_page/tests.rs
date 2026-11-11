@@ -268,6 +268,10 @@ fn the_editor_saves_what_the_person_owns(cx: &mut TestAppContext) {
         editor.save(cx);
     });
     cx.run_until_parked();
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();
     assert_eq!(body["name"], "Crítico");
@@ -440,6 +444,10 @@ fn the_team_lists_the_agents_and_makes_a_new_one(cx: &mut TestAppContext) {
         editor.save(cx);
     });
     cx.run_until_parked();
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     assert_eq!(seen[0].0, "POST /api/v1/agents");
     let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();

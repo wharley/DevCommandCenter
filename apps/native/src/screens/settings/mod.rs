@@ -17,6 +17,7 @@ mod memory;
 mod nav;
 mod preview;
 mod providers;
+mod room_notices;
 mod shortcuts;
 #[cfg(test)]
 pub(crate) mod tests;

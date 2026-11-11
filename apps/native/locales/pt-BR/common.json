@@ -779,6 +779,15 @@
       "groupHints": {
         "github": "Lê PRs, checks e deploys pelo gh em que você está logado no DCC; nunca escreve no GitHub."
       }
+    },
+    "notices": {
+      "approval": "{{agent}} pede aprovação",
+      "question": "{{agent}} pergunta",
+      "done": "{{agent}} terminou {{where}}",
+      "stopped": "{{agent}} parou antes de terminar",
+      "inRoom": "em {{room}}",
+      "inGeral": "na Geral",
+      "openRoom": "Abrir sala"
     }
   },
   "sidebar": {
@@ -2940,6 +2949,10 @@
         "title": "Espaço das concluídas",
         "body": "Avisa na Sala da equipe quando as tarefas concluídas passam do limite, com um atalho para liberar espaço. Nada é apagado sem o seu clique, e só o que já está commitado e publicado.",
         "limit": "Avisar a partir de"
+      },
+      "roomNotices": {
+        "title": "Avisos das salas",
+        "body": "Avisa quando um agente pede aprovação, pergunta, termina ou para numa sala: pelo sistema com o DCC em segundo plano, com um aviso no app quando você está em outra tela. Nada quando a sala já está aberta."
       }
     },
     "appearance": {

@@ -33,6 +33,9 @@ mod review_requests;
 mod review_trigger;
 mod reviewer_in_task;
 mod room_delivery;
+mod room_notices;
+#[cfg(test)]
+mod room_notices_tests;
 mod routines;
 mod session_search;
 mod settings;
@@ -159,6 +162,8 @@ pub struct Shell {
     feedback: Option<feedback::OpenFeedback>,
     /// The first-run guide, while open.
     onboarding: Option<onboarding::OpenOnboarding>,
+    /// The rooms' notices (`room_notices`).
+    room_notices: room_notices::RoomNotices,
     /// The project notes and their balloons.
     notes: Entity<crate::screens::notes::NotesWorkspace>,
     _notes: Vec<Subscription>,
@@ -212,6 +217,7 @@ impl Shell {
                 shell
                     .code_column
                     .update(cx, |column, cx| column.read_now(cx));
+                shell.room_notice_returned(window, cx);
             }
         });
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
@@ -246,6 +252,7 @@ impl Shell {
                 new_task.set_projects(&projects, &linked, cx)
             });
             this.sync_session_agents(cx);
+            this.watch_rooms(cx);
         });
         let new_task_events = cx.subscribe_in(&new_task, window, Self::on_new_task_event);
         let conversation_events =
@@ -330,6 +337,7 @@ impl Shell {
         });
         Self {
             onboarding: None,
+            room_notices: room_notices::RoomNotices::new(window.window_handle()),
             cli_updates: cx.new(cli_updates::CliUpdates::new),
             _pr_watch: {
                 let sidebar = sidebar.clone();

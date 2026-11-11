@@ -108,6 +108,10 @@ fn an_answer_is_marked_and_a_thumbs_down_keeps_a_rule(cx: &mut TestAppContext) {
     cx.simulate_click(keep.center(), Modifiers::none());
     cx.run_until_parked();
     assert!(cx.debug_bounds("room-rule").is_none());
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     assert!(seen[0].1.contains(r#""reaction":"up""#), "{}", seen[0].1);
     assert!(seen[1].1.contains(r#""reaction":"down""#));

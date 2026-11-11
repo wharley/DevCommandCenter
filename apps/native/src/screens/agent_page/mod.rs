@@ -9,6 +9,8 @@ use gpui::{
     Window, div, prelude::*, px,
 };
 
+pub use on_screen::RoomOnScreen;
+
 use crate::agent::AgentAvatarView;
 use crate::data::agents::{AgentRecord, AgentState};
 use crate::data::composer_settings::clamp_effort;
@@ -45,6 +47,7 @@ mod memory_history;
 mod memory_layers;
 #[cfg(test)]
 mod memory_tests;
+mod on_screen;
 mod page_tabs;
 mod pr_reviews;
 #[cfg(test)]

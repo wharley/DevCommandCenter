@@ -239,6 +239,10 @@ fn the_room_shows_the_team_together_and_sends_to_who_answers(cx: &mut TestAppCon
     });
     cx.run_until_parked();
     assert!(cx.debug_bounds("room-pending-0").is_some());
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     assert_eq!(seen[0].0, "POST /api/v1/sessions/s-home/turns");
     let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();
@@ -420,6 +424,10 @@ fn an_agent_suggests_a_teammate_and_only_the_persons_click_passes_it(cx: &mut Te
     let pass = cx.debug_bounds("room-handoff-pass-1").unwrap();
     cx.simulate_click(pass.center(), Modifiers::none());
     cx.run_until_parked();
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the call"
+    );
     let seen = desktop.join().unwrap();
     assert_eq!(seen[0].0, "POST /api/v1/sessions/s-res/turns");
     let body: serde_json::Value = serde_json::from_str(&seen[0].1).unwrap();

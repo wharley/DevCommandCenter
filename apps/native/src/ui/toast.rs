@@ -157,7 +157,49 @@ impl Toaster {
         run: impl Fn(&mut App) + 'static,
         cx: &mut App,
     ) {
-        let (message, description) = (message.into(), Some(description.into()));
+        let (message, description) = (message.into(), description.into());
+        Self::with_action(
+            ToastKind::Error,
+            message,
+            description,
+            label,
+            lifetime,
+            run,
+            cx,
+        );
+    }
+
+    /// `toast.info(message, { description, duration, action })`.
+    pub fn info_action(
+        message: impl Into<SharedString>,
+        description: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        lifetime: Duration,
+        run: impl Fn(&mut App) + 'static,
+        cx: &mut App,
+    ) {
+        let (message, description) = (message.into(), description.into());
+        Self::with_action(
+            ToastKind::Info,
+            message,
+            description,
+            label,
+            lifetime,
+            run,
+            cx,
+        );
+    }
+
+    fn with_action(
+        kind: ToastKind,
+        message: SharedString,
+        description: SharedString,
+        label: impl Into<SharedString>,
+        lifetime: Duration,
+        run: impl Fn(&mut App) + 'static,
+        cx: &mut App,
+    ) {
+        let description = Some(description).filter(|text| !text.is_empty());
         let action = ToastAction {
             label: label.into(),
             run: std::rc::Rc::new(run),
@@ -166,7 +208,7 @@ impl Toaster {
             return eprintln!("[dcc-native] {message}");
         };
         toaster.update(cx, |toaster, cx| {
-            let id = toaster.push(ToastKind::Error, message, description, cx);
+            let id = toaster.push(kind, message, description, cx);
             if let Some(toast) = toaster.toasts.iter_mut().find(|toast| toast.id == id) {
                 toast.action = Some(action);
                 toast._timer = Self::timer_for(id, lifetime, cx);

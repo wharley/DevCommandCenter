@@ -24,7 +24,7 @@ pub fn request_attention(title: &str, body: &str) {
         std::thread::spawn(move || notify(&title, &body));
     }
     #[cfg(test)]
-    let _ = (title, body);
+    record(title, body, true);
 }
 
 /// A system notification while the person is in another app, without
@@ -39,7 +39,27 @@ pub fn notify_away(title: &str, body: &str) {
         std::thread::spawn(move || notify(&title, &body));
     }
     #[cfg(test)]
-    let _ = (title, body);
+    record(title, body, false);
+}
+
+#[cfg(test)]
+thread_local! {
+    static SENT: std::cell::RefCell<Vec<(String, String, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Tests post nothing; what would have been posted is kept here.
+#[cfg(test)]
+fn record(title: &str, body: &str, bounced: bool) {
+    SENT.with(|sent| {
+        sent.borrow_mut()
+            .push((title.to_string(), body.to_string(), bounced))
+    });
+}
+
+/// What would have been posted, as `(title, body, bounced)`, taken.
+#[cfg(test)]
+pub fn take_sent() -> Vec<(String, String, bool)> {
+    SENT.with(|sent| std::mem::take(&mut *sent.borrow_mut()))
 }
 
 #[cfg(all(target_os = "macos", not(test)))]

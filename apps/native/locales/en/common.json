@@ -779,6 +779,15 @@
       "groupHints": {
         "github": "Reads pull requests, checks and deploys through the gh you are signed into in DCC; never writes to GitHub."
       }
+    },
+    "notices": {
+      "approval": "{{agent}} asks for approval",
+      "question": "{{agent}} asks",
+      "done": "{{agent}} finished {{where}}",
+      "stopped": "{{agent}} stopped before finishing",
+      "inRoom": "in {{room}}",
+      "inGeral": "in General",
+      "openRoom": "Open room"
     }
   },
   "sidebar": {
@@ -2940,6 +2949,10 @@
         "title": "Completed tasks' space",
         "body": "Tells you in the team room when completed tasks go past the limit, with a shortcut to free up space. Nothing is deleted without your click, and only what is already committed and pushed.",
         "limit": "Tell me from"
+      },
+      "roomNotices": {
+        "title": "Room notices",
+        "body": "Tells you when an agent asks for approval, asks a question, finishes or stops in a room: through the system while DCC is in the background, with an in-app notice when you are on another screen. Nothing when the room is already open."
       }
     },
     "appearance": {
