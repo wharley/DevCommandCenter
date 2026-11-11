@@ -3,13 +3,19 @@
  * each new day; what the person said as a bubble to the right, each
  * `@Agent` a tinted pill, with who took it; an agent's answer as a flat row
  * — mascot, bold name and the time on one line, the words under, answers
- * close together sharing one face — with its receipt and "Abrir conversa";
- * who is working; the approvals docked on the field; and the team's list
- * that `@` opens.
+ * close together sharing one face — with its receipt and "Abrir conversa",
+ * its steps opened from its folded line and, when it ends with "@Teammate …",
+ * "Passar a vez"; who is working; the approvals docked on the field; and the
+ * team's list that `@` opens. The rows are memoized: a read of the room that
+ * keeps a line's object redraws nothing of it.
  */
 import {
 	approvalTitle,
 	handoffHeading,
+	handoffLabel,
+	moreStepsLabel,
+	stepText,
+	t,
 	pathBasename,
 	residentStateLabel,
 	roomClock,
@@ -22,6 +28,7 @@ import {
 	type ResidentAgent,
 	type RoomApproval,
 	type RoomLine,
+	type RoomStep,
 	type RoomTask,
 } from "@dcc/mobile-core";
 import { alpha, hairline, makeStyles, radius, useTheme } from "@/theme";
@@ -30,7 +37,8 @@ import { Button, Mono } from "@/ui/primitives";
 import { ResidentMascot } from "@/ui/ResidentMascot";
 import { RichText } from "@/ui/RichText";
 import Feather from "@expo/vector-icons/Feather";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { memo, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 /** The face's side, and so the column the words line up in. */
 const FACE = 30;
@@ -46,7 +54,18 @@ export function DayPill({ label }: { label: string }) {
 	);
 }
 
-export function PersonLine({ line, agent, team }: { line: RoomLine; agent: ResidentAgent | undefined; team: ResidentAgent[] }) {
+export const PersonLine = memo(function PersonLine({
+	line,
+	agent,
+	team,
+	note,
+}: {
+	line: Pick<RoomLine, "text" | "wake">;
+	agent: ResidentAgent | undefined;
+	team: ResidentAgent[];
+	/** Under the bubble instead of who took it ("Na fila · …"). */
+	note?: string;
+}) {
 	const styles = useStyles();
 	const passed = handoffHeading(line.text);
 	if (passed) {
@@ -97,25 +116,26 @@ export function PersonLine({ line, agent, team }: { line: RoomLine; agent: Resid
 					</Text>
 				) : null}
 			</View>
-			{agent ? <Mono style={styles.routed}>→ {agent.name}</Mono> : null}
+			{note ? <Mono style={styles.routed}>{note}</Mono> : agent ? <Mono style={styles.routed}>→ {agent.name}</Mono> : null}
 		</View>
 	);
-}
+});
 
-export function AgentLine({
-	line,
-	agent,
-	first,
-	onOpen,
-	onTask,
-}: {
+export type AgentLineProps = {
 	line: RoomLine;
 	agent: ResidentAgent;
 	/** Opens a group: the face, the name and the time show. */
 	first: boolean;
-	onOpen: () => void;
+	/** "Passar a vez" or "Ignorar" is on its way. */
+	handing: boolean;
+	onOpen: (line: RoomLine) => void;
 	onTask: (task: RoomTask, where: "thread" | "delivery") => void;
-}) {
+	onHandoff: (line: RoomLine, action: "pass" | "ignore") => void;
+	/** Reads the answer's steps when its folded line is opened. */
+	loadSteps: (line: RoomLine) => Promise<{ steps: RoomStep[]; more: number }>;
+};
+
+function AgentLineView({ line, agent, first, handing, onOpen, onTask, onHandoff, loadSteps }: AgentLineProps) {
 	const styles = useStyles();
 	const receipt = roomReceiptLabel(line.receipt);
 	return (
@@ -130,21 +150,18 @@ export function AgentLine({
 						<Mono style={styles.clock}>{roomClock(line.at)}</Mono>
 					</View>
 				) : null}
-				{line.steps ? (
-					<Text style={styles.steps} numberOfLines={2}>
-						{roomStepsLabel(line.steps)}
-					</Text>
-				) : null}
+				{line.steps ? <StepsFold line={line} loadSteps={loadSteps} /> : null}
 				<RichText text={line.text} />
 				{line.tasks.map((task) => (
 					<TaskCard key={task.workspaceId} task={task} onOpen={(where) => onTask(task, where)} />
 				))}
+				{line.handoff ? <HandoffBar line={line} author={agent.name} busy={handing} onAct={onHandoff} /> : null}
 				<View style={styles.receipt}>
 					{receipt ? <Mono style={styles.receiptText}>{receipt}</Mono> : null}
 					<Pressable
 						onPress={() => {
 							haptic("tap");
-							onOpen();
+							onOpen(line);
 						}}
 						accessibilityRole="button"
 						accessibilityLabel={`Abrir a conversa com ${agent.name}`}
@@ -153,6 +170,151 @@ export function AgentLine({
 						<Text style={styles.open}>Abrir conversa</Text>
 					</Pressable>
 				</View>
+			</View>
+		</View>
+	);
+}
+
+/** Redrawn only when its line, its agent's face or name, or what it shows moved. */
+export const AgentLine = memo(
+	AgentLineView,
+	(before, after) =>
+		before.line === after.line &&
+		before.first === after.first &&
+		before.handing === after.handing &&
+		before.agent.name === after.agent.name &&
+		JSON.stringify(before.agent.avatar) === JSON.stringify(after.agent.avatar) &&
+		before.onOpen === after.onOpen &&
+		before.onTask === after.onTask &&
+		before.onHandoff === after.onHandoff &&
+		before.loadSteps === after.loadSteps,
+);
+
+/** "Trabalhou 4 min · leu 6 arquivos": a tap lists each step, read once. */
+function StepsFold({ line, loadSteps }: { line: RoomLine; loadSteps: AgentLineProps["loadSteps"] }) {
+	const { color } = useTheme();
+	const styles = useStyles();
+	const [open, setOpen] = useState(false);
+	const [read, setRead] = useState<{ steps: RoomStep[]; more: number } | null>(null);
+	const [failed, setFailed] = useState(false);
+	const toggle = () => {
+		haptic("select");
+		const next = !open;
+		setOpen(next);
+		if (next && !read) {
+			setFailed(false);
+			loadSteps(line)
+				.then(setRead)
+				.catch(() => setFailed(true));
+		}
+	};
+	return (
+		<View style={{ gap: 4 }}>
+			<Pressable
+				onPress={toggle}
+				accessibilityRole="button"
+				accessibilityState={{ expanded: open }}
+				accessibilityLabel={`${roomStepsLabel(line.steps!)}. ${open ? "Esconder os passos" : "Ver os passos"}`}
+				hitSlop={6}
+				style={styles.stepsHead}
+			>
+				<Text style={styles.steps} numberOfLines={2}>
+					{roomStepsLabel(line.steps!)}
+				</Text>
+				<Feather name={open ? "chevron-up" : "chevron-down"} size={13} color={color.mute} />
+			</Pressable>
+			{open ? (
+				<View style={styles.stepList}>
+					{failed ? (
+						<Text style={styles.steps}>Não deu para ler os passos.</Text>
+					) : !read ? (
+						<ActivityIndicator size="small" color={color.mute} style={{ alignSelf: "flex-start" }} />
+					) : (
+						<>
+							{read.steps.map((step, index) => (
+								<StepRow key={index} text={stepText(step, false)} state={step.failed ? "failed" : "done"} />
+							))}
+							{read.more > 0 ? <Text style={styles.steps}>{moreStepsLabel(read.more)}</Text> : null}
+						</>
+					)}
+				</View>
+			) : null}
+		</View>
+	);
+}
+
+/** One step: ✓ done, ✗ failed or a spinner while it runs, then what it did. */
+export function StepRow({ text, state }: { text: string; state: "running" | "done" | "failed" }) {
+	const { color } = useTheme();
+	const styles = useStyles();
+	return (
+		<View style={styles.stepRow}>
+			{state === "running" ? (
+				<ActivityIndicator size="small" color={color.accent} style={[styles.stepMark, styles.spinner]} />
+			) : (
+				<Feather name={state === "failed" ? "x" : "check"} size={12} color={state === "failed" ? color.danger : color.mute} style={styles.stepMark} />
+			)}
+			<Text style={[styles.stepText, state === "failed" && { color: color.danger }]} numberOfLines={1}>
+				{text}
+			</Text>
+		</View>
+	);
+}
+
+/** "Dev sugere passar a vez para QA" with "Passar a vez" and "Ignorar", or what was done. */
+function HandoffBar({
+	line,
+	author,
+	busy,
+	onAct,
+}: {
+	line: RoomLine;
+	author: string;
+	busy: boolean;
+	onAct: (line: RoomLine, action: "pass" | "ignore") => void;
+}) {
+	const styles = useStyles();
+	const handoff = line.handoff!;
+	const label = handoffLabel(handoff, author);
+	if (handoff.state !== "pending") {
+		return (
+			<View style={styles.handoffDone} accessible accessibilityLabel={label}>
+				<Feather name="corner-down-right" size={12} style={styles.passedIcon} />
+				<Text style={styles.passedText} numberOfLines={1}>
+					{label}
+				</Text>
+			</View>
+		);
+	}
+	return (
+		<View style={styles.handoff}>
+			<Text style={styles.handoffTitle}>{label}</Text>
+			{handoff.request ? (
+				<Text style={styles.handoffRequest} numberOfLines={2}>
+					{handoff.request}
+				</Text>
+			) : null}
+			<View style={styles.approvalActions}>
+				<Button
+					label={t("agents.room.handoff.pass")}
+					style={styles.approvalButton}
+					busy={busy}
+					disabled={busy}
+					onPress={() => {
+						haptic("success");
+						onAct(line, "pass");
+					}}
+				/>
+				<Button
+					label={t("agents.room.handoff.ignore")}
+					variant="ghost"
+					style={styles.approvalButton}
+					disabled={busy}
+					onPress={() => {
+						haptic("tap");
+						onAct(line, "ignore");
+					}}
+				/>
 			</View>
 		</View>
 	);
@@ -211,7 +373,11 @@ export function WorkingLine({ agent }: { agent: ResidentAgent }) {
 	);
 }
 
-/** The approvals waiting in the room, right on the field: three at most, then "+N aguardando". */
+/**
+ * The approvals waiting in the room, right on the field: three at most, then
+ * "+N aguardando". Each with Permitir and Negar, "Sempre permitir" for a
+ * connector's tool, and "Recusar com motivo" opening a field the agent reads.
+ */
 export function ApprovalDock({
 	approvals,
 	answering,
@@ -219,15 +385,19 @@ export function ApprovalDock({
 }: {
 	approvals: RoomApproval[];
 	answering: ReadonlySet<string>;
-	onAnswer: (approval: RoomApproval, allow: boolean) => void;
+	onAnswer: (approval: RoomApproval, choice: "allow" | "always" | "deny", reason?: string) => void;
 }) {
+	const { color } = useTheme();
 	const styles = useStyles();
+	const [reasonFor, setReasonFor] = useState<string | null>(null);
+	const [reason, setReason] = useState("");
 	if (approvals.length === 0) return null;
 	const more = approvals.length - DOCKED;
 	return (
 		<View style={styles.dock}>
 			{approvals.slice(0, DOCKED).map((approval, index) => {
 				const busy = answering.has(approval.requestId);
+				const writing = reasonFor === approval.requestId;
 				return (
 					<View key={approval.requestId} style={[styles.approval, index > 0 && styles.approvalNext]}>
 						<Text style={styles.approvalTitle} numberOfLines={1}>
@@ -238,10 +408,62 @@ export function ApprovalDock({
 								{approval.summary}
 							</Mono>
 						) : null}
-						<View style={styles.approvalActions}>
-							<Button label="Permitir" variant="wait" style={styles.approvalButton} busy={busy} disabled={busy} onPress={() => onAnswer(approval, true)} />
-							<Button label="Negar" variant="ghost" style={styles.approvalButton} disabled={busy} onPress={() => onAnswer(approval, false)} />
-						</View>
+						{writing ? (
+							<>
+								<TextInput
+									value={reason}
+									onChangeText={setReason}
+									placeholder={t("conversation.permission.reasonPlaceholder")}
+									placeholderTextColor={color.faint}
+									style={styles.reason}
+									autoFocus
+									multiline
+									maxLength={500}
+									accessibilityLabel="Motivo da recusa"
+								/>
+								<View style={styles.approvalActions}>
+									<Button
+										label={t("conversation.permission.denySend")}
+										variant="danger"
+										style={styles.approvalButton}
+										busy={busy}
+										disabled={busy || reason.trim().length === 0}
+										onPress={() => {
+											onAnswer(approval, "deny", reason);
+											setReasonFor(null);
+											setReason("");
+										}}
+									/>
+									<Button label="Cancelar" variant="ghost" style={styles.approvalButton} disabled={busy} onPress={() => setReasonFor(null)} />
+								</View>
+							</>
+						) : (
+							<>
+								<View style={styles.approvalActions}>
+									<Button label="Permitir" variant="wait" style={styles.approvalButton} busy={busy} disabled={busy} onPress={() => onAnswer(approval, "allow")} />
+									<Button label="Negar" variant="ghost" style={styles.approvalButton} disabled={busy} onPress={() => onAnswer(approval, "deny")} />
+								</View>
+								<View style={styles.approvalMoreActions}>
+									{approval.mayAlwaysAllow ? (
+										<Pressable onPress={() => onAnswer(approval, "always")} disabled={busy} accessibilityRole="button" hitSlop={6}>
+											<Text style={styles.approvalLink}>{t("conversation.permission.always")}</Text>
+										</Pressable>
+									) : null}
+									<Pressable
+										onPress={() => {
+											haptic("tap");
+											setReason("");
+											setReasonFor(approval.requestId);
+										}}
+										disabled={busy}
+										accessibilityRole="button"
+										hitSlop={6}
+									>
+										<Text style={styles.approvalLink}>{t("conversation.permission.denyWithReason")}</Text>
+									</Pressable>
+								</View>
+							</>
+						)}
 					</View>
 				);
 			})}
@@ -335,6 +557,30 @@ const useStyles = makeStyles((color) =>
 		approvalActions: { flexDirection: "row", gap: 8, marginTop: 2 },
 		approvalButton: { flex: 1, minHeight: 40 },
 		approvalMore: { color: color.wait, fontSize: 12, paddingHorizontal: 14, paddingBottom: 10 },
+		approvalMoreActions: { flexDirection: "row", gap: 18, paddingTop: 2 },
+		approvalLink: { color: color.wait, fontSize: 13, fontWeight: "500" },
+		reason: {
+			minHeight: 40,
+			maxHeight: 100,
+			color: color.fg,
+			fontSize: 14,
+			paddingHorizontal: 10,
+			paddingVertical: 8,
+			borderRadius: radius.md,
+			borderWidth: 1,
+			borderColor: alpha(color.waitFill, 0.45),
+			backgroundColor: color.bg,
+		},
+		stepsHead: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start" },
+		stepList: { gap: 3, paddingLeft: 2 },
+		stepRow: { flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 },
+		stepMark: { width: 14 },
+		spinner: { transform: [{ scale: 0.7 }] },
+		stepText: { flexShrink: 1, color: color.mute, fontSize: 12 },
+		handoff: { gap: 6, padding: 12, borderRadius: radius.lg, borderWidth: 1, borderColor: color.border, backgroundColor: color.panel },
+		handoffTitle: { color: color.fg, fontSize: 13, fontWeight: "600" },
+		handoffRequest: { color: color.mute, fontSize: 12, lineHeight: 17 },
+		handoffDone: { flexDirection: "row", alignItems: "center", gap: 6 },
 		mentions: { borderRadius: radius.lg, borderWidth: 1, borderColor: color.border, backgroundColor: color.panel, overflow: "hidden" },
 		mentionRow: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44, paddingHorizontal: 12 },
 		mentionNext: { borderTopWidth: hairline, borderTopColor: color.border },

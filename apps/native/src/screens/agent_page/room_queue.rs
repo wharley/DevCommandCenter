@@ -21,9 +21,14 @@ pub struct Queued {
 
 /// Whether a message waits for the conversation's turn: one runs (as the
 /// sidebar or the events see it), it waits on the person, or a message of
-/// the person's is queued there already (they go in order).
+/// the person's is queued there already (they go in order) — the rule the
+/// phone's room shares (`dcc_core::domain::team_room_queue`).
 pub(crate) fn must_wait(state: Option<AgentState>, live: bool, queued_ahead: bool) -> bool {
-    live || queued_ahead || matches!(state, Some(AgentState::Working | AgentState::NeedsYou))
+    dcc_core::domain::team_room_queue::must_wait(
+        live || state == Some(AgentState::Working),
+        state == Some(AgentState::NeedsYou),
+        queued_ahead,
+    )
 }
 
 /// Whether the queued turn `id` was taken out of its queue (here or from

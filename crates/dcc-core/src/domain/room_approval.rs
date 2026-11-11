@@ -87,6 +87,21 @@ pub fn short_tool(tool_name: &str) -> &str {
         .map_or(tool_name, |(_, tool)| tool)
 }
 
+/// The providers that pass a denial's reason to the model themselves; any
+/// other gets the reason as its next message (`denial_reason_message`).
+const READS_DENIAL_REASON: [&str; 1] = ["claude_code"];
+
+/// Whether `provider_id` reads the reason written with a denial.
+pub fn reads_denial_reason(provider_id: &str) -> bool {
+    READS_DENIAL_REASON.contains(&provider_id)
+}
+
+/// The next message that carries a denial's reason to a provider that
+/// cannot read it with the denial.
+pub fn denial_reason_message(tool: &str, reason: &str) -> String {
+    format!("[DCC] I denied `{tool}`: {reason}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +165,15 @@ mod tests {
         assert!(may_always_allow("mcp__dcc-slack__slack_search"));
         assert!(!may_always_allow("mcp__dcc-browser-webview__click"));
         assert!(!may_always_allow("Bash"));
+    }
+
+    #[test]
+    fn a_reason_goes_with_the_denial_or_as_the_next_message() {
+        assert!(reads_denial_reason("claude_code"));
+        assert!(!reads_denial_reason("codex"));
+        assert_eq!(
+            denial_reason_message("Bash", "não mexe no banco"),
+            "[DCC] I denied `Bash`: não mexe no banco"
+        );
     }
 }

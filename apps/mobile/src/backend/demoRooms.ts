@@ -3,6 +3,13 @@
  * and two project rooms with a few lines, one approval and one question
  * waiting in a room and an agent that answers what the person writes. Same paths and shapes
  * as the real desktop (`/api/v1/mobile/rooms`, `/mobile/room`, `/mobile/agents`).
+ *
+ * An agent written to works live (`live`: its steps, then its answer
+ * streaming) before it answers; writing again while it works queues the
+ * message; "Parar" stops it and "Tentar de novo" sends the prompt again;
+ * the Reviewer's answer in Geral suggests passing the turn to Dev; Dev's
+ * task in loja-online runs live under the room; each answer's steps open.
+ * The turns are read from the clock on each read, no timer drives them.
  */
 import { ApiError } from "./types";
 
@@ -16,7 +23,32 @@ type Line = {
 	receipt: { seconds: number; tokens: number } | null;
 	steps?: unknown;
 	task?: unknown;
+	turnId?: string;
+	handoff?: { to: string; toName: string; request: string; state: "pending" | "passed" | "auto" };
 };
+
+/** An agent at work in a room, read from the clock. */
+type Turn = { room: string; agentId: string; sessionId: string; turnId: string; startedAt: number; prompt: string };
+
+/** What a demo turn does, by milliseconds since it started. */
+const SCRIPT: Array<{ at: number; end: number; kind: string; target: string }> = [
+	{ at: 300, end: 1800, kind: "read", target: "src/checkout/gateway.ts" },
+	{ at: 1800, end: 2900, kind: "search", target: "PAYMENT_FLAG" },
+	{ at: 2900, end: 4600, kind: "command", target: "yarn test checkout" },
+	{ at: 4600, end: 5600, kind: "edit", target: "src/checkout/gateway.ts" },
+];
+const WRITE_AT = 5800;
+const TURN_MS = 8600;
+const ANSWER =
+	"Anotado. No modo demonstração eu leio, rodo os testes e respondo isto; com o DCC no computador, a resposta vem do agente de verdade.";
+/** The steps an answer lists when opened. */
+const STEPS = [
+	{ kind: "read", target: "src/checkout/gateway.ts", failed: false },
+	{ kind: "search", target: "PAYMENT_FLAG", failed: false },
+	{ kind: "command", target: "yarn test checkout", failed: true },
+	{ kind: "edit", target: "src/checkout/gateway.ts", failed: false },
+	{ kind: "command", target: "yarn test checkout", failed: false },
+];
 
 const AGENTS = [
 	{ id: "demo-dev", name: "Dev", preset: null, avatar: { color: "emerald", arms: 4, eyes: "round", shape: "octopus", accessory: "cap" } },
@@ -55,6 +87,11 @@ export class DemoRooms {
 	private questionOpen = true;
 	private version = 0;
 	private counter = 0;
+	private readonly turns = new Map<string, Turn>();
+	private queue: Array<{ id: string; room: string; agentId: string; sessionId: string; text: string; at: string }> = [];
+	private stopped: Array<{ room: string; agentId: string; sessionId: string; turnId: string; reason: string | null; prompt: string | null }> = [];
+	/** When Dev's task in loja-online started, for its live row. */
+	private readonly taskStartedAt: number;
 
 	constructor(
 		now: number,
@@ -79,6 +116,116 @@ export class DemoRooms {
 		opened.task = { delegationId: "demo-d1", workspaceId: "demo-w1", sessionId: "demo-s1", title: "checkout-v2", state: "working", files: 3, additions: 78, deletions: 14 };
 		line("site", "demo-rev", "agent", "O guia de onboarding tem um check de lint falhando. Sugiro corrigir antes de mesclar.", 60 * 5, { seconds: 22, tokens: 3100 });
 		this.working.set("loja", new Set(["demo-dev"]));
+		const reviewed = this.lines.get("geral")!.at(-1)!;
+		reviewed.text += "\n\n@Dev pode corrigir o link do passo 3?";
+		reviewed.turnId = "demo-turn-rev";
+		reviewed.steps = { seconds: 71, tools: 5, failures: 1, counts: { read: 2, search: 1, command: 2 } };
+		reviewed.handoff = { to: "demo-dev", toName: "Dev", request: "@Dev pode corrigir o link do passo 3?", state: "pending" };
+		opened.turnId = "demo-turn-dev";
+		// Suporte stopped in loja-online: "Tentar de novo" sends the prompt again.
+		this.stopped.push({ room: "loja", agentId: "demo-sup", sessionId: "demo-live-loja-demo-sup", turnId: "demo-stop-1", reason: "O provedor encerrou a conexão", prompt: "@Suporte responde o cliente sem recibo" });
+		this.taskStartedAt = now - 3 * 60_000;
+	}
+
+	/** Ends the turns whose time is up: the answer, then the next message queued there. */
+	private settle(now: number) {
+		for (const [sessionId, turn] of [...this.turns]) {
+			if (now - turn.startedAt < TURN_MS) continue;
+			this.turns.delete(sessionId);
+			this.say(turn.room, turn.agentId, "agent", ANSWER, { seconds: Math.round(TURN_MS / 1000), tokens: 620 }, sessionId, turn.turnId);
+			this.working.get(turn.room)?.delete(turn.agentId);
+			const next = this.queue.find((item) => item.sessionId === sessionId);
+			if (next) {
+				this.queue = this.queue.filter((item) => item !== next);
+				this.say(next.room, next.agentId, "person", next.text);
+				this.start(next.room, next.agentId, next.text);
+			}
+		}
+	}
+
+	private say(room: string, agentId: string, speaker: Line["speaker"], text: string, receipt: Line["receipt"] = null, sessionId = THREAD, turnId?: string) {
+		const list = this.lines.get(room) ?? [];
+		this.counter += 1;
+		const line: Line = { key: `demo-${room}-new-${this.counter}`, agentId, sessionId, speaker, text, at: new Date().toISOString(), receipt };
+		if (speaker === "agent") {
+			line.turnId = turnId ?? `demo-turn-${this.counter}`;
+			line.steps = { seconds: receipt?.seconds ?? null, tools: 5, failures: 1, counts: { read: 1, search: 1, command: 2, edit: 1 } };
+		}
+		list.push(line);
+		this.lines.set(room, list);
+		this.version += 1;
+	}
+
+	/** `agentId` starts working in `room`; the phone hears of it, and of its end. */
+	private start(room: string, agentId: string, prompt: string) {
+		const sessionId = `demo-live-${room}-${agentId}`;
+		this.counter += 1;
+		this.turns.set(sessionId, { room, agentId, sessionId, turnId: `demo-turn-live-${this.counter}`, startedAt: Date.now(), prompt });
+		const set = this.working.get(room) ?? new Set<string>();
+		set.add(agentId);
+		this.working.set(room, set);
+		this.version += 1;
+		this.later(() => {
+			this.settle(Date.now());
+			this.notify();
+		}, TURN_MS + 50);
+	}
+
+	/** An agent's turn at work, as the desktop serves it. */
+	private liveOf(turn: Turn, now: number) {
+		const elapsed = now - turn.startedAt;
+		const steps = SCRIPT.filter((step) => step.at <= elapsed).map((step) => ({
+			kind: step.kind,
+			target: step.target,
+			state: elapsed < step.end ? "running" : "done",
+		}));
+		const written = elapsed < WRITE_AT ? 0 : Math.ceil((ANSWER.length * (elapsed - WRITE_AT)) / (TURN_MS - WRITE_AT - 400));
+		return {
+			kind: "conversation",
+			agentId: turn.agentId,
+			sessionId: turn.sessionId,
+			turnId: turn.turnId,
+			startedAt: new Date(turn.startedAt).toISOString(),
+			doing: steps.some((step) => step.state === "running") ? "tool" : steps.length === 0 ? "reading" : "thinking",
+			steps,
+			earlier: 0,
+			text: ANSWER.slice(0, written),
+		};
+	}
+
+	/** Dev's task in loja-online at work, its steps going round. */
+	private taskLive(now: number) {
+		const elapsed = (now - this.taskStartedAt) % (TURN_MS - 2000);
+		const round = Math.floor((now - this.taskStartedAt) / (TURN_MS - 2000));
+		return {
+			kind: "task",
+			agentId: "demo-dev",
+			sessionId: "demo-s1",
+			turnId: "demo-task-turn",
+			startedAt: new Date(this.taskStartedAt).toISOString(),
+			doing: "tool",
+			steps: SCRIPT.filter((step) => step.at <= elapsed).map((step) => ({ kind: step.kind, target: step.target, state: elapsed < step.end ? "running" : "done" })),
+			earlier: round * SCRIPT.length,
+			task: { title: "checkout-v2", workspaceId: "demo-w1" },
+		};
+	}
+
+	private roomRead(key: string, now: number) {
+		const live: object[] = [...this.turns.values()].filter((turn) => turn.room === key).map((turn) => this.liveOf(turn, now));
+		if (key === "loja") live.unshift(this.taskLive(now));
+		return {
+			live,
+			stopped: this.stopped
+				.filter((stop) => stop.room === key && !this.turns.has(stop.sessionId))
+				.map((stop) => ({
+					agentId: stop.agentId,
+					sessionId: stop.sessionId,
+					turnId: stop.turnId,
+					reason: stop.reason,
+					retry: stop.prompt ? { sessionId: stop.sessionId, prompt: stop.prompt, turnId: stop.turnId } : null,
+				})),
+			queued: this.queue.filter((item) => item.room === key).map(({ room: _room, ...item }) => item),
+		};
 	}
 
 	private key(room: string | null): string {
@@ -121,31 +268,65 @@ export class DemoRooms {
 	}
 
 	private send(body: unknown) {
-		const input = (body ?? {}) as { text?: unknown; room?: unknown };
+		const input = (body ?? {}) as { text?: unknown; room?: unknown; sessionId?: unknown };
 		const text = typeof input.text === "string" ? input.text.trim() : "";
 		if (!text) throw new ApiError(400, "Mensagem vazia.");
 		const key = this.key(typeof input.room === "string" && input.room ? input.room : null);
+		// "Tentar de novo": the stopped conversation, past the rule.
+		const retried = this.stopped.find((stop) => stop.sessionId === input.sessionId);
 		const called = AGENTS.find((agent) => text.toLowerCase().includes(`@${agent.name.toLowerCase()}`));
 		const last = [...(this.lines.get(key) ?? [])].reverse().find((line) => line.speaker === "agent");
-		const agent = called ?? AGENTS.find((a) => a.id === last?.agentId) ?? AGENTS[1]!;
-		const push = (speaker: Line["speaker"], body: string, receipt: Line["receipt"] = null) => {
-			const list = this.lines.get(key) ?? [];
+		const agent = AGENTS.find((a) => a.id === retried?.agentId) ?? called ?? AGENTS.find((a) => a.id === last?.agentId) ?? AGENTS[1]!;
+		if (retried) this.stopped = this.stopped.filter((stop) => stop !== retried);
+		const sessionId = `demo-live-${key}-${agent.id}`;
+		const reason = retried ? "continues" : called ? "mention" : last ? "continues" : "default";
+		const room = key === "geral" ? null : key;
+		if (this.turns.has(sessionId)) {
+			// At work: the message waits for its turn to end.
 			this.counter += 1;
-			list.push({ key: `demo-${key}-new-${this.counter}`, agentId: agent.id, sessionId: THREAD, speaker, text: body, at: new Date().toISOString(), receipt });
-			this.lines.set(key, list);
+			const id = `demo-queued-${this.counter}`;
+			this.queue.push({ id, room: key, agentId: agent.id, sessionId, text, at: new Date().toISOString() });
 			this.version += 1;
-		};
-		push("person", text);
-		const set = this.working.get(key) ?? new Set<string>();
-		set.add(agent.id);
-		this.working.set(key, set);
-		this.later(() => {
-			push("agent", "Anotado. No modo demonstração eu só respondo isto; com o DCC no computador, a resposta vem do agente de verdade.", { seconds: 4, tokens: 620 });
-			set.delete(agent.id);
 			this.notify();
-		}, 2200);
+			return { agentId: agent.id, agentName: agent.name, reason, sessionId, room, queued: true, queuedId: id };
+		}
+		this.say(key, agent.id, "person", text);
+		this.start(key, agent.id, text);
 		this.notify();
-		return { agentId: agent.id, agentName: agent.name, reason: called ? "mention" : last ? "continues" : "default", sessionId: THREAD, room: key === "geral" ? null : key };
+		return { agentId: agent.id, agentName: agent.name, reason, sessionId, room, queued: false, queuedId: null };
+	}
+
+	/** "Passar a vez" or "Ignorar" under the Reviewer's answer. */
+	private handoff(body: unknown) {
+		const input = (body ?? {}) as { key?: unknown; action?: unknown };
+		const line = [...this.lines.values()].flat().find((item) => item.key === input.key);
+		if (!line?.handoff || line.handoff.state !== "pending") throw new ApiError(409, "roomNoHandoff");
+		const room = [...this.lines.entries()].find(([, list]) => list.includes(line))![0];
+		const to = AGENTS.find((agent) => agent.id === line.handoff!.to)!;
+		if (input.action === "ignore") {
+			delete line.handoff;
+			this.version += 1;
+			this.notify();
+			return { ignored: true };
+		}
+		line.handoff = { ...line.handoff, state: "passed" };
+		const from = AGENTS.find((agent) => agent.id === line.agentId)?.name ?? "";
+		this.say(room, to.id, "person", `↪ ${from} → ${to.name}: ${line.handoff.request}\n\nWhat ${from} said in the team room:\n${line.text}`);
+		this.start(room, to.id, line.handoff.request);
+		this.notify();
+		return { agentId: to.id, agentName: to.name, reason: "mention", sessionId: `demo-live-${room}-${to.id}`, room: room === "geral" ? null : room, queued: false };
+	}
+
+	/** "Parar": the turn ends where it is, and may be tried again. */
+	private abort(sessionId: string) {
+		const turn = this.turns.get(sessionId);
+		if (!turn) throw new ApiError(409, "Nada rodando.");
+		this.turns.delete(sessionId);
+		this.working.get(turn.room)?.delete(turn.agentId);
+		this.stopped.push({ room: turn.room, agentId: turn.agentId, sessionId, turnId: turn.turnId, reason: "Parado por você", prompt: turn.prompt });
+		this.version += 1;
+		this.notify();
+		return { ok: true };
 	}
 
 	/** The answer to a rooms route, or `undefined` when the path is not one. */
@@ -160,14 +341,24 @@ export class DemoRooms {
 			return unchanged("rooms") ?? { snapshotId: this.snapshot("rooms"), rooms: this.rooms() };
 		}
 		if (method === "GET" && path === "/api/v1/mobile/room") {
+			const now = Date.now();
+			this.settle(now);
 			const key = this.key(url.searchParams.get("room"));
+			const turns = this.roomRead(key, now);
+			// While someone works the snapshot moves with the clock, as it does with what streams.
+			const beat = turns.live.length > 0 ? `-${Math.floor(now / 500)}` : "";
+			const scope = `room-${key}${beat}`;
+			const linesId = this.snapshot(`lines-${key}`);
+			const held = url.searchParams.get("lines") === linesId;
 			return (
-				unchanged(`room-${key}`) ?? {
-					snapshotId: this.snapshot(`room-${key}`),
-					lines: this.lines.get(key) ?? [],
+				unchanged(scope) ?? {
+					snapshotId: this.snapshot(scope),
+					linesId,
+					...(held ? { linesUnchanged: true } : { lines: this.lines.get(key) ?? [] }),
+					...turns,
 					approvals:
 						this.approvalOpen && key === "loja"
-							? [{ sessionId: APPROVAL_SESSION, requestId: "demo-room-p1", agentId: "demo-dev", agentName: "Dev", toolName: "Bash", summary: "yarn test checkout" }]
+							? [{ sessionId: APPROVAL_SESSION, requestId: "demo-room-p1", agentId: "demo-dev", agentName: "Dev", toolName: "Bash", summary: "yarn test checkout", mayAlwaysAllow: false }]
 							: [],
 					questions:
 						this.questionOpen && key === "site"
@@ -178,7 +369,15 @@ export class DemoRooms {
 			);
 		}
 		if (method === "POST" && path === "/api/v1/mobile/room/messages") return this.send(body);
-		if (method === "POST" && path === `/api/v1/sessions/${APPROVAL_SESSION}/respond-permission`) {
+		if (method === "POST" && path === "/api/v1/mobile/room/handoff") return this.handoff(body);
+		if (method === "GET" && path === "/api/v1/mobile/room/steps") return { steps: STEPS, more: 0 };
+		const abort = /^\/api\/v1\/sessions\/(demo-live-[^/]+)\/abort$/.exec(path);
+		if (method === "POST" && abort) return this.abort(decodeURIComponent(abort[1]!));
+		if (
+			method === "POST" &&
+			(path === `/api/v1/sessions/${APPROVAL_SESSION}/respond-permission` ||
+				(path === "/api/v1/mobile/room/approvals/respond" && (body as { sessionId?: unknown })?.sessionId === APPROVAL_SESSION))
+		) {
 			if (!this.approvalOpen) throw new ApiError(409, "Já foi respondido em outro lugar.");
 			this.approvalOpen = false;
 			this.version += 1;

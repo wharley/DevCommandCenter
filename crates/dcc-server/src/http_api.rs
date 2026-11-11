@@ -94,8 +94,12 @@ mod provider_usage;
 mod providers;
 mod pull_request_hub;
 mod remote_devices;
+mod room_approval_respond;
 mod room_feed;
+mod room_handoffs;
 mod room_line_json;
+mod room_steps;
+mod room_turns;
 mod shortcuts;
 mod skills;
 mod task_proposals;
@@ -708,6 +712,12 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/mobile/rooms", get(mobile_rooms::list))
         .route("/api/v1/mobile/room", get(mobile_room::room))
         .route("/api/v1/mobile/room/messages", post(mobile_room_send::send))
+        .route("/api/v1/mobile/room/steps", get(room_steps::steps))
+        .route("/api/v1/mobile/room/handoff", post(room_handoffs::act))
+        .route(
+            "/api/v1/mobile/room/approvals/respond",
+            post(room_approval_respond::respond),
+        )
         .route(
             "/api/v1/task-proposals/:proposal_id/start",
             post(task_proposals::start),
@@ -7261,6 +7271,70 @@ mod tests {
         assert!(crate::remote_connector::remote_path_allowed(
             "/api/v1/mobile/rooms?after=x"
         ));
+        // Nobody at work: the turns are empty, and the settled part is not
+        // sent again to a phone that holds it.
+        assert_eq!(room["live"], json!([]));
+        assert_eq!(room["stopped"], json!([]));
+        assert_eq!(room["queued"], json!([]));
+        let lines_id = room["linesId"].as_str().unwrap().to_string();
+        let (status, held) = get_json(
+            &fixture.app,
+            &format!("/api/v1/mobile/room?after=old&lines={lines_id}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{held}");
+        assert_eq!(held["linesUnchanged"], true);
+        assert!(held.get("lines").is_none(), "{held}");
+        // "Tentar de novo" only to one of the room's own conversations.
+        let (status, refused) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/messages",
+            json!({ "text": "de novo", "sessionId": "elsewhere", "retryOf": "t" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert!(
+            refused.to_string().contains("roomNoConversation"),
+            "{refused}"
+        );
+        // An answer's steps, read lazily.
+        let (status, steps) = get_json(
+            &fixture.app,
+            "/api/v1/mobile/room/steps?sessionId=nothing&turn=t",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{steps}");
+        assert_eq!(steps["steps"], json!([]));
+        // Passing the turn: nothing to pass for an answer that is not
+        // there; ignoring is kept, and moves the room.
+        let (status, refused) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/handoff",
+            json!({ "key": "s:t", "action": "pass" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert!(refused.to_string().contains("roomNoHandoff"), "{refused}");
+        let (status, ignored) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/handoff",
+            json!({ "key": "s:t", "action": "ignore" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{ignored}");
+        let (_, moved) = get_json(
+            &fixture.app,
+            &format!("/api/v1/mobile/room?lines={lines_id}"),
+        )
+        .await;
+        assert_ne!(moved["linesId"], json!(lines_id));
+        for path in [
+            "/api/v1/mobile/room/steps?sessionId=s&turn=t",
+            "/api/v1/mobile/room/handoff",
+            "/api/v1/mobile/room/approvals/respond",
+        ] {
+            assert!(crate::remote_connector::remote_path_allowed(path), "{path}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

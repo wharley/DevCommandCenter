@@ -16,9 +16,6 @@ use crate::i18n::Translate;
 use crate::screens::conversation::approval_reason::{reason_message, short_tool};
 use crate::ui::{TextInput, Toaster};
 
-/// The providers that read a denial's reason themselves.
-const READS_DENIAL_REASON: [&str; 1] = ["claude_code"];
-
 /// One approval waiting in the room.
 #[derive(Clone)]
 pub(crate) struct RoomApproval {
@@ -73,8 +70,9 @@ impl TeamRoom {
         let session = approval.session_id.clone();
         let tool = short_tool(&approval.request.tool_name).to_string();
         let queue = reason.is_some()
-            && !READS_DENIAL_REASON
-                .contains(&approval.agent.provider_id.as_deref().unwrap_or_default());
+            && !dcc_core::domain::room_approval::reads_denial_reason(
+                approval.agent.provider_id.as_deref().unwrap_or_default(),
+            );
         cx.spawn(async move |this, cx| {
             let request_id = request.clone();
             let sent = cx

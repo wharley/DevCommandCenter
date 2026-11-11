@@ -4,7 +4,11 @@
 //! conversation of the room — started the first time, as the desktop's room
 //! does — on the agent's own provider, model, effort and conversation
 //! approval (`dcc_core::domain::agent_run`). The answer comes in that
-//! conversation; the phone reads the room again.
+//! conversation; the phone reads the room again. While that conversation has
+//! a turn open the message is queued for when it ends
+//! (`dcc_core::domain::team_room_queue`), as the desktop's room does. A
+//! message may also name its conversation (`sessionId`): "Tentar de novo"
+//! on a turn that stopped, the same prompt to the same agent.
 
 use std::path::Path;
 
@@ -19,6 +23,7 @@ use dcc_core::domain::project::ProjectId;
 use dcc_core::domain::provider::{HealthStatus, ProviderApprovalPolicy, ProviderDescriptor};
 use dcc_core::domain::team_room::{route, RouteReason, Teammate};
 use dcc_core::domain::team_room_lines::{last_answer, RoomLine};
+use dcc_core::domain::team_room_queue::must_wait;
 use dcc_core::domain::workspace::WorkspaceState;
 use dcc_core::ports::provider::ProviderRuntimeConfig;
 use dcc_core::ports::WorkspaceRepo;
@@ -28,7 +33,7 @@ use dcc_tauri::commands::agent_conversation::agent_home_with_state;
 
 use super::mobile_room::room_param;
 use super::mobile_rooms::project_names;
-use super::room_feed::{read_team, room_lines};
+use super::room_feed::{read_team, room_lines, Team};
 use super::*;
 
 #[derive(Debug, Deserialize)]
@@ -37,20 +42,36 @@ pub(super) struct RoomMessage {
     /// The project whose room it is written in; none: Geral.
     #[serde(default)]
     room: Option<String>,
+    /// The room's conversation it goes to, past the rule ("Tentar de novo").
+    #[serde(default, rename = "sessionId")]
+    session_id: Option<String>,
+    /// The stopped turn it tries again.
+    #[serde(default, rename = "retryOf")]
+    retry_of: Option<String>,
 }
 
 /// Where a message goes: the agent, why, its conversation in the room (none
 /// until the first message) and the room's name.
-struct Destination {
-    agent: ResidentAgent,
-    reason: RouteReason,
-    session_id: Option<String>,
+pub(super) struct Destination {
+    pub agent: ResidentAgent,
+    pub reason: RouteReason,
+    pub session_id: Option<String>,
     /// The agent's newest conversation in any room, for what it ran on.
-    latest: Option<String>,
-    room_name: Option<String>,
+    pub latest: Option<String>,
+    pub room_name: Option<String>,
+    /// That conversation has a turn open, or waits on the person: the
+    /// message is queued.
+    pub waits: bool,
 }
 
-fn reason_name(reason: RouteReason) -> &'static str {
+/// What became of a message: the conversation it went to and, when it was
+/// queued, the queued turn's id.
+pub(super) struct Delivered {
+    pub session_id: String,
+    pub queued: Option<String>,
+}
+
+pub(super) fn reason_name(reason: RouteReason) -> &'static str {
     match reason {
         RouteReason::Mention => "mention",
         RouteReason::Role => "role",
@@ -85,27 +106,89 @@ fn pick<'a>(
     Some((agent, reason))
 }
 
+/// The room's name, or the refusal when the project's room is gone.
+pub(super) fn room_name(
+    db_path: &Path,
+    room: Option<&str>,
+) -> Result<Result<Option<String>, HttpApiError>, String> {
+    let Some(project) = room else {
+        return Ok(Ok(None));
+    };
+    let names = project_names(db_path)?;
+    Ok(match names.into_iter().find(|(id, _)| id == project) {
+        Some((_, name)) => Ok(Some(name)),
+        None => Err(HttpApiError::Refused(
+            "roomNotFound",
+            "this project's room is gone".to_string(),
+            json!({ "room": project }),
+        )),
+    })
+}
+
+/// Where `agent` answers in `room`, read from `team`.
+pub(super) fn destination_of(
+    team: &Team,
+    agent: &ResidentAgent,
+    reason: RouteReason,
+    session_id: Option<String>,
+    room_name: Option<String>,
+) -> Destination {
+    let binding = session_id.as_deref().and_then(|id| {
+        team.bindings
+            .iter()
+            .find(|binding| binding.session_id == id)
+    });
+    let waits = binding.is_some_and(|binding| {
+        must_wait(
+            team.running(binding),
+            team.waiting(binding).is_some(),
+            false,
+        )
+    });
+    Destination {
+        agent: agent.clone(),
+        reason,
+        latest: team.latest_conversation(&agent.id),
+        session_id,
+        room_name,
+        waits,
+    }
+}
+
 fn destination(
     db_path: &Path,
     text: &str,
     room: Option<&str>,
+    session_id: Option<&str>,
 ) -> Result<Result<Destination, HttpApiError>, String> {
     let repo = SqliteSessionRepo::open_read_only(db_path).map_err(|error| error.to_string())?;
-    let room_name = match room {
-        None => None,
-        Some(project) => {
-            let names = project_names(db_path)?;
-            let Some((_, name)) = names.into_iter().find(|(id, _)| id == project) else {
-                return Ok(Err(HttpApiError::Refused(
-                    "roomNotFound",
-                    "this project's room is gone".to_string(),
-                    json!({ "room": project }),
-                )));
-            };
-            Some(name)
-        }
+    let room_name = match room_name(db_path, room)? {
+        Ok(name) => name,
+        Err(refused) => return Ok(Err(refused)),
     };
     let team = read_team(&repo)?;
+    if let Some(session_id) = session_id {
+        // Only one of the room's own conversations.
+        let agent = team
+            .room_homes(room)
+            .into_iter()
+            .find(|home| home.session_id == session_id)
+            .and_then(|home| team.agents.iter().find(|agent| agent.id == home.agent_id));
+        return Ok(match agent {
+            Some(agent) => Ok(destination_of(
+                &team,
+                agent,
+                RouteReason::Continues,
+                Some(session_id.to_string()),
+                room_name,
+            )),
+            None => Err(HttpApiError::Refused(
+                "roomNoConversation",
+                "that conversation is not in this room".to_string(),
+                json!({ "sessionId": session_id }),
+            )),
+        });
+    }
     let lines = room_lines(&repo, &team.room_homes(room))?;
     let Some((agent, reason)) = pick(text, &team.agents, &lines, chrono::Utc::now()) else {
         return Ok(Err(HttpApiError::Refused(
@@ -114,13 +197,10 @@ fn destination(
             json!({}),
         )));
     };
-    Ok(Ok(Destination {
-        agent: agent.clone(),
-        reason,
-        session_id: team.conversation(&agent.id, room),
-        latest: team.latest_conversation(&agent.id),
-        room_name,
-    }))
+    let session_id = team.conversation(&agent.id, room);
+    Ok(Ok(destination_of(
+        &team, agent, reason, session_id, room_name,
+    )))
 }
 
 /// The provider and model picked "where the message is written": on the
@@ -255,26 +335,18 @@ fn run_error(agent: &str, error: AgentRunError) -> HttpApiError {
     }
 }
 
-/// `POST /api/v1/mobile/room/messages`: `{text, room?}` to whoever the
-/// rule picks in that room.
-pub(super) async fn send(
-    State(config): State<Arc<RwLock<HttpConfig>>>,
-    State(backend): State<Arc<HttpBackend>>,
-    Json(message): Json<RoomMessage>,
-) -> Result<Json<Value>, HttpApiError> {
-    let text = message.text.trim().to_string();
-    if text.is_empty() {
-        return Err(HttpApiError::bad_request("empty message".to_string()));
-    }
-    let room = room_param(message.room);
-    let db_path = backend.workspace.db_path.clone();
-    let to = {
-        let (text, room) = (text.clone(), room.clone());
-        tokio::task::spawn_blocking(move || destination(&db_path, &text, room.as_deref()))
-            .await
-            .map_err(|error| HttpApiError::internal(error.to_string()))?
-            .map_err(HttpApiError::internal)??
-    };
+/// Sends `text` to `to` in `room`, on the agent's own provider and model:
+/// into its conversation there (started the first time), or queued while
+/// that conversation has a turn open. `retry_of`: the stopped turn it tries
+/// again.
+pub(super) async fn deliver(
+    config: Arc<RwLock<HttpConfig>>,
+    backend: &Arc<HttpBackend>,
+    to: &Destination,
+    room: Option<&str>,
+    text: &str,
+    retry_of: Option<&str>,
+) -> Result<Delivered, HttpApiError> {
     let state = &backend.sessions;
     let peek = |id: Option<String>| async move {
         match id {
@@ -324,8 +396,16 @@ pub(super) async fn send(
         (!keeps).then(|| agent_run_runtime(base.flatten(), own_account).unwrap_or_default());
     let session_id = match to.session_id.clone() {
         Some(session) => session,
-        None => start_conversation(&backend, &to, room.as_deref(), &pick, runtime.clone()).await?,
+        None => start_conversation(backend, to, room, &pick, runtime.clone()).await?,
     };
+    if retry_of.is_some() {
+        // Not closed by the stop: nothing to reopen.
+        let _ = super::resume_session_handler(
+            State(backend.clone()),
+            axum::extract::Path(session_id.clone()),
+        )
+        .await;
+    }
     let mut input: SendTurnInput = serde_json::from_value(json!({
         "sessionId": session_id,
         "prompt": text,
@@ -339,20 +419,97 @@ pub(super) async fn send(
             .tool_access
             .conversation_approval
             .unwrap_or(ProviderApprovalPolicy::Ask),
+        "retryOfTurnId": retry_of,
     }))
     .map_err(|error| HttpApiError::internal(error.to_string()))?;
     input.provider_runtime = runtime;
-    mobile::resolve_turn_approval_policy(config, &backend, &mut input).await?;
+    mobile::resolve_turn_approval_policy(config, backend, &mut input).await?;
+    if to.waits && to.session_id.is_some() {
+        let queued = dcc_tauri::commands::session_commands::queue_turn_with_state(
+            state,
+            dcc_core::application::QueueTurnInput {
+                turn: input.clone(),
+            },
+        )
+        .await;
+        match queued {
+            Ok(queued) => {
+                return Ok(Delivered {
+                    session_id,
+                    queued: Some(queued.id),
+                })
+            }
+            // The turn ended meanwhile: it goes now.
+            Err(error) if turn_ended(&error) => {}
+            Err(error) => return Err(follow_up_error(error)),
+        }
+    }
     send_turn_with_state(state, input)
         .await
         .map_err(classify_session_error)?;
-    Ok(Json(json!({
+    Ok(Delivered {
+        session_id,
+        queued: None,
+    })
+}
+
+/// Whether a queue was refused because no turn runs any more.
+fn turn_ended(error: &str) -> bool {
+    error.contains("only be queued while a turn is active")
+}
+
+/// What the phone reads back of a message sent: who took it and whether it
+/// waits in the queue.
+pub(super) fn sent_json(to: &Destination, delivered: &Delivered, room: Option<&str>) -> Value {
+    json!({
         "agentId": to.agent.id,
         "agentName": to.agent.name,
         "reason": reason_name(to.reason),
-        "sessionId": session_id,
+        "sessionId": delivered.session_id,
         "room": room,
-    })))
+        "queued": delivered.queued.is_some(),
+        "queuedId": delivered.queued,
+    })
+}
+
+/// `POST /api/v1/mobile/room/messages`: `{text, room?}` to whoever the
+/// rule picks in that room; with `sessionId` (and `retryOf`) to that
+/// conversation of the room.
+pub(super) async fn send(
+    State(config): State<Arc<RwLock<HttpConfig>>>,
+    State(backend): State<Arc<HttpBackend>>,
+    Json(message): Json<RoomMessage>,
+) -> Result<Json<Value>, HttpApiError> {
+    let text = message.text.trim().to_string();
+    if text.is_empty() {
+        return Err(HttpApiError::bad_request("empty message".to_string()));
+    }
+    let room = room_param(message.room);
+    let db_path = backend.workspace.db_path.clone();
+    let session_id = message
+        .session_id
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty());
+    let to = {
+        let (text, room) = (text.clone(), room.clone());
+        tokio::task::spawn_blocking(move || {
+            destination(&db_path, &text, room.as_deref(), session_id.as_deref())
+        })
+        .await
+        .map_err(|error| HttpApiError::internal(error.to_string()))?
+        .map_err(HttpApiError::internal)??
+    };
+    let retry_of = message.retry_of.filter(|_| to.session_id.is_some());
+    let delivered = deliver(
+        config,
+        &backend,
+        &to,
+        room.as_deref(),
+        &text,
+        retry_of.as_deref(),
+    )
+    .await?;
+    Ok(Json(sent_json(&to, &delivered, room.as_deref())))
 }
 
 #[cfg(test)]
@@ -431,5 +588,46 @@ mod tests {
             (Some("claude_code".into()), None)
         );
         assert_eq!(fallback_pick(None, &[]), (None, None));
+    }
+
+    #[test]
+    fn a_message_to_a_conversation_at_work_waits_for_its_turn() {
+        let team = super::super::room_feed::tests::team();
+        let dev = &team.agents[0];
+        // "s-dev-room" runs (and waits on a permission): queued.
+        let busy = destination_of(
+            &team,
+            dev,
+            RouteReason::Mention,
+            Some("s-dev-room".into()),
+            None,
+        );
+        assert!(busy.waits);
+        let idle = destination_of(
+            &team,
+            dev,
+            RouteReason::Mention,
+            Some("s-geral".into()),
+            None,
+        );
+        assert!(!idle.waits);
+        let first = destination_of(&team, dev, RouteReason::Default, None, None);
+        assert!(!first.waits);
+        assert_eq!(first.latest.as_deref(), Some("s-dev-room"));
+        let sent = sent_json(
+            &busy,
+            &Delivered {
+                session_id: "s-dev-room".into(),
+                queued: Some("q-1".into()),
+            },
+            Some("checkout"),
+        );
+        assert_eq!(sent["queued"], true);
+        assert_eq!(sent["queuedId"], "q-1");
+        assert_eq!(sent["reason"], "mention");
+        assert!(turn_ended(
+            "follow-ups can only be queued while a turn is active"
+        ));
+        assert!(!turn_ended("session not found"));
     }
 }

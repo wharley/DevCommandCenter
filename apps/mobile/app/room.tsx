@@ -5,24 +5,38 @@
  * does. Answers read as flat rows under each agent's mascot; an approval an
  * agent waits on is answered right on the field; files, photos and
  * dictation go in as in a task. `?to=Nome` opens with "@Nome " written.
+ *
+ * The list is inverted (newest first): the room opens at its latest lines
+ * with no jump, follows what comes while the person is at the end, and
+ * stays put when they scrolled up, where "N novas" takes them back. Each
+ * agent at work shows live at the end (`roomLive`), with the turns that
+ * stopped and the messages queued. Rows are memoized and a read keeps the
+ * objects that did not change, so typing or a read redraws only what moved.
  */
 import {
 	applyFileMention,
 	findActiveFileMention,
+	linesSince,
 	matchingAgents,
+	queuedLabel,
 	roomItems,
 	roomReasonLabel,
 	type ResidentAgent,
 	type RoomApproval,
-	type RoomItem,
+	type RoomLine,
+	type RoomLive,
+	type RoomQueued,
 	type RoomQuestion,
+	type RoomStopped,
+	type RoomTask,
 } from "@dcc/mobile-core";
 import { useResidentAgents } from "@/backend/residentAgents";
 import { markRoomSeen } from "@/backend/roomsSeen";
 import { useBackend } from "@/backend/session";
-import { sendError, useTeamRoom } from "@/backend/teamRoom";
+import { sendError, useTeamRoom, type ApprovalChoice } from "@/backend/teamRoom";
 import { useDictation } from "@/dictation/useDictation";
 import { AgentLine, ApprovalDock, DayPill, MentionList, PersonLine, WorkingLine } from "@/screens/roomParts";
+import { JumpPill, LiveRow, StoppedRow } from "@/screens/roomLive";
 import { QuestionDock } from "@/screens/roomQuestion";
 import { makeStyles, useTheme } from "@/theme";
 import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
@@ -32,11 +46,61 @@ import { haptic } from "@/ui/haptics";
 import { Loading, Mono } from "@/ui/primitives";
 import { EdgeFade } from "@/ui/surfaces";
 import Feather from "@expo/vector-icons/Feather";
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { router, useIsFocused, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	ActivityIndicator,
+	FlatList,
+	Pressable,
+	StyleSheet,
+	Text,
+	TextInput,
+	View,
+	type NativeScrollEvent,
+	type NativeSyntheticEvent,
+} from "react-native";
 import { KeyboardAvoidingView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+/** One row of the room's list, with the air above it. */
+type RowBody = { key: string } & (
+	| { type: "day"; label: string }
+	| { type: "line"; line: RoomLine; first: boolean }
+	| { type: "stopped"; stopped: RoomStopped }
+	| { type: "live"; live: RoomLive }
+	| { type: "working"; agent: ResidentAgent }
+	| { type: "queued"; queued: RoomQueued }
+);
+type Row = RowBody & { gap: number };
+
+/** Scrolled this far from the end, the room stops following. */
+const FOLLOW_SLACK = 64;
+
+/** The room's lines in time order: a pill at each new day, an answer within its group close, a new speaker with air. */
+function lineRows(lines: RoomLine[]): Row[] {
+	return roomItems(lines).map((item, index) => {
+		const gap = index === 0 ? 0 : item.type === "line" && !item.first ? 8 : 18;
+		return item.type === "day"
+			? { type: "day", key: item.key, label: item.label, gap }
+			: { type: "line", key: item.key, line: item.line, first: item.first, gap };
+	});
+}
+
+/**
+ * After the lines: the stops to try again, the agents at work and the
+ * messages queued; then all of it newest first, as the inverted list reads
+ * it. The lines' rows are built apart, so a beat of the turns at work keeps them.
+ */
+function roomRows(lines: Row[], stopped: RoomStopped[], live: RoomLive[], working: ResidentAgent[], queued: RoomQueued[]): Row[] {
+	const after: Row[] = [];
+	const push = (row: RowBody, gap: number) => after.push({ ...row, gap: lines.length + after.length === 0 ? 0 : gap });
+	for (const stop of stopped) push({ type: "stopped", key: `stopped-${stop.sessionId}-${stop.turnId}`, stopped: stop }, 14);
+	for (const turn of live) push({ type: "live", key: `live-${turn.key}`, live: turn }, 18);
+	// An older desktop says only who works: the plain line.
+	for (const agent of working) push({ type: "working", key: `working-${agent.id}`, agent }, 18);
+	for (const message of queued) push({ type: "queued", key: `queued-${message.id}`, queued: message }, 14);
+	return [...lines, ...after].reverse();
+}
 
 export default function TeamRoomScreen() {
 	const backend = useBackend();
@@ -47,7 +111,8 @@ export default function TeamRoomScreen() {
 	const roomId = params.room || null;
 	const roomName = roomId ? params.name || "Projeto" : "Geral";
 	const agents = useResidentAgents();
-	const room = useTeamRoom(backend, roomId);
+	const focused = useIsFocused();
+	const room = useTeamRoom(backend, roomId, focused);
 	const [text, setText] = useState(params.to ? `@${params.to} ` : "");
 	const [selection, setSelection] = useState({ start: text.length, end: text.length });
 	const [forced, setForced] = useState<{ start: number; end: number } | undefined>(undefined);
@@ -57,19 +122,36 @@ export default function TeamRoomScreen() {
 	const attachments = useAttachments(backend);
 	const dictation = useDictation(text, setText);
 	const input = useRef<TextInput>(null);
-	const list = useRef<FlatList<RoomItem>>(null);
+	const list = useRef<FlatList<Row>>(null);
+	const [scrolledUp, setScrolledUp] = useState(false);
+	const up = useRef(false);
+	const [seen, setSeen] = useState<string | null>(null);
 	const keyboardOpen = useKeyboardState((keyboard) => keyboard.isVisible);
 
 	const byId = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents]);
-	const items = useMemo(() => roomItems(room.lines), [room.lines]);
 	const mention = findActiveFileMention(text, selection.end);
 	const matches = mention ? matchingAgents(agents, mention.query) : [];
 	// Who works in this room; an older desktop only says how each agent is anywhere.
-	const working = room.working
-		? agents.filter((agent) => room.working!.includes(agent.id))
-		: roomId
-			? []
-			: agents.filter((agent) => agent.state === "working");
+	const working = useMemo(
+		() =>
+			room.working
+				? agents.filter((agent) => room.working!.includes(agent.id))
+				: roomId
+					? []
+					: agents.filter((agent) => agent.state === "working"),
+		[agents, room.working, roomId],
+	);
+	const lined = useMemo(() => lineRows(room.lines), [room.lines]);
+	const rows = useMemo(() => {
+		const atWork = new Set(room.live.map((turn) => turn.agentId));
+		return roomRows(
+			lined,
+			room.stopped.filter((stop) => byId.has(stop.agentId)),
+			room.live.filter((turn) => byId.has(turn.agentId)),
+			working.filter((agent) => !atWork.has(agent.id)),
+			room.queued,
+		);
+	}, [lined, room.stopped, room.live, room.queued, working, byId]);
 
 	const lastAt = room.lines.at(-1)?.at ?? null;
 	useEffect(() => {
@@ -77,9 +159,22 @@ export default function TeamRoomScreen() {
 		if (!room.loading) markRoomSeen(roomId, lastAt);
 	}, [roomId, lastAt, room.loading]);
 
+	// At the end the newest line is seen; scrolled up, what comes is counted.
+	const newest = room.lines.at(-1)?.key ?? null;
 	useEffect(() => {
-		if (items.length > 0) requestAnimationFrame(() => list.current?.scrollToEnd({ animated: false }));
-	}, [items.length, working.length]);
+		if (!scrolledUp) setSeen(newest);
+	}, [newest, scrolledUp]);
+	const unseen = scrolledUp ? linesSince(room.lines, seen) : 0;
+
+	const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+		// Inverted: the end of the room is offset 0.
+		const away = event.nativeEvent.contentOffset.y > FOLLOW_SLACK;
+		if (away !== up.current) {
+			up.current = away;
+			setScrolledUp(away);
+		}
+	}, []);
+	const toEnd = useCallback(() => list.current?.scrollToOffset({ offset: 0, animated: true }), []);
 
 	const address = (agent: ResidentAgent) => {
 		if (!mention) return;
@@ -119,7 +214,11 @@ export default function TeamRoomScreen() {
 			haptic("success");
 			setText("");
 			attachments.queue.clear();
-			setNotice({ text: `Foi para ${sent.agentName} · ${roomReasonLabel(sent.reason)}`, error: false });
+			toEnd();
+			setNotice({
+				text: sent.queued ? queuedLabel(sent.agentName) : `Foi para ${sent.agentName} · ${roomReasonLabel(sent.reason)}`,
+				error: false,
+			});
 		} catch (error) {
 			haptic("warning");
 			setNotice({ text: sendError(error), error: true });
@@ -133,10 +232,46 @@ export default function TeamRoomScreen() {
 		void room.reply(question, answers).then((failed) => failed && setNotice({ text: failed, error: true }));
 	};
 
-	const answer = (approval: RoomApproval, allow: boolean) => {
-		haptic(allow ? "success" : "warning");
-		void room.answer(approval, allow).then((failed) => failed && setNotice({ text: failed, error: true }));
+	const answer = (approval: RoomApproval, choice: ApprovalChoice, reason?: string) => {
+		haptic(choice === "deny" ? "warning" : "success");
+		void room.answer(approval, choice, reason).then((failed) => failed && setNotice({ text: failed, error: true }));
 	};
+
+	// Stable, so a row redraws only when its own line moves.
+	const { retry, stop, handoff, steps: loadSteps } = room;
+	const failed = useCallback((text: string | null) => {
+		if (text) setNotice({ text, error: true });
+	}, []);
+	const openLine = useCallback((line: RoomLine) => router.push({ pathname: "/thread/[id]", params: { id: line.sessionId } }), []);
+	const openTask = useCallback(
+		(task: RoomTask, where: "thread" | "delivery") =>
+			where === "thread" && task.sessionId
+				? router.push({ pathname: "/thread/[id]", params: { id: task.sessionId } })
+				: router.push({ pathname: "/delivery/[id]", params: { id: task.workspaceId } }),
+		[],
+	);
+	const openLive = useCallback(
+		(turn: RoomLive) =>
+			turn.kind === "task" && turn.task?.workspaceId && !turn.sessionId
+				? router.push({ pathname: "/delivery/[id]", params: { id: turn.task.workspaceId } })
+				: router.push({ pathname: "/thread/[id]", params: { id: turn.sessionId } }),
+		[],
+	);
+	const onHandoff = useCallback(
+		(line: RoomLine, action: "pass" | "ignore") => {
+			void handoff(line, action).then(failed);
+			if (action === "pass") toEnd();
+		},
+		[handoff, failed, toEnd],
+	);
+	const onStop = useCallback((turn: RoomLive) => void stop(turn).then(failed), [stop, failed]);
+	const onRetry = useCallback(
+		(turn: RoomStopped) => {
+			void retry(turn).then(failed);
+			toEnd();
+		},
+		[retry, failed, toEnd],
+	);
 
 	const goBack = () => (router.canGoBack() ? router.back() : router.replace("/"));
 	const headerSpace = insets.top + 6 + 48 + 6;
@@ -151,67 +286,95 @@ export default function TeamRoomScreen() {
 					? `${working.length} agentes trabalhando`
 					: `${agents.length} ${agents.length === 1 ? "agente" : "agentes"} · @ escolhe quem responde`;
 
-	const renderItem = ({ item }: { item: RoomItem }) => {
-		if (item.type === "day") return <DayPill label={item.label} />;
-		const agent = byId.get(item.line.agentId);
-		if (item.line.speaker === "person") return <PersonLine line={item.line} agent={agent} team={agents} />;
-		if (!agent) return null;
-		return (
-			<AgentLine
-				line={item.line}
-				agent={agent}
-				first={item.first}
-				onOpen={() => router.push({ pathname: "/thread/[id]", params: { id: item.line.sessionId } })}
-				onTask={(task, where) =>
-					where === "thread" && task.sessionId
-						? router.push({ pathname: "/thread/[id]", params: { id: task.sessionId } })
-						: router.push({ pathname: "/delivery/[id]", params: { id: task.workspaceId } })
+	const answering = room.answering;
+	const renderItem = useCallback(
+		({ item }: { item: Row }) => {
+			const row = (() => {
+				switch (item.type) {
+					case "day":
+						return <DayPill label={item.label} />;
+					case "line": {
+						const agent = byId.get(item.line.agentId);
+						if (item.line.speaker === "person") return <PersonLine line={item.line} agent={agent} team={agents} />;
+						if (!agent) return null;
+						return (
+							<AgentLine
+								line={item.line}
+								agent={agent}
+								first={item.first}
+								handing={answering.has(`handoff:${item.line.key}`)}
+								onOpen={openLine}
+								onTask={openTask}
+								onHandoff={onHandoff}
+								loadSteps={loadSteps}
+							/>
+						);
+					}
+					case "stopped": {
+						const agent = byId.get(item.stopped.agentId);
+						return agent ? (
+							<StoppedRow stopped={item.stopped} agent={agent} busy={answering.has(`retry:${item.stopped.turnId}`)} onRetry={onRetry} />
+						) : null;
+					}
+					case "live": {
+						const agent = byId.get(item.live.agentId);
+						return agent ? (
+							<LiveRow live={item.live} agent={agent} stopping={answering.has(`stop:${item.live.sessionId}`)} onStop={onStop} onOpen={openLive} />
+						) : null;
+					}
+					case "working":
+						return <WorkingLine agent={item.agent} />;
+					case "queued": {
+						const agent = byId.get(item.queued.agentId);
+						return (
+							<PersonLine line={{ text: item.queued.text, wake: null }} agent={agent} team={agents} note={queuedLabel(agent?.name ?? "agente")} />
+						);
+					}
 				}
-			/>
-		);
-	};
+			})();
+			return row ? <View style={item.gap ? { paddingTop: item.gap } : undefined}>{row}</View> : null;
+		},
+		[byId, agents, answering, openLine, openTask, onHandoff, loadSteps, onRetry, onStop, openLive],
+	);
 
 	return (
 		<KeyboardAvoidingView style={styles.root} behavior="padding">
 			<View style={styles.frame}>
-				{room.loading && room.lines.length === 0 ? (
+				{room.loading && rows.length === 0 ? (
 					<View style={{ flex: 1, paddingTop: headerSpace }}>
 						<Loading />
+					</View>
+				) : rows.length === 0 ? (
+					<View style={[styles.listContent, { flex: 1, paddingTop: headerSpace }]}>
+						<View style={{ marginBottom: 8 }}>
+							<ConnectionBanner backend={backend} />
+						</View>
+						<Text style={styles.empty}>
+							{roomId
+								? `Ninguém falou em ${roomName} ainda. Peça algo do projeto: aqui os agentes já sabem que é ele.`
+								: "Ninguém falou ainda. Pergunte o que precisa de você hoje ou peça para o @Revisor olhar um PR."}
+						</Text>
 					</View>
 				) : (
 					<FlatList
 						ref={list}
-						data={items}
+						inverted
+						data={rows}
 						keyExtractor={(item) => item.key}
 						renderItem={renderItem}
-						contentContainerStyle={[styles.listContent, { paddingTop: headerSpace, paddingBottom: dockHeight + dockBottom + 20 }]}
-						ItemSeparatorComponent={({ leadingItem }) => {
-							const next = items[items.indexOf(leadingItem as RoomItem) + 1];
-							// Answers of one group sit close; a new speaker gets air.
-							return <View style={{ height: next?.type === "line" && !next.first ? 8 : 18 }} />;
-						}}
+						// Inverted: the top padding sits at the end, over the field.
+						contentContainerStyle={[styles.listContent, { paddingTop: dockHeight + dockBottom + 20, paddingBottom: headerSpace }]}
 						keyboardShouldPersistTaps="handled"
-						onContentSizeChange={() => list.current?.scrollToEnd({ animated: false })}
-						ListHeaderComponent={
+						onScroll={onScroll}
+						scrollEventThrottle={64}
+						// Scrolled up, what comes in does not move what is being read.
+						maintainVisibleContentPosition={scrolledUp ? { minIndexForVisible: 0 } : undefined}
+						initialNumToRender={14}
+						windowSize={9}
+						ListFooterComponent={
 							<View style={{ marginBottom: 8 }}>
 								<ConnectionBanner backend={backend} />
 							</View>
-						}
-						ListEmptyComponent={
-							<Text style={styles.empty}>
-								{roomId
-									? `Ninguém falou em ${roomName} ainda. Peça algo do projeto: aqui os agentes já sabem que é ele.`
-									: "Ninguém falou ainda. Pergunte o que precisa de você hoje ou peça para o @Revisor olhar um PR."}
-							</Text>
-						}
-						ListFooterComponent={
-							working.length > 0 ? (
-								<View style={styles.working}>
-									{working.map((agent) => (
-										<WorkingLine key={agent.id} agent={agent} />
-									))}
-								</View>
-							) : null
 						}
 					/>
 				)}
@@ -232,6 +395,8 @@ export default function TeamRoomScreen() {
 					</View>
 					<View style={{ width: 44 }} />
 				</View>
+
+				<JumpPill count={unseen} bottom={dockBottom + dockHeight + 12} onPress={toEnd} />
 
 				<View style={[styles.dock, { bottom: dockBottom }]} onLayout={(event) => setDockHeight(event.nativeEvent.layout.height)}>
 					<MentionList agents={matches} onPick={address} />
@@ -301,7 +466,6 @@ const useStyles = makeStyles((color) =>
 		subtitle: { fontSize: 11, color: color.mute, marginTop: 3 },
 		listContent: { paddingHorizontal: 16 },
 		empty: { color: color.mute, fontSize: 14, lineHeight: 20, marginTop: 24 },
-		working: { gap: 10, marginTop: 18 },
 		dock: { position: "absolute", left: 12, right: 12, gap: 8 },
 		notice: { color: color.mute, fontSize: 12, paddingHorizontal: 8 },
 		error: { color: color.danger },

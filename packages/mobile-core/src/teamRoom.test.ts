@@ -114,7 +114,7 @@ describe("team room", () => {
 	});
 
 	it("puts a pill at each new day and one face on answers close together", () => {
-		const line = (key: string, speaker: RoomLine["speaker"], agentId: string, at: Date): RoomLine => ({ key, agentId, sessionId: "s", speaker, text: key, at: at.toISOString(), receipt: null, steps: null, tasks: [], wake: null });
+		const line = (key: string, speaker: RoomLine["speaker"], agentId: string, at: Date): RoomLine => ({ key, agentId, sessionId: "s", speaker, text: key, at: at.toISOString(), receipt: null, steps: null, tasks: [], wake: null, turnId: null, handoff: null });
 		const now = new Date(2026, 10, 10, 15, 0);
 		const items = roomItems(
 			[

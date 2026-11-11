@@ -118,6 +118,17 @@ pub(super) fn task_json(delegation: &Delegation) -> Value {
     })
 }
 
+/// The turn an agent's answer ends.
+pub(super) fn turn_of(line: &RoomLine) -> Option<&str> {
+    if line.speaker != Speaker::Agent {
+        return None;
+    }
+    line.key
+        .strip_prefix(line.session_id.as_str())
+        .and_then(|rest| rest.strip_prefix(':'))
+        .filter(|turn| !turn.is_empty())
+}
+
 /// `line` with its `steps` and, when it reports tasks known in `tasks`
 /// (by delegation id), the first as `task` and all as `reports`.
 pub(super) fn line_json(line: &RoomLine, tasks: &HashMap<String, Value>) -> Value {
@@ -127,6 +138,10 @@ pub(super) fn line_json(line: &RoomLine, tasks: &HashMap<String, Value>) -> Valu
     };
     if let Some(steps) = steps_json(line) {
         object.insert("steps".into(), steps);
+    }
+    // An answer's key is `<session>:<turn>`: its turn, to list its steps.
+    if let Some(turn) = turn_of(line) {
+        object.insert("turnId".into(), json!(turn));
     }
     if let Some((kind, about)) = wake(line) {
         object.insert("kind".into(), json!(kind));
@@ -284,6 +299,7 @@ mod tests {
                     "counts": { "command": 1, "read": 2 } })
         );
         assert_eq!(value["task"]["workspaceId"], "w-campo");
+        assert_eq!(value["turnId"], "t");
         assert_eq!(value["reports"].as_array().unwrap().len(), 1);
         let quiet = line_json(&line(&[], TurnSteps::default()), &tasks);
         assert!(quiet.get("steps").is_none());

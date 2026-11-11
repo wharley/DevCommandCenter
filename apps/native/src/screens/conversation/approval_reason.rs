@@ -14,9 +14,6 @@ use crate::data::desktop_api::{DesktopApi, TurnOptions};
 use crate::i18n::{Args, Translate};
 use crate::ui::{TextInput, Toaster};
 
-/// The providers that pass a denial's reason to the model themselves.
-const READS_DENIAL_REASON: [&str; 1] = ["claude_code"];
-
 /// Whether "Sempre permitir" fits the tool and a connector's tool by its own
 /// name: the rule the phone's room shares (`dcc_core::domain::room_approval`).
 pub(crate) use dcc_core::domain::room_approval::{may_always_allow, short_tool};
@@ -24,7 +21,7 @@ pub(crate) use dcc_core::domain::room_approval::{may_always_allow, short_tool};
 /// The next message that carries a reason to a provider that cannot read it
 /// with the denial.
 pub(crate) fn reason_message(tool: &str, reason: &str) -> String {
-    format!("[DCC] I denied `{tool}`: {reason}")
+    dcc_core::domain::room_approval::denial_reason_message(tool, reason)
 }
 
 impl ConversationView {
@@ -81,7 +78,7 @@ impl ConversationView {
             .as_ref()
             .and_then(|data| data.provider_id.clone())
             .unwrap_or_default();
-        let queue = !READS_DENIAL_REASON.contains(&provider.as_str());
+        let queue = !dcc_core::domain::room_approval::reads_denial_reason(&provider);
         let Some(api) = self.endpoint() else {
             Toaster::error(cx.t("native.desktopClosed"), cx);
             return;

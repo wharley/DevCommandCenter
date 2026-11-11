@@ -7,7 +7,7 @@
 import { highlightCode, type CodeTokenKind } from "@dcc/mobile-core";
 import Feather from "@expo/vector-icons/Feather";
 import * as Clipboard from "expo-clipboard";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { font, makeStyles, radius, useTheme, type Scheme } from "../theme";
 import { haptic } from "./haptics";
@@ -118,7 +118,8 @@ function Inline({ text }: { text: string }) {
 	);
 }
 
-export function RichText({ text }: { text: string }) {
+/** Parsed again only when its text changes. */
+export const RichText = memo(function RichText({ text }: { text: string }) {
 	const styles = useStyles();
 	return (
 		<View style={{ gap: 8 }}>
@@ -163,7 +164,7 @@ export function RichText({ text }: { text: string }) {
 			)}
 		</View>
 	);
-}
+});
 
 const useStyles = makeStyles((color) =>
 	StyleSheet.create({

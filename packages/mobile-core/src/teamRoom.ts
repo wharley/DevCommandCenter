@@ -1,4 +1,14 @@
 import { parseAgentQuestions, type AgentQuestion } from "./questions.ts";
+import {
+	parseRoomHandoff,
+	parseRoomLive,
+	parseRoomQueued,
+	parseRoomStopped,
+	type RoomHandoff,
+	type RoomLive,
+	type RoomQueued,
+	type RoomStopped,
+} from "./roomLive.ts";
 
 /**
  * The team room as the desktop serves it to the phone
@@ -47,6 +57,10 @@ export type RoomLine = {
 	tasks: RoomTask[];
 	/** DCC woke the agent with this line (a routine, a source's news): not the person's words. */
 	wake: { kind: "routine" | "source"; about: string } | null;
+	/** The turn an answer ends, to list its steps; null on a desktop that does not say. */
+	turnId: string | null;
+	/** The teammate an answer suggests passing to, and what became of it. */
+	handoff: RoomHandoff | null;
 };
 
 /** An agent's permission request waiting in the room; answered with the session's `respond-permission`. */
@@ -58,6 +72,8 @@ export type RoomApproval = {
 	toolName: string;
 	/** What it wants to do, in one line (a command, a file, a connector's tool). */
 	summary: string;
+	/** "Sempre permitir" fits it (a connector's tool). */
+	mayAlwaysAllow: boolean;
 };
 
 /** An agent's question waiting in the room (its ask-user tool); answered with the session's `respond-user-input`. */
@@ -82,12 +98,27 @@ export type RoomSnapshot =
 			questions: RoomQuestion[];
 			/** The agents mid-turn in the room; null when the desktop does not say. */
 			working: string[] | null;
+			/** The turns at work, the stops to try again and the messages queued; empty on an older desktop. */
+			live: RoomLive[];
+			stopped: RoomStopped[];
+			queued: RoomQueued[];
+			/** Names the settled part (the lines), sent back as `lines`. */
+			linesId: string | null;
+			/** The lines are those of `linesId` sent back: `lines` is empty, keep the ones held. */
+			linesUnchanged: boolean;
 	  };
 
 /** Why the desktop picked who answers (`RouteReason`). */
 export type RoomReason = "mention" | "role" | "continues" | "default";
 
-export type RoomSent = { agentId: string; agentName: string; reason: RoomReason; sessionId: string };
+export type RoomSent = {
+	agentId: string;
+	agentName: string;
+	reason: RoomReason;
+	sessionId: string;
+	/** The conversation was at work: the message waits in its queue. */
+	queued: boolean;
+};
 
 function parseApproval(raw: unknown): RoomApproval | null {
 	if (!raw || typeof raw !== "object") return null;
@@ -103,6 +134,7 @@ function parseApproval(raw: unknown): RoomApproval | null {
 		agentName: text(value.agentName) ?? "",
 		toolName: text(value.toolName) ?? "",
 		summary: text(value.summary) ?? "",
+		mayAlwaysAllow: value.mayAlwaysAllow === true,
 	};
 }
 
@@ -182,6 +214,8 @@ function parseLine(raw: unknown): RoomLine | null {
 			const task = parseTask(item);
 			return task ? [task] : [];
 		}),
+		turnId: text(value.turnId),
+		handoff: value.speaker === "agent" ? parseRoomHandoff(value.handoff) : null,
 	};
 }
 
@@ -193,14 +227,20 @@ export function parseRoom(data: unknown, after: string | null): RoomSnapshot | n
 	if (value.unchanged === true) {
 		return snapshotId && snapshotId === after ? { unchanged: true, snapshotId } : null;
 	}
-	if (!Array.isArray(value.lines)) return null;
+	const linesUnchanged = value.linesUnchanged === true;
+	if (!Array.isArray(value.lines) && !linesUnchanged) return null;
 	return {
 		unchanged: false,
 		snapshotId,
-		lines: value.lines.flatMap((raw) => {
+		lines: (Array.isArray(value.lines) ? value.lines : []).flatMap((raw) => {
 			const line = parseLine(raw);
 			return line ? [line] : [];
 		}),
+		live: parseRoomLive(value.live),
+		stopped: parseRoomStopped(value.stopped),
+		queued: parseRoomQueued(value.queued),
+		linesId: text(value.linesId),
+		linesUnchanged,
 		approvals: Array.isArray(value.approvals)
 			? value.approvals.flatMap((raw) => {
 					const approval = parseApproval(raw);
@@ -227,7 +267,7 @@ export function parseRoomSent(data: unknown): RoomSent | null {
 	const sessionId = text(value.sessionId);
 	if (!agentId || !agentName || !sessionId) return null;
 	const reason = REASONS.includes(value.reason as RoomReason) ? (value.reason as RoomReason) : "default";
-	return { agentId, agentName, reason, sessionId };
+	return { agentId, agentName, reason, sessionId, queued: value.queued === true };
 }
 
 /** `agents.room.reason.*` on the desktop. */

@@ -10,8 +10,9 @@ use std::sync::Arc;
 use dcc_core::domain::agent::{ResidentAgent, ReviewerPresetText};
 use dcc_core::domain::agent_conversation::home_project_id;
 use dcc_core::domain::attention::{AttentionReason, SessionActivityInput};
-use dcc_core::domain::session::SessionId;
+use dcc_core::domain::session::{SessionEventRecord, SessionId};
 use dcc_core::domain::team_room_lines::{lines_of, RoomLine};
+use dcc_core::domain::team_room_live::moves_only_the_turn;
 use dcc_core::domain::timeline::activity::total_turn_tokens;
 use dcc_core::domain::timeline::{project_session, TimelineMessage};
 use dcc_core::domain::workspace::WorkspaceId;
@@ -175,7 +176,7 @@ impl Team {
     }
 }
 
-type Stamp = (i64, i64, i64);
+pub(super) type Stamp = (i64, i64, i64);
 
 fn kept() -> &'static std::sync::Mutex<HashMap<String, (Stamp, Arc<Vec<TimelineMessage>>)>> {
     static KEPT: std::sync::OnceLock<
@@ -185,7 +186,7 @@ fn kept() -> &'static std::sync::Mutex<HashMap<String, (Stamp, Arc<Vec<TimelineM
 }
 
 /// A conversation's messages, read whole only when its history moved.
-fn messages(
+pub(super) fn messages(
     repo: &SqliteSessionRepo,
     session_id: &str,
 ) -> Result<Arc<Vec<TimelineMessage>>, String> {
@@ -201,12 +202,37 @@ fn messages(
         if at == stamp {
             return Ok(messages);
         }
+        // While a turn streams only its own work moves: the lines, read
+        // from settled answers, stay as they were.
+        let fresh = events_after(repo, &id, u64::try_from(at.1).unwrap_or(0))?;
+        if only_the_turn_moved(at, stamp, &fresh) {
+            if let Ok(mut kept) = kept().lock() {
+                kept.insert(session_id.to_string(), (stamp, messages.clone()));
+            }
+            return Ok(messages);
+        }
     }
+    let events = events_after(repo, &id, 0)?;
+    let messages = Arc::new(project_session(&events, session_id));
+    if let Ok(mut kept) = kept().lock() {
+        if kept.len() >= KEPT_CONVERSATIONS && !kept.contains_key(session_id) {
+            kept.clear();
+        }
+        kept.insert(session_id.to_string(), (stamp, messages.clone()));
+    }
+    Ok(messages)
+}
+
+/// A conversation's events after `cursor`, in pages.
+pub(super) fn events_after(
+    repo: &SqliteSessionRepo,
+    id: &SessionId,
+    mut cursor: u64,
+) -> Result<Vec<SessionEventRecord>, String> {
     let mut events = Vec::new();
-    let mut cursor = 0;
     loop {
         let page = repo
-            .list_events_by_session_after_sync(&id, cursor, EVENT_PAGE)
+            .list_events_by_session_after_sync(id, cursor, EVENT_PAGE)
             .map_err(|error| error.to_string())?;
         let full = page.len() == EVENT_PAGE;
         if let Some(last) = page.last() {
@@ -217,14 +243,15 @@ fn messages(
             break;
         }
     }
-    let messages = Arc::new(project_session(&events, session_id));
-    if let Ok(mut kept) = kept().lock() {
-        if kept.len() >= KEPT_CONVERSATIONS && !kept.contains_key(session_id) {
-            kept.clear();
-        }
-        kept.insert(session_id.to_string(), (stamp, messages.clone()));
-    }
-    Ok(messages)
+    Ok(events)
+}
+
+/// Whether going from `before` to `after` only appended `fresh`, and each
+/// of them only moves an open turn (`moves_only_the_turn`).
+fn only_the_turn_moved(before: Stamp, after: Stamp, fresh: &[SessionEventRecord]) -> bool {
+    !fresh.is_empty()
+        && before.0 + fresh.len() as i64 == after.0
+        && fresh.iter().all(|event| moves_only_the_turn(&event.kind))
 }
 
 /// One conversation's lines, with its turns' tokens read fresh.
@@ -446,5 +473,33 @@ pub(super) mod tests {
         );
         let texts: Vec<&str> = lines.iter().map(|line| line.text.as_str()).collect();
         assert_eq!(texts, ["b", "c"]);
+    }
+
+    #[test]
+    fn a_streamed_step_keeps_the_lines_read() {
+        let event = |sequence: u64, json: serde_json::Value| SessionEventRecord {
+            event_id: format!("e-{sequence}"),
+            session_id: SessionId("s".into()),
+            sequence,
+            occurred_at: "2026-11-10T10:00:00Z".into(),
+            kind: serde_json::from_value(json).unwrap(),
+        };
+        let delta = event(
+            4,
+            serde_json::json!({ "type": "turn_delta", "turnId": "t", "content": "oi" }),
+        );
+        let ended = event(
+            5,
+            serde_json::json!({ "type": "turn_completed", "turnId": "t" }),
+        );
+        assert!(only_the_turn_moved((3, 3, 3), (4, 4, 9), &[delta.clone()]));
+        assert!(!only_the_turn_moved(
+            (3, 3, 3),
+            (5, 5, 9),
+            &[delta.clone(), ended]
+        ));
+        // Something went missing in between: read it whole.
+        assert!(!only_the_turn_moved((3, 3, 3), (6, 6, 9), &[delta]));
+        assert!(!only_the_turn_moved((3, 3, 3), (3, 3, 3), &[]));
     }
 }
