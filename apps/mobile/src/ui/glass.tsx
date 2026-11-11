@@ -48,7 +48,9 @@ export function Glass({
 		);
 	}
 	return (
-		<View style={[styles.shadow, styles.edge, { borderRadius: radius, backgroundColor: color.glass }, style]}>{children}</View>
+		// Android has no live blur: an opaque fill, so the text scrolling under
+		// a floating control never shows through it.
+		<View style={[styles.shadow, styles.edge, { borderRadius: radius, backgroundColor: Platform.OS === "android" ? color.panel : color.glass }, style]}>{children}</View>
 	);
 }
 

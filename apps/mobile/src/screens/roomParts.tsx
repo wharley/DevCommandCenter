@@ -12,6 +12,7 @@
 import {
 	approvalTitle,
 	handoffHeading,
+	plainMarkdown,
 	handoffLabel,
 	moreStepsLabel,
 	stepText,
@@ -75,7 +76,7 @@ export const PersonLine = memo(function PersonLine({
 			<View style={styles.passed} accessible accessibilityLabel={passed}>
 				<Feather name="corner-down-right" size={13} style={styles.passedIcon} />
 				<Text style={styles.passedText} numberOfLines={2}>
-					{passed.replace(/^↪ /, "")}
+					{plainMarkdown(passed.replace(/^↪ /, ""))}
 				</Text>
 			</View>
 		);
@@ -137,9 +138,11 @@ export type AgentLineProps = {
 	loadSteps: (line: RoomLine) => Promise<{ steps: RoomStep[]; more: number }>;
 	/** 👍 / 👎; the one given again takes it back (null). */
 	onReact: (line: RoomLine, reaction: RoomReaction | null) => void;
+	/** The team, so each @Agent in the answer is a pill. */
+	team: readonly { id: string; name: string }[];
 };
 
-function AgentLineView({ line, agent, first, handing, onOpen, onTask, onHandoff, loadSteps, onReact }: AgentLineProps) {
+function AgentLineView({ line, agent, first, handing, onOpen, onTask, onHandoff, loadSteps, onReact, team }: AgentLineProps) {
 	const styles = useStyles();
 	const receipt = roomReceiptLabel(line.receipt);
 	return (
@@ -155,7 +158,7 @@ function AgentLineView({ line, agent, first, handing, onOpen, onTask, onHandoff,
 					</View>
 				) : null}
 				{line.steps ? <StepsFold line={line} loadSteps={loadSteps} /> : null}
-				<RichText text={line.text} />
+				<RichText text={line.text} team={team} />
 				{line.tasks.map((task) => (
 					<TaskCard key={task.workspaceId} task={task} onOpen={(where) => onTask(task, where)} />
 				))}
@@ -194,7 +197,8 @@ export const AgentLine = memo(
 		before.onTask === after.onTask &&
 		before.onHandoff === after.onHandoff &&
 		before.loadSteps === after.loadSteps &&
-		before.onReact === after.onReact,
+		before.onReact === after.onReact &&
+		before.team === after.team,
 );
 
 /** "Trabalhou 4 min · leu 6 arquivos": a tap lists each step, read once. */

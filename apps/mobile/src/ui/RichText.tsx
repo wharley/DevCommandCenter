@@ -1,15 +1,16 @@
 /**
  * Just enough markdown for agent answers on a phone: fenced code blocks
- * (language, copy, light highlighting), inline code, headings, bullets and
- * bold. Full markdown (tables, diff) is a follow-up — the plan is to try
+ * (language, copy, light highlighting), inline code, headings, bullets,
+ * bold, links (by their label, a bare address shortened, opening the browser)
+ * and, given the team, each @Agent as a tinted pill. Full markdown (tables, diff) is a follow-up — the plan is to try
  * Expo DOM components with a web renderer.
  */
-import { highlightCode, type CodeTokenKind } from "@dcc/mobile-core";
+import { highlightCode, inlinePieces, splitMentions, type CodeTokenKind } from "@dcc/mobile-core";
 import Feather from "@expo/vector-icons/Feather";
 import * as Clipboard from "expo-clipboard";
 import { Fragment, memo, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { font, makeStyles, radius, useTheme, type Scheme } from "../theme";
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { alpha, font, makeStyles, radius, useTheme, type Scheme } from "../theme";
 import { haptic } from "./haptics";
 
 type Block = { kind: "code"; text: string; lang: string } | { kind: "text"; text: string };
@@ -92,34 +93,69 @@ function CodeBlock({ text, lang }: { text: string; lang: string }) {
 	);
 }
 
-function Inline({ text }: { text: string }) {
+export type Teammate = { id: string; name: string };
+
+/** Plain words, each @Agent of the team as a pill. */
+function Words({ text, team }: { text: string; team?: readonly Teammate[] }) {
 	const styles = useStyles();
-	const pieces = text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g);
+	if (!team || team.length === 0 || !text.includes("@")) return <>{text}</>;
 	return (
 		<>
-			{pieces.map((piece, i) => {
-				if (piece.startsWith("`") && piece.endsWith("`") && piece.length > 2) {
-					return (
-						<Text key={i} style={styles.inlineCode}>
-							{piece.slice(1, -1)}
-						</Text>
-					);
+			{splitMentions(text, team).map((part, i) =>
+				part.agentId ? (
+					<Text key={i} style={styles.mention}>
+						{part.text}
+					</Text>
+				) : (
+					<Fragment key={i}>{part.text}</Fragment>
+				),
+			)}
+		</>
+	);
+}
+
+function Inline({ text, team }: { text: string; team?: readonly Teammate[] }) {
+	const styles = useStyles();
+	return (
+		<>
+			{inlinePieces(text).map((piece, i) => {
+				switch (piece.kind) {
+					case "code":
+						return (
+							<Text key={i} style={styles.inlineCode}>
+								{piece.text}
+							</Text>
+						);
+					case "bold":
+						return (
+							<Text key={i} style={styles.bold}>
+								<Words text={piece.text} team={team} />
+							</Text>
+						);
+					case "link":
+						return (
+							<Text
+								key={i}
+								style={styles.link}
+								accessibilityRole="link"
+								onPress={() => {
+									haptic("tap");
+									void Linking.openURL(piece.url);
+								}}
+							>
+								{piece.text}
+							</Text>
+						);
+					default:
+						return <Words key={i} text={piece.text} team={team} />;
 				}
-				if (piece.startsWith("**") && piece.endsWith("**") && piece.length > 4) {
-					return (
-						<Text key={i} style={styles.bold}>
-							{piece.slice(2, -2)}
-						</Text>
-					);
-				}
-				return <Fragment key={i}>{piece}</Fragment>;
 			})}
 		</>
 	);
 }
 
 /** Parsed again only when its text changes. */
-export const RichText = memo(function RichText({ text }: { text: string }) {
+export const RichText = memo(function RichText({ text, team }: { text: string; team?: readonly Teammate[] }) {
 	const styles = useStyles();
 	return (
 		<View style={{ gap: 8 }}>
@@ -137,7 +173,7 @@ export const RichText = memo(function RichText({ text }: { text: string }) {
 								if (heading) {
 									return (
 										<Text key={j} style={[styles.text, styles.heading]} selectable>
-											<Inline text={heading[1]!} />
+											<Inline text={heading[1]!} team={team} />
 										</Text>
 									);
 								}
@@ -146,14 +182,14 @@ export const RichText = memo(function RichText({ text }: { text: string }) {
 										<View key={j} style={styles.bulletRow}>
 											<Text style={styles.text}>•</Text>
 											<Text style={[styles.text, { flex: 1 }]} selectable>
-												<Inline text={bullet[1]!} />
+												<Inline text={bullet[1]!} team={team} />
 											</Text>
 										</View>
 									);
 								}
 								return line.trim() ? (
 									<Text key={j} style={styles.text} selectable>
-										<Inline text={line} />
+										<Inline text={line} team={team} />
 									</Text>
 								) : (
 									<View key={j} style={{ height: 4 }} />
@@ -171,6 +207,8 @@ const useStyles = makeStyles((color) =>
 		text: { color: color.fg, fontSize: 15, lineHeight: 22 },
 		heading: { fontWeight: "700" },
 		bold: { fontWeight: "700" },
+		link: { color: color.info, textDecorationLine: "underline" },
+		mention: { color: color.info, fontWeight: "600", backgroundColor: alpha(color.info, 0.14) },
 		inlineCode: { fontFamily: font.mono, fontSize: 13, color: color.fg, backgroundColor: color.chip },
 		codeBox: {
 			backgroundColor: color.panel,

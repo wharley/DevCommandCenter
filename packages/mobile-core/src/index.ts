@@ -19,3 +19,4 @@ export * from "./triage.ts";
 export * from "./highlight.ts";
 export * from "./patch.ts";
 export * from "./rooms.ts";
+export * from "./markdownInline.ts";

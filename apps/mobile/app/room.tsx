@@ -363,6 +363,7 @@ export default function TeamRoomScreen() {
 								onHandoff={onHandoff}
 								loadSteps={loadSteps}
 								onReact={onReact}
+								team={agents}
 							/>
 						);
 					}
@@ -424,8 +425,11 @@ export default function TeamRoomScreen() {
 						data={rows}
 						keyExtractor={(item) => item.key}
 						renderItem={renderItem}
-						// Inverted: the top padding sits at the end, over the field.
-						contentContainerStyle={[styles.listContent, { paddingTop: dockHeight + dockBottom + 20, paddingBottom: headerSpace }]}
+						contentContainerStyle={[styles.listContent, { paddingBottom: headerSpace }]}
+						// Inverted, the header is the list's end: the room's last line
+						// stays above the field on every platform (Android's inverted
+						// list does not keep a content padding at the bottom).
+						ListHeaderComponent={<View style={{ height: dockHeight + dockBottom + 20 }} />}
 						keyboardShouldPersistTaps="handled"
 						onScroll={onScroll}
 						scrollEventThrottle={64}

@@ -121,7 +121,7 @@ export class DemoRooms {
 		line("geral", "demo-rev", "person", "@Revisor olha o PR 18 do site", 95);
 		line("geral", "demo-rev", "agent", "Revisei o PR 18: o guia está claro. Um bloqueante — o link do passo 3 aponta para a página antiga. Deixei o comentário como rascunho.", 92, { seconds: 71, tokens: 9100 });
 		line("loja", "demo-dev", "person", "@Dev migra o checkout para o novo gateway", 14);
-		line("loja", "demo-dev", "agent", "Comecei pela camada de pagamento. Abri a tarefa **checkout-v2** para isso; o gateway antigo fica atrás de uma flag.", 12, { seconds: 95, tokens: 14300 });
+		line("loja", "demo-dev", "agent", "Comecei pela camada de pagamento. Abri a tarefa **checkout-v2** para isso; o gateway antigo fica atrás de uma flag. Referência: [doc do gateway](https://docs.example.com/gateway/v2) e https://status.example.com/incidents/2026-11-11-checkout-latency.\n\n@Revisor quando terminar, revisa o PR?", 12, { seconds: 95, tokens: 14300 });
 		const opened = this.lines.get("loja")!.at(-1)!;
 		opened.steps = { seconds: 95, tools: 6, failures: 0, counts: { read: 4, command: 1, edit: 1 } };
 		opened.task = { delegationId: "demo-d1", workspaceId: "demo-w1", sessionId: "demo-s1", title: "checkout-v2", state: "working", files: 3, additions: 78, deletions: 14 };
