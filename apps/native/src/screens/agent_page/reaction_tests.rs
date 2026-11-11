@@ -91,6 +91,13 @@ fn an_answer_is_marked_and_a_thumbs_down_keeps_a_rule(cx: &mut TestAppContext) {
     cx.simulate_click(up.center(), Modifiers::none());
     cx.run_until_parked();
     assert!(cx.debug_bounds("room-rule").is_none());
+    // The reaction given leads the line, before the receipt and its link.
+    let up = cx.debug_bounds("room-react-up-0").unwrap();
+    let open = cx.debug_bounds("room-open-0").unwrap();
+    assert!(
+        up.right() <= open.left(),
+        "the pill sits before \"Abrir conversa\""
+    );
     let down = cx.debug_bounds("room-react-down-0").unwrap();
     cx.simulate_click(down.center(), Modifiers::none());
     cx.run_until_parked();

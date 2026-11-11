@@ -514,10 +514,10 @@
       "projectTitle": "Sala · {{project}}",
       "projectSubtitle": "Aqui os agentes já sabem que é o {{project}}: peça sem dizer o projeto. Com @ você escolhe quem responde.",
       "placeholderProject": "Escreva para a equipe do {{project}} · @ para chamar alguém",
-      "taskRunning": "{{agent}} · “{{task}}” rodando há {{time}}",
-      "taskRunningNow": "{{agent}} · “{{task}}” começou agora",
-      "atWork": "{{agent}} trabalhando em “{{task}}” há {{time}}",
-      "atWorkNow": "{{agent}} começou a trabalhar em “{{task}}”",
+      "task": {
+        "title": "{{agent}} · “{{task}}”",
+        "open": "Abrir tarefa"
+      },
       "ceiling": "{{agent}} chegou ao teto de {{count}} gatilhos hoje: os próximos esperam até amanhã.",
       "approval": "{{agent}} quer usar {{tool}}",
       "approvalMore_one": "+{{count}} aguardando",

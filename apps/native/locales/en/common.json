@@ -514,10 +514,10 @@
       "projectTitle": "Room · {{project}}",
       "projectSubtitle": "Here the agents know it is {{project}}: ask without naming the project. With @ you pick who answers.",
       "placeholderProject": "Write to the {{project}} team · @ to call someone",
-      "taskRunning": "{{agent}} · “{{task}}” running for {{time}}",
-      "taskRunningNow": "{{agent}} · “{{task}}” just started",
-      "atWork": "{{agent}} working in “{{task}}” for {{time}}",
-      "atWorkNow": "{{agent}} started working in “{{task}}”",
+      "task": {
+        "title": "{{agent}} · “{{task}}”",
+        "open": "Open task"
+      },
       "ceiling": "{{agent}} reached today's ceiling of {{count}} triggers: the next ones wait until tomorrow.",
       "approval": "{{agent}} wants to use {{tool}}",
       "approvalMore_one": "+{{count}} waiting",

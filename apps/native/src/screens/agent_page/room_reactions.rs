@@ -123,11 +123,21 @@ impl TeamRoom {
         let current = self.reaction(line);
         let button = |reaction: Reaction, icon: &'static str, cx: &mut Context<Self>| {
             let picked = current == Some(reaction);
+            let tint = match reaction {
+                Reaction::Up => tw::EMERALD_500.hsla(),
+                Reaction::Down => tw::AMBER_500.hsla(),
+            };
             let line = line.clone();
             div()
-                // The one given stays; the other shows on the answer's hover.
+                // The one given stays, as a tinted pill; the other shows on
+                // the answer's hover.
                 .opacity(if picked { 1.0 } else { 0.0 })
                 .group_hover(group.clone(), |style| style.opacity(1.0))
+                .when(picked, |pill| {
+                    pill.bg(tint.opacity(0.12))
+                        .border_1()
+                        .border_color(tint.opacity(0.35))
+                })
                 .id(SharedString::from(format!(
                     "room-react-{}-{index}",
                     reaction.key()
@@ -136,8 +146,9 @@ impl TeamRoom {
                 .flex()
                 .items_center()
                 .justify_center()
-                .size(px(22.0))
-                .rounded(px(6.0))
+                .h(px(22.0))
+                .w(px(if picked { 30.0 } else { 22.0 }))
+                .rounded(px(11.0))
                 .cursor_pointer()
                 .hover(|button| button.bg(colors.accent))
                 .on_click(

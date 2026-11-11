@@ -15,6 +15,8 @@ pub struct RunningTask {
     pub agent_id: String,
     /// The agent's conversation that opened it.
     pub session_id: String,
+    /// The task's own conversation, once known: the room follows its turn.
+    pub task_session_id: Option<String>,
     /// The task's project, for its room.
     pub project_id: String,
     /// When its running turn started.
@@ -58,6 +60,7 @@ impl Sidebar {
                     .unwrap_or_default(),
                 agent_id: opened.agent_id.clone(),
                 session_id: opened.session_id.clone(),
+                task_session_id: opened.task_session_id.clone(),
                 started_at: data
                     .activities
                     .get(task)

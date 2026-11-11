@@ -143,8 +143,20 @@ fn a_turn_at_work_shows_live_and_its_answer_takes_its_place(cx: &mut TestAppCont
     room.update(cx, |room, _| {
         room.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
     });
-    let stop = cx.debug_bounds("room-live-stop-0").unwrap();
-    cx.simulate_click(stop.center(), Modifiers::none());
+    // The streamed text is revealed on the real clock, so the row may still
+    // grow between measuring the button and clicking it: measure again until
+    // the click lands (the room marks the conversation as stopping).
+    let mut landed = false;
+    for _ in 0..5 {
+        let stop = cx.debug_bounds("room-live-stop-0").unwrap();
+        cx.simulate_click(stop.center(), Modifiers::none());
+        landed = room.update(cx, |room, _| room.live.stopping.contains("s-geral"));
+        if landed {
+            break;
+        }
+        cx.run_until_parked();
+    }
+    assert!(landed, "\"Parar\" was never clicked");
     assert!(
         crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
         "the desktop never got the call"

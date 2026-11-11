@@ -134,6 +134,9 @@ mod room_steps;
 #[cfg(test)]
 mod room_steps_tests;
 mod room_task_answer;
+mod room_task_live;
+#[cfg(test)]
+mod room_task_live_tests;
 #[cfg(test)]
 mod room_tests;
 mod room_timeline;

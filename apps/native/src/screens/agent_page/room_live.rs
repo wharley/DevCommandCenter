@@ -1,8 +1,7 @@
-//! The room's live lines, the way Slack shows who is typing: one shape for
-//! everything at work now (`live_row`: the agent's face, a trigger's chip,
-//! what it does, a spinner, a click opening it) and "Revisor está
-//! trabalhando…" / "precisa de você" for an agent's own conversation. What
-//! moves here moves on the shared clock (`ui::pulse`).
+//! The room's live lines, the way Slack shows who is typing: "Revisor está
+//! trabalhando…" / "precisa de você" for an agent's own conversation (a task
+//! at work has its own row, `room_task_live`). What moves here moves on the
+//! shared clock (`ui::pulse`).
 
 use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*, px};
 
@@ -11,69 +10,8 @@ use crate::agent::{AgentAvatarView, Mood, MoodAvatarView};
 use crate::data::agents::{AgentRecord, AgentState};
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
-use crate::ui::pulse_spinner;
 
 impl TeamRoom {
-    /// One thing at work now: `key` names it for tests.
-    pub(super) fn live_row(
-        &self,
-        key: String,
-        agent: &AgentRecord,
-        chip: Option<SharedString>,
-        text: SharedString,
-        open: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        let chip = chip.map(|chip| {
-            div()
-                .flex_none()
-                .px(px(6.0))
-                .rounded(px(4.0))
-                .bg(colors.accent)
-                .text_size(px(10.0))
-                .text_color(colors.muted_foreground)
-                .child(chip)
-        });
-        let selector = key.clone();
-        div()
-            .id(SharedString::from(key.clone()))
-            .debug_selector(move || selector.clone())
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .px(px(12.0))
-            .py(px(8.0))
-            .rounded(px(12.0))
-            .border_1()
-            .border_color(colors.border.opacity(0.7))
-            .bg(colors.card)
-            .cursor_pointer()
-            .hover(|row| row.bg(colors.accent.opacity(0.4)))
-            .on_click(cx.listener(move |room, _, _, cx| open(room, cx)))
-            .child(AgentAvatarView::new(
-                SharedString::from(format!("{key}-face")),
-                &agent.avatar,
-                None,
-                22.0,
-            ))
-            .children(chip)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(px(12.5))
-                    .text_color(colors.foreground)
-                    .child(text),
-            )
-            .child(pulse_spinner(
-                SharedString::from(format!("{key}-spin")),
-                14.0,
-            ))
-            .into_any_element()
-    }
-
     /// "Revisor está trabalhando…" / "Revisor precisa de você".
     pub(super) fn busy_line(
         &self,

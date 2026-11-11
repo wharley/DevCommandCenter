@@ -192,8 +192,17 @@ impl TeamRoom {
                     .flex_col()
                     .gap(px(4.0))
                     .child(header)
-                    .child(shimmer(index, label, colors.muted_foreground))
-                    .children(self.live_steps(index, &turn.steps, cx))
+                    .child(shimmer(
+                        format!("room-live-doing-{index}"),
+                        label,
+                        colors.muted_foreground,
+                    ))
+                    .children(step_list(
+                        &format!("room-live-step-{index}"),
+                        &turn.steps,
+                        STEPS_SHOWN,
+                        cx,
+                    ))
                     .children(text),
             )
             .into_any_element()
@@ -261,65 +270,6 @@ impl TeamRoom {
                     window,
                     cx,
                 ))
-                .into_any_element(),
-        )
-    }
-
-    /// The last steps, open while it works ("+N passos" for the earlier).
-    fn live_steps(&self, index: usize, steps: &[LiveStep], cx: &gpui::App) -> Option<AnyElement> {
-        if steps.is_empty() {
-            return None;
-        }
-        let colors = cx.theme().colors.clone();
-        let earlier = steps.len().saturating_sub(STEPS_SHOWN);
-        let rows = steps[earlier..].iter().enumerate().map(|(n, step)| {
-            let mark = match step.state {
-                StepState::Running => pulse_spinner(
-                    SharedString::from(format!("room-live-step-spin-{index}-{n}")),
-                    11.0,
-                )
-                .into_any_element(),
-                StepState::Done => Icon::new("check")
-                    .size(11.0)
-                    .color(colors.muted_foreground)
-                    .into_any_element(),
-                StepState::Failed => Icon::new("x")
-                    .size(11.0)
-                    .color(colors.destructive)
-                    .into_any_element(),
-            };
-            div()
-                .debug_selector(move || format!("room-live-step-{index}-{n}"))
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .min_w_0()
-                .text_size(px(11.5))
-                .text_color(if step.state == StepState::Failed {
-                    colors.destructive
-                } else {
-                    colors.muted_foreground
-                })
-                .child(div().flex_none().child(mark))
-                .child(div().truncate().child(step_text(step, cx)))
-                .into_any_element()
-        });
-        Some(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .when(earlier > 0, |list| {
-                    list.child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(colors.muted_foreground)
-                            .child(
-                                cx.t_with("agents.room.steps.more", &Args::count(earlier as i64)),
-                            ),
-                    )
-                })
-                .children(rows)
                 .into_any_element(),
         )
     }
@@ -442,14 +392,80 @@ fn step_text(step: &LiveStep, cx: &gpui::App) -> SharedString {
     }
 }
 
+/// The last `shown` steps, open while it works ("+N passos" for the
+/// earlier); `key` names them for tests (`{key}-0`, `{key}-more`).
+pub(super) fn step_list(
+    key: &str,
+    steps: &[LiveStep],
+    shown: usize,
+    cx: &gpui::App,
+) -> Option<AnyElement> {
+    if steps.is_empty() {
+        return None;
+    }
+    let colors = cx.theme().colors.clone();
+    let earlier = steps.len().saturating_sub(shown);
+    let rows = steps[earlier..].iter().enumerate().map(|(n, step)| {
+        let mark = match step.state {
+            StepState::Running => {
+                pulse_spinner(SharedString::from(format!("{key}-spin-{n}")), 11.0)
+                    .into_any_element()
+            }
+            StepState::Done => Icon::new("check")
+                .size(11.0)
+                .color(colors.muted_foreground)
+                .into_any_element(),
+            StepState::Failed => Icon::new("x")
+                .size(11.0)
+                .color(colors.destructive)
+                .into_any_element(),
+        };
+        let selector = format!("{key}-{n}");
+        div()
+            .debug_selector(move || selector.clone())
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .min_w_0()
+            .text_size(px(11.5))
+            .text_color(if step.state == StepState::Failed {
+                colors.destructive
+            } else {
+                colors.muted_foreground
+            })
+            .child(div().flex_none().child(mark))
+            .child(div().truncate().child(step_text(step, cx)))
+            .into_any_element()
+    });
+    let more = format!("{key}-more");
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .when(earlier > 0, |list| {
+                list.child(
+                    div()
+                        .debug_selector(move || more.clone())
+                        .text_size(px(11.0))
+                        .text_color(colors.muted_foreground)
+                        .child(cx.t_with("agents.room.steps.more", &Args::count(earlier as i64))),
+                )
+            })
+            .children(rows)
+            .into_any_element(),
+    )
+}
+
 /// The label breathing softly on the shared clock; still under reduced
-/// motion or with DCC in the back.
-fn shimmer(index: usize, label: SharedString, color: gpui::Hsla) -> AnyElement {
+/// motion or with DCC in the back. `key` names it for tests.
+pub(super) fn shimmer(key: String, label: SharedString, color: gpui::Hsla) -> AnyElement {
+    let selector = key.clone();
     div()
-        .debug_selector(move || format!("room-live-doing-{index}"))
+        .debug_selector(move || selector.clone())
         .text_size(px(12.0))
         .child(pulse_loop(
-            SharedString::from(format!("room-live-doing-{index}")),
+            SharedString::from(key),
             Duration::from_millis(1600),
             Rate::Half,
             move |phase| {

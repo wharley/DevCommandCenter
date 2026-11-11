@@ -1,18 +1,19 @@
 //! What is going on now, under the room's conversation, the way Slack shows
 //! who is typing: the tasks this room's agents opened that still run ("Dev ·
-//! “Investigar…” rodando há 12 min"), and every agent at work in a task of
-//! the room's project however it got there — a trigger included ("Revisor ·
-//! Gatilho · CI falhou · trabalhando em “Código de rastreio” há 1 min").
-//! Each works until the turn ends, a click opening it; the result card
-//! takes its place.
+//! “Investigar…” 2:14 · Editando checkout.tsx"), and every agent at work in
+//! a task of the room's project however it got there — a trigger included
+//! ("Gatilho · CI falhou · Revisor · “Código de rastreio”").
+//! Each shows live until the turn ends (`room_task_live`), a click opening
+//! it; the result card takes its place.
 
 use gpui::{AnyElement, Context};
 
 use super::room::{RoomEvent, TeamRoom};
+use super::room_task_live::TaskRun;
 use crate::data::agent_triggers::AgentTriggers;
 use crate::data::agents::AgentRecord;
 use crate::data::room_of::room_for;
-use crate::i18n::{Args, Translate};
+use crate::i18n::Translate;
 use crate::screens::sidebar::{AgentAtWork, RunningTask};
 
 /// "3 min", "1 h 5 min"; under a minute, "agora".
@@ -31,7 +32,7 @@ impl TeamRoom {
     /// project's room every task of the project an agent opened from any
     /// room — the project's work shows in its room, as Tucano posts a
     /// project's events in its channel.
-    fn running_here(&self, cx: &gpui::App) -> Vec<RunningTask> {
+    pub(super) fn running_here(&self, cx: &gpui::App) -> Vec<RunningTask> {
         self.sidebar
             .read(cx)
             .running_agent_tasks()
@@ -53,33 +54,24 @@ impl TeamRoom {
         agents: &[AgentRecord],
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let now = chrono::Utc::now().timestamp_millis();
         self.running_here(cx)
             .into_iter()
             .enumerate()
             .filter_map(|(index, task)| {
                 let agent = agents.iter().find(|agent| agent.id == task.agent_id)?;
-                let time = elapsed(task.started_at.as_deref(), now).unwrap_or_default();
-                let text = cx.t_with(
-                    if time.is_empty() {
-                        "agents.room.taskRunningNow"
-                    } else {
-                        "agents.room.taskRunning"
-                    },
-                    &Args::default()
-                        .with("agent", agent.name.clone())
-                        .with("task", task.name.clone())
-                        .with("time", time),
-                );
                 let id = task.task_id.clone();
-                Some(self.live_row(
-                    format!("room-running-{index}"),
-                    agent,
-                    None,
-                    text,
+                self.task_row(
+                    TaskRun {
+                        key: format!("room-running-{index}"),
+                        agent,
+                        task_name: task.name,
+                        session_id: task.task_session_id,
+                        started_at: task.started_at,
+                        chip: None,
+                    },
                     move |_, cx| cx.emit(RoomEvent::OpenTask(id.clone())),
                     cx,
-                ))
+                )
             })
             .collect()
     }
@@ -87,7 +79,7 @@ impl TeamRoom {
 
 impl TeamRoom {
     /// The agents at work in a task of this room's project.
-    fn at_work_here(&self, cx: &gpui::App) -> Vec<AgentAtWork> {
+    pub(super) fn at_work_here(&self, cx: &gpui::App) -> Vec<AgentAtWork> {
         let opened: Vec<String> = self
             .running_here(cx)
             .into_iter()
@@ -120,7 +112,6 @@ impl TeamRoom {
             .enumerate()
             .filter_map(|(index, work)| {
                 let agent = agents.iter().find(|agent| agent.id == work.agent_id)?;
-                let time = elapsed(work.started_at.as_deref(), now).unwrap_or_default();
                 let started = work
                     .started_at
                     .as_deref()
@@ -129,23 +120,16 @@ impl TeamRoom {
                 let chip =
                     crate::data::room_inbox::woken_by(&runs, &agent.id, &work.task_id, started)
                         .map(|trigger| cx.t(&format!("agents.room.card.trigger.{}", trigger.id())));
-                let text = cx.t_with(
-                    if time.is_empty() {
-                        "agents.room.atWorkNow"
-                    } else {
-                        "agents.room.atWork"
-                    },
-                    &Args::default()
-                        .with("agent", agent.name.clone())
-                        .with("task", work.task_name.clone())
-                        .with("time", time),
-                );
                 let (task, session) = (work.task_id.clone(), work.session_id.clone());
-                Some(self.live_row(
-                    format!("room-at-work-{index}"),
-                    agent,
-                    chip,
-                    text,
+                self.task_row(
+                    TaskRun {
+                        key: format!("room-at-work-{index}"),
+                        agent,
+                        task_name: work.task_name,
+                        session_id: Some(work.session_id),
+                        started_at: work.started_at,
+                        chip,
+                    },
                     move |_, cx| {
                         cx.emit(RoomEvent::OpenSession {
                             task_id: task.clone(),
@@ -153,7 +137,7 @@ impl TeamRoom {
                         })
                     },
                     cx,
-                ))
+                )
             })
             .collect()
     }

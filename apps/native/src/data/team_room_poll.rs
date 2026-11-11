@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use dcc_core::domain::agent_reaction::Reaction;
-use dcc_core::domain::session::SessionEventRecord;
+use dcc_core::domain::session::{SessionEventKind, SessionEventRecord};
 use dcc_core::domain::team_room_live::{TurnNow, moves_only_the_turn, turn_now_of_events};
 use dcc_infra::db::SqliteSessionRepo;
 
@@ -33,6 +33,9 @@ pub struct LiveProbe {
     agent_id: String,
     session_id: String,
     events: Arc<Vec<SessionEventRecord>>,
+    /// A task's own conversation followed from the room: only its open turn
+    /// is wanted, never its lines, so only the last turn's events are kept.
+    turn_only: bool,
 }
 
 /// What a poll read, for the feed it came from (`HomeFeed::take_poll`).
@@ -52,6 +55,16 @@ impl HomeFeed {
             agent_id: self.agent_id.clone(),
             session_id: self.session_id.clone(),
             events: self.events.clone(),
+            turn_only: false,
+        }
+    }
+
+    /// A probe for a task's conversation whose open turn the room shows
+    /// (`room_task_live`): its polls never read the lines.
+    pub fn turn_probe(&self) -> LiveProbe {
+        LiveProbe {
+            turn_only: true,
+            ..self.probe()
         }
     }
 
@@ -121,7 +134,18 @@ impl LiveProbe {
         let whole = fresh.iter().any(|event| !moves_only_the_turn(&event.kind));
         // Copied here, off the UI thread, only when the room still shares it.
         Arc::make_mut(&mut self.events).extend(fresh);
-        if whole {
+        if self.turn_only {
+            // What came before the last turn is never drawn: dropped, so a
+            // long task keeps only its open turn here.
+            let start = self
+                .events
+                .iter()
+                .rposition(|event| matches!(event.kind, SessionEventKind::TurnStarted { .. }))
+                .unwrap_or(0);
+            if start > 0 {
+                Arc::make_mut(&mut self.events).drain(..start);
+            }
+        } else if whole {
             let mut feed = HomeFeed {
                 events: self.events.clone(),
                 ..HomeFeed::new(&self.agent_id, &self.session_id)
@@ -152,7 +176,7 @@ impl LiveProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dcc_core::domain::session::{SessionEventKind, SessionId};
+    use dcc_core::domain::session::SessionId;
 
     fn event(sequence: u64, json: serde_json::Value) -> SessionEventRecord {
         SessionEventRecord {

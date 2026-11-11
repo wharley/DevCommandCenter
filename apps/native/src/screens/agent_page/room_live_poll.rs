@@ -41,6 +41,12 @@ pub(crate) struct RoomLive {
     pub(crate) retried: HashSet<String>,
     /// The answers streaming, by conversation (`room_live_text`).
     pub(crate) texts: RefCell<HashMap<String, LiveText>>,
+    /// The own conversations of the tasks running here, read for their
+    /// open turn only (`room_task_live`).
+    pub(crate) tasks: Vec<HomeFeed>,
+    /// What each task row drew last (clock, label), for the tests.
+    #[cfg(test)]
+    pub(crate) drawn: RefCell<HashMap<String, (String, String)>>,
     /// Beats that read the database, for the tests.
     #[cfg(test)]
     pub(crate) polls: usize,
@@ -75,7 +81,7 @@ impl TeamRoom {
         self.live.drawn_at = Some(Instant::now());
         if self.live.watching
             || self.db_path.as_os_str().is_empty()
-            || self.live_feeds(cx).is_empty()
+            || (self.live_feeds(cx).is_empty() && self.followed_tasks(cx).is_empty())
         {
             return;
         }
@@ -116,7 +122,7 @@ impl TeamRoom {
             .live
             .drawn_at
             .is_some_and(|at| at.elapsed() < DRAWN_WITHIN);
-        let probes: Vec<LiveProbe> = if drawn {
+        let mut probes: Vec<LiveProbe> = if drawn {
             self.live_feeds(cx)
                 .into_iter()
                 .map(HomeFeed::probe)
@@ -124,6 +130,9 @@ impl TeamRoom {
         } else {
             Vec::new()
         };
+        if drawn {
+            probes.extend(self.task_probes(cx));
+        }
         if probes.is_empty() {
             self.live.watching = false;
             return None;
@@ -158,6 +167,7 @@ impl TeamRoom {
             let Some(feed) = self
                 .feeds
                 .iter_mut()
+                .chain(self.live.tasks.iter_mut())
                 .find(|feed| feed.session_id == session)
             else {
                 continue;

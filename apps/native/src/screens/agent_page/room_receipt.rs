@@ -1,7 +1,8 @@
-//! The line under an answer: how long it took and how many tokens, "Abrir
-//! conversa" and the 👍 / 👎 — all but a reaction the person gave show only
-//! while the answer is hovered (Tucano's receipt), the line's height kept so
-//! the rows do not jump. When the folded steps line is there it already says
+//! The line under an answer: the 👍 / 👎, how long it took and how many
+//! tokens, and "Abrir conversa" — all but a reaction the person gave show
+//! only while the answer is hovered (Tucano's receipt), the line's height kept
+//! so the rows do not jump. A reaction given leads the line, as a pill (Slack),
+//! so it never floats after the hidden receipt. When the folded steps line is there it already says
 //! how long the work took, so the receipt keeps the tokens only.
 
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px};
@@ -56,6 +57,7 @@ impl TeamRoom {
             .gap(px(8.0))
             .text_size(px(11.0))
             .text_color(colors.muted_foreground)
+            .child(self.reaction_buttons(index, line, group, cx))
             .child(
                 div()
                     .flex()
@@ -76,7 +78,6 @@ impl TeamRoom {
                             .child(cx.t("agents.room.open")),
                     ),
             )
-            .child(self.reaction_buttons(index, line, group, cx))
             .into_any_element()
     }
 }
