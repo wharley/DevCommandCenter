@@ -55,6 +55,7 @@ pub mod task_report;
 pub mod task_title;
 pub mod team_room;
 pub mod team_room_lines;
+pub mod team_room_live;
 pub mod team_room_steps;
 pub mod thread;
 pub mod timeline;

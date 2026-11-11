@@ -36,6 +36,7 @@ impl TeamRoom {
         &self,
         index: usize,
         line: &RoomLine,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let sidebar = self.sidebar.read(cx);
@@ -61,6 +62,8 @@ impl TeamRoom {
             .max(1);
         let green = tw::EMERALD_600.hsla();
         let red = tw::ROSE_600.hsla();
+        // A survey or an analysis changes nothing: its totals would be zeros.
+        let any_change = files > 0 || added + removed > 0;
         let totals = div()
             .flex()
             .items_center()
@@ -68,11 +71,20 @@ impl TeamRoom {
             .text_size(px(11.5))
             .font_features(tabular_nums())
             .text_color(colors.muted_foreground)
-            .child(div().text_color(green).child(format!("+{added}")))
-            .child(div().text_color(red).child(format!("−{removed}")))
-            .child(diff_squares(added, removed, 7.0, (green, red), cx))
-            .child(cx.t_with("agents.report.files", &Args::count(files as i64)))
-            .children(longest.map(|seconds| format!("· {}", duration_label(seconds))));
+            .when(any_change, |totals| {
+                totals
+                    .child(div().text_color(green).child(format!("+{added}")))
+                    .child(div().text_color(red).child(format!("−{removed}")))
+                    .child(diff_squares(added, removed, 7.0, (green, red), cx))
+                    .child(cx.t_with("agents.report.files", &Args::count(files as i64)))
+            })
+            .children(longest.map(|seconds| {
+                if any_change {
+                    format!("· {}", duration_label(seconds))
+                } else {
+                    duration_label(seconds)
+                }
+            }));
         let head = div()
             .flex()
             .items_center()
@@ -100,6 +112,7 @@ impl TeamRoom {
                     .as_deref()
                     .and_then(|id| agents.iter().find(|agent| agent.id == id));
                 let lines = task.additions + task.deletions;
+                let changed = task.files > 0 || lines > 0;
                 let width = BAR_WIDTH * lines as f32 / widest as f32;
                 let plus = if lines == 0 {
                     0.0
@@ -183,47 +196,56 @@ impl TeamRoom {
                             ),
                     )
                     // The lines it changed, as a bar against the largest.
-                    .child(
-                        div()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .flex()
-                                    .w(px(BAR_WIDTH))
-                                    .h(px(6.0))
-                                    .rounded_full()
-                                    .bg(colors.muted.opacity(0.6))
-                                    .overflow_hidden()
-                                    .child(div().h_full().w(px(plus)).bg(green))
-                                    .child(div().h_full().w(px(width - plus)).bg(red)),
-                            )
-                            .child(
-                                div()
-                                    .w(px(72.0))
-                                    .flex()
-                                    .justify_end()
-                                    .gap(px(4.0))
-                                    .text_size(px(11.0))
-                                    .font_features(tabular_nums())
-                                    .child(
-                                        div()
-                                            .text_color(green)
-                                            .child(format!("+{}", task.additions)),
-                                    )
-                                    .child(
-                                        div().text_color(red).child(format!("−{}", task.deletions)),
-                                    ),
-                            ),
-                    );
+                    .when(changed, |line| {
+                        line.child(
+                            div()
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .w(px(BAR_WIDTH))
+                                        .h(px(6.0))
+                                        .rounded_full()
+                                        .bg(colors.muted.opacity(0.6))
+                                        .overflow_hidden()
+                                        .child(div().h_full().w(px(plus)).bg(green))
+                                        .child(div().h_full().w(px(width - plus)).bg(red)),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(72.0))
+                                        .flex()
+                                        .justify_end()
+                                        .gap(px(4.0))
+                                        .text_size(px(11.0))
+                                        .font_features(tabular_nums())
+                                        .child(
+                                            div()
+                                                .text_color(green)
+                                                .child(format!("+{}", task.additions)),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(red)
+                                                .child(format!("−{}", task.deletions)),
+                                        ),
+                                ),
+                        )
+                    });
                 // Its files and where its delivery stands (`room_change_card`).
                 div()
                     .flex()
                     .flex_col()
                     .child(line)
-                    .children(self.change_block(index, row, task, cx))
+                    .children(self.task_answer(index, row, task, changed, window, cx))
+                    .children(
+                        changed
+                            .then(|| self.change_block(index, row, task, cx))
+                            .flatten(),
+                    )
                     .into_any_element()
             })
             .collect();

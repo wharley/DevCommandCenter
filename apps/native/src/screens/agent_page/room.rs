@@ -15,10 +15,9 @@ use dcc_core::domain::agent_conversation::home_project_id;
 use dcc_core::domain::team_room::{RouteReason, Teammate, route};
 use gpui::{AppContext, Context, Entity, EventEmitter, Subscription, Window};
 
-use super::execution::agent_execution;
 use crate::data::agent_conversation::ConversationStart;
 use crate::data::agents::{AgentRecord, AgentSession, AgentState};
-use crate::data::desktop_api::{DesktopApi, TurnOptions};
+use crate::data::desktop_api::DesktopApi;
 use crate::data::team_room::{HomeFeed, RoomLine, Speaker, last_answer, merged};
 use crate::i18n::{Args, Translate};
 use crate::screens::composer::Composer;
@@ -63,7 +62,7 @@ pub struct Pending {
 
 pub struct TeamRoom {
     pub(super) sidebar: Entity<Sidebar>,
-    composer: Entity<Composer>,
+    pub(super) composer: Entity<Composer>,
     pub(crate) api: Option<DesktopApi>,
     pub(crate) db_path: PathBuf,
     pub(crate) feeds: Vec<HomeFeed>,
@@ -79,6 +78,8 @@ pub struct TeamRoom {
     pub(crate) list: super::room_list::RoomList,
     /// Answers' markdown, parsed once per line (`room_markdown`).
     pub(super) markdown: std::cell::RefCell<super::room_markdown::LineMarkdown>,
+    /// The task answers opened in full ("Ler tudo"), by key.
+    pub(super) opened_answers: std::cell::RefCell<std::collections::HashSet<String>>,
     /// The change cards' files, read as they show (`room_changes`).
     pub(crate) changes: std::cell::RefCell<super::room_changes::RoomChanges>,
     /// The day's recap, read when its card opens.
@@ -117,6 +118,8 @@ pub struct TeamRoom {
     pub(crate) reacted: HashMap<String, Option<dcc_core::domain::agent_reaction::Reaction>>,
     /// "Guardar como regra?" after a 👎 (`room_reactions`).
     pub(crate) rule: Option<super::room_reactions::RuleDraft>,
+    /// A turn at work shown as it goes (`room_live_poll`, `room_live_turn`).
+    pub(crate) live: super::room_live_poll::RoomLive,
     _subscriptions: [Subscription; 8],
 }
 
@@ -156,9 +159,12 @@ impl TeamRoom {
             // The sources proposed, as their clock reads them.
             cx.observe_global::<crate::data::agent_sources::Sources>(|_, cx| cx.notify()),
             // A frame the shared clock alone asked for keeps the rows.
+            // So does one the live poll asked for when only a turn at work
+            // moved (`room_live_poll`): the tail is drawn fresh anyway.
             cx.observe_self(|room, cx| {
                 let tick = crate::ui::pulse::took_tick(cx.entity_id(), cx);
-                room.list.notified(tick);
+                let quiet = std::mem::take(&mut room.live.quiet);
+                room.list.notified(tick || quiet);
             }),
             // Read by the rows but kept apart from the sidebar: a trigger
             // run (cards, a held trigger) and a pull request review.
@@ -200,6 +206,7 @@ impl TeamRoom {
             ),
             list: Default::default(),
             markdown: Default::default(),
+            opened_answers: Default::default(),
             changes: Default::default(),
             recap: Default::default(),
             recap_open: false,
@@ -219,6 +226,7 @@ impl TeamRoom {
             answered_proposals: Vec::new(),
             reacted: HashMap::new(),
             rule: None,
+            live: Default::default(),
             _subscriptions: subscriptions,
         };
         room.reload_cleanup();
@@ -314,10 +322,13 @@ impl TeamRoom {
                 .iter_mut()
                 .find(|old| old.session_id == feed.session_id)
             {
+                // A live poll may have read further meanwhile: kept.
+                Some(old) if feed.last_sequence() < old.last_sequence() => {}
                 Some(old) => *old = feed,
                 None => self.feeds.push(feed),
             }
         }
+        self.forget_settled();
         let feeds = &self.feeds;
         self.pending.retain(|pending| {
             !feeds.iter().flat_map(|feed| &feed.lines).any(|line| {
@@ -421,8 +432,8 @@ impl TeamRoom {
         if self.sending {
             return false;
         }
-        let (provider, model) = match agent_execution(&agent, self.composer.read(cx), cx) {
-            Ok(execution) => execution,
+        let (provider, model, options) = match self.agent_turn(&agent, cx) {
+            Ok(turn) => turn,
             Err(reason) => {
                 Toaster::error(reason, cx);
                 return false;
@@ -472,17 +483,7 @@ impl TeamRoom {
             );
         }
         cx.notify();
-        let effort = dcc_core::domain::agent_run::agent_run_effort(
-            agent.provider_id.as_deref(),
-            agent.effort.as_deref(),
-        );
-        // A message the person sends runs in the mode set for the agent.
-        let conversation_mode =
-            super::editor_task_mode::wire_mode(agent.tool_access.conversation_approval);
-        // Its own account on its own provider (`provider_runtime::for_agent`).
-        let runtime = (!cfg!(test))
-            .then(|| crate::data::provider_runtime::for_agent(&agent, &provider))
-            .flatten();
+        let runtime = options.provider_runtime.clone();
         cx.spawn(async move |this, cx| {
             let sent = cx
                 .background_executor()
@@ -504,16 +505,6 @@ impl TeamRoom {
                                 })?
                                 .1
                             }
-                        };
-                        let options = TurnOptions {
-                            provider_id: Some(provider.clone()),
-                            model: model.clone(),
-                            effort,
-                            approval_policy: Some(conversation_mode.clone()),
-                            plan_mode: false,
-                            fast_mode: false,
-                            tool_instructions: None,
-                            provider_runtime: runtime,
                         };
                         api.send_turn(&session, &text, None, &options)
                     }

@@ -230,6 +230,8 @@
       "delete": "Remover"
     },
     "report": {
+      "readAll": "Ler tudo",
+      "readLess": "Mostrar menos",
       "title_one": "Relatório · {{count}} tarefa",
       "title_other": "Relatório · {{count}} tarefas",
       "files_one": "{{count}} arquivo",
@@ -571,6 +573,18 @@
       "limit": {
         "text": "{{agent}} chegou ao limite do mês ({{limit}} tokens)",
         "adjust": "Ajustar"
+      },
+      "live": {
+        "stop": "Parar",
+        "stopping": "Parando…",
+        "stopFailed": "Não deu para parar: {{error}}",
+        "reading": "Lendo o pedido…",
+        "thinking": "Pensando…",
+        "writing": "Escrevendo…",
+        "long": "Ainda trabalhando: tarefas longas levam um tempo",
+        "stopped": "{{agent}} parou antes de terminar",
+        "retry": "Tentar de novo",
+        "retryFailed": "Não deu para tentar de novo: {{error}}"
       }
     },
     "team": {
@@ -738,7 +752,11 @@
         "browser": "Navegador do DCC",
         "computer": "Uso do computador",
         "device": "Simulador iOS",
-        "delegation": "Delegar tarefas"
+        "delegation": "Delegar tarefas",
+        "github": "GitHub (pelo DCC)"
+      },
+      "groupHints": {
+        "github": "Lê PRs, checks e deploys pelo gh em que você está logado no DCC; nunca escreve no GitHub."
       }
     }
   },

@@ -128,7 +128,7 @@ impl TeamRoom {
                             )),
                     )
                     .child(self.answer_footer(index, line, &group, steps.is_some(), cx))
-                    .children(self.report_card(index, line, cx))
+                    .children(self.report_card(index, line, window, cx))
                     .children(self.rule_field(line, cx)),
             )
             .into_any_element()
@@ -141,6 +141,8 @@ impl Render for TeamRoom {
         // The rows are read again only when the room's data moved, not on a
         // frame the shared clock alone asked for (`room_list`).
         let scope = self.scope();
+        // A conversation at work is read as it goes while this draws.
+        self.watch_live(cx);
         if self.list.needs_build(&scope) {
             let model = self.build_rows(cx);
             {

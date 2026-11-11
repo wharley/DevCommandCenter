@@ -230,6 +230,8 @@
       "delete": "Remove"
     },
     "report": {
+      "readAll": "Read all",
+      "readLess": "Show less",
       "title_one": "Report · {{count}} task",
       "title_other": "Report · {{count}} tasks",
       "files_one": "{{count}} file",
@@ -571,6 +573,18 @@
       "limit": {
         "text": "{{agent}} reached its monthly limit ({{limit}} tokens)",
         "adjust": "Adjust"
+      },
+      "live": {
+        "stop": "Stop",
+        "stopping": "Stopping…",
+        "stopFailed": "Couldn't stop: {{error}}",
+        "reading": "Reading the request…",
+        "thinking": "Thinking…",
+        "writing": "Writing…",
+        "long": "Still working: long tasks take a while",
+        "stopped": "{{agent}} stopped before finishing",
+        "retry": "Try again",
+        "retryFailed": "Couldn't try again: {{error}}"
       }
     },
     "team": {
@@ -738,7 +752,11 @@
         "browser": "DCC's browser",
         "computer": "Computer use",
         "device": "iOS Simulator",
-        "delegation": "Delegate tasks"
+        "delegation": "Delegate tasks",
+        "github": "GitHub (through DCC)"
+      },
+      "groupHints": {
+        "github": "Reads pull requests, checks and deploys through the gh you are signed into in DCC; never writes to GitHub."
       }
     }
   },

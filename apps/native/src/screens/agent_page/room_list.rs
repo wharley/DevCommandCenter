@@ -91,6 +91,21 @@ impl RoomList {
         self.built = true;
     }
 
+    /// One row changed height on its own (an answer opened in place).
+    pub(crate) fn remeasure_row(&self, index: usize) {
+        self.state.remeasure_items(index..index + 1);
+    }
+
+    /// The live part under the rows moved on its own (a turn at work):
+    /// measured again, the rows kept (`room_live_poll`).
+    pub(crate) fn remeasure_tail(&self) {
+        if !self.built {
+            return;
+        }
+        let tail = self.model.rows.len();
+        self.state.remeasure_items(tail..tail + 1);
+    }
+
     /// Back to the bottom, following it (the person just sent).
     pub(crate) fn follow(&self) {
         self.state.set_follow_mode(FollowMode::Tail);

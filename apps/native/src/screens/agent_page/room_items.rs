@@ -71,7 +71,7 @@ impl TeamRoom {
         let model = self.list.model();
         let content = match model.rows.get(index) {
             Some(row) => self.row(row, &model, window, cx),
-            None => self.tail(&model, cx),
+            None => self.tail(&model, window, cx),
         };
         let tight = matches!(model.rows.get(index), Some(Row::Line { first: false, .. }));
         item(content, index == 0, index >= model.rows.len(), tight)
@@ -163,7 +163,12 @@ impl TeamRoom {
     }
 
     /// What holds now, after everything: read fresh on each frame it shows.
-    fn tail(&mut self, model: &RoomModel, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn tail(
+        &mut self,
+        model: &RoomModel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let agents = &model.agents;
         let whole = self.focus.is_none();
         let geral = self.is_geral();
@@ -191,6 +196,11 @@ impl TeamRoom {
         rows.extend(self.at_work_rows(agents, cx));
         // A trigger held for the day, said here.
         rows.extend(self.held_rows(agents, cx));
+        // The room's own conversations at work, as they go
+        // (`room_live_turn`), and the last turn that stopped.
+        let (live, working) = self.live_turn_rows(agents, &model.mentions, window, cx);
+        rows.extend(live);
+        rows.extend(self.stopped_rows(agents, &working, cx));
         // An approval is answered in the dock above the field; its agent
         // needs no "precisa de você".
         let asking: Vec<String> = self
@@ -202,8 +212,11 @@ impl TeamRoom {
             .busy(cx)
             .into_iter()
             .filter(|(agent, _)| self.shows(&agent.id))
-            .filter(|(agent, state)| {
-                !(*state == AgentState::NeedsYou && asking.contains(&agent.id))
+            // An agent shown at work live needs no "está trabalhando…".
+            .filter(|(agent, state)| match state {
+                AgentState::NeedsYou => !asking.contains(&agent.id),
+                AgentState::Working => !working.contains(&agent.id),
+                _ => true,
             })
         {
             rows.push(self.busy_line(&agent, state, cx));

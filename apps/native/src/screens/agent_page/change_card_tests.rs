@@ -150,6 +150,7 @@ fn room_with_task(
         deletions: 5,
         seconds: Some(360),
         session_id: Some("child".into()),
+        answer: None,
     };
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {

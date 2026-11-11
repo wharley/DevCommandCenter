@@ -41,6 +41,9 @@ pub struct TaskReport {
     /// The session that ran it, for its turns' captures once the checkout
     /// is gone (`task_changes`).
     pub session_id: Option<String>,
+    /// What the task answered, last: the whole result of one that changed
+    /// nothing (a survey, an analysis).
+    pub answer: Option<String>,
 }
 
 fn seconds_between(start: Option<&str>, end: &str) -> Option<i64> {
@@ -84,6 +87,12 @@ pub fn by_delegation(
                     .child_session_id
                     .as_ref()
                     .map(|session| session.0.clone()),
+                answer: delegation
+                    .result_summary
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|answer| !answer.is_empty())
+                    .map(str::to_string),
             };
             (delegation.id.0.clone(), report)
         })

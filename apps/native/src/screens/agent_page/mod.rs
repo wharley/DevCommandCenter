@@ -64,9 +64,9 @@ mod room_change_card;
 mod room_changes;
 mod room_checkins;
 mod room_cleanup;
+mod room_composer;
 mod room_day;
 mod room_delivery;
-mod room_composer;
 mod room_dock;
 mod room_failure;
 #[cfg(test)]
@@ -84,6 +84,12 @@ mod room_list;
 #[cfg(test)]
 mod room_list_tests;
 mod room_live;
+mod room_live_actions;
+mod room_live_poll;
+#[cfg(test)]
+mod room_live_tests;
+mod room_live_text;
+mod room_live_turn;
 mod room_markdown;
 mod room_mentions;
 mod room_proposals;
@@ -105,6 +111,7 @@ mod room_sources;
 mod room_steps;
 #[cfg(test)]
 mod room_steps_tests;
+mod room_task_answer;
 #[cfg(test)]
 mod room_tests;
 mod room_timeline;

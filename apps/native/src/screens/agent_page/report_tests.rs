@@ -39,6 +39,7 @@ fn an_answer_to_tasks_carries_their_report(cx: &mut TestAppContext) {
         deletions: 4,
         seconds: Some(360),
         session_id: None,
+        answer: None,
     };
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {
@@ -91,4 +92,87 @@ fn an_answer_to_tasks_carries_their_report(cx: &mut TestAppContext) {
     cx.simulate_click(row.center(), Modifiers::none());
     cx.run_until_parked();
     assert_eq!(opened.borrow().as_slice(), ["w-campo"]);
+}
+
+/// A task that changed nothing is its answer: the room shows it in place,
+/// folded with "Ler tudo", and no zeros nor delivery under it.
+#[gpui::test]
+fn a_task_without_changes_shows_its_answer_in_place(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("dev".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(1400.0)));
+    let mut dev = super::editor_role::blank_agent();
+    dev.id = "dev".into();
+    dev.name = "Dev".into();
+    let answer = (1..=12)
+        .map(|n| format!("- PR #{n} mesclado e em produção"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let report = TaskReport {
+        title: "Levantar merges e deploys".into(),
+        state: ReportState::TurnEnded,
+        task_id: Some("w-merges".into()),
+        provider_id: "codex".into(),
+        agent_id: Some("dev".into()),
+        files: 0,
+        additions: 0,
+        deletions: 0,
+        seconds: Some(120),
+        session_id: None,
+        answer: Some(format!("Confirmados 12 PRs.\n\n{answer}")),
+    };
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![dev],
+                    task_reports: [("t-1".to_string(), report)].into(),
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.open_room(None, cx);
+    });
+    cx.run_until_parked();
+    page.update(cx, |page, cx| {
+        let room = page.room.as_ref().unwrap().0.clone();
+        room.update(cx, |room, cx| {
+            let mut feed = HomeFeed::new("dev", "s-home");
+            feed.lines = vec![RoomLine {
+                key: "s-home:t".into(),
+                agent_id: "dev".into(),
+                session_id: "s-home".into(),
+                speaker: Speaker::Agent,
+                text: "O levantamento terminou.".into(),
+                at: "2026-11-09T10:06:00Z".into(),
+                receipt: None,
+                tasks: vec!["t-1".into()],
+                steps: Default::default(),
+            }];
+            room.take(vec![feed]);
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    let folded = cx.debug_bounds("room-answer-text-0-0").unwrap();
+    // No delivery footer for a task with nothing to deliver.
+    assert!(cx.debug_bounds("room-report-delivery-0-0").is_none());
+    let more = cx.debug_bounds("room-answer-more-0-0").unwrap();
+    cx.simulate_click(more.center(), Modifiers::none());
+    cx.run_until_parked();
+    let open = cx.debug_bounds("room-answer-text-0-0").unwrap();
+    assert!(
+        open.size.height > folded.size.height,
+        "Ler tudo opens the rest"
+    );
 }

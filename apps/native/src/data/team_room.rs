@@ -6,10 +6,12 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use dcc_core::domain::agent_reaction::Reaction;
 use dcc_core::domain::session::{SessionEventRecord, SessionId};
 pub use dcc_core::domain::team_room_lines::{Receipt, RoomLine, Speaker, last_answer, lines_of};
+use dcc_core::domain::team_room_live::{TurnNow, turn_now};
 use dcc_core::domain::timeline::activity::total_turn_tokens;
 use dcc_core::domain::timeline::project_session;
 use dcc_core::ports::UsageRepo;
@@ -23,10 +25,14 @@ pub struct HomeFeed {
     pub session_id: String,
     /// The conversation's `updated_at` when it was read.
     pub read_at: String,
-    events: Vec<SessionEventRecord>,
+    /// Shared, so a poll off the UI thread takes them without a copy
+    /// (`team_room_poll`).
+    pub(crate) events: Arc<Vec<SessionEventRecord>>,
     pub lines: Vec<RoomLine>,
     /// The person's 👍 / 👎 by answer (`agent_reaction`).
     pub reactions: HashMap<String, Reaction>,
+    /// The last turn now: at work, stopped, or neither (`team_room_live`).
+    pub now: Arc<TurnNow>,
 }
 
 impl HomeFeed {
@@ -42,9 +48,29 @@ impl HomeFeed {
     #[cfg(test)]
     pub fn with_events(agent_id: &str, session_id: &str, events: Vec<SessionEventRecord>) -> Self {
         Self {
-            events,
+            events: Arc::new(events),
             ..Self::new(agent_id, session_id)
         }
+    }
+
+    /// A conversation as read, its lines and its last turn projected from
+    /// `events` as a refresh would (no tokens), for tests.
+    #[cfg(test)]
+    pub fn projected(agent_id: &str, session_id: &str, events: Vec<SessionEventRecord>) -> Self {
+        let mut feed = Self::with_events(agent_id, session_id, events);
+        feed.project(&HashMap::new());
+        feed
+    }
+
+    /// The last event read; a read with more is the newer one.
+    pub fn last_sequence(&self) -> u64 {
+        self.events.last().map_or(0, |event| event.sequence)
+    }
+
+    fn project(&mut self, tokens: &HashMap<String, u64>) {
+        let messages = project_session(&self.events, &self.session_id);
+        self.lines = lines_of(&self.agent_id, &self.session_id, &messages, tokens);
+        self.now = Arc::new(turn_now(&messages));
     }
 
     /// The approval the conversation waits on, if any (`room_approvals`).
@@ -62,9 +88,17 @@ impl HomeFeed {
     /// Reads the events after the ones it has and its turns' tokens.
     pub fn refresh(mut self, db: &Path, updated_at: &str) -> anyhow::Result<Self> {
         let sessions = SqliteSessionRepo::open_read_only(db)?;
-        let after = self.events.last().map_or(0, |event| event.sequence);
-        let fresh = super::conversation::events_after(&sessions, &self.session_id, after)?;
-        self.events.extend(fresh);
+        let fresh =
+            super::conversation::events_after(&sessions, &self.session_id, self.last_sequence())?;
+        Arc::make_mut(&mut self.events).extend(fresh);
+        self.read_all(&sessions)?;
+        self.read_at = updated_at.to_string();
+        Ok(self)
+    }
+
+    /// The lines, the last turn, the tokens and the reactions from the
+    /// events read.
+    pub(crate) fn read_all(&mut self, sessions: &SqliteSessionRepo) -> anyhow::Result<()> {
         let id = SessionId(self.session_id.clone());
         let tokens: HashMap<String, u64> = block_on(sessions.list_session_turn_usage(&id))?
             .iter()
@@ -72,16 +106,14 @@ impl HomeFeed {
                 total_turn_tokens(&turn.models).map(|totals| (turn.turn_id.clone(), totals.total))
             })
             .collect();
-        let messages = project_session(&self.events, &self.session_id);
-        self.lines = lines_of(&self.agent_id, &self.session_id, &messages, &tokens);
+        self.project(&tokens);
         // A database older than the reactions has none yet.
         self.reactions = sessions
             .session_reactions(&self.session_id)
             .unwrap_or_default()
             .into_iter()
             .collect();
-        self.read_at = updated_at.to_string();
-        Ok(self)
+        Ok(())
     }
 }
 

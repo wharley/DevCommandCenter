@@ -7,7 +7,7 @@ use crate::domain::timeline::activity::{
     classify_tool_action, mcp_tool_label, summarize_turn_work, tool_target, ToolKind,
     SUMMARY_KIND_ORDER,
 };
-use crate::domain::timeline::{Annotation, TimelineMessage};
+use crate::domain::timeline::{Annotation, TimelineMessage, ToolCall};
 
 /// A turn's tool calls by kind (edits count files), in the summary's order.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -69,28 +69,31 @@ pub fn steps_of(messages: &[TimelineMessage], turn: &str) -> Vec<Step> {
         .filter(|message| message.turn_id.as_deref() == Some(turn))
         .flat_map(|message| &message.annotations)
         .filter_map(|annotation| match annotation {
-            Annotation::ToolCall(call) => {
-                let kind = classify_tool_action(&call.action);
-                let target = tool_target(call).or_else(|| match kind {
-                    ToolKind::Mcp => Some(mcp_tool_label(&call.action)),
-                    ToolKind::Other => Some(call.action.clone()),
-                    _ => None,
-                });
-                Some(Step {
-                    kind,
-                    target,
-                    failed: call.failure.is_some(),
-                })
-            }
+            Annotation::ToolCall(call) => Some(step_of(call)),
             _ => None,
         })
         .collect()
 }
 
+/// One tool call as a step: its kind and what it acted on (also read by
+/// the turn at work, `team_room_live`).
+pub fn step_of(call: &ToolCall) -> Step {
+    let kind = classify_tool_action(&call.action);
+    let target = tool_target(call).or_else(|| match kind {
+        ToolKind::Mcp => Some(mcp_tool_label(&call.action)),
+        ToolKind::Other => Some(call.action.clone()),
+        _ => None,
+    });
+    Step {
+        kind,
+        target,
+        failed: call.failure.is_some(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::timeline::ToolCall;
 
     fn call(id: &str, action: &str, file: Option<&str>, failed: bool) -> Annotation {
         Annotation::ToolCall(ToolCall {

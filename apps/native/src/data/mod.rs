@@ -122,6 +122,7 @@ pub mod task_proposal;
 pub mod task_reports;
 pub mod tasks;
 pub mod team_room;
+pub mod team_room_poll;
 pub mod terminal_api;
 pub mod text_match;
 pub mod time;
