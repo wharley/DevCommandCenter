@@ -137,7 +137,7 @@ pub fn handoff_block(teammates: &[&str], direct: &[&str]) -> Option<String> {
         "The person decides whether to pass it on; never contact a teammate yourself.".to_string()
     } else {
         format!(
-            "The person lets you pass to {} yourself: that line goes to them at once, with your answer as their brief — so end with it only when they should take over now. For anyone else the person decides; never contact a teammate any other way.",
+            "The person lets you pass to {} yourself: that line goes to them at once, with your answer as their brief — so end with it only when they can act on it now. If it still needs something from the person first (which PR, a choice, a missing detail), ask the person and leave the @ line out until they answer. For anyone else the person decides; never contact a teammate any other way.",
             direct.join(", ")
         )
     };

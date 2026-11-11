@@ -110,6 +110,7 @@ fn running() -> TaskActivity {
         last_interaction_at: None,
         waiting_session_ids: Vec::new(),
         running_session_ids: vec!["child".into()],
+        completed_by_session: Vec::new(),
     }
 }
 

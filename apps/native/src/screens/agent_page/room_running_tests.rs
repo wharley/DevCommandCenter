@@ -150,6 +150,7 @@ fn a_projects_task_opened_from_geral_runs_in_its_room(cx: &mut TestAppContext) {
         last_interaction_at: None,
         waiting_session_ids: Vec::new(),
         running_session_ids: vec!["s-task".into()],
+        completed_by_session: Vec::new(),
     };
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {
@@ -238,6 +239,7 @@ fn a_projects_task_opened_from_geral_ends_as_a_card_in_its_room(cx: &mut TestApp
         last_interaction_at: None,
         waiting_session_ids: Vec::new(),
         running_session_ids: Vec::new(),
+        completed_by_session: vec![("s-task".into(), chrono::Utc::now().to_rfc3339())],
     };
     page.update(cx, |page, cx| {
         page.sidebar.update(cx, |sidebar, cx| {

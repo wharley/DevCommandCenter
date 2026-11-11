@@ -4,6 +4,7 @@ mod agent_budget;
 mod agent_conversation;
 mod agent_memory;
 mod agent_proposals;
+mod agent_recent_work;
 mod agent_reactions;
 mod agent_reads;
 mod agent_rooms;

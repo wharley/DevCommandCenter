@@ -52,6 +52,7 @@ fn running(state: &mut SidebarState, id: &str) {
             last_interaction_at: None,
             waiting_session_ids: vec![],
             running_session_ids: vec![],
+            completed_by_session: Vec::new(),
         },
     );
 }

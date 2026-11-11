@@ -57,6 +57,12 @@ impl SessionCommandState {
             Some(room) => format!("{conversation}\n\n{room}"),
             None => conversation,
         };
+        // What it did in tasks since its last turn here, which this
+        // conversation did not see.
+        let conversation = match self.recent_work(session_id, agent_id)? {
+            Some(work) => format!("{conversation}\n\n{work}"),
+            None => conversation,
+        };
         Ok(Some(match memory {
             Some(memory) => format!("{conversation}\n\n{memory}"),
             None => conversation,

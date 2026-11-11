@@ -57,6 +57,34 @@ impl SqliteSessionRepo {
         .ok()
     }
 
+    /// When `session_id`'s last turn ended (completed or stopped), without
+    /// reading its history.
+    pub fn last_turn_end(&self, session_id: &SessionId) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(repository_error)?;
+        conn.query_row(
+            "SELECT occurred_at FROM dcc_session_events
+              WHERE session_id = ?1
+                AND json_extract(kind_json, '$.type') IN ('turn_completed', 'turn_aborted')
+              ORDER BY sequence DESC LIMIT 1",
+            params![session_id.0],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(repository_error)
+    }
+
+    /// A task's name, as the sidebar shows it.
+    pub fn workspace_name(&self, workspace_id: &str) -> Option<String> {
+        let conn = self.conn.lock().ok()?;
+        conn.query_row(
+            "SELECT name FROM dcc_workspaces WHERE id = ?1",
+            params![workspace_id],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .filter(|name| !name.trim().is_empty())
+    }
+
     /// What tells a conversation's history changed, without reading it:
     /// how many events, the highest sequence and the newest row (a rewind
     /// that drops events and writes new ones moves the last). The phone's
@@ -97,5 +125,6 @@ mod tests {
         assert_eq!(repo.session_room(&SessionId("s-2".into())).unwrap(), None);
         assert_eq!(repo.project_name_and_path("nope"), None);
         assert_eq!(repo.session_event_stamp(&session).unwrap(), (0, 0, 0));
+        assert_eq!(repo.last_turn_end(&session).unwrap(), None);
     }
 }

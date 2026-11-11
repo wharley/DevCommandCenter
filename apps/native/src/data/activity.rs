@@ -18,6 +18,10 @@ pub struct TaskActivity {
     /// Conversations blocked on the person, the one to open first.
     pub waiting_session_ids: Vec<String>,
     pub running_session_ids: Vec<String>,
+    /// When each conversation's last turn ended, by session: what one
+    /// conversation of the task did, apart from the others in it (an
+    /// agent called into the task is not the task's own turn).
+    pub completed_by_session: Vec<(String, String)>,
 }
 
 impl TaskActivity {
@@ -30,6 +34,19 @@ impl TaskActivity {
 
     pub fn is_running(&self) -> bool {
         self.activity.state == AgentActivityState::Active
+    }
+
+    /// That conversation's turn is open (running or waiting on the person).
+    pub fn session_open(&self, session_id: &str) -> bool {
+        self.running_session_ids.iter().any(|id| id == session_id)
+    }
+
+    /// When that conversation's last turn ended.
+    pub fn session_completed_at(&self, session_id: &str) -> Option<&str> {
+        self.completed_by_session
+            .iter()
+            .find(|(id, _)| id == session_id)
+            .map(|(_, at)| at.as_str())
     }
 
     pub fn waiting_for_permission(&self) -> bool {
@@ -71,6 +88,13 @@ pub fn task_activity(summaries: &[WorkspaceSessionSummary]) -> Option<TaskActivi
         running_session_ids: running
             .iter()
             .map(|(index, _)| summaries[*index].session.id.0.clone())
+            .collect(),
+        completed_by_session: summaries
+            .iter()
+            .filter_map(|summary| {
+                let at = summary.last_turn_completed_at.clone()?;
+                Some((summary.session.id.0.clone(), at))
+            })
             .collect(),
     })
 }

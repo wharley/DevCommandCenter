@@ -12,6 +12,7 @@ use crate::agent::AgentAvatarView;
 use crate::data::agents::AgentRecord;
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
+use crate::ui::Icon;
 
 /// A teammate the editor offers: id, name and mascot.
 pub(crate) type Teammate = (String, String, AgentAvatar);
@@ -66,11 +67,14 @@ impl AgentEditor {
                     .border_1()
                     .text_size(px(12.0))
                     .cursor_pointer()
+                    // Picked reads at a glance: the ring, the weight and a check;
+                    // not picked, the face and name step back.
                     .map(|chip| {
                         if selected {
-                            chip.border_color(colors.ring)
+                            chip.border_color(colors.foreground.opacity(0.55))
                                 .bg(colors.accent)
                                 .text_color(colors.foreground)
+                                .font_weight(gpui::FontWeight::MEDIUM)
                         } else {
                             chip.border_color(colors.border.opacity(0.7))
                                 .text_color(colors.muted_foreground)
@@ -81,13 +85,22 @@ impl AgentEditor {
                         editor.toggle_call(&id);
                         cx.notify();
                     }))
-                    .child(AgentAvatarView::new(
-                        SharedString::from(format!("agent-editor-call-face-{index}")),
-                        &avatar,
-                        None,
-                        20.0,
+                    .child(div().when(!selected, |face| face.opacity(0.5)).child(
+                        AgentAvatarView::new(
+                            SharedString::from(format!("agent-editor-call-face-{index}")),
+                            &avatar,
+                            None,
+                            20.0,
+                        ),
                     ))
                     .child(name)
+                    .when(selected, |chip| {
+                        chip.child(
+                            div()
+                                .debug_selector(move || format!("agent-editor-call-check-{index}"))
+                                .child(Icon::new("check").size(13.0).stroke(2.4)),
+                        )
+                    })
                     .into_any_element()
             })
             .collect();
