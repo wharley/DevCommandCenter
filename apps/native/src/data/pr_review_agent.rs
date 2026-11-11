@@ -212,8 +212,24 @@ pub fn thread_reply_prompt(
     )
 }
 
+/// The answer's JSON object: the first one that parses whole, read by its own
+/// braces and quotes, so a code fence (```) inside a string — a summary
+/// quoting code — never cuts it; the fenced text, then the whole text, only
+/// when no object parses.
 pub(crate) fn parse_json(response: &str) -> Result<Value, String> {
-    serde_json::from_str(fenced_json(response)).map_err(|error| error.to_string())
+    let fenced = fenced_json(response);
+    for (start, _) in response.match_indices('{') {
+        let mut objects =
+            serde_json::Deserializer::from_str(&response[start..]).into_iter::<Value>();
+        if let Some(Ok(value)) = objects.next()
+            && value.is_object()
+        {
+            return Ok(value);
+        }
+    }
+    serde_json::from_str(fenced)
+        .or_else(|_| serde_json::from_str(response.trim()))
+        .map_err(|error: serde_json::Error| error.to_string())
 }
 
 /// `parseAgentReply`
@@ -392,6 +408,20 @@ mod tests {
         ));
         assert!(files.contains("- src/huge.rs (+9000 −0), no patch from the forge"));
         assert!(is_noise("web/dist/app.js") && is_noise("yarn.lock") && !is_noise("src/lib.rs"));
+    }
+
+    #[test]
+    fn a_code_fence_inside_the_summary_does_not_cut_the_answer() {
+        let response = "```json\n{\"verdict\":\"request_changes\",\"summary\":\"Peça mudanças.\\n\\n```ts\\nconst x = 1;\\n```\\nfim\",\"comments\":[]}\n```";
+        let review = parse_review(response, &detail()).unwrap();
+        assert!(review.summary.contains("const x = 1;"));
+        assert_eq!(
+            review.verdict,
+            Some(super::super::pr_review_verdict::Verdict::RequestChanges)
+        );
+        // Text around the object, and a brace in prose before it.
+        let chatty = "Aqui vai {nota}:\n{\"summary\":\"ok\",\"comments\":[]}\nFim.";
+        assert_eq!(parse_review(chatty, &detail()).unwrap().summary, "ok");
     }
 
     #[test]
