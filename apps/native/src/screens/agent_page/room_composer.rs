@@ -206,7 +206,7 @@ impl TeamRoom {
                     .child(self.input.clone()),
             )
             .child(bar)
-            .children(self.mention_popup(cx));
+            .children(self.mention_popup(window, cx));
         div()
             .flex_none()
             .px(px(24.0))

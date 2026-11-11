@@ -8,6 +8,7 @@ use gpui::{
     prelude::*, px,
 };
 
+use super::agent_card::card_trigger;
 use super::room::TeamRoom;
 use crate::agent::AgentAvatarView;
 use crate::data::agents::AgentRecord;
@@ -75,11 +76,19 @@ impl TeamRoom {
                 true => div()
                     .debug_selector(move || format!("room-face-{index}"))
                     .flex_none()
-                    .child(AgentAvatarView::new(
-                        SharedString::from(format!("room-face-{index}")),
-                        &agent.avatar,
-                        None,
-                        FACE,
+                    .child(card_trigger(
+                        self,
+                        format!("room-face-{index}"),
+                        &agent.id,
+                        true,
+                        AgentAvatarView::new(
+                            SharedString::from(format!("room-face-{index}")),
+                            &agent.avatar,
+                            None,
+                            FACE,
+                        ),
+                        window,
+                        cx,
                     ))
                     .into_any_element(),
                 // The face's column, empty: the words keep their line.
@@ -93,17 +102,24 @@ impl TeamRoom {
                     .flex_col()
                     .gap(px(4.0))
                     .children(when.map(|when| {
+                        let name = card_trigger(
+                            self,
+                            format!("room-name-{index}"),
+                            &agent.id,
+                            true,
+                            div()
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(colors.foreground)
+                                .child(agent.name.clone()),
+                            window,
+                            cx,
+                        );
                         div()
                             .flex()
                             .items_baseline()
                             .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(13.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(colors.foreground)
-                                    .child(agent.name.clone()),
-                            )
+                            .child(name)
                             .child(
                                 div()
                                     .text_size(px(11.0))

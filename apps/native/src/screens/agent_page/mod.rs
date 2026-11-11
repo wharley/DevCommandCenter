@@ -22,6 +22,11 @@ use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
 use crate::ui::{Icon, Tracked};
 
+mod agent_card;
+mod agent_card_hosts;
+mod agent_card_view;
+#[cfg(test)]
+mod agent_card_tests;
 mod agent_room_switch;
 #[cfg(test)]
 mod chain_tests;
@@ -206,6 +211,8 @@ pub struct AgentPage {
     pub(crate) editing_proposal: Option<dcc_core::domain::agent_proposal::AgentProposal>,
     /// What the room's field starts with when it opens ("@Revisor ").
     room_draft: Option<String>,
+    /// The agent card open on a face in the team's column (`agent_card`).
+    pub(crate) card: agent_card::AgentCards,
     _sidebar: Subscription,
     /// Its mascot follows the blink and the triggers; its sources follow
     /// their clock.
@@ -279,6 +286,7 @@ impl AgentPage {
             tab: Default::default(),
             editing_proposal: None,
             room_draft: None,
+            card: Default::default(),
             _sidebar: observe,
             _mascot: [
                 cx.observe_global::<crate::agent::MascotBlink>(|_, cx| cx.notify()),

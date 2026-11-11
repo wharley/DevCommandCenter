@@ -9,6 +9,7 @@ use std::ops::Range;
 
 use gpui::{AnyElement, BoxShadow, Context, FontWeight, SharedString, div, point, prelude::*, px};
 
+use super::agent_card::card_trigger;
 use super::room::TeamRoom;
 use crate::agent::AgentAvatarView;
 use crate::data::agent_mentions::MentionNames;
@@ -50,7 +51,7 @@ pub(crate) fn matching(agents: &[AgentRecord], query: &str) -> Vec<String> {
 
 /// What the list says an agent does: the Reviewer in the app's words, any
 /// other agent by the start of its role.
-fn what_it_does(agent: &AgentRecord, cx: &gpui::App) -> SharedString {
+pub(super) fn what_it_does(agent: &AgentRecord, cx: &gpui::App) -> SharedString {
     if agent.preset.as_deref() == Some(REVIEWER_PRESET) {
         return cx.t("agents.room.mention.reviewer");
     }
@@ -148,7 +149,11 @@ impl TeamRoom {
         }
     }
 
-    pub(super) fn mention_popup(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn mention_popup(
+        &self,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let menu = self.mention.as_ref()?;
         let colors = cx.theme().colors.clone();
         let agents = self.sidebar.read(cx).agents().to_vec();
@@ -159,60 +164,67 @@ impl TeamRoom {
             .filter_map(|(index, id)| {
                 let agent = agents.iter().find(|agent| &agent.id == id)?;
                 let selected = index == menu.selected;
-                Some(
-                    div()
-                        .id(SharedString::from(format!("room-mention-{index}")))
-                        .debug_selector(move || format!("room-mention-{index}"))
-                        .flex()
-                        .items_center()
-                        .gap(px(10.0))
-                        .px(px(10.0))
-                        .py(px(6.0))
-                        .rounded(px(8.0))
-                        .cursor_pointer()
-                        .when(selected, |row| row.bg(colors.muted))
-                        .on_mouse_move(cx.listener(move |room, _, _, cx| {
-                            if let Some(menu) = &mut room.mention
-                                && menu.selected != index
-                            {
-                                menu.selected = index;
-                                cx.notify();
-                            }
-                        }))
-                        .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
-                            window.prevent_default()
-                        })
-                        .on_click(
-                            cx.listener(move |room, _, _, cx| room.accept_mention(Some(index), cx)),
-                        )
-                        .child(AgentAvatarView::new(
-                            SharedString::from(format!("room-mention-face-{index}")),
-                            &agent.avatar,
-                            None,
-                            24.0,
-                        ))
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .text_size(px(13.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(colors.foreground)
-                                        .child(format!("@{}", agent.name)),
-                                )
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_size(px(11.0))
-                                        .text_color(colors.muted_foreground)
-                                        .child(what_it_does(agent, cx)),
-                                ),
-                        )
-                        .into_any_element(),
-                )
+                let row = div()
+                    .id(SharedString::from(format!("room-mention-{index}")))
+                    .debug_selector(move || format!("room-mention-{index}"))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .px(px(10.0))
+                    .py(px(6.0))
+                    .rounded(px(8.0))
+                    .cursor_pointer()
+                    .when(selected, |row| row.bg(colors.muted))
+                    .on_mouse_move(cx.listener(move |room, _, _, cx| {
+                        if let Some(menu) = &mut room.mention
+                            && menu.selected != index
+                        {
+                            menu.selected = index;
+                            cx.notify();
+                        }
+                    }))
+                    .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                        window.prevent_default()
+                    })
+                    .on_click(
+                        cx.listener(move |room, _, _, cx| room.accept_mention(Some(index), cx)),
+                    )
+                    .child(AgentAvatarView::new(
+                        SharedString::from(format!("room-mention-face-{index}")),
+                        &agent.avatar,
+                        None,
+                        24.0,
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(colors.foreground)
+                                    .child(format!("@{}", agent.name)),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(11.0))
+                                    .text_color(colors.muted_foreground)
+                                    .child(what_it_does(agent, cx)),
+                            ),
+                    );
+                // Hover only: a click picks the agent.
+                Some(card_trigger(
+                    self,
+                    format!("room-mention-{index}"),
+                    &agent.id,
+                    false,
+                    row,
+                    window,
+                    cx,
+                ))
             })
             .collect();
         let list = div()

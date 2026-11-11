@@ -17,6 +17,7 @@ use dcc_core::domain::team_room_live::{
 };
 use gpui::{AnyElement, Context, FontWeight, SharedString, Window, div, prelude::*, px};
 
+use super::agent_card::card_trigger;
 use super::room::{RoomEvent, TeamRoom};
 use super::room_live_text::{LiveText, clock_text};
 use crate::agent::{AgentAvatarView, Mood, MoodAvatarView};
@@ -114,13 +115,19 @@ impl TeamRoom {
             .flex()
             .items_baseline()
             .gap(px(8.0))
-            .child(
+            .child(card_trigger(
+                self,
+                format!("room-live-name-{index}"),
+                &agent.id,
+                true,
                 div()
                     .text_size(px(13.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(colors.foreground)
                     .child(agent.name.clone()),
-            )
+                window,
+                cx,
+            ))
             .child(
                 div()
                     .debug_selector(move || format!("room-live-clock-{index}"))
@@ -162,7 +169,11 @@ impl TeamRoom {
             .flex()
             .items_start()
             .gap(px(10.0))
-            .child(
+            .child(card_trigger(
+                self,
+                format!("room-live-face-{index}"),
+                &agent.id,
+                true,
                 MoodAvatarView::new(
                     SharedString::from(format!("room-live-face-{index}")),
                     &agent.avatar,
@@ -170,7 +181,9 @@ impl TeamRoom {
                     32.0,
                 )
                 .on_clock(),
-            )
+                window,
+                cx,
+            ))
             .child(
                 div()
                     .flex_1()

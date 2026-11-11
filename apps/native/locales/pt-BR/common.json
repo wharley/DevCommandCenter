@@ -625,6 +625,12 @@
         "idle": "Disponível"
       }
     },
+    "card": {
+      "runsOn": "Roda em",
+      "rooms": "Salas",
+      "message": "Mensagem",
+      "profile": "Ver perfil"
+    },
     "rooms": {
       "running": "Rodando nesta sala",
       "waiting": "Esperando você nesta sala",

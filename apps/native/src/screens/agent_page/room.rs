@@ -128,6 +128,8 @@ pub struct TeamRoom {
     pub(crate) drafts: super::room_drafts::RoomDrafts,
     /// The new lines under the person scrolled up (`room_jump`).
     pub(crate) jump: super::room_jump::Jump,
+    /// The agent card open on a face or a name (`agent_card`).
+    pub(crate) card: super::agent_card::AgentCards,
     _subscriptions: [Subscription; 8],
 }
 
@@ -238,6 +240,7 @@ impl TeamRoom {
             live: Default::default(),
             drafts: Default::default(),
             jump: Default::default(),
+            card: Default::default(),
             _subscriptions: subscriptions,
         };
         room.reload_cleanup();

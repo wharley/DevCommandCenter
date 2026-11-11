@@ -625,6 +625,12 @@
         "idle": "Available"
       }
     },
+    "card": {
+      "runsOn": "Runs on",
+      "rooms": "Rooms",
+      "message": "Message",
+      "profile": "View profile"
+    },
     "rooms": {
       "running": "Running in this room",
       "waiting": "Waiting on you in this room",

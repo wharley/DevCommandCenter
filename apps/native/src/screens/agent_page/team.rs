@@ -6,6 +6,7 @@ use gpui::{
     AnyElement, AppContext, Context, IntoElement, Render, SharedString, Window, div, prelude::*, px,
 };
 
+use super::agent_card::card_trigger;
 use super::team_state::{TeamFacts, Tone, state_line};
 use super::{AgentPage, AgentPageEvent, room};
 use crate::agent::{Mood, MoodAvatarView};
@@ -120,6 +121,7 @@ impl AgentPage {
         room.into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn team_row(
         &self,
         index: usize,
@@ -128,9 +130,11 @@ impl AgentPage {
         avatar: &dcc_core::domain::agent::AgentAvatar,
         mood: Mood,
         line: (SharedString, Tone),
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
+        let agent_id = id.clone();
         let current = !self.room_open && self.agent_id == id && self.editor_is_for_agent(cx);
         let (line, tone) = line;
         div()
@@ -150,15 +154,25 @@ impl AgentPage {
             .on_click(cx.listener(move |page, _, _, cx| page.show_conversation(id.clone(), cx)))
             // On the room's clock: the column's bob and the room's land in
             // one frame.
-            .child(
-                MoodAvatarView::new(
-                    SharedString::from(format!("team-face-{index}")),
-                    avatar,
-                    mood,
-                    30.0,
-                )
-                .on_clock(),
-            )
+            .child(card_trigger(
+                self,
+                format!("team-face-{index}"),
+                &agent_id,
+                true,
+                div()
+                    .debug_selector(move || format!("team-face-{index}"))
+                    .child(
+                        MoodAvatarView::new(
+                            SharedString::from(format!("team-face-{index}")),
+                            avatar,
+                            mood,
+                            30.0,
+                        )
+                        .on_clock(),
+                    ),
+                window,
+                cx,
+            ))
             .child(
                 div()
                     .flex()
@@ -194,7 +208,7 @@ impl AgentPage {
             .is_none_or(|(editor, _)| !editor.read(cx).is_new())
     }
 
-    fn team_column(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn team_column(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let sidebar = self.sidebar.read(cx);
         let facts = TeamFacts::read(sidebar);
@@ -219,7 +233,7 @@ impl AgentPage {
             .into_iter()
             .enumerate()
             .map(|(index, (id, name, avatar, mood, line))| {
-                self.team_row(index, id, name, &avatar, mood, line, cx)
+                self.team_row(index, id, name, &avatar, mood, line, window, cx)
             })
             .collect();
         let creating = !self.editor_is_for_agent(cx);
@@ -291,7 +305,7 @@ impl Render for AgentPage {
             .size_full()
             .min_h_0()
             .bg(cx.theme().colors.background)
-            .child(self.team_column(cx))
+            .child(self.team_column(window, cx))
             .child(div().flex_1().min_w_0().h_full().child(body))
     }
 }
