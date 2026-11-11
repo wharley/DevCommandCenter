@@ -54,7 +54,7 @@ pub fn is_open_task_tool(name: &str) -> bool {
 pub fn definition() -> Value {
     json!({
         "name": OPEN_TASK_TOOL,
-        "description": "Only in your own conversation as a DCC resident agent (your instructions carry a dcc_agent_conversation block): open a task in one of the person's projects, the way they would with \"Nova tarefa\". It becomes a task of its own in their task list, in a protected worktree unless worktree=false (the project's own checkout). Call it when the person asks for work in a project; questions about where things stand you answer yourself with dcc_overview. The task sees only your brief and the project, so make it self-contained: goal, area, constraints and what done looks like. When the person asked for the work in this turn the task starts at once; when an event woke you (a trigger, a routine) it starts only if the person lets you start tasks yourself, else it waits as a card they start. Pass start=propose when they want to see it before it runs. Each time the task ends a turn DCC sends you a short [DCC] status: tell the person where it stands and stop; send it more with dcc_task_message only when they ask. At most 3 per turn.",
+        "description": "Only in your own conversation as a DCC resident agent (your instructions carry a dcc_agent_conversation block): open a task in one of the person's projects, the way they would with \"Nova tarefa\". It becomes a task of its own in their task list, in a protected worktree unless worktree=false (the project's own checkout). That worktree is already the task's own, made from the project's base branch: never ask the task to create a worktree or a branch, fetch, or pin a commit — DCC does it and names the branch when the work is sent; describe only the work. Call it when the person asks for work in a project; questions about where things stand you answer yourself with dcc_overview. The task sees only your brief and the project, so make it self-contained: goal, area, constraints and what done looks like. When the person asked for the work in this turn the task starts at once; when an event woke you (a trigger, a routine) it starts only if the person lets you start tasks yourself, else it waits as a card they start. Pass start=propose when they want to see it before it runs. Each time the task ends a turn DCC sends you a short [DCC] status: tell the person where it stands and stop; send it more with dcc_task_message only when they ask. At most 3 per turn.",
         "inputSchema": {
             "type": "object",
             "additionalProperties": false,
@@ -128,7 +128,10 @@ pub async fn open(
             parent_session_id: parent,
             project: args.project,
             title: args.title.trim().to_string(),
-            instruction: args.task,
+            instruction: dcc_tauri::agent_task::task_instruction(
+                &args.task,
+                args.worktree.unwrap_or(true),
+            ),
             worktree: args.worktree.unwrap_or(true),
             target_provider_id: clean(args.provider),
             target_model_id: clean(args.model),

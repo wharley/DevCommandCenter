@@ -21,6 +21,22 @@ use crate::app_events::AppEvents;
 use crate::delegation_runtime::{propose_task, ProposeTaskInput};
 use crate::state::SessionCommandState;
 
+/// What a task in its own worktree is told under the agent's brief: the
+/// place is already its own, from the base branch, so a brief asking for "an
+/// isolated worktree" or "a branch" does not send the work somewhere DCC does
+/// not see (an agent did: its changes sat in a worktree of its own making,
+/// out of the task's Mudanças and delivery).
+pub const OWN_WORKTREE_NOTE: &str = "(DCC) This task already runs in its own worktree, made from the project's base branch for it. Work here: do not create another worktree or branch, do not switch branches, and ignore any part of the brief that asks for one. DCC names the branch when the work is sent.";
+
+/// The brief as the task gets it.
+pub fn task_instruction(brief: &str, worktree: bool) -> String {
+    if worktree {
+        format!("{}\n\n{OWN_WORKTREE_NOTE}", brief.trim_end())
+    } else {
+        brief.to_string()
+    }
+}
+
 /// The efforts a task's first turn may run with.
 pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -304,5 +320,24 @@ mod tests {
             let error = find_project(&db, missing, true, None).unwrap_err();
             assert!(error.contains("Checkout, loja-api, painel"), "{error}");
         }
+    }
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+
+    #[test]
+    fn a_task_in_its_own_worktree_is_told_not_to_make_another() {
+        let told = task_instruction(
+            "Trabalhar em worktree isolado a partir de origin/main.\n",
+            true,
+        );
+        assert!(told.starts_with("Trabalhar em worktree isolado a partir de origin/main."));
+        assert!(told.ends_with(OWN_WORKTREE_NOTE));
+        assert_eq!(
+            task_instruction("Ajuste o rótulo.", false),
+            "Ajuste o rótulo."
+        );
     }
 }
