@@ -263,3 +263,48 @@ fn a_local_diff_switches_to_the_pull_requests(cx: &mut TestAppContext) {
         );
     });
 }
+
+#[gpui::test]
+fn a_comments_markdown_shows_clean_with_its_marker_as_a_chip(cx: &mut TestAppContext) {
+    let (stage, cx, _repo, _, _server) = open(
+        cx,
+        WorkspaceGitPreviewScope::Committed,
+        vec![read_comments()],
+    );
+    let marked = "♻️ **Reuso.** Re-implementa `parse_ms`, que já existe.\n\n- um\n- dois";
+    let mut reply = comment("13", "t1", 2, false);
+    reply.body = "🔴 **Bloqueante** — e o `id` vazio?".into();
+    stage.update(cx, |stage, cx| {
+        let review = stage.diff.as_mut().unwrap().review.as_mut().unwrap();
+        for comment in review.comments.iter_mut().filter(|c| c.thread_id == "t1") {
+            comment.body = marked.into();
+        }
+        review.comments.push(reply);
+        stage.review_changed(cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(active(&stage, cx).as_deref(), Some("t1"));
+    // The drawer: the comment and its reply as markdown, each marker a chip.
+    let drawer = cx.debug_bounds("thread-drawer").expect("the drawer");
+    let body = cx.debug_bounds("review-comment-body").expect("markdown");
+    assert!(drawer.contains(&body.origin));
+    let chip = cx.debug_bounds("review-severity-chip").expect("the chip");
+    assert!(drawer.contains(&chip.center()), "the drawer's chip");
+    // The bar's row and the diff's callout show one plain line, the marker
+    // a chip before it.
+    let row = cx.debug_bounds("review-row-t1").expect("listed");
+    let callout = cx.debug_bounds("review-mark-t1").expect("the callout");
+    let chip = cx
+        .debug_bounds("review-preview-chip")
+        .expect("the row's chip");
+    assert!(
+        [row, callout]
+            .iter()
+            .any(|area| area.contains(&chip.center())),
+        "the chip sits in the row or the callout"
+    );
+    let preview = crate::data::review_comment_text::comment_preview(marked);
+    assert_eq!(preview.label.as_deref(), Some("Reuso"));
+    assert_eq!(preview.text, "Re-implementa parse_ms, que já existe.");
+    assert!(!preview.text.contains("**") && !preview.text.contains('`'));
+}

@@ -65,14 +65,6 @@ fn threads_in_order(
         .collect()
 }
 
-pub(crate) fn first_line(body: &str) -> String {
-    body.lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or_default()
-        .to_string()
-}
-
 /// `ReviewThreadStateChip`
 pub(crate) fn state_chip(state: ReviewThreadState, cx: &gpui::App) -> AnyElement {
     let colors = cx.theme().colors.clone();
@@ -189,14 +181,7 @@ fn thread_row(
                         .font_weight(FontWeight::MEDIUM)
                         .child(author),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(colors.muted_foreground)
-                        .child(first_line(&root.body)),
-                )
+                .child(super::comment_preview_line(&root.body, 10.5, cx))
                 .when(state != ReviewThreadState::Open, |row| {
                     row.child(state_chip(state, cx))
                 }),

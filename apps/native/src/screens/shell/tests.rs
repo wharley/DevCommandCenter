@@ -356,6 +356,16 @@ fn code_from_the_stage_opens_the_card_and_goes_to_the_composer(cx: &mut TestAppC
         cx.debug_bounds("annotation-card").is_some(),
         "the card opens"
     );
+    // Over the whole window, its "Enviar" whole inside it.
+    let viewport = cx.update(|window, _| window.viewport_size());
+    let send = cx.debug_bounds("annotation-send").expect("Enviar");
+    assert!(
+        send.origin.x >= px(0.0)
+            && send.origin.y >= px(0.0)
+            && send.right() <= viewport.width
+            && send.bottom() <= viewport.height,
+        "{send:?} inside {viewport:?}"
+    );
     let card = shell.read_with(cx, |shell, _| shell.annotation.as_ref().unwrap().0.clone());
     card.update(cx, |card, cx| card.edit_in_composer(cx));
     shell.read_with(cx, |shell, cx| {

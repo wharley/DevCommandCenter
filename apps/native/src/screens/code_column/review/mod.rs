@@ -5,6 +5,7 @@
 //! desktop, which keeps the failure and runs the forge's CLI.
 
 mod checks;
+pub(crate) mod comment_view;
 mod failure;
 mod identity;
 mod picker;
@@ -15,11 +16,12 @@ mod state;
 mod tests;
 mod threads;
 
+pub(crate) use comment_view::{author_label, comment_entry, comment_preview_line};
 pub(crate) use failure::{failure_section, recovery_confirm};
 pub(crate) use identity::identity_chip;
 pub(crate) use pipeline::{pipeline_retry_confirm, pipeline_section};
 pub(crate) use state::review_section;
-pub(crate) use threads::{first_line, review_badge, state_chip, threads_section};
+pub(crate) use threads::{review_badge, state_chip, threads_section};
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};

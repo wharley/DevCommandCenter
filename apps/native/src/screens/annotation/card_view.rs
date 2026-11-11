@@ -1,25 +1,34 @@
-//! How the card looks (`code-annotation.css`): 396px, the surface edge and
+//! How the card looks (`code-annotation.css`): 440px, the surface edge and
 //! the dialog shadow; the mark, title and path; the lines (and "removido"
 //! for old code); the code (98px at most, the first 6000 characters); the
-//! instruction field; ⌘↵ Enviar and "Adicionar como evidência"; then
-//! "Editar no composer", "Nova sessão" and "Enviar". Over a faint backdrop
-//! that closes it; placed over its trigger, under it when that doesn't fit.
+//! instruction field; then one footer row: "Editar no composer" and
+//! "Adicionar como evidência" (its icon) on the left, "Nova sessão" and
+//! "Enviar ⌘↵" on the right. Over a faint backdrop that closes it; placed
+//! over its trigger, under it when that doesn't fit, always whole inside the
+//! window (only its body scrolls).
 
 use dcc_core::domain::code_annotation::{AnnotationSide, line_label};
 use gpui::{
     BoxShadow, Context, Focusable, FontWeight, InteractiveElement, MouseButton, Pixels, Point,
-    Render, SharedString, Size, Window, canvas, div, point, prelude::*, px, size,
+    Render, SharedString, Size, Window, anchored, canvas, deferred, div, point, prelude::*, px,
+    size,
 };
 
 use super::card::{AnnotationCard, CONTEXT, CloseAnnotation, SendAnnotation};
 use crate::i18n::Translate;
 use crate::theme::color::mix_lab;
 use crate::theme::{ActiveTheme, fonts};
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tracked, shortcut_keys};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip, Tracked};
 
-const WIDTH: f32 = 396.0;
+const WIDTH: f32 = 440.0;
 const MARGIN: f32 = 12.0;
 const GAP: f32 = 8.0;
+/// The send shortcut, faint inside "Enviar".
+const SEND_KEYS: &str = if cfg!(target_os = "macos") {
+    "⌘↵"
+} else {
+    "Ctrl↵"
+};
 /// `request.snippet.slice(0, 6000)`
 const PREVIEW_LIMIT: usize = 6000;
 
@@ -65,6 +74,7 @@ impl Render for AnnotationCard {
 
         let header = div()
             .flex()
+            .flex_shrink_0()
             .items_center()
             .gap(px(10.0))
             .pt(px(15.0))
@@ -115,6 +125,7 @@ impl Render for AnnotationCard {
         let lines = line_label(annotation.start_line, annotation.end_line);
         let context = div()
             .flex()
+            .flex_shrink_0()
             .flex_wrap()
             .items_center()
             .gap(px(6.0))
@@ -207,82 +218,86 @@ impl Render for AnnotationCard {
             .line_height(gpui::relative(1.6))
             .child(self.instruction.clone());
 
-        let hints = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .justify_between()
-            .gap(px(8.0))
-            .mt(px(10.0))
-            .text_size(px(10.0))
-            .text_color(colors.muted_foreground)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .child(shortcut_keys(&["⌘", "↵"], cx))
-                    .child(div().mr(px(4.0)).child(Icon::new("send").size(12.0)))
-                    .child(cx.t("diffAnnotate.send")),
-            )
-            .child(
-                Button::new("annotation-add-to-review")
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::Xs)
-                    .padding_x(6.0)
-                    .text_size(11.0)
-                    .muted()
-                    .disabled(!can_submit)
-                    .on_click(cx.listener(|card, _, _, cx| card.add_to_review(cx)))
-                    .child(Icon::new("list-plus").size(12.0))
-                    .child(cx.t("diffAnnotate.addToReview")),
-            );
-
+        // One row: the quiet ways out on the left (they give way first),
+        // "Nova sessão" and the filled "Enviar ⌘↵" always whole on the right.
+        let evidence = Tooltip::text(
+            "tip-annotation-add-to-review",
+            Button::new("annotation-add-to-review")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::IconSm)
+                .muted()
+                .disabled(!can_submit)
+                .on_click(cx.listener(|card, _, _, cx| card.add_to_review(cx)))
+                .child(Icon::new("list-plus").size(14.0)),
+            cx.t("diffAnnotate.addToReview"),
+        );
         let footer = div()
             .flex()
-            .flex_wrap()
+            .flex_shrink_0()
             .items_center()
-            .justify_end()
-            .gap(px(6.0))
-            .px(px(16.0))
-            .py(px(11.0))
+            .gap(px(8.0))
+            .px(px(12.0))
+            .py(px(12.0))
             .border_t_1()
             .border_color(edge)
             .bg(colors.muted.opacity(0.3))
             .child(
-                div().mr_auto().child(
-                    Button::new("annotation-edit-in-composer")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::Xs)
-                        .height(28.0)
-                        .text_size(11.0)
-                        .muted()
-                        .on_click(cx.listener(|card, _, _, cx| card.edit_in_composer(cx)))
-                        .child(Icon::new("square-pen").size(12.0))
-                        .child(cx.t("diffAnnotate.editInComposer")),
-                ),
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(
+                        Button::new("annotation-edit-in-composer")
+                            .variant(ButtonVariant::Ghost)
+                            .size(ButtonSize::Xs)
+                            .height(28.0)
+                            .padding_x(8.0)
+                            .text_size(12.0)
+                            .muted()
+                            .on_click(cx.listener(|card, _, _, cx| card.edit_in_composer(cx)))
+                            .child(Icon::new("square-pen").size(12.0))
+                            .child(cx.t("diffAnnotate.editInComposer")),
+                    )
+                    .child(evidence),
             )
             .child(
-                Button::new("annotation-new-session")
-                    .variant(ButtonVariant::Outline)
-                    .size(ButtonSize::Xs)
-                    .height(28.0)
-                    .text_size(11.0)
-                    .disabled(!can_submit)
-                    .on_click(cx.listener(|card, _, _, cx| card.submit(true, cx)))
-                    .child(Icon::new("plus").size(12.0))
-                    .child(cx.t("diffAnnotate.newSession")),
-            )
-            .child(
-                Button::new("annotation-send")
-                    .variant(ButtonVariant::Default)
-                    .size(ButtonSize::Xs)
-                    .height(28.0)
-                    .text_size(11.0)
-                    .disabled(!can_submit)
-                    .on_click(cx.listener(|card, _, _, cx| card.submit(false, cx)))
-                    .child(Icon::new("send").size(12.0))
-                    .child(cx.t("diffAnnotate.send")),
+                div()
+                    .flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        Button::new("annotation-new-session")
+                            .variant(ButtonVariant::Outline)
+                            .size(ButtonSize::Xs)
+                            .height(28.0)
+                            .padding_x(10.0)
+                            .text_size(12.0)
+                            .disabled(!can_submit)
+                            .on_click(cx.listener(|card, _, _, cx| card.submit(true, cx)))
+                            .child(cx.t("diffAnnotate.newSession")),
+                    )
+                    .child(
+                        Button::new("annotation-send")
+                            .variant(ButtonVariant::Default)
+                            .size(ButtonSize::Xs)
+                            .height(28.0)
+                            .padding_x(10.0)
+                            .text_size(12.0)
+                            .disabled(!can_submit)
+                            .on_click(cx.listener(|card, _, _, cx| card.submit(false, cx)))
+                            .child(Icon::new("send").size(12.0))
+                            .child(cx.t("diffAnnotate.send"))
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(colors.primary_foreground.opacity(0.6))
+                                    .child(SEND_KEYS),
+                            ),
+                    ),
             );
 
         let card = div()
@@ -293,9 +308,8 @@ impl Render for AnnotationCard {
             .on_action(cx.listener(|card, _: &SendAnnotation, _, cx| card.submit(false, cx)))
             .on_action(cx.listener(|card, _: &CloseAnnotation, _, cx| card.cancel(cx)))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .absolute()
-            .left(at.map_or(request.anchor.x, |at| at.x))
-            .top(at.map_or(request.anchor.y, |at| at.y))
+            .occlude()
+            .relative()
             .when(at.is_none(), |card| card.invisible())
             .flex()
             .flex_col()
@@ -325,11 +339,14 @@ impl Render for AnnotationCard {
             ])
             .child(
                 canvas(
-                    move |bounds, window, _| {
+                    move |bounds, window, cx| {
                         let next = size(bounds.size.width, bounds.size.height);
                         if record.get() != Some(next) {
                             record.set(Some(next));
-                            window.refresh();
+                            // A refresh while drawing is dropped: ask for the
+                            // next frame once this one is done, so the card is
+                            // placed by its real size (and shows).
+                            window.defer(cx, |window, _| window.refresh());
                         }
                     },
                     |_, _, _, _| {},
@@ -344,13 +361,13 @@ impl Render for AnnotationCard {
                     .id("annotation-body")
                     .flex()
                     .flex_col()
+                    .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
                     .px(px(16.0))
                     .pb(px(12.0))
                     .children(snippet)
-                    .child(field)
-                    .child(hints),
+                    .child(field),
             )
             .child(footer);
 
@@ -369,7 +386,17 @@ impl Render for AnnotationCard {
                         cx.listener(|card, _, _, cx| card.cancel(cx)),
                     ),
             )
-            .child(card)
+            // In window coordinates over everything, so no column clips it,
+            // and snapped back inside the window should it ever leave it.
+            .child(
+                deferred(
+                    anchored()
+                        .position(at.unwrap_or(request.anchor))
+                        .snap_to_window_with_margin(px(MARGIN))
+                        .child(card),
+                )
+                .priority(crate::ui::layer::POPUP),
+            )
     }
 }
 

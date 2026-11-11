@@ -5209,6 +5209,12 @@
     "replyPlaceholder": "Responder no pull request…",
     "resolve": "Resolver",
     "reopen": "Reabrir",
+    "severity": {
+      "blocking": "Bloqueante",
+      "warning": "Atenção",
+      "reuse": "Reuso",
+      "suggestion": "Sugestão"
+    },
     "badge_one": "{{count}} conversa aberta no PR",
     "badge_other": "{{count}} conversas abertas no PR",
     "bar": {

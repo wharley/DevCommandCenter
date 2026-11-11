@@ -25,6 +25,8 @@ pub struct MarkdownStyle {
     pub size: f32,
     /// Prompt code blocks taller than this start collapsed (16 lines).
     pub collapsed_lines: Option<usize>,
+    /// A paragraph's line height, relative to its size (1.82 by default).
+    pub paragraph_line: f32,
 }
 
 impl MarkdownStyle {
@@ -32,6 +34,7 @@ impl MarkdownStyle {
         Self {
             size: 16.0,
             collapsed_lines: None,
+            paragraph_line: 1.82,
         }
     }
 
@@ -40,6 +43,7 @@ impl MarkdownStyle {
         Self {
             size: 12.0,
             collapsed_lines: Some(16),
+            paragraph_line: 1.82,
         }
     }
 
@@ -47,6 +51,16 @@ impl MarkdownStyle {
         Self {
             size: 13.0,
             collapsed_lines: Some(16),
+            paragraph_line: 1.82,
+        }
+    }
+
+    /// A review comment on the diff: 13px prose at a tighter 1.55.
+    pub fn review() -> Self {
+        Self {
+            size: 13.0,
+            collapsed_lines: Some(16),
+            paragraph_line: 1.55,
         }
     }
 }
@@ -501,7 +515,7 @@ fn block_element(
     let colors = cx.theme().colors.clone();
     match block {
         Block::Paragraph(inline) => div()
-            .line_height(gpui::relative(1.82))
+            .line_height(gpui::relative(style.paragraph_line))
             .child(inline_text(
                 inline,
                 SharedString::from(format!("{path}-p")),

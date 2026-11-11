@@ -42,6 +42,19 @@ fn open(
     &mut gpui::VisualTestContext,
     Rc<RefCell<Vec<AnnotationCardEvent>>>,
 ) {
+    open_at(cx, side, (200.0, 500.0), (1200.0, 800.0))
+}
+
+fn open_at(
+    cx: &mut TestAppContext,
+    side: AnnotationSide,
+    anchor: (f32, f32),
+    window: (f32, f32),
+) -> (
+    gpui::Entity<AnnotationCard>,
+    &mut gpui::VisualTestContext,
+    Rc<RefCell<Vec<AnnotationCardEvent>>>,
+) {
     cx.update(|cx| {
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
         crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
@@ -56,10 +69,10 @@ fn open(
             end_line: 3,
             snippet: "let x = 1;\nlet y = 2;".into(),
         },
-        anchor: point(px(200.0), px(500.0)),
+        anchor: point(px(anchor.0), px(anchor.1)),
     };
     let (card, cx) = cx.add_window_view(|window, cx| AnnotationCard::new(request, window, cx));
-    cx.simulate_resize(size(px(1200.0), px(800.0)));
+    cx.simulate_resize(size(px(window.0), px(window.1)));
     cx.run_until_parked();
     let events = Rc::new(RefCell::new(Vec::new()));
     let sink = events.clone();
@@ -78,7 +91,7 @@ fn it_shows_the_code_and_sends_with_cmd_enter(cx: &mut TestAppContext) {
     let shown = cx
         .debug_bounds("annotation-card")
         .expect("placed once measured");
-    assert_eq!(f32::from(shown.size.width), 396.0);
+    assert_eq!(f32::from(shown.size.width), 440.0);
     assert!(cx.debug_bounds("annotation-snippet").is_some());
     // Without an instruction nothing goes.
     cx.simulate_keystrokes("cmd-enter");
@@ -130,4 +143,56 @@ fn the_other_ways_out(cx: &mut TestAppContext) {
     );
     assert_eq!(events.borrow().last(), Some(&AnnotationCardEvent::Cancel));
     assert_eq!(events.borrow().len(), 5);
+}
+
+/// `inner` lies wholly inside the `window`.
+fn inside(inner: gpui::Bounds<gpui::Pixels>, window: (f32, f32)) -> bool {
+    f32::from(inner.origin.x) >= 0.0
+        && f32::from(inner.origin.y) >= 0.0
+        && f32::from(inner.right()) <= window.0
+        && f32::from(inner.bottom()) <= window.1
+}
+
+/// Opened from a line near the bottom or the right edge of a small window,
+/// the card and its footer stay whole, and "Enviar" still sends.
+fn stays_whole(cx: &mut TestAppContext, anchor: (f32, f32)) {
+    let window = (900.0, 600.0);
+    let (_, cx, events) = open_at(cx, AnnotationSide::Modified, anchor, window);
+    let card = cx.debug_bounds("annotation-card").expect("the card");
+    assert!(inside(card, window), "{card:?} inside {window:?}");
+    for button in [
+        "annotation-send",
+        "annotation-new-session",
+        "annotation-edit-in-composer",
+        "annotation-add-to-review",
+    ] {
+        let bounds = cx.debug_bounds(button).expect(button);
+        assert!(inside(bounds, window), "{button} {bounds:?}");
+        assert!(
+            bounds.right() <= card.right() && bounds.bottom() <= card.bottom(),
+            "{button} inside the card"
+        );
+    }
+    let send = cx.debug_bounds("annotation-send").unwrap();
+    let new_session = cx.debug_bounds("annotation-new-session").unwrap();
+    assert_eq!(send.origin.y, new_session.origin.y, "one footer row");
+    cx.simulate_input("Renomeie");
+    cx.simulate_click(send.center(), gpui::Modifiers::none());
+    assert_eq!(
+        events.borrow().as_slice(),
+        &[AnnotationCardEvent::Submit {
+            instruction: "Renomeie".into(),
+            new_session: false,
+        }]
+    );
+}
+
+#[gpui::test]
+fn near_the_bottom_of_a_small_window_the_card_stays_whole(cx: &mut TestAppContext) {
+    stays_whole(cx, (120.0, 596.0));
+}
+
+#[gpui::test]
+fn near_the_right_edge_of_a_small_window_the_card_stays_whole(cx: &mut TestAppContext) {
+    stays_whole(cx, (890.0, 140.0));
 }

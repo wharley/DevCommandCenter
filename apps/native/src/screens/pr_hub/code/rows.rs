@@ -75,6 +75,7 @@ impl PrHub {
         rows: &[PatchRow],
         detail: &crate::data::pr_hub::Detail,
         width: f32,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let colors = cx.theme().colors.clone();
@@ -138,7 +139,7 @@ impl PrHub {
                     && comment.side.as_deref() == Some(side)
             }) {
                 let mark = super::since::ThreadMark::of(comment, detail);
-                out.push(self.thread(comment, mark, width, cx));
+                out.push(self.thread(comment, mark, width, window, cx));
             }
             if let Some(draft) = self.review.drafts.iter().find(|draft| draft.key() == key) {
                 out.push(self.draft_card(draft, width, cx));

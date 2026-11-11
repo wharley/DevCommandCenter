@@ -16,7 +16,9 @@ use gpui::{
 use super::Stage;
 use super::review::ForgeBusy;
 use crate::i18n::{Args, Translate};
-use crate::screens::code_column::review::{first_line, state_chip};
+use crate::screens::code_column::review::{
+    author_label, comment_entry, comment_preview_line, state_chip,
+};
 use crate::theme::{ActiveTheme, fonts};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tracked, spinner, tabular_nums};
 
@@ -30,18 +32,6 @@ pub fn bind_keys(cx: &mut gpui::App) {
         ReplyToThread,
         Some(DRAWER_CONTEXT),
     )]);
-}
-
-fn author_label(
-    thread_comment: &dcc_core::domain::review_threads::WorkspacePrReviewComment,
-    cx: &gpui::App,
-) -> SharedString {
-    thread_comment
-        .author
-        .as_ref()
-        .and_then(|author| author.login.clone())
-        .map(|login| SharedString::from(format!("@{login}")))
-        .unwrap_or_else(|| cx.t("reviewThread.reviewer"))
 }
 
 /// `ReviewThreadsBar`, while the diff shows and the file has conversations.
@@ -252,14 +242,7 @@ fn thread_row(thread: &ReviewThread, active: Option<&str>, cx: &mut Context<Stag
                 .text_color(colors.foreground)
                 .child(author_label(root, cx)),
         )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_color(colors.muted_foreground)
-                .child(first_line(&root.body)),
-        )
+        .child(comment_preview_line(&root.body, 11.0, cx))
         .when(replies > 0, |row| {
             row.child(
                 div()
@@ -274,14 +257,6 @@ fn thread_row(thread: &ReviewThread, active: Option<&str>, cx: &mut Context<Stag
             row.child(state_chip(state, cx))
         })
         .into_any_element()
-}
-
-/// `reviewAuthorInitials`
-fn initials(login: Option<&str>) -> String {
-    match login.map(str::trim).filter(|login| !login.is_empty()) {
-        Some(login) => login.chars().take(2).collect::<String>().to_uppercase(),
-        None => "?".into(),
-    }
 }
 
 /// `ReviewThreadDrawer`, over the diff's top right.
@@ -393,67 +368,11 @@ pub(crate) fn thread_drawer(
                 .child(Icon::new("x").size(14.0).stroke(2.0)),
         );
 
-    let comments = thread.comments.iter().map(|comment| {
-        let login = comment
-            .author
-            .as_ref()
-            .and_then(|author| author.login.as_deref());
-        let time = comment
-            .created_at
-            .as_deref()
-            .and_then(crate::data::time::parse_ms)
-            .map(|at| crate::data::time::relative_time(at, now, english));
-        div()
-            .relative()
-            .pl(px(36.0))
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top_0()
-                    .flex()
-                    .size(px(24.0))
-                    .items_center()
-                    .justify_center()
-                    .rounded_full()
-                    .bg(colors.muted)
-                    .border_2()
-                    .border_color(colors.popover)
-                    .text_size(px(9.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(colors.muted_foreground)
-                    .child(initials(login)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_baseline()
-                    .gap(px(6.0))
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(11.5))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(colors.foreground)
-                            .child(author_label(comment, cx)),
-                    )
-                    .children(time.map(|time| {
-                        div()
-                            .flex_shrink_0()
-                            .text_size(px(10.0))
-                            .text_color(colors.muted_foreground)
-                            .child(time)
-                    })),
-            )
-            .child(
-                div()
-                    .mt(px(4.0))
-                    .text_size(px(12.0))
-                    .line_height(gpui::relative(1.55))
-                    .text_color(colors.foreground.opacity(0.9))
-                    .child(SharedString::from(comment.body.clone())),
-            )
-    });
+    let comments: Vec<AnyElement> = thread
+        .comments
+        .iter()
+        .map(|comment| comment_entry(comment, now, english, window, cx))
+        .collect();
     let figure = (!snippet.trim().is_empty()).then(|| {
         let caption = cx.t("reviewThread.codeContext").to_uppercase();
         div()
@@ -525,7 +444,7 @@ pub(crate) fn thread_drawer(
                 .relative()
                 .flex()
                 .flex_col()
-                .gap(px(14.0))
+                .gap(px(16.0))
                 .when(multiple, |list| {
                     list.child(
                         div()

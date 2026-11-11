@@ -97,12 +97,7 @@ impl DiffView {
                             cx.emit(DiffViewEvent::OpenMark(id.clone()))
                         }))
                         .child(Icon::new("message-square").size(12.0))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .child(SharedString::from(mark.title.clone())),
-                        )
+                        .child(mark_title(&mark.title, cx))
                 }))
                 .into_any_element(),
         )
@@ -164,4 +159,28 @@ impl DiffView {
             self.reveal_line(side, line, cx);
         }
     }
+}
+
+/// A callout's "@author: comment": the author, then the comment on one
+/// plain line with its marker as a chip.
+fn mark_title(title: &str, cx: &gpui::App) -> AnyElement {
+    let (author, body) = title.split_once(": ").unwrap_or(("", title));
+    div()
+        .flex()
+        .min_w_0()
+        .items_center()
+        .gap(px(6.0))
+        .when(!author.is_empty(), |row| {
+            row.child(
+                div()
+                    .flex_shrink_0()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .child(SharedString::from(author.to_string())),
+            )
+        })
+        .child(
+            crate::screens::code_column::review::comment_preview_line(body, 10.0, cx)
+                .flex_initial(),
+        )
+        .into_any_element()
 }

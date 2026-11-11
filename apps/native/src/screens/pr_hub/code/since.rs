@@ -165,6 +165,7 @@ impl PrHub {
         file: &File,
         detail: &Detail,
         width: f32,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let outdated: Vec<_> = detail
@@ -204,7 +205,7 @@ impl PrHub {
                         .into_any_element(),
                 );
             }
-            cards.push(self.thread(comment, ThreadMark::of(comment, detail), width, cx));
+            cards.push(self.thread(comment, ThreadMark::of(comment, detail), width, window, cx));
         }
         Some(
             div()

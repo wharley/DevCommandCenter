@@ -390,10 +390,10 @@ impl PrHub {
                     .into_any_element(),
             ]
         } else {
-            self.patch_rows(&file, &rows, detail, width, cx)
+            self.patch_rows(&file, &rows, detail, width, window, cx)
         };
         let lines: Vec<AnyElement> = self
-            .outdated_block(&file, detail, width, cx)
+            .outdated_block(&file, detail, width, window, cx)
             .into_iter()
             .chain(lines)
             .collect();

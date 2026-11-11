@@ -19,6 +19,7 @@ impl PrHub {
         comment: &InlineComment,
         mark: super::since::ThreadMark,
         width: f32,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
@@ -185,13 +186,16 @@ impl PrHub {
                         )
                     }),
             )
-            .child(
-                div()
-                    .mt(px(6.0))
-                    .text_size(px(11.0))
-                    .line_height(px(16.0))
-                    .child(comment.body.clone()),
-            )
+            // The comment as the review drawer shows it: markdown, its
+            // severity as a chip (`comment_view::comment_body`).
+            .child(div().mt(px(6.0)).min_w_0().child(
+                crate::screens::code_column::review::comment_view::comment_body(
+                    &comment.body,
+                    &format!("pr-thread-body-{id}"),
+                    window,
+                    cx,
+                ),
+            ))
             .children(actions)
             .children(reply_box)
             .into_any_element()
