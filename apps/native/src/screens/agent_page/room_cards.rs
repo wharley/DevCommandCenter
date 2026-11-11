@@ -186,6 +186,21 @@ impl TeamRoom {
                             .text_color(colors.foreground)
                             .child(text),
                     )
+                    .children(match &card.kind {
+                        CardKind::PrReview {
+                            verdict: Some(verdict),
+                            ..
+                        } => Some(
+                            div()
+                                .pt(px(3.0))
+                                .child(crate::ui::verdict_chip::verdict_chip(
+                                    SharedString::from(format!("room-card-verdict-{index}")),
+                                    *verdict,
+                                    cx,
+                                )),
+                        ),
+                        _ => None,
+                    })
                     .children(reason.map(|reason| {
                         div()
                             .debug_selector(move || format!("room-card-reason-{index}"))

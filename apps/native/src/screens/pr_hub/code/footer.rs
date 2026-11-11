@@ -118,6 +118,9 @@ impl PrHub {
                             .font_weight(FontWeight::MEDIUM)
                             .child(cx.t("pullRequests.code.submitReview")),
                     )
+                    .children(review.verdict.map(|verdict| {
+                        crate::ui::verdict_chip::verdict_chip("pr-review-verdict", verdict, cx)
+                    }))
                     .when(!review.drafts.is_empty(), |row| {
                         row.child(
                             div()

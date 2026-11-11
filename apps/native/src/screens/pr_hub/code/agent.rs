@@ -149,6 +149,19 @@ impl PrHub {
                     drop_repeats(&mut review, &detail, &login);
                 }
                 self.review.agent_result = Some(review.comments.len());
+                // The verdict picks the event, when the forge allows it here;
+                // the person still sends it.
+                self.review.verdict = review.verdict;
+                if let (Some(verdict), Some(item)) = (review.verdict, self.selected_item(cx))
+                    && crate::data::pr_review::event_blocked(
+                        verdict.event(),
+                        &item,
+                        detail.review_capabilities.as_ref(),
+                    )
+                    .is_none()
+                {
+                    self.review.event = verdict.event();
+                }
                 if let Some(file) = detail.files.iter().find(|file| {
                     review
                         .comments

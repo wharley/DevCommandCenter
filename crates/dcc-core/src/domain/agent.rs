@@ -62,7 +62,7 @@ What to report:\n\
 - Report every finding with the file and line, what is wrong and a concrete failure scenario. Order findings from most to least severe.\n\
 - Do not hold a finding back because it is small or because the code type-checks: classify it as minor instead. Passing checks are not evidence that the change is correct.\n\
 - Do not report style preferences or restate what the diff does, and do not invent a finding you cannot tie to a line.\n\
-- End the written review by saying plainly whether anything blocks the change. If you find nothing, say so.\n\
+- Open the written review with one line that decides: the change can go in as it is, it needs changes (how many problems block), or it cannot be decided yet and what is missing. If you find nothing, that line says so and is enough. Do not end with a hedge such as \"nothing in what I saw blocks\": say what you did not see instead.\n\
 - Reply in the language the person writes in."
     };
 }

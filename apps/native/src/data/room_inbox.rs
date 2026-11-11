@@ -40,6 +40,8 @@ pub enum CardKind {
         running: bool,
         /// Why it failed, as the provider said it.
         reason: Option<String>,
+        /// The reviewer's verdict, once done.
+        verdict: Option<super::pr_review_verdict::Verdict>,
     },
 }
 
@@ -168,6 +170,10 @@ pub fn cards(sources: &InboxSources<'_>) -> Vec<InboxCard> {
                 reason: (job.status == JobStatus::Failed)
                     .then(|| job.error.clone())
                     .flatten(),
+                verdict: (job.status == JobStatus::Done)
+                    .then(|| job.response.as_deref())
+                    .flatten()
+                    .and_then(super::pr_review_verdict::verdict_of),
             },
             title,
             trigger: job.by_trigger.then_some(Trigger::PrUpdated),

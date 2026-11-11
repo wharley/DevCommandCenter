@@ -88,6 +88,7 @@ mod tests {
             failed: false,
             running: true,
             reason: None,
+            verdict: None,
         });
         let labels: HashMap<String, String> =
             [("pr-924".to_string(), "vendeagora-app#924".to_string())].into();

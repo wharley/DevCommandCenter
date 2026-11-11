@@ -71,6 +71,8 @@ pub(crate) struct CodeReview {
     pub agent_error: Option<String>,
     /// How many drafts the finished review left, until "Ok".
     pub agent_result: Option<usize>,
+    /// The reviewer's verdict on the review it wrote, shown by the event.
+    pub verdict: Option<crate::data::pr_review_verdict::Verdict>,
     /// The finished review already applied on this visit.
     pub applied: Option<u64>,
 }
@@ -155,6 +157,7 @@ impl CodeReview {
             agent_pending: None,
             agent_error: None,
             agent_result: None,
+            verdict: None,
             applied: None,
         };
         (review, subscriptions)
@@ -181,6 +184,7 @@ impl PrHub {
         review.drafts.clear();
         review.editing = None;
         review.event = ReviewEvent::Comment;
+        review.verdict = None;
         review.submitting = false;
         review.submitted = false;
         review.warning = None;

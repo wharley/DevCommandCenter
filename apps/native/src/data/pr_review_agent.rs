@@ -48,19 +48,65 @@ fn instruction_text(instruction: &str) -> &str {
     instruction.trim()
 }
 
+/// What the description may take of a prompt.
+const DESCRIPTION_BOUND: usize = 8_000;
+
+/// Files a review learns nothing from: lockfiles, snapshots, build output.
+fn is_noise(path: &str) -> bool {
+    const NAMES: [&str; 6] = [
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "bun.lockb",
+        "composer.lock",
+    ];
+    const ENDINGS: [&str; 4] = [".snap", ".min.js", ".map", ".lock"];
+    let name = path.rsplit('/').next().unwrap_or(path);
+    NAMES.contains(&name)
+        || ENDINGS.iter().any(|ending| name.ends_with(ending))
+        || path
+            .split('/')
+            .any(|part| part == "dist" || part == "build")
+}
+
+fn chars(text: &str) -> usize {
+    text.chars().map(char::len_utf16).sum()
+}
+
+/// The patches that fit, whole, the code first; the rest named with their
+/// size, so a review never judges a file cut in the middle.
+fn changed_files(detail: &Detail, budget: usize) -> String {
+    let mut ordered: Vec<&super::pr_review::File> = detail.files.iter().collect();
+    ordered.sort_by_key(|file| is_noise(&file.path));
+    let mut left = budget;
+    let mut sent = Vec::new();
+    let mut left_out = Vec::new();
+    for file in ordered {
+        let size = format!("{} (+{} −{})", file.path, file.additions, file.deletions);
+        let Some(patch) = file.patch.as_deref() else {
+            left_out.push(format!("{size}, no patch from the forge"));
+            continue;
+        };
+        let text = format!("### {}\n{patch}", file.path);
+        if chars(&text) <= left {
+            left -= chars(&text);
+            sent.push(text);
+        } else {
+            left_out.push(size);
+        }
+    }
+    let mut files = sent.join("\n\n");
+    if !left_out.is_empty() {
+        files.push_str(&format!(
+            "\n\nLeft out, too large to send (you did not see them):\n- {}",
+            left_out.join("\n- ")
+        ));
+    }
+    files
+}
+
 fn pull_request_context(item: &Item, detail: &Detail) -> String {
-    let files = detail
-        .files
-        .iter()
-        .map(|file| {
-            format!(
-                "### {}\n{}",
-                file.path,
-                file.patch.as_deref().unwrap_or("[patch unavailable]")
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
     let author = item
         .author
         .as_ref()
@@ -70,21 +116,28 @@ fn pull_request_context(item: &Item, detail: &Detail) -> String {
         .as_deref()
         .or(item.body.as_deref())
         .unwrap_or("[none]");
-    bounded(
-        [
-            format!(
-                "PR: {}#{} — {}",
-                item.repository_name, item.number, item.title
-            ),
-            format!("Author: {author}"),
-            format!("Branches: {} -> {}", item.head_branch, item.base_branch),
-            format!("Description:\n{description}"),
-            format!("Changed files:\n{files}"),
-        ]
-        .join("\n\n"),
-        BOUND,
+    let head = [
+        format!(
+            "PR: {}#{} — {}",
+            item.repository_name, item.number, item.title
+        ),
+        format!("Author: {author}"),
+        format!("Branches: {} -> {}", item.head_branch, item.base_branch),
+        format!(
+            "Description:\n{}",
+            bounded(description.to_string(), DESCRIPTION_BOUND)
+        ),
+    ]
+    .join("\n\n");
+    let budget = BOUND.saturating_sub(chars(&head) + 2_000);
+    format!(
+        "{head}\n\nChanged files:\n{}",
+        changed_files(detail, budget)
     )
 }
+
+/// How the review decides and what its summary holds, short.
+const VERDICT_RULES: &str = "Decide first, with one of these verdicts:\n- \"approve\": nothing blocks. Minor points may exist; they are optional for the author.\n- \"request_changes\": at least one blocking problem: a bug, regression, security issue or data loss on a path that will realistically run.\n- \"undecided\": only when a file you did not see could hide a blocking problem on the main path. Then say exactly which file and what to check. A file you did not see that cannot break the main path does not stop an approve.\n\nThe summary is short, written in the language of the pull request's description, and holds only:\n1. One line with the verdict in plain words.\n2. The blocking problems, one line each with where, under a label like \"Blocks:\", only when there are any.\n3. At most three optional points, one line each, under a label like \"Doesn't block:\", only when there are any.\n4. The files you did not see, in one line, only when there are any.\nTranslate the labels into the summary's language. Nothing else: do not restate what the diff does, list what you checked, praise it, or ask the person to confirm something you could not read.";
 
 /// `buildReviewAgentPrompt`; a follow-up when the person reviewed before.
 pub fn review_prompt(item: &Item, detail: &Detail, instruction: &str) -> String {
@@ -95,7 +148,7 @@ pub fn review_prompt(item: &Item, detail: &Detail, instruction: &str) -> String 
         .map(|section| format!("\n\n{section}"))
         .unwrap_or_default();
     format!(
-        "{}\n\nReview this pull request for correctness, regressions, security, data loss, concurrency, and missing tests. Focus only on actionable findings introduced by the diff. {}{follow_up}\n\nReturn JSON only with this exact shape:\n{{\"summary\":\"editable review summary\",\"comments\":[{{\"path\":\"exact changed file path\",\"line\":123,\"side\":\"right\",\"body\":\"concise actionable finding\"}}]}}\n\nUse only lines visible in the supplied patches. If there are no findings, return an empty comments array. Do not publish or modify anything.",
+        "{}\n\nReview this pull request for correctness, regressions, security, data loss, concurrency, and missing tests. Focus only on actionable findings introduced by the diff. {}{follow_up}\n\n{VERDICT_RULES}\n\nReturn JSON only with this exact shape:\n{{\"verdict\":\"approve|request_changes|undecided\",\"summary\":\"editable review summary\",\"comments\":[{{\"path\":\"exact changed file path\",\"line\":123,\"side\":\"right\",\"body\":\"concise actionable finding\"}}]}}\n\nUse only lines visible in the supplied patches. If there are no findings, return an empty comments array. Do not publish or modify anything.",
         pull_request_context(item, detail),
         instruction_text(instruction),
     )
@@ -159,7 +212,7 @@ pub fn thread_reply_prompt(
     )
 }
 
-fn parse_json(response: &str) -> Result<Value, String> {
+pub(crate) fn parse_json(response: &str) -> Result<Value, String> {
     serde_json::from_str(fenced_json(response)).map_err(|error| error.to_string())
 }
 
@@ -180,6 +233,8 @@ pub fn parse_reply(response: &str) -> Result<String, String> {
 pub struct AgentReview {
     pub summary: String,
     pub comments: Vec<DraftComment>,
+    /// Approve, ask for changes, or not decided yet; none from an older answer.
+    pub verdict: Option<super::pr_review_verdict::Verdict>,
 }
 
 /// `parseAgentReview`: only comments on lines the patches show stay.
@@ -235,6 +290,10 @@ pub fn parse_review(response: &str, detail: &Detail) -> Result<AgentReview, Stri
         })
         .unwrap_or_default();
     Ok(AgentReview {
+        verdict: parsed
+            .get("verdict")
+            .and_then(Value::as_str)
+            .and_then(super::pr_review_verdict::Verdict::parse),
         summary: parsed
             .get("summary")
             .and_then(Value::as_str)
@@ -286,6 +345,56 @@ mod tests {
     }
 
     #[test]
+    fn a_review_answer_says_its_verdict() {
+        let review = parse_review(
+            "{\"verdict\":\"request_changes\",\"summary\":\"Peça mudanças.\",\"comments\":[]}",
+            &detail(),
+        )
+        .unwrap();
+        assert_eq!(
+            review.verdict,
+            Some(super::super::pr_review_verdict::Verdict::RequestChanges)
+        );
+        assert_eq!(parse_review("{}", &detail()).unwrap().verdict, None);
+    }
+
+    #[test]
+    fn a_patch_that_does_not_fit_is_named_never_cut() {
+        use crate::data::pr_review::File;
+        let file = |path: &str, size: usize| File {
+            path: path.into(),
+            additions: size as u64,
+            deletions: 1,
+            patch: Some(format!("@@ -1 +1 @@\n+{}", "x".repeat(size))),
+            ..Default::default()
+        };
+        let detail = Detail {
+            files: vec![
+                file("package-lock.json", 50),
+                file("src/big.rs", 400),
+                file("src/a.rs", 40),
+                File {
+                    path: "src/huge.rs".into(),
+                    additions: 9000,
+                    patch: None,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let files = changed_files(&detail, 200);
+        // The code first, whole; the lockfile after it, as room allows.
+        assert!(files.starts_with("### src/a.rs\n"));
+        assert!(files.contains("### package-lock.json"));
+        assert!(!files.contains("### src/big.rs"));
+        assert!(files.contains(
+            "Left out, too large to send (you did not see them):\n- src/big.rs (+400 −1)"
+        ));
+        assert!(files.contains("- src/huge.rs (+9000 −0), no patch from the forge"));
+        assert!(is_noise("web/dist/app.js") && is_noise("yarn.lock") && !is_noise("src/lib.rs"));
+    }
+
+    #[test]
     fn a_reply_needs_text() {
         assert_eq!(
             parse_reply("```\n{\"reply\":\" Sim \"}\n```").unwrap(),
@@ -310,7 +419,7 @@ mod tests {
             prompt.starts_with("PR: acme/app#7 — Fix\n\nAuthor: unknown\n\nBranches: feat -> main")
         );
         assert!(prompt.contains("### src/a.rs\n@@ -1,2 +1,2 @@"));
-        assert!(prompt.contains("missing tests. Focus only on actionable findings introduced by the diff. foque em testes\n\nReturn JSON"));
+        assert!(prompt.contains("missing tests. Focus only on actionable findings introduced by the diff. foque em testes\n\nDecide first"));
         let row = &parse_patch(detail().files[0].patch.as_deref())[2];
         let inline = inline_prompt(&item, "src/a.rs", row, None, "");
         assert!(inline.contains("Selected left line 2: old\nPatch:\n[unavailable]"));

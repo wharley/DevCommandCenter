@@ -105,7 +105,7 @@ pub fn section(detail: &Detail, login: &str) -> Option<String> {
         text = text.chars().take(BOUND).collect::<String>() + "\n…[truncated]";
     }
     Some(format!(
-        "{text}\n\nThis is a follow-up round: the author changed the pull request since that review. Do not repeat, rephrase or extend points already raised, resolved or not. In the summary, say for each open thread whether the current diff addresses it; when a reply says a thread is fixed, check that against the current diff and say plainly when it does not hold. Add a new comment only for a blocking problem (a bug, regression, security issue or data loss) in the current diff; never style, naming, refactors or nice-to-have suggestions. An empty comments array is the expected answer when nothing blocks."
+        "{text}\n\nThis is a follow-up round: the author changed the pull request since that review. Those threads are a settled conversation: do not list them one by one, and never repeat, rephrase or extend them. In the summary, only: a blocking problem from them that the current diff still has, in one line under the blocking ones; and a reply that says something is fixed when the current diff does not hold it, in one line. A minor thread left as it was is the person's decision: leave it out entirely. Add a new comment only for a blocking problem (a bug, regression, security issue or data loss) in the current diff; never style, naming, refactors or nice-to-have suggestions. When nothing blocks, the verdict is approve, the comments array is empty and the summary can be the verdict line alone."
     ))
 }
 
@@ -224,7 +224,10 @@ mod tests {
             )
         );
         assert!(!text.contains("before the review"));
-        assert!(text.contains("say plainly when it does not hold"));
+        assert!(text.contains("when the current diff does not hold it"));
+        assert!(text.contains(
+            "A minor thread left as it was is the person's decision: leave it out entirely."
+        ));
     }
 
     #[test]
@@ -236,6 +239,7 @@ mod tests {
             side: "right",
         };
         let mut review = AgentReview {
+            verdict: None,
             summary: String::new(),
             comments: vec![draft(3), draft(5), draft(8), draft(9)],
         };
@@ -247,6 +251,7 @@ mod tests {
         let mut moved = detail();
         moved.inline_comments[0].outdated = true;
         let mut review = AgentReview {
+            verdict: None,
             summary: String::new(),
             comments: vec![draft(3), draft(8)],
         };

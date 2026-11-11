@@ -1145,6 +1145,11 @@
     }
   },
   "pullRequests": {
+    "verdict": {
+      "approve": "Can approve",
+      "requestChanges": "Request changes",
+      "undecided": "Not decided"
+    },
     "myReview": {
       "approved": "You approved",
       "changesRequested": "You requested changes",

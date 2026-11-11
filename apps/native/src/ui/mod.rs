@@ -6,6 +6,7 @@ mod badge;
 mod branch_context;
 mod button;
 pub mod changed_files;
+pub mod verdict_chip;
 pub mod command;
 pub mod dialog;
 pub mod diff_squares;

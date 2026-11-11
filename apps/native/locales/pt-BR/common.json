@@ -1145,6 +1145,11 @@
     }
   },
   "pullRequests": {
+    "verdict": {
+      "approve": "Pode aprovar",
+      "requestChanges": "Pedir mudanças",
+      "undecided": "Falta decidir"
+    },
     "myReview": {
       "approved": "Você aprovou",
       "changesRequested": "Você pediu alterações",

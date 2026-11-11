@@ -307,3 +307,62 @@ fn a_long_review_keeps_its_send_button_in_the_window(cx: &mut TestAppContext) {
         "the files stay above"
     );
 }
+
+/// The Reviewer's verdict comes with its review: the chip shows it and the
+/// event it picks is chosen; the person still sends.
+#[gpui::test]
+fn the_reviewers_verdict_picks_the_event(cx: &mut TestAppContext) {
+    use crate::data::pr_review_jobs::PrReviewJobs;
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let detail = json!({
+        "body": null, "comments": [], "checks": [], "inlineComments": [],
+        "files": [{ "path": "src/login.rs", "status": "modified", "additions": 2, "deletions": 1,
+            "patch": "@@ -1,2 +1,3 @@\n fn login() {\n-    old();\n+    new();\n+    more();" }],
+        "reviewCapabilities": { "inlineComments": true, "approve": true, "requestChanges": true,
+            "replyToThreads": true, "resolveThreads": true },
+        "mergeCapabilities": null,
+    })
+    .to_string();
+    let detail_route = || ("/api/v1/pull-request-hub/detail", 200, detail.clone());
+    let (port, _desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list),
+        detail_route(),
+        detail_route(),
+        detail_route(),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1400.0), px(900.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        assert!(PrReviewJobs::start(
+            cx,
+            "pr-1",
+            "acme/app#1".into(),
+            "Fix login".into()
+        ));
+        PrReviewJobs::finish(
+            cx,
+            "pr-1",
+            Ok(r#"{"verdict":"approve","summary":"Pode aprovar.","comments":[]}"#.into()),
+        );
+    });
+    let bounds = cx.debug_bounds("pr-tab-code").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-review-verdict").is_some());
+    assert_eq!(
+        hub.read_with(cx, |hub, _| hub.review.event),
+        ReviewEvent::Approve
+    );
+}
