@@ -65,6 +65,31 @@ fn saved_rooms(app_data: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The project rooms, `(id, name)`, in the desktop's column's order.
+pub(super) fn listed_rooms(
+    db_path: &Path,
+    app_data: &Path,
+    team: &Team,
+) -> Result<Vec<(String, String)>, String> {
+    Ok(listed_rooms_of(app_data, team, &project_names(db_path)?))
+}
+
+/// `listed_rooms`, from the `projects` already read.
+pub(super) fn listed_rooms_of(
+    app_data: &Path,
+    team: &Team,
+    projects: &[(String, String)],
+) -> Vec<(String, String)> {
+    // Agent by agent, as the desktop's column reads them.
+    let talked = team.agents.iter().flat_map(|agent| {
+        team.bindings
+            .iter()
+            .filter(move |binding| binding.agent_id == agent.id)
+            .filter_map(|binding| binding.room.clone())
+    });
+    rooms(&saved_rooms(app_data), talked, projects)
+}
+
 /// One room as the list shows it, before its last line is read.
 struct RoomState<'a> {
     id: Option<String>,
@@ -217,14 +242,7 @@ fn running_opened_tasks(db_path: &Path, team: &Team) -> Result<Vec<String>, Stri
 fn read_rooms(db_path: &Path, app_data: &Path, after: Option<&str>) -> Result<Value, String> {
     let repo = SqliteSessionRepo::open_read_only(db_path).map_err(|error| error.to_string())?;
     let team = read_team(&repo)?;
-    // Agent by agent, as the desktop's column reads them.
-    let talked = team.agents.iter().flat_map(|agent| {
-        team.bindings
-            .iter()
-            .filter(move |binding| binding.agent_id == agent.id)
-            .filter_map(|binding| binding.room.clone())
-    });
-    let listed = rooms(&saved_rooms(app_data), talked, &project_names(db_path)?);
+    let listed = listed_rooms(db_path, app_data, &team)?;
     let running = running_opened_tasks(db_path, &team)?;
     let states = room_states(&team, &listed, &running);
     let snapshot = snapshot_id(&team, &states);

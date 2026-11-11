@@ -86,6 +86,7 @@ mod menu_bar;
 mod mobile;
 mod mobile_agents;
 mod mobile_room;
+mod mobile_room_actions;
 mod mobile_room_send;
 mod mobile_rooms;
 mod pr_review_requests;
@@ -95,6 +96,7 @@ mod providers;
 mod pull_request_hub;
 mod remote_devices;
 mod room_approval_respond;
+mod room_cards;
 mod room_feed;
 mod room_handoffs;
 mod room_line_json;
@@ -717,6 +719,22 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/mobile/room/approvals/respond",
             post(room_approval_respond::respond),
+        )
+        .route(
+            "/api/v1/mobile/room/reactions",
+            post(mobile_room_actions::react),
+        )
+        .route(
+            "/api/v1/mobile/room/rules",
+            post(mobile_room_actions::keep_rule),
+        )
+        .route(
+            "/api/v1/mobile/room/proposals",
+            post(mobile_room_actions::answer_proposal),
+        )
+        .route(
+            "/api/v1/mobile/room/limit",
+            post(mobile_room_actions::let_past_limit),
         )
         .route(
             "/api/v1/task-proposals/:proposal_id/start",
@@ -7335,6 +7353,161 @@ mod tests {
         ] {
             assert!(crate::remote_connector::remote_path_allowed(path), "{path}");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_phone_sees_the_rooms_cards_and_acts_on_them() {
+        let fixture = embedded_fixture().await;
+        let mut draft = dcc_core::domain::agent::ResidentAgentDraft::reviewer(&Default::default());
+        draft.name = "QA".into();
+        draft.role = "Teste.".into();
+        draft.monthly_token_limit = Some(1_000);
+        let qa = fixture
+            .backend
+            .sessions
+            .save_resident_agent(None, draft)
+            .unwrap();
+        let (status, room) = get_json(&fixture.app, "/api/v1/mobile/room").await;
+        assert_eq!(status, StatusCode::OK, "{room}");
+        assert_eq!(room["cards"], json!([]));
+        // Past its limit: a card in Geral, none in a project's room.
+        let session = fixture.session_id.0.clone();
+        let (status, body) = post_json(
+            &fixture.app,
+            &format!("/api/v1/sessions/{session}/agent"),
+            json!({ "agentId": qa.id }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        {
+            let conn = rusqlite::Connection::open(&fixture.backend.workspace.db_path).unwrap();
+            conn.execute(
+                "INSERT INTO dcc_turn_model_usage (session_id, turn_id, model, total_tokens, recorded_at) VALUES (?1, 't-1', 'm', 5000, ?2)",
+                rusqlite::params![
+                    session,
+                    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                ],
+            )
+            .unwrap();
+        }
+        let (_, room) = get_json(&fixture.app, "/api/v1/mobile/room").await;
+        let limit = room["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|card| card["kind"] == "limit")
+            .cloned()
+            .unwrap_or_else(|| panic!("{room}"));
+        assert_eq!(limit["agentId"], json!(qa.id));
+        assert_eq!(limit["limit"], 1_000);
+        assert_eq!(limit["actions"], json!(["continue"]));
+        for field in [
+            "key",
+            "title",
+            "at",
+            "unread",
+            "trigger",
+            "verdict",
+            "workspaceId",
+            "sessionId",
+            "prId",
+        ] {
+            assert!(limit.get(field).is_some(), "{field}: {limit}");
+        }
+        let snapshot = room["snapshotId"].as_str().unwrap().to_string();
+        let (_, project) = get_json(&fixture.app, "/api/v1/mobile/room?room=checkout").await;
+        assert!(
+            !project["cards"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|card| card["kind"] == "limit"),
+            "{project}"
+        );
+        // "Continuar mesmo assim": the card goes, and the room moves.
+        let (status, body) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/limit",
+            json!({ "agentId": qa.id }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (_, after) = get_json(
+            &fixture.app,
+            &format!("/api/v1/mobile/room?after={snapshot}"),
+        )
+        .await;
+        assert_ne!(after["unchanged"], true, "{after}");
+        assert!(!after["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|card| card["kind"] == "limit"));
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/limit",
+            json!({ "agentId": "nobody" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        // A proposal no longer there; a rule for an agent, or for nobody.
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/proposals",
+            json!({ "kind": "agent", "id": "gone", "action": "create" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/proposals",
+            json!({ "kind": "routine", "id": "gone", "agentId": qa.id, "action": "discard" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, kept) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/rules",
+            json!({ "agentId": qa.id, "body": "  sempre cite o PR  " }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{kept}");
+        let notes = fixture.backend.sessions.agent_memory(&qa.id).unwrap();
+        assert!(notes.iter().any(|note| note.body == "sempre cite o PR"));
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/rules",
+            json!({ "agentId": "nobody", "body": "x" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/rules",
+            json!({ "agentId": qa.id, "body": "   " }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // A reaction only on an agent's own conversation (this one is a task's).
+        let (status, _) = post_json(
+            &fixture.app,
+            "/api/v1/mobile/room/reactions",
+            json!({ "sessionId": session, "lineKey": format!("{session}:t-1"), "reaction": "up" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        for path in [
+            "/api/v1/mobile/room/reactions",
+            "/api/v1/mobile/room/rules",
+            "/api/v1/mobile/room/proposals",
+            "/api/v1/mobile/room/limit",
+        ] {
+            assert!(crate::remote_connector::remote_path_allowed(path), "{path}");
+        }
+        assert!(!crate::remote_connector::remote_path_allowed(&format!(
+            "/api/v1/agents/{}/reactions",
+            qa.id
+        )));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

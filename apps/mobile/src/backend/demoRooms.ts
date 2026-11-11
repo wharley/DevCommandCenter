@@ -10,6 +10,12 @@
  * the Reviewer's answer in Geral suggests passing the turn to Dev; Dev's
  * task in loja-online runs live under the room; each answer's steps open.
  * The turns are read from the clock on each read, no timer drives them.
+ *
+ * The rooms carry the desktop's cards too: Dev's finished task in
+ * loja-online (woken by "CI falhou"), the Reviewer's pull request review
+ * with "Pode aprovar", a check-in and Dev's proposal of a QA agent in Geral
+ * ("Criar" / "Descartar"); 👍 / 👎 under an answer stay, and a rule kept
+ * after a 👎 is accepted.
  */
 import { ApiError } from "./types";
 
@@ -25,7 +31,11 @@ type Line = {
 	task?: unknown;
 	turnId?: string;
 	handoff?: { to: string; toName: string; request: string; state: "pending" | "passed" | "auto" };
+	reaction?: "up" | "down" | null;
 };
+
+/** A card as the desktop serves it (`cards` on `/mobile/room`), with its room. */
+type Card = { room: string } & Record<string, unknown>;
 
 /** An agent at work in a room, read from the clock. */
 type Turn = { room: string; agentId: string; sessionId: string; turnId: string; startedAt: number; prompt: string };
@@ -92,6 +102,7 @@ export class DemoRooms {
 	private stopped: Array<{ room: string; agentId: string; sessionId: string; turnId: string; reason: string | null; prompt: string | null }> = [];
 	/** When Dev's task in loja-online started, for its live row. */
 	private readonly taskStartedAt: number;
+	private cards: Card[] = [];
 
 	constructor(
 		now: number,
@@ -125,6 +136,80 @@ export class DemoRooms {
 		// Suporte stopped in loja-online: "Tentar de novo" sends the prompt again.
 		this.stopped.push({ room: "loja", agentId: "demo-sup", sessionId: "demo-live-loja-demo-sup", turnId: "demo-stop-1", reason: "O provedor encerrou a conexão", prompt: "@Suporte responde o cliente sem recibo" });
 		this.taskStartedAt = now - 3 * 60_000;
+		const card = (room: string, key: string, kind: string, minutes: number | null, fields: Record<string, unknown>) =>
+			this.cards.push({
+				room,
+				key,
+				kind,
+				agentId: null,
+				title: "",
+				at: minutes === null ? null : ago(minutes),
+				unread: false,
+				trigger: null,
+				verdict: null,
+				workspaceId: null,
+				sessionId: null,
+				prId: null,
+				actions: ["open"],
+				...fields,
+			});
+		card("loja", "demo-card-done", "taskResult", 30, {
+			agentId: "demo-dev",
+			title: "corrigir-frete",
+			unread: true,
+			trigger: "ciFailed",
+			workspaceId: "demo-w4",
+			sessionId: THREAD,
+			actions: ["open", "delivery"],
+		});
+		card("geral", "demo-card-review", "prReview", 90, {
+			agentId: "demo-rev",
+			title: "site#18 · Guia de onboarding",
+			unread: true,
+			verdict: "approve",
+			sessionId: THREAD,
+			prId: "demo-pr-18",
+		});
+		card("geral", "demo-card-check", "checkIn", 50, {
+			title: "Atualizar SDK de pagamentos",
+			unread: true,
+			sessionId: THREAD,
+			checkIn: { kind: "reviewRequested", place: "loja-online #42", url: null, minutes: 20 },
+		});
+		card("geral", "demo-card-proposal", "agentProposal", 20, {
+			agentId: "demo-dev",
+			title: "QA",
+			actions: ["create", "discard"],
+			proposal: {
+				id: "demo-proposal-qa",
+				name: "QA",
+				role: "Testa cada entrega no navegador antes do PR e conta o que quebrou, com o passo a passo.",
+				avatar: { color: "amber", arms: 3, eyes: "round", shape: "block", accessory: "magnifier" },
+				projects: ["loja-online"],
+				firstRequest: "Teste o checkout-v2 no navegador",
+			},
+		});
+	}
+
+	/** 👍 / 👎 on an answer: kept on its line, as the desktop keeps it. */
+	private react(body: unknown) {
+		const input = (body ?? {}) as { lineKey?: unknown; reaction?: unknown };
+		const line = [...this.lines.values()].flat().find((item) => item.key === input.lineKey);
+		if (!line || line.speaker !== "agent") throw new ApiError(404, "conversation not found");
+		line.reaction = input.reaction === "up" || input.reaction === "down" ? input.reaction : null;
+		this.version += 1;
+		this.notify();
+		return { ok: true, reaction: line.reaction };
+	}
+
+	/** "Criar" / "Descartar" on a proposal, "Continuar mesmo assim" on a limit: the card goes. */
+	private answerCard(match: (card: Card) => boolean) {
+		const before = this.cards.length;
+		this.cards = this.cards.filter((card) => !match(card));
+		if (this.cards.length === before) throw new ApiError(404, "proposal not found");
+		this.version += 1;
+		this.notify();
+		return { ok: true };
 	}
 
 	/** Ends the turns whose time is up: the answer, then the next message queued there. */
@@ -365,8 +450,23 @@ export class DemoRooms {
 							? [{ sessionId: QUESTION_SESSION, requestId: "demo-room-q1", agentId: "demo-rev", agentName: "Revisor", questions: QUESTION }]
 							: [],
 					working: [...(this.working.get(key) ?? [])],
+					cards: this.cards.filter((card) => card.room === key).map(({ room: _room, ...card }) => card),
 				}
 			);
+		}
+		if (method === "POST" && path === "/api/v1/mobile/room/reactions") return this.react(body);
+		if (method === "POST" && path === "/api/v1/mobile/room/rules") {
+			const rule = typeof (body as { body?: unknown })?.body === "string" ? (body as { body: string }).body.trim() : "";
+			if (!rule) throw new ApiError(400, "Regra vazia.");
+			return { ok: true, noteId: "demo-note" };
+		}
+		if (method === "POST" && path === "/api/v1/mobile/room/proposals") {
+			const id = (body as { id?: unknown })?.id;
+			return this.answerCard((card) => (card.proposal as { id?: unknown } | undefined)?.id === id);
+		}
+		if (method === "POST" && path === "/api/v1/mobile/room/limit") {
+			const agentId = (body as { agentId?: unknown })?.agentId;
+			return this.answerCard((card) => card.kind === "limit" && card.agentId === agentId);
 		}
 		if (method === "POST" && path === "/api/v1/mobile/room/messages") return this.send(body);
 		if (method === "POST" && path === "/api/v1/mobile/room/handoff") return this.handoff(body);

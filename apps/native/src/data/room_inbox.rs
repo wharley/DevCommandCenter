@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use dcc_core::domain::agent_conversation::home_agent_id;
+use dcc_core::domain::room_inbox::{TaskCard, TaskCardKind, TaskSession, task_card};
 
 use super::agent_triggers::{Run, Trigger};
 use super::agents::{AgentRecord, AgentState, REVIEWER_PRESET};
@@ -15,9 +15,7 @@ use super::pr_review_jobs::{JobStatus, PrReviewJob};
 use super::time::parse_ms;
 
 /// Cards older than this leave the room.
-const KEEP_DAYS: i64 = 7;
-/// A trigger run this close before a result is what woke the agent.
-const WOKEN_WITHIN_MS: i64 = 2 * 60 * 60 * 1000;
+const KEEP_DAYS: i64 = dcc_core::domain::room_inbox::KEEP_DAYS;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CardKind {
@@ -70,13 +68,32 @@ pub struct InboxSources<'a> {
     pub now_ms: i64,
 }
 
+/// The trigger that woke `agent` on `target` shortly before `at_ms`.
 pub(crate) fn woken_by(runs: &[Run], agent: &str, target: &str, at_ms: i64) -> Option<Trigger> {
-    runs.iter()
-        .filter(|run| run.agent_id == agent && run.target == target)
-        .filter_map(|run| parse_ms(&run.at).map(|ran| (ran, run.trigger)))
-        .filter(|(ran, _)| *ran <= at_ms && at_ms - ran <= WOKEN_WITHIN_MS)
-        .max_by_key(|(ran, _)| *ran)
-        .map(|(_, trigger)| trigger)
+    dcc_core::domain::room_inbox::woken_by(runs, agent, target, at_ms)
+}
+
+/// A card of the shared rule (`dcc_core::domain::room_inbox`) as the room's.
+pub(crate) fn from_task_card(card: TaskCard) -> InboxCard {
+    InboxCard {
+        key: card.key,
+        agent_id: card.agent_id,
+        kind: match card.kind {
+            TaskCardKind::Result { completed_at } => CardKind::TaskResult {
+                workspace_id: card.workspace_id,
+                session_id: card.session_id,
+                completed_at,
+            },
+            TaskCardKind::Waiting => CardKind::TaskWaiting {
+                workspace_id: card.workspace_id,
+                session_id: card.session_id,
+            },
+        },
+        title: card.title,
+        trigger: card.trigger,
+        at: card.at,
+        unread: card.unread,
+    }
 }
 
 /// The cards, oldest first.
@@ -86,52 +103,27 @@ pub fn cards(sources: &InboxSources<'_>) -> Vec<InboxCard> {
     let mut cards = Vec::new();
     for agent in sources.agents {
         for session in &agent.sessions {
-            // Its own conversation is the room itself.
-            if home_agent_id(&session.project_id).is_some() {
-                continue;
-            }
-            let title = sources
-                .task_names
-                .get(&session.workspace_id)
-                .cloned()
-                .or_else(|| session.title.clone())
-                .unwrap_or_default();
-            if session.state == AgentState::NeedsYou {
-                cards.push(InboxCard {
-                    key: format!("wait:{}", session.session_id),
-                    agent_id: agent.id.clone(),
-                    kind: CardKind::TaskWaiting {
-                        workspace_id: session.workspace_id.clone(),
-                        session_id: session.session_id.clone(),
-                    },
-                    title,
-                    trigger: None,
-                    at: session.updated_at.clone(),
-                    unread: true,
-                });
-                continue;
-            }
-            let Some(completed) = session.completed_at.as_deref() else {
-                continue;
-            };
-            if session.state == AgentState::Working || !recent(completed) {
-                continue;
-            }
-            let trigger = parse_ms(completed)
-                .and_then(|at| woken_by(sources.runs, &agent.id, &session.workspace_id, at));
-            cards.push(InboxCard {
-                key: format!("done:{}:{completed}", session.session_id),
-                agent_id: agent.id.clone(),
-                kind: CardKind::TaskResult {
-                    workspace_id: session.workspace_id.clone(),
-                    session_id: session.session_id.clone(),
-                    completed_at: completed.to_string(),
+            let found = task_card(
+                &TaskSession {
+                    agent_id: &agent.id,
+                    session_id: &session.session_id,
+                    workspace_id: &session.workspace_id,
+                    project_id: &session.project_id,
+                    title: session.title.as_deref(),
+                    waiting: session.state == AgentState::NeedsYou,
+                    working: session.state == AgentState::Working,
+                    completed_at: session.completed_at.as_deref(),
+                    updated_at: &session.updated_at,
                 },
-                title,
-                trigger,
-                at: completed.to_string(),
-                unread: (sources.unread)(&session.session_id, completed),
-            });
+                sources
+                    .task_names
+                    .get(&session.workspace_id)
+                    .map(String::as_str),
+                sources.runs,
+                sources.unread,
+                sources.now_ms,
+            );
+            cards.extend(found.map(from_task_card));
         }
     }
     let reviewer = sources

@@ -28,6 +28,7 @@ import {
 	type ResidentAgent,
 	type RoomApproval,
 	type RoomLine,
+	type RoomReaction,
 	type RoomStep,
 	type RoomTask,
 } from "@dcc/mobile-core";
@@ -36,6 +37,7 @@ import { haptic } from "@/ui/haptics";
 import { Button, Mono } from "@/ui/primitives";
 import { ResidentMascot } from "@/ui/ResidentMascot";
 import { RichText } from "@/ui/RichText";
+import { GivenReaction, ReactionTargets } from "@/screens/roomReactions";
 import Feather from "@expo/vector-icons/Feather";
 import { memo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
@@ -133,9 +135,11 @@ export type AgentLineProps = {
 	onHandoff: (line: RoomLine, action: "pass" | "ignore") => void;
 	/** Reads the answer's steps when its folded line is opened. */
 	loadSteps: (line: RoomLine) => Promise<{ steps: RoomStep[]; more: number }>;
+	/** 👍 / 👎; the one given again takes it back (null). */
+	onReact: (line: RoomLine, reaction: RoomReaction | null) => void;
 };
 
-function AgentLineView({ line, agent, first, handing, onOpen, onTask, onHandoff, loadSteps }: AgentLineProps) {
+function AgentLineView({ line, agent, first, handing, onOpen, onTask, onHandoff, loadSteps, onReact }: AgentLineProps) {
 	const styles = useStyles();
 	const receipt = roomReceiptLabel(line.receipt);
 	return (
@@ -157,6 +161,7 @@ function AgentLineView({ line, agent, first, handing, onOpen, onTask, onHandoff,
 				))}
 				{line.handoff ? <HandoffBar line={line} author={agent.name} busy={handing} onAct={onHandoff} /> : null}
 				<View style={styles.receipt}>
+					{line.reaction ? <GivenReaction reaction={line.reaction} onPress={() => onReact(line, null)} /> : null}
 					{receipt ? <Mono style={styles.receiptText}>{receipt}</Mono> : null}
 					<Pressable
 						onPress={() => {
@@ -169,6 +174,7 @@ function AgentLineView({ line, agent, first, handing, onOpen, onTask, onHandoff,
 					>
 						<Text style={styles.open}>Abrir conversa</Text>
 					</Pressable>
+					<ReactionTargets given={line.reaction} onReact={(reaction) => onReact(line, reaction)} />
 				</View>
 			</View>
 		</View>
@@ -187,7 +193,8 @@ export const AgentLine = memo(
 		before.onOpen === after.onOpen &&
 		before.onTask === after.onTask &&
 		before.onHandoff === after.onHandoff &&
-		before.loadSteps === after.loadSteps,
+		before.loadSteps === after.loadSteps &&
+		before.onReact === after.onReact,
 );
 
 /** "Trabalhou 4 min · leu 6 arquivos": a tap lists each step, read once. */

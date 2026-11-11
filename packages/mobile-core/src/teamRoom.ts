@@ -9,6 +9,7 @@ import {
 	type RoomQueued,
 	type RoomStopped,
 } from "./roomLive.ts";
+import { parseRoomCards, ROOM_OWN_CARDS, type RoomCard } from "./roomCards.ts";
 
 /**
  * The team room as the desktop serves it to the phone
@@ -61,7 +62,11 @@ export type RoomLine = {
 	turnId: string | null;
 	/** The teammate an answer suggests passing to, and what became of it. */
 	handoff: RoomHandoff | null;
+	/** The person's 👍 / 👎 on an answer, given here or on the desktop. */
+	reaction: RoomReaction | null;
 };
+
+export type RoomReaction = "up" | "down";
 
 /** An agent's permission request waiting in the room; answered with the session's `respond-permission`. */
 export type RoomApproval = {
@@ -106,6 +111,8 @@ export type RoomSnapshot =
 			linesId: string | null;
 			/** The lines are those of `linesId` sent back: `lines` is empty, keep the ones held. */
 			linesUnchanged: boolean;
+			/** The room's cards (results, check-ins, proposals, limits); empty on an older desktop. */
+			cards: RoomCard[];
 	  };
 
 /** Why the desktop picked who answers (`RouteReason`). */
@@ -216,6 +223,7 @@ function parseLine(raw: unknown): RoomLine | null {
 		}),
 		turnId: text(value.turnId),
 		handoff: value.speaker === "agent" ? parseRoomHandoff(value.handoff) : null,
+		reaction: value.speaker === "agent" && (value.reaction === "up" || value.reaction === "down") ? value.reaction : null,
 	};
 }
 
@@ -241,6 +249,7 @@ export function parseRoom(data: unknown, after: string | null): RoomSnapshot | n
 		queued: parseRoomQueued(value.queued),
 		linesId: text(value.linesId),
 		linesUnchanged,
+		cards: parseRoomCards(value.cards),
 		approvals: Array.isArray(value.approvals)
 			? value.approvals.flatMap((raw) => {
 					const approval = parseApproval(raw);
@@ -319,7 +328,9 @@ const GROUP_MINUTES = 5;
 export type RoomItem =
 	| { type: "day"; key: string; label: string }
 	/** `first`: the line opens a group, so it carries the agent's face, name and time. */
-	| { type: "line"; key: string; line: RoomLine; first: boolean };
+	| { type: "line"; key: string; line: RoomLine; first: boolean }
+	/** A card of the inbox at its time, or DCC's own after everything. */
+	| { type: "card"; key: string; card: RoomCard };
 
 function dayOf(at: string): string {
 	const when = new Date(at);
@@ -347,28 +358,51 @@ export function roomClock(at: string): string {
 
 /**
  * The lines as the list draws them: a pill at each new day, and an agent's
- * answers within 5 minutes of its last one grouped under one face.
+ * answers within 5 minutes of its last one grouped under one face. The
+ * inbox's cards sit at their time among the lines (a line after a card opens
+ * its group again); DCC's own cards (a limit, a proposal) come after them all.
  */
-export function roomItems(lines: RoomLine[], now: Date = new Date()): RoomItem[] {
+export function roomItems(lines: RoomLine[], now: Date = new Date(), cards: RoomCard[] = []): RoomItem[] {
 	const items: RoomItem[] = [];
 	let day = "";
 	let previous: RoomLine | null = null;
-	for (const line of lines) {
-		const lineDay = dayOf(line.at);
-		if (lineDay && lineDay !== day) {
-			day = lineDay;
-			items.push({ type: "day", key: `day-${lineDay}`, label: roomDayLabel(line.at, now) });
+	const timed = cards.filter((card) => !ROOM_OWN_CARDS.has(card.kind) && card.at);
+	const own = cards.filter((card) => !timed.includes(card));
+	type Entry = { at: string; line: RoomLine } | { at: string; card: RoomCard };
+	const entries: Entry[] = [...lines.map((line) => ({ at: line.at, line })), ...timed.map((card) => ({ at: card.at!, card }))];
+	// Stable: a line and a card at the same time keep the line first.
+	const time = (at: string) => {
+		const ms = new Date(at).getTime();
+		return Number.isNaN(ms) ? 0 : ms;
+	};
+	entries.sort((left, right) => time(left.at) - time(right.at));
+	const dayPill = (at: string) => {
+		const entryDay = dayOf(at);
+		if (entryDay && entryDay !== day) {
+			day = entryDay;
+			items.push({ type: "day", key: `day-${entryDay}`, label: roomDayLabel(at, now) });
 			previous = null;
 		}
+	};
+	for (const entry of entries) {
+		dayPill(entry.at);
+		if ("card" in entry) {
+			items.push({ type: "card", key: `card-${entry.card.key}`, card: entry.card });
+			previous = null;
+			continue;
+		}
+		const line = entry.line;
+		const last: RoomLine | null = previous;
 		const grouped =
 			line.speaker === "agent" &&
-			previous !== null &&
-			previous.speaker === "agent" &&
-			previous.agentId === line.agentId &&
-			new Date(line.at).getTime() - new Date(previous.at).getTime() <= GROUP_MINUTES * 60_000;
+			last !== null &&
+			last.speaker === "agent" &&
+			last.agentId === line.agentId &&
+			new Date(line.at).getTime() - new Date(last.at).getTime() <= GROUP_MINUTES * 60_000;
 		items.push({ type: "line", key: line.key, line, first: !grouped });
 		previous = line;
 	}
+	for (const card of own) items.push({ type: "card", key: `card-${card.key}`, card });
 	return items;
 }
 

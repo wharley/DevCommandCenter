@@ -9,6 +9,7 @@ export * from "./mentions.ts";
 export * from "./questions.ts";
 export * from "./residentAgents.ts";
 export * from "./roomLive.ts";
+export * from "./roomCards.ts";
 export * from "./teamRoom.ts";
 export * from "./taskProposals.ts";
 export * from "./threadEvents.ts";

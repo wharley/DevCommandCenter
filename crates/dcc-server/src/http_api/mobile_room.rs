@@ -13,6 +13,10 @@
 //! read cheaply from those conversations' event stamps. `linesId` names the
 //! settled part: a phone that sends it back as `lines` gets
 //! `linesUnchanged` without the lines while only the turns at work moved.
+//!
+//! The room also carries `cards`, the ones the desktop's room shows there
+//! (`room_cards`), and each answer the person's 👍 / 👎 (`reaction`); both
+//! move the ids, so a reaction given on the desktop reaches the phone.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -83,6 +87,15 @@ fn lines_id(
         digest.update(format!("{count}:{sequence}:{row}").as_bytes());
     }
     super::room_handoffs::digest(handled, &mut digest);
+    // A 👍 or 👎 given here or on the desktop.
+    for home in homes {
+        for (key, reaction) in repo
+            .session_reactions(&home.session_id)
+            .map_err(|error| error.to_string())?
+        {
+            digest.update(format!("{key}={}", reaction.key()).as_bytes());
+        }
+    }
     Ok(hex(&digest.finalize()[..12]))
 }
 
@@ -96,12 +109,14 @@ fn snapshot_id(
     repo: &SqliteSessionRepo,
     lines_id: &str,
     running: &[&str],
+    cards: &[Value],
 ) -> Result<String, String> {
-    if running.is_empty() {
+    if running.is_empty() && cards.is_empty() {
         return Ok(lines_id.to_string());
     }
     let mut digest = Sha256::new();
     digest.update(lines_id.as_bytes());
+    super::room_cards::digest(cards, &mut digest);
     for session in running {
         let (count, sequence, row) = repo
             .session_event_stamp(&SessionId(session.to_string()))
@@ -220,6 +235,21 @@ fn requests(
     Ok((approvals, questions))
 }
 
+/// The person's 👍 / 👎 on the room's answers, by answer key.
+fn reactions(
+    repo: &SqliteSessionRepo,
+    homes: &[&AgentSessionBinding],
+) -> Result<HashMap<String, dcc_core::domain::agent_reaction::Reaction>, String> {
+    let mut all = HashMap::new();
+    for home in homes {
+        all.extend(
+            repo.session_reactions(&home.session_id)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    Ok(all)
+}
+
 fn read_room(
     db_path: &Path,
     app_data: &Path,
@@ -239,7 +269,9 @@ fn read_room(
         .map(|home| home.session_id.as_str())
         .chain(tasks.iter().map(|task| task.session_id.as_str()))
         .collect();
-    let snapshot = snapshot_id(&repo, &lines_id, &running)?;
+    let sources = super::room_cards::read_sources(db_path, app_data, &repo, &team)?;
+    let cards = super::room_cards::cards(&team, &sources, room);
+    let snapshot = snapshot_id(&repo, &lines_id, &running, &cards)?;
     if after == Some(snapshot.as_str()) {
         return Ok(json!({ "unchanged": true, "snapshotId": snapshot }));
     }
@@ -255,6 +287,7 @@ fn read_room(
         "live": live,
         "stopped": stopped,
         "queued": queued,
+        "cards": cards,
     });
     if lines_after == Some(lines_id.as_str()) {
         value["linesUnchanged"] = json!(true);
@@ -262,10 +295,14 @@ fn read_room(
     }
     let lines = super::room_line_json::shown(room_lines(&repo, &homes)?);
     let tasks = reported_tasks(&repo, &lines)?;
+    let reactions = reactions(&repo, &homes)?;
     let shown: Vec<Value> = lines
         .iter()
         .map(|line| {
             let mut json = line_json(line, &tasks);
+            if line.speaker == dcc_core::domain::team_room_lines::Speaker::Agent {
+                json["reaction"] = json!(reactions.get(&line.key).map(|reaction| reaction.key()));
+            }
             if let Some(handoff) =
                 super::room_handoffs::handoff_json(line, &team.agents, &handled, &lines)
             {

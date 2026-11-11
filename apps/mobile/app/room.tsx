@@ -21,12 +21,15 @@ import {
 	queuedLabel,
 	roomItems,
 	roomReasonLabel,
+	t,
 	type ResidentAgent,
 	type RoomApproval,
+	type RoomCard,
 	type RoomLine,
 	type RoomLive,
 	type RoomQueued,
 	type RoomQuestion,
+	type RoomReaction,
 	type RoomStopped,
 	type RoomTask,
 } from "@dcc/mobile-core";
@@ -37,6 +40,8 @@ import { sendError, useTeamRoom, type ApprovalChoice } from "@/backend/teamRoom"
 import { useDictation } from "@/dictation/useDictation";
 import { AgentLine, ApprovalDock, DayPill, MentionList, PersonLine, WorkingLine } from "@/screens/roomParts";
 import { JumpPill, LiveRow, StoppedRow } from "@/screens/roomLive";
+import { RoomCardRow } from "@/screens/roomCards";
+import { RuleSheet } from "@/screens/roomReactions";
 import { QuestionDock } from "@/screens/roomQuestion";
 import { makeStyles, useTheme } from "@/theme";
 import { AttachButton, AttachmentTray, DictationStatus, MicButton, useAttachments } from "@/ui/ComposerTools";
@@ -51,6 +56,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	ActivityIndicator,
 	FlatList,
+	Linking,
 	Pressable,
 	StyleSheet,
 	Text,
@@ -66,6 +72,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 type RowBody = { key: string } & (
 	| { type: "day"; label: string }
 	| { type: "line"; line: RoomLine; first: boolean }
+	| { type: "card"; card: RoomCard }
 	| { type: "stopped"; stopped: RoomStopped }
 	| { type: "live"; live: RoomLive }
 	| { type: "working"; agent: ResidentAgent }
@@ -76,13 +83,22 @@ type Row = RowBody & { gap: number };
 /** Scrolled this far from the end, the room stops following. */
 const FOLLOW_SLACK = 64;
 
-/** The room's lines in time order: a pill at each new day, an answer within its group close, a new speaker with air. */
-function lineRows(lines: RoomLine[]): Row[] {
-	return roomItems(lines).map((item, index) => {
-		const gap = index === 0 ? 0 : item.type === "line" && !item.first ? 8 : 18;
-		return item.type === "day"
-			? { type: "day", key: item.key, label: item.label, gap }
-			: { type: "line", key: item.key, line: item.line, first: item.first, gap };
+/**
+ * The room's lines in time order with its cards among them: a pill at each
+ * new day, an answer within its group close, a new speaker or a card with
+ * air; DCC's own cards (a limit, a proposal) after them all.
+ */
+function lineRows(lines: RoomLine[], cards: RoomCard[]): Row[] {
+	return roomItems(lines, new Date(), cards).map((item, index): Row => {
+		const gap = index === 0 ? 0 : item.type === "line" && !item.first ? 8 : item.type === "card" ? 14 : 18;
+		switch (item.type) {
+			case "day":
+				return { type: "day", key: item.key, label: item.label, gap };
+			case "card":
+				return { type: "card", key: item.key, card: item.card, gap };
+			case "line":
+				return { type: "line", key: item.key, line: item.line, first: item.first, gap };
+		}
 	});
 }
 
@@ -141,7 +157,7 @@ export default function TeamRoomScreen() {
 					: agents.filter((agent) => agent.state === "working"),
 		[agents, room.working, roomId],
 	);
-	const lined = useMemo(() => lineRows(room.lines), [room.lines]);
+	const lined = useMemo(() => lineRows(room.lines, room.cards), [room.lines, room.cards]);
 	const rows = useMemo(() => {
 		const atWork = new Set(room.live.map((turn) => turn.agentId));
 		return roomRows(
@@ -238,7 +254,9 @@ export default function TeamRoomScreen() {
 	};
 
 	// Stable, so a row redraws only when its own line moves.
-	const { retry, stop, handoff, steps: loadSteps } = room;
+	const { retry, stop, handoff, steps: loadSteps, react, answerProposal, continueLimit, keepRule } = room;
+	/** The answer whose 👎 asks "Guardar como regra?". */
+	const [rule, setRule] = useState<{ agentId: string } | null>(null);
 	const failed = useCallback((text: string | null) => {
 		if (text) setNotice({ text, error: true });
 	}, []);
@@ -265,6 +283,43 @@ export default function TeamRoomScreen() {
 		[handoff, failed, toEnd],
 	);
 	const onStop = useCallback((turn: RoomLive) => void stop(turn).then(failed), [stop, failed]);
+	const onReact = useCallback(
+		(line: RoomLine, reaction: RoomReaction | null) => {
+			void react(line, reaction).then((error) => {
+				failed(error);
+				if (!error && reaction === "down") setRule({ agentId: line.agentId });
+			});
+		},
+		[react, failed],
+	);
+	const onKeepRule = (body: string) => {
+		if (!rule) return;
+		void keepRule(rule.agentId, body).then((error) => {
+			if (error) {
+				setNotice({ text: error, error: true });
+				return;
+			}
+			setRule(null);
+			setNotice({ text: t("agents.reactions.kept"), error: false });
+		});
+	};
+	const openCard = useCallback((card: RoomCard, where: "thread" | "delivery") => {
+		if (where === "delivery" && card.workspaceId) {
+			router.push({ pathname: "/delivery/[id]", params: { id: card.workspaceId } });
+		} else if (card.sessionId) {
+			router.push({ pathname: "/thread/[id]", params: { id: card.sessionId } });
+		} else if (card.workspaceId) {
+			router.push({ pathname: "/delivery/[id]", params: { id: card.workspaceId } });
+		} else if (card.checkIn?.url) {
+			void Linking.openURL(card.checkIn.url);
+		}
+	}, []);
+	const actOnCard = useCallback(
+		(card: RoomCard, action: "create" | "discard" | "continue") => {
+			void (action === "continue" ? continueLimit(card) : answerProposal(card, action)).then(failed);
+		},
+		[answerProposal, continueLimit, failed],
+	);
 	const onRetry = useCallback(
 		(turn: RoomStopped) => {
 			void retry(turn).then(failed);
@@ -307,8 +362,15 @@ export default function TeamRoomScreen() {
 								onTask={openTask}
 								onHandoff={onHandoff}
 								loadSteps={loadSteps}
+								onReact={onReact}
 							/>
 						);
+					}
+					case "card": {
+						const agent = item.card.agentId ? byId.get(item.card.agentId) : undefined;
+						// A card of an agent the phone does not know yet waits for the team's next read.
+						if (item.card.agentId && !agent) return null;
+						return <RoomCardRow card={item.card} agent={agent} busy={answering.has(`card:${item.card.key}`)} onOpen={openCard} onAct={actOnCard} />;
 					}
 					case "stopped": {
 						const agent = byId.get(item.stopped.agentId);
@@ -334,7 +396,7 @@ export default function TeamRoomScreen() {
 			})();
 			return row ? <View style={item.gap ? { paddingTop: item.gap } : undefined}>{row}</View> : null;
 		},
-		[byId, agents, answering, openLine, openTask, onHandoff, loadSteps, onRetry, onStop, openLive],
+		[byId, agents, answering, openLine, openTask, onHandoff, loadSteps, onReact, openCard, actOnCard, onRetry, onStop, openLive],
 	);
 
 	return (
@@ -395,6 +457,13 @@ export default function TeamRoomScreen() {
 					</View>
 					<View style={{ width: 44 }} />
 				</View>
+
+				<RuleSheet
+					visible={rule !== null}
+					busy={rule !== null && answering.has(`rule:${rule.agentId}`)}
+					onKeep={onKeepRule}
+					onClose={() => setRule(null)}
+				/>
 
 				<JumpPill count={unseen} bottom={dockBottom + dockHeight + 12} onPress={toEnd} />
 

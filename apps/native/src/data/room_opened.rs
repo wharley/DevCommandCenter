@@ -7,13 +7,9 @@
 use std::collections::HashMap;
 
 use super::activity::TaskActivity;
-use super::room_inbox::{CardKind, InboxCard};
+use super::room_inbox::InboxCard;
 use super::task_agents::OpenedTask;
 use super::tasks::TaskSummary;
-use super::time::parse_ms;
-
-/// Kept this long, as the room's other cards.
-const KEEP_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 pub fn opened_cards(
     opened: &HashMap<String, OpenedTask>,
@@ -31,26 +27,17 @@ pub fn opened_cards(
             // The task's own conversation, not another agent called into
             // the task (the Reviewer answering a review there has its own
             // card, in its name).
-            if activity.session_open(session) {
-                return None;
-            }
-            let completed = activity.session_completed_at(session)?;
-            if parse_ms(completed).is_none_or(|at| now_ms - at > KEEP_MS) {
-                return None;
-            }
-            Some(InboxCard {
-                key: format!("done:{session}:{completed}"),
-                agent_id: opened.agent_id.clone(),
-                kind: CardKind::TaskResult {
-                    workspace_id: task_id.clone(),
-                    session_id: session.to_string(),
-                    completed_at: completed.to_string(),
-                },
-                title: task.name.clone(),
-                trigger: None,
-                at: completed.to_string(),
-                unread: unread(session, completed),
-            })
+            dcc_core::domain::room_inbox::opened_task_card(
+                &opened.agent_id,
+                task_id,
+                &task.name,
+                session,
+                activity.session_open(session),
+                activity.session_completed_at(session),
+                unread,
+                now_ms,
+            )
+            .map(super::room_inbox::from_task_card)
         })
         .collect()
 }
@@ -58,6 +45,7 @@ pub fn opened_cards(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::time::parse_ms;
     use dcc_core::domain::attention::{AgentActivity, AgentActivityState};
 
     /// The task's activity with its own conversation, `s-task`, ended at

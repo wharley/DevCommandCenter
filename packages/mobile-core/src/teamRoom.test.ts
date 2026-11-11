@@ -114,7 +114,7 @@ describe("team room", () => {
 	});
 
 	it("puts a pill at each new day and one face on answers close together", () => {
-		const line = (key: string, speaker: RoomLine["speaker"], agentId: string, at: Date): RoomLine => ({ key, agentId, sessionId: "s", speaker, text: key, at: at.toISOString(), receipt: null, steps: null, tasks: [], wake: null, turnId: null, handoff: null });
+		const line = (key: string, speaker: RoomLine["speaker"], agentId: string, at: Date): RoomLine => ({ key, agentId, sessionId: "s", speaker, text: key, at: at.toISOString(), receipt: null, steps: null, tasks: [], wake: null, turnId: null, handoff: null, reaction: null });
 		const now = new Date(2026, 10, 10, 15, 0);
 		const items = roomItems(
 			[
@@ -127,7 +127,7 @@ describe("team room", () => {
 			],
 			now,
 		);
-		expect(items.map((item) => (item.type === "day" ? item.label : `${item.line.key}${item.first ? "*" : ""}`))).toEqual(["Ontem", "a*", "Hoje", "b*", "c*", "d", "e*", "f*"]);
+		expect(items.map((item) => (item.type === "day" ? item.label : item.type === "card" ? item.card.key : `${item.line.key}${item.first ? "*" : ""}`))).toEqual(["Ontem", "a*", "Hoje", "b*", "c*", "d", "e*", "f*"]);
 		expect(roomDayLabel(new Date(2026, 9, 3, 9, 0).toISOString(), now)).toBe("3 de out.");
 	});
 

@@ -18,10 +18,12 @@ import {
 	parseRoomSent,
 	parseRoomSteps,
 	type RoomApproval,
+	type RoomCard,
 	type RoomLine,
 	type RoomLive,
 	type RoomQueued,
 	type RoomQuestion,
+	type RoomReaction,
 	type RoomSent,
 	type RoomStep,
 	type RoomStopped,
@@ -51,6 +53,8 @@ export type TeamRoomState = {
 	stopped: RoomStopped[];
 	/** The messages waiting for a turn to end. */
 	queued: RoomQueued[];
+	/** The room's cards: results, check-ins, and DCC's own (limits, proposals). */
+	cards: RoomCard[];
 	/** The approvals, questions and other actions running now, by key. */
 	answering: ReadonlySet<string>;
 	loading: boolean;
@@ -68,6 +72,14 @@ export type TeamRoomState = {
 	handoff: (line: RoomLine, action: "pass" | "ignore") => Promise<string | null>;
 	/** An answer's steps, read when the person opens them. */
 	steps: (line: RoomLine) => Promise<{ steps: RoomStep[]; more: number }>;
+	/** 👍 / 👎 on an answer; null takes it back. */
+	react: (line: RoomLine, reaction: RoomReaction | null) => Promise<string | null>;
+	/** "Guardar como regra?": the person's note in the agent's memory. */
+	keepRule: (agentId: string, body: string) => Promise<string | null>;
+	/** "Criar" / "Descartar" on a proposed agent, routine or source. */
+	answerProposal: (card: RoomCard, action: "create" | "discard") => Promise<string | null>;
+	/** "Continuar mesmo assim" on an agent past its monthly limit. */
+	continueLimit: (card: RoomCard) => Promise<string | null>;
 };
 
 /** What the person reads when a message could not go. */
@@ -100,6 +112,7 @@ export function useTeamRoom(backend: Backend, roomId: string | null = null, focu
 	const [live, setLive] = useState<RoomLive[]>([]);
 	const [stopped, setStopped] = useState<RoomStopped[]>([]);
 	const [queued, setQueued] = useState<RoomQueued[]>([]);
+	const [cards, setCards] = useState<RoomCard[]>([]);
 	const [answering, setAnswering] = useState<ReadonlySet<string>>(() => new Set());
 	const [loading, setLoading] = useState(true);
 	const snapshot = useRef<string | null>(null);
@@ -139,6 +152,7 @@ export function useTeamRoom(backend: Backend, roomId: string | null = null, focu
 				setLive((current) => keepUnchanged(current, read.live, (item) => item.key));
 				setStopped((current) => keepUnchanged(current, read.stopped, (item) => `${item.sessionId}:${item.turnId}`));
 				setQueued((current) => keepUnchanged(current, read.queued, (item) => item.id));
+				setCards((current) => keepUnchanged(current, read.cards, (item) => item.key));
 			})
 			// Older desktops have no route: an empty room.
 			.catch(() => {})
@@ -324,5 +338,93 @@ export function useTeamRoom(backend: Backend, roomId: string | null = null, focu
 		[backend],
 	);
 
-	return { lines, approvals, questions, working, live, stopped, queued, answering, loading, send, answer, reply, retry, stop, handoff, steps };
+	const react = useCallback(
+		(line: RoomLine, reaction: RoomReaction | null) =>
+			busy(`react:${line.key}`, async () => {
+				const before = line.reaction;
+				// Shown at once; the next read confirms it.
+				setLines((current) => current.map((item) => (item.key === line.key ? { ...item, reaction } : item)));
+				try {
+					await backend.request("POST", "/api/v1/mobile/room/reactions", { sessionId: line.sessionId, lineKey: line.key, reaction });
+					refresh();
+					return null;
+				} catch (error) {
+					setLines((current) => current.map((item) => (item.key === line.key ? { ...item, reaction: before } : item)));
+					return errorMessage(error, "Não foi possível reagir.");
+				}
+			}),
+		[backend, busy, refresh],
+	);
+
+	const keepRule = useCallback(
+		(agentId: string, body: string) =>
+			busy(`rule:${agentId}`, async () => {
+				try {
+					await backend.request("POST", "/api/v1/mobile/room/rules", { agentId, body });
+					return null;
+				} catch (error) {
+					return errorMessage(error, "Não foi possível guardar a regra.");
+				}
+			}),
+		[backend, busy],
+	);
+
+	const answerProposal = useCallback(
+		(card: RoomCard, action: "create" | "discard") =>
+			busy(`card:${card.key}`, async () => {
+				const kind = card.kind === "agentProposal" ? "agent" : card.kind === "routineProposal" ? "routine" : "source";
+				const id = card.proposal?.id ?? card.routine?.id ?? card.source?.id;
+				if (!id) return null;
+				try {
+					await backend.request("POST", "/api/v1/mobile/room/proposals", { kind, id, agentId: card.agentId, action });
+					// Gone from the room at once; the next read confirms it.
+					setCards((current) => current.filter((item) => item.key !== card.key));
+					refresh();
+					return null;
+				} catch (error) {
+					refresh();
+					return errorMessage(error, "Não foi possível responder à proposta.");
+				}
+			}),
+		[backend, busy, refresh],
+	);
+
+	const continueLimit = useCallback(
+		(card: RoomCard) =>
+			busy(`card:${card.key}`, async () => {
+				try {
+					await backend.request("POST", "/api/v1/mobile/room/limit", { agentId: card.agentId });
+					setCards((current) => current.filter((item) => item.key !== card.key));
+					refresh();
+					return null;
+				} catch (error) {
+					return errorMessage(error, "Não foi possível liberar o agente.");
+				}
+			}),
+		[backend, busy, refresh],
+	);
+
+	return {
+		lines,
+		approvals,
+		questions,
+		working,
+		live,
+		stopped,
+		queued,
+		cards,
+		answering,
+		loading,
+		send,
+		answer,
+		reply,
+		retry,
+		stop,
+		handoff,
+		steps,
+		react,
+		keepRule,
+		answerProposal,
+		continueLimit,
+	};
 }

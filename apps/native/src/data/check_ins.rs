@@ -14,41 +14,12 @@ use chrono::{DateTime, Duration, Utc};
 use gpui::{App, Global};
 use serde::{Deserialize, Serialize};
 
-/// A turn open this long with no event is stalled.
-pub const STALLED_MINUTES: i64 = 20;
+/// The cards and their kinds, shared with the phone's room
+/// (`dcc_core::domain::check_in`).
+pub use dcc_core::domain::check_in::{CheckIn, CheckInKind, STALLED_MINUTES};
 const KEEP_DAYS: i64 = 7;
 /// What was seen is forgotten after this, so it can come back later.
 const SEEN_DAYS: i64 = 30;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum CheckInKind {
-    /// A pull request asks for the person's review.
-    ReviewRequested,
-    /// An issue was assigned to the person.
-    IssueAssigned,
-    /// A task's turn is open with no sign of life.
-    TaskStalled,
-}
-
-/// One thing the check-in found.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckIn {
-    /// What makes it the same thing next time.
-    pub key: String,
-    pub kind: CheckInKind,
-    pub title: String,
-    /// `acme/app #12`, or the stalled task's project.
-    pub place: String,
-    pub url: Option<String>,
-    pub workspace_id: Option<String>,
-    pub session_id: Option<String>,
-    pub project_id: Option<String>,
-    /// When it was found.
-    pub at: String,
-    pub unread: bool,
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

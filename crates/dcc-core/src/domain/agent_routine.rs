@@ -124,6 +124,24 @@ pub fn routine_prompt(routine: &Routine) -> String {
     )
 }
 
+/// `Seg, Qua · 09:00` / `Mon, Wed · 09:00`; every day: `Todo dia`.
+pub fn schedule_label(routine: &Routine, english: bool) -> String {
+    const PT: [&str; 7] = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+    const EN: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    let names = if english { EN } else { PT };
+    let days = match routine.days.as_slice() {
+        [0, 1, 2, 3, 4, 5, 6] => (if english { "Every day" } else { "Todo dia" }).to_string(),
+        [0, 1, 2, 3, 4] => (if english { "Weekdays" } else { "Dias úteis" }).to_string(),
+        days => days
+            .iter()
+            .filter_map(|day| names.get(*day as usize))
+            .copied()
+            .collect::<Vec<_>>()
+            .join(", "),
+    };
+    format!("{days} · {:02}:{:02}", routine.hour, routine.minute)
+}
+
 /// Whether an answer is a routine's "nothing to report".
 pub fn is_quiet(answer: &str) -> bool {
     answer.trim().trim_matches('`') == QUIET_ANSWER

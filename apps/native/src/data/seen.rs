@@ -37,19 +37,11 @@ impl SeenResults {
     /// `isWorkspaceResultUnread`: finished after the baseline and after the
     /// last result seen for that task. No baseline means nothing is unread.
     pub fn is_unread(&self, workspace_id: &str, completed_at: Option<&str>) -> bool {
-        let (Some(completed), Some(baseline)) = (
-            completed_at.and_then(parse_ms),
-            self.baseline.as_deref().and_then(parse_ms),
-        ) else {
-            return false;
-        };
-        if completed <= baseline {
-            return false;
-        }
-        self.seen
-            .get(workspace_id)
-            .and_then(|seen| parse_ms(seen))
-            .is_none_or(|seen| seen < completed)
+        dcc_core::domain::room_inbox::result_unread(
+            self.baseline.as_deref(),
+            self.seen.get(workspace_id).map(String::as_str),
+            completed_at,
+        )
     }
 
     /// Opening a task marks its latest result as seen; returns whether it changed.

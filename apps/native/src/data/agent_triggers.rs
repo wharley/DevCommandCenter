@@ -20,70 +20,9 @@ pub const TARGET_RUNS: usize = 2;
 /// the last week with the one before.
 const KEEP_DAYS: i64 = 14;
 
-/// Something that wakes an agent.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Trigger {
-    /// A pull request the person reviewed got commits or replies.
-    PrUpdated,
-    /// The checks of a task's pull request failed.
-    CiFailed,
-    /// Someone reviewed or commented on a task's pull request.
-    ReviewReceived,
-    /// A pull request asks for the person's review (the check-in).
-    ReviewRequested,
-    /// An issue was assigned to the person (the check-in).
-    IssueAssigned,
-    /// A task's turn is open with no sign of life (the check-in).
-    TaskStalled,
-    /// A routine's time came (`routines`); not a switch, and not counted in
-    /// the daily ceiling, only in the brake (`agent_brake`).
-    Routine,
-    /// A source the agent watches brought news (`sources`); like a routine,
-    /// counted only in the brake.
-    Source,
-}
-
-impl Trigger {
-    pub const ALL: [Trigger; 6] = [
-        Trigger::PrUpdated,
-        Trigger::ReviewRequested,
-        Trigger::CiFailed,
-        Trigger::ReviewReceived,
-        Trigger::IssueAssigned,
-        Trigger::TaskStalled,
-    ];
-
-    /// `agents.triggers.<id>.*`
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::PrUpdated => "prUpdated",
-            Self::CiFailed => "ciFailed",
-            Self::ReviewReceived => "reviewReceived",
-            Self::ReviewRequested => "reviewRequested",
-            Self::IssueAssigned => "issueAssigned",
-            Self::TaskStalled => "taskStalled",
-            Self::Routine => "routine",
-            Self::Source => "source",
-        }
-    }
-
-    /// The pull request hub's review is the Reviewer's own job; the others
-    /// wake any agent in its conversation.
-    pub fn reviewer_only(self) -> bool {
-        matches!(self, Self::PrUpdated | Self::ReviewRequested)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Run {
-    pub agent_id: String,
-    pub trigger: Trigger,
-    /// The pull request's URL or the task's id.
-    pub target: String,
-    pub at: String,
-}
+/// What wakes an agent and each time it did, shared with the phone's room
+/// (`dcc_core::domain::agent_trigger`).
+pub use dcc_core::domain::agent_trigger::{Trigger, TriggerRun as Run};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
