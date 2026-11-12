@@ -454,6 +454,8 @@
     "page": {
       "missing": "This agent no longer exists.",
       "edit": "Edit",
+      "duplicate": "Duplicate",
+      "copyName": "{{name}} (copy)",
       "runsOnCurrent": "uses the provider selected in the composer",
       "howToCall": "How to call it",
       "howToCallReviewer": "The Reviewer works on a task's changes, so it is called from inside the task: from the bubble that appears when a turn ends with changes, or from its icon in the task header. In Pull Requests, from the bubble or its button on the code tab.",

@@ -454,6 +454,8 @@
     "page": {
       "missing": "Este agente não existe mais.",
       "edit": "Editar",
+      "duplicate": "Duplicar",
+      "copyName": "{{name}} (cópia)",
       "runsOnCurrent": "usa o provider selecionado no composer",
       "howToCall": "Como chamar",
       "howToCallReviewer": "O Revisor trabalha sobre as mudanças de uma tarefa, então é chamado de dentro dela: pelo balão que aparece quando um turno termina com mudanças, ou pelo ícone dele no cabeçalho da tarefa. Em Pull Requests, pelo balão ou pelo botão dele na aba de código.",

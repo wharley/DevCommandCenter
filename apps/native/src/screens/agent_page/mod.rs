@@ -24,9 +24,10 @@ use crate::ui::{Icon, Tracked};
 
 mod agent_card;
 mod agent_card_hosts;
-mod agent_card_view;
 #[cfg(test)]
 mod agent_card_tests;
+mod agent_card_view;
+mod agent_duplicate;
 mod agent_room_switch;
 #[cfg(test)]
 mod chain_tests;
@@ -65,13 +66,13 @@ mod room;
 mod room_approvals;
 #[cfg(test)]
 mod room_approvals_tests;
-#[cfg(test)]
-mod room_question_tests;
 mod room_bubble;
 mod room_bulletin;
 mod room_cards;
 mod room_change_card;
 mod room_changes;
+#[cfg(test)]
+mod room_checkin_tests;
 mod room_checkins;
 mod room_cleanup;
 mod room_composer;
@@ -91,7 +92,6 @@ mod room_images;
 #[cfg(test)]
 mod room_images_tests;
 mod room_items;
-mod room_replies;
 mod room_jump;
 #[cfg(test)]
 mod room_jump_tests;
@@ -110,16 +110,21 @@ mod room_live_turn;
 mod room_markdown;
 mod room_mentions;
 mod room_proposals;
-mod room_queue;
 mod room_question;
 mod room_question_card;
 mod room_question_steps;
+#[cfg(test)]
+mod room_question_tests;
+mod room_queue;
 #[cfg(test)]
 mod room_queue_tests;
 mod room_reactions;
 mod room_recap;
 mod room_receipt;
 mod room_refresh;
+mod room_replies;
+#[cfg(test)]
+mod room_replies_tests;
 mod room_report;
 mod room_routines;
 mod room_rows;
@@ -138,10 +143,6 @@ mod room_task_answer;
 mod room_task_live;
 #[cfg(test)]
 mod room_task_live_tests;
-#[cfg(test)]
-mod room_checkin_tests;
-#[cfg(test)]
-mod room_replies_tests;
 #[cfg(test)]
 mod room_tests;
 mod room_timeline;
@@ -617,6 +618,22 @@ impl AgentPage {
                             .gap(px(6.0))
                             .child(Icon::new("pencil").size(16.0))
                             .child(cx.t("agents.page.edit")),
+                    ),
+            )
+            // Another of the same on a different model, say.
+            .child(
+                crate::ui::Button::new("agent-page-duplicate")
+                    .variant(crate::ui::ButtonVariant::Ghost)
+                    .size(crate::ui::ButtonSize::Default)
+                    .text_size(14.0)
+                    .on_click(cx.listener(|page, _, window, cx| page.open_duplicate(window, cx)))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(Icon::new("copy").size(16.0))
+                            .child(cx.t("agents.page.duplicate")),
                     ),
             );
         // An agent works on a task's changes, so it is called from the task.
