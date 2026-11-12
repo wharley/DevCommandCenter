@@ -94,6 +94,7 @@ impl TeamRoom {
             Row::Recap => self.recap_card(cx).into_iter().collect(),
             Row::Bulletin => vec![self.bulletin_card(&model.agents, cx)],
             Row::Day { day } => vec![self.day_row(*day, cx)],
+            Row::Sources { key, lines, open } => self.sources_row(key, lines, *open, cx),
             Row::Line {
                 index,
                 line,
@@ -159,7 +160,7 @@ impl TeamRoom {
         let said = said
             .cloned()
             .unwrap_or_else(|| Rc::new(Said::new(&line.text, &model.mentions)));
-        vec![self.person_line(format!("room-said-{index}"), &said, note, cx)]
+        vec![self.person_line(format!("room-said-{index}"), &said, note, window, cx)]
     }
 
     /// What holds now, after everything: read fresh on each frame it shows.
@@ -191,7 +192,7 @@ impl TeamRoom {
         rows.extend(self.source_cards(&shown, cx));
         // A reply waits under the answers, in the room it was asked in.
         rows.extend(self.reply_cards(&shown, cx));
-        rows.extend(self.pending_rows(agents, &model.mentions, whole, cx));
+        rows.extend(self.pending_rows(agents, &model.mentions, whole, window, cx));
         // Tasks opened here that still run.
         rows.extend(self.running_rows(agents, cx));
         // Agents at work in this project's tasks, however they got there.
@@ -240,6 +241,7 @@ impl TeamRoom {
         agents: &[AgentRecord],
         names: &MentionNames,
         whole: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let pending: Vec<Pending> = self
@@ -268,7 +270,8 @@ impl TeamRoom {
                     state
                 };
                 let said = Said::new(&sent.text, names);
-                let bubble = self.person_line(format!("room-pending-{index}"), &said, note, cx);
+                let bubble =
+                    self.person_line(format!("room-pending-{index}"), &said, note, window, cx);
                 self.with_unqueue(index, &sent, bubble, cx)
             })
             .collect()

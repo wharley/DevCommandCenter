@@ -63,6 +63,10 @@ impl TeamRoom {
             .markdown
             .borrow_mut()
             .get(&line.key, &line.text, &model.mentions);
+        let open = self.answers_open.contains(&line.key);
+        let shown = super::room_answer_fold::shown(&line.text, &blocks, open);
+        let foldable = super::room_answer_fold::shown(&line.text, &blocks, false) < blocks.len();
+        let fold = foldable.then(|| self.fold_toggle(&line.key, !open, cx));
         let when = first.then(|| super::room_flow::clock(&line.at, english(cx)));
         // The row is the hover group of its receipt and reactions.
         let group = SharedString::from(format!("room-answer-g-{index}"));
@@ -133,7 +137,7 @@ impl TeamRoom {
                             .text_size(px(13.0))
                             .text_color(colors.foreground)
                             .child(render_markdown(
-                                &blocks,
+                                &blocks[..shown],
                                 MarkdownStyle {
                                     size: 13.0,
                                     ..MarkdownStyle::reply()
@@ -143,6 +147,7 @@ impl TeamRoom {
                                 cx,
                             )),
                     )
+                    .children(fold)
                     .child(self.answer_footer(index, line, &group, steps.is_some(), cx))
                     .children(self.report_card(index, line, window, cx))
                     .children(self.rule_field(line, cx)),
@@ -202,7 +207,14 @@ impl Render for TeamRoom {
                                     None => cx.t("agents.room.title"),
                                 }),
                         )
-                        .children(self.pause_button(cx)),
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .children(self.status_chips(cx))
+                                .children(self.pause_button(cx)),
+                        ),
                 )
                 .child(
                     div()

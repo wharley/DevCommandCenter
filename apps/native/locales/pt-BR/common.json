@@ -236,7 +236,9 @@
       "every": "a cada {{minutes}} min",
       "inRoom": "sala {{room}}",
       "lastRead": "última leitura {{when}}",
-      "delete": "Remover"
+      "delete": "Remover",
+      "grouped_one": "{{count}} aviso das fontes · {{connectors}}",
+      "grouped_other": "{{count}} avisos das fontes · {{connectors}}"
     },
     "report": {
       "readAll": "Ler tudo",
@@ -618,7 +620,15 @@
       "unqueueFailed": "Não deu para tirar da fila: {{error}}",
       "jumpTip": "Ir para o fim",
       "newLines_one": "{{count}} nova",
-      "newLines_other": "{{count}} novas"
+      "newLines_other": "{{count}} novas",
+      "showMore": "ver mais",
+      "showLess": "ver menos",
+      "status": {
+        "working_one": "{{count}} trabalhando",
+        "working_other": "{{count}} trabalhando",
+        "waiting_one": "{{count}} esperando você",
+        "waiting_other": "{{count}} esperando você"
+      }
     },
     "team": {
       "title": "Equipe",

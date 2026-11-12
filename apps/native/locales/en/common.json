@@ -236,7 +236,9 @@
       "every": "every {{minutes}} min",
       "inRoom": "{{room}} room",
       "lastRead": "last read {{when}}",
-      "delete": "Remove"
+      "delete": "Remove",
+      "grouped_one": "{{count}} source notice · {{connectors}}",
+      "grouped_other": "{{count}} source notices · {{connectors}}"
     },
     "report": {
       "readAll": "Read all",
@@ -618,7 +620,15 @@
       "unqueueFailed": "Could not remove it from the queue: {{error}}",
       "jumpTip": "Jump to the end",
       "newLines_one": "{{count}} new",
-      "newLines_other": "{{count}} new"
+      "newLines_other": "{{count}} new",
+      "showMore": "show more",
+      "showLess": "show less",
+      "status": {
+        "working_one": "{{count}} working",
+        "working_other": "{{count}} working",
+        "waiting_one": "{{count}} waiting on you",
+        "waiting_other": "{{count}} waiting on you"
+      }
     },
     "team": {
       "title": "Team",

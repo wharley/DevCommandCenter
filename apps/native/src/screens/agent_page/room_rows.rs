@@ -55,6 +55,12 @@ pub(crate) enum Row {
     Day {
         day: chrono::NaiveDate,
     },
+    /// Source news in a row, as one line (`room_source_group`).
+    Sources {
+        key: String,
+        lines: Vec<(usize, RoomLine)>,
+        open: bool,
+    },
 }
 
 impl Row {
@@ -82,6 +88,14 @@ impl Row {
                 },
             ) => a == b && fa == fb && sa == sb && ta == tb,
             (Row::Day { day: a }, Row::Day { day: b }) => a == b,
+            (
+                Row::Sources {
+                    lines: a, open: oa, ..
+                },
+                Row::Sources {
+                    lines: b, open: ob, ..
+                },
+            ) => a == b && oa == ob,
             _ => false,
         }
     }
@@ -217,6 +231,7 @@ impl TeamRoom {
             }
         }
         let rows = super::room_flow::arrange(rows);
+        let rows = super::room_source_group::group(rows, &self.sources_open);
         let talk = super::room_jump::talk(&rows);
         RoomModel {
             scope: self.scope(),

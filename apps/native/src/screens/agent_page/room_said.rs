@@ -1,18 +1,23 @@
 //! What the person's message is made of, split once when the row is built
-//! (`room_rows`): the words, the images and links that go under them, and
-//! where the words name an agent, so a frame only draws it.
+//! (`room_rows`): the words parsed as the composer's chat parses a prompt
+//! (links inline, with their site's icon; an `@Agent` a pill), the images
+//! that go under them, and where the words name an agent.
 
 use std::ops::Range;
 
 use crate::data::agent_mentions::MentionNames;
-use crate::data::message_links::{MessageLink, split_images, split_links};
+use std::rc::Rc;
+
+use crate::data::message_links::split_images;
 use crate::data::team_room::{RoomLine, Speaker};
+use crate::markdown::{Block, mentions, parse_prompt};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Said {
     pub words: String,
+    /// `words` as markdown, parsed once.
+    pub blocks: Rc<Vec<Block>>,
     pub images: Vec<String>,
-    pub links: Vec<MessageLink>,
     /// `@Agent` in `words`: its bytes and the mascot's color.
     pub mentions: Vec<(Range<usize>, u32)>,
 }
@@ -32,14 +37,15 @@ pub(crate) fn is_message(line: &RoomLine) -> bool {
 
 impl Said {
     pub(crate) fn new(text: &str, names: &MentionNames) -> Self {
-        // Images and links go under the words.
-        let (text, images) = split_images(text);
-        let (words, links) = split_links(&text);
+        // Images go under the words; links stay in them.
+        let (words, images) = split_images(text);
         let mentions = names.find(&words);
+        let mut blocks = parse_prompt(&words);
+        mentions::mark(&mut blocks, names);
         Self {
             words,
+            blocks: Rc::new(blocks),
             images,
-            links,
             mentions,
         }
     }
@@ -56,7 +62,8 @@ mod tests {
         assert!(said.words.starts_with("@Revisor veja"));
         assert_eq!(said.mentions, [(0..8, 7)]);
         assert_eq!(said.images, ["/tmp/shot.png"]);
-        assert_eq!(said.links.len(), 1);
+        // The link stays in the words, as the composer's chat shows it.
+        assert!(said.words.contains("https://x.dev/a"));
         assert!(Said::new("sem ninguém", &names).mentions.is_empty());
     }
 }

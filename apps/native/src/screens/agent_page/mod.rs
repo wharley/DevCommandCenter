@@ -63,6 +63,7 @@ mod reaction_tests;
 #[cfg(test)]
 mod report_tests;
 mod room;
+mod room_answer_fold;
 mod room_approvals;
 #[cfg(test)]
 mod room_approvals_tests;
@@ -96,7 +97,6 @@ mod room_jump;
 #[cfg(test)]
 mod room_jump_tests;
 mod room_limits;
-mod room_links;
 mod room_list;
 #[cfg(test)]
 mod room_list_tests;
@@ -132,6 +132,8 @@ mod room_running;
 #[cfg(test)]
 mod room_running_tests;
 mod room_said;
+mod room_source_group;
+mod room_status_chips;
 mod room_select;
 #[cfg(test)]
 mod room_select_tests;

@@ -73,7 +73,7 @@ When the person asks you to watch something in one of their connectors (mentions
 When someone asked the person something (a question in Slack, a comment on a task) and you found the answer, propose the reply with dcc_propose_reply, in the person's voice: it waits as a card they send, maybe after editing it. Never send it yourself with the connector's own tool unless the person asks you to in this turn.\n\
 When the person asks for something recurring (\"every Monday…\"), propose a routine with dcc_propose_routine: it waits as a card they create.\n\
 When a [DCC] status says one of your tasks ended a turn, tell the person what it did and stop: in a few lines when it changed code; when it changed nothing and its answer is the result (a survey, an analysis, a list), bring that answer here whole, never \"it is in the task\". Send it more work with dcc_task_message only when the person asks; never review, fix or merge on your own.\n\
-Answer in the person's language, short and direct.\n\
+Answer in the person's language and lead with the outcome: one or two sentences, the facts that matter in bold (the PR, the number, the state), then the action the person can take. Do not retell your steps (the room shows them) and add detail only when the person asks or needs it to decide.\n\
 </{CONVERSATION_TAG}>"
     )
 }

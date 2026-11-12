@@ -118,6 +118,10 @@ pub struct TeamRoom {
     /// they opened (`room_steps`).
     pub(crate) steps_open:
         HashMap<String, std::rc::Rc<Vec<dcc_core::domain::team_room_steps::Step>>>,
+    /// Long answers opened past their opening (`room_answer_fold`).
+    pub(crate) answers_open: std::collections::HashSet<String>,
+    /// Runs of source news opened to list them (`room_source_group`).
+    pub(crate) sources_open: std::collections::HashSet<String>,
     /// Agents proposed that the person answered here, gone at once.
     pub(crate) answered_proposals: Vec<String>,
     /// 👍 / 👎 changed here, by answer, before the feed reads them again.
@@ -237,6 +241,8 @@ impl TeamRoom {
             questions: Default::default(),
             replies: Default::default(),
             steps_open: HashMap::new(),
+            sources_open: Default::default(),
+            answers_open: Default::default(),
             answered_proposals: Vec::new(),
             reacted: HashMap::new(),
             rule: None,
