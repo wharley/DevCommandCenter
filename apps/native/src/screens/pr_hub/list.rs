@@ -369,16 +369,28 @@ impl PrHub {
                         .child(cx.t("pullRequests.emptyHint")),
                 )
                 .into_any_element(),
-            Some(Ok(_)) => div()
-                .flex()
-                .flex_col()
-                .children(
-                    visible
-                        .iter()
-                        .map(|item| self.card(item, english, cx))
-                        .collect::<Vec<_>>(),
-                )
-                .into_any_element(),
+            Some(Ok(_)) => {
+                let mut rows: Vec<AnyElement> = Vec::new();
+                let mut current = None;
+                for item in &visible {
+                    let section = self.section_of(item, cx);
+                    if section != current {
+                        current = section;
+                        if let Some(section) = section {
+                            let count = visible
+                                .iter()
+                                .filter(|other| self.section_of(other, cx) == Some(section))
+                                .count();
+                            rows.push(self.section_header(section, count, cx));
+                        }
+                    }
+                    if section.is_some_and(|section| self.section_folded(section)) {
+                        continue;
+                    }
+                    rows.push(self.card(item, english, cx));
+                }
+                div().flex().flex_col().children(rows).into_any_element()
+            }
         };
         let warnings = match &self.list {
             Some(Ok(list)) if !list.warnings.is_empty() => Some(list.warnings.len()),

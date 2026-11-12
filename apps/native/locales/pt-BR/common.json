@@ -1400,6 +1400,15 @@
         "renamed": "renomeado",
         "changed": "alterado"
       }
+    },
+    "sections": {
+      "needsYou": "Precisa de você",
+      "waitingOnAuthor": "Aguardando o autor",
+      "approved": "Você aprovou",
+      "readyToMerge": "Prontos para mesclar",
+      "needsAction": "Precisam de você",
+      "awaitingReview": "Aguardando revisão",
+      "drafts": "Rascunhos"
     }
   },
   "workspaceDialog": {

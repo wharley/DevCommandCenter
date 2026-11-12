@@ -14,6 +14,7 @@ mod merge;
 #[cfg(test)]
 mod news_tests;
 mod reviewer;
+mod sections;
 #[cfg(test)]
 mod tests;
 
@@ -84,6 +85,8 @@ pub struct PrHub {
     news_order: Vec<String>,
     /// The next search sets `news_order` (the hub just opened).
     reorder: bool,
+    /// Sections folded by hand.
+    pub(crate) toggled_sections: std::collections::HashSet<crate::data::pr_sections::Section>,
     /// The hub's width, measured as it paints.
     pub(crate) width: Rc<Cell<f32>>,
     _inputs: Vec<Subscription>,
@@ -149,6 +152,7 @@ impl PrHub {
             requested: None,
             news_order: Vec::new(),
             reorder: true,
+            toggled_sections: Default::default(),
             width: Rc::new(Cell::new(1200.0)),
             _inputs: inputs,
         };
@@ -177,7 +181,46 @@ impl PrHub {
         let first = |item: &&Item| self.news_order.contains(&item.url);
         let (mut news, rest): (Vec<&Item>, Vec<&Item>) = items.into_iter().partition(first);
         news.extend(rest);
-        news.into_iter().cloned().collect()
+        // In sections, what needs the person first (`pr_sections`).
+        crate::data::pr_sections::grouped(self.filter, &news, |item| self.review_of(item, cx))
+            .into_iter()
+            .flat_map(|(_, rows)| rows)
+            .cloned()
+            .collect()
+    }
+
+    /// The person's latest review of it, and whether it has news: news seen
+    /// since the hub opened keeps it where it was.
+    fn review_of(&self, item: &Item, cx: &gpui::App) -> (Option<String>, bool) {
+        (
+            crate::data::pr_news::my_review(item, cx),
+            crate::data::pr_news::is_new(item, cx) || self.news_order.contains(&item.url),
+        )
+    }
+
+    /// The section a pull request of the list is in.
+    pub(crate) fn section_of(
+        &self,
+        item: &Item,
+        cx: &gpui::App,
+    ) -> Option<crate::data::pr_sections::Section> {
+        let (mine, new) = self.review_of(item, cx);
+        crate::data::pr_sections::section_of(self.filter, item, mine.as_deref(), new)
+    }
+
+    pub(crate) fn section_folded(&self, section: crate::data::pr_sections::Section) -> bool {
+        self.toggled_sections.contains(&section)
+    }
+
+    pub(crate) fn toggle_section(
+        &mut self,
+        section: crate::data::pr_sections::Section,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.toggled_sections.remove(&section) {
+            self.toggled_sections.insert(section);
+        }
+        cx.notify();
     }
 
     pub(crate) fn selected_item(&self, cx: &gpui::App) -> Option<Item> {

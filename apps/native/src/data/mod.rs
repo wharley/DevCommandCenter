@@ -75,6 +75,7 @@ pub mod onboarding;
 pub mod open_project;
 pub mod plan_checklist;
 pub mod pr_hub;
+pub mod pr_sections;
 pub mod pr_news;
 pub mod pr_review;
 pub mod pr_review_agent;

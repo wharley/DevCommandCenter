@@ -1400,6 +1400,15 @@
         "renamed": "renamed",
         "changed": "changed"
       }
+    },
+    "sections": {
+      "needsYou": "Needs you",
+      "waitingOnAuthor": "Waiting on the author",
+      "approved": "You approved",
+      "readyToMerge": "Ready to merge",
+      "needsAction": "Need you",
+      "awaitingReview": "Awaiting review",
+      "drafts": "Drafts"
     }
   },
   "workspaceDialog": {

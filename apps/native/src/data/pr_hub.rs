@@ -37,6 +37,9 @@ pub struct Item {
     pub head_branch: String,
     pub base_branch: String,
     pub is_draft: bool,
+    /// GitHub's decision on it: `approved`, `changes_requested`,
+    /// `review_required`; none without required reviews.
+    pub review_decision: Option<String>,
     pub review_requested_for_viewer: bool,
     pub created_by_viewer: bool,
     pub reviewers: Vec<Actor>,
