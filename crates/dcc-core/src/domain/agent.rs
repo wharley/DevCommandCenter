@@ -2,9 +2,8 @@
 //!
 //! A resident agent is a person-owned identity (name, avatar, role) that is
 //! global to the installation. A session may be bound to one agent; the role
-//! is then re-sent as bounded background context with every turn, the same
-//! way the durable objective is, so it survives provider switches and
-//! compaction. The session itself still belongs to its workspace.
+//! is then re-sent as bounded background context with every turn, so it
+//! survives provider switches and compaction. The session itself still belongs to its workspace.
 //!
 //! Built-in agents (presets) are owned by DCC: their role comes from this
 //! file, so it improves with the app and the person never has to write it.

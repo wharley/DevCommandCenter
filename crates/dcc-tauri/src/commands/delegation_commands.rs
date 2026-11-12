@@ -307,13 +307,6 @@ pub async fn create_delegation_with_state(
             return Err("child session must belong to workspace_id".to_string());
         }
         validate_child_provider_target(&child_session, &input.target_provider_id)?;
-        // The child works toward the parent's objective with its own budget.
-        // Best-effort: a failure here must not block creating the delegation.
-        if let Err(error) =
-            state.inherit_session_objective(&input.parent_session_id, child_session_id)
-        {
-            eprintln!("[DCC] delegation objective inheritance failed: {error}");
-        }
         Some(child_session)
     } else {
         None
@@ -640,14 +633,6 @@ pub async fn start_delegation_with_state(
         ));
     }
     validate_stored_delegation_target(&state, &delegation).await?;
-    if let Some(child_session_id) = delegation.child_session_id.as_ref() {
-        // Covers children bound after creation; idempotent for the rest.
-        if let Err(error) =
-            state.inherit_session_objective(&delegation.parent_session_id, child_session_id)
-        {
-            eprintln!("[DCC] delegation objective inheritance failed: {error}");
-        }
-    }
 
     let now = now_iso();
     let updated = DelegationRepo::update_delegation_status(

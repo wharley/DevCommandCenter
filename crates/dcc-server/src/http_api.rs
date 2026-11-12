@@ -813,16 +813,6 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(dismiss_goal_handler),
         )
         .route(
-            "/api/v1/sessions/:session_id/objective",
-            get(get_objective_handler)
-                .put(set_objective_handler)
-                .delete(clear_objective_handler),
-        )
-        .route(
-            "/api/v1/sessions/:session_id/objective/transition",
-            post(transition_objective_handler),
-        )
-        .route(
             "/api/v1/sessions/:session_id/steer",
             post(steer_turn_handler),
         )
@@ -1950,10 +1940,6 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/sessions/:session_id/respond-user-input",
             "POST /api/v1/sessions/:session_id/respond-permission",
             "POST /api/v1/sessions/:session_id/goal/dismiss",
-            "GET /api/v1/sessions/:session_id/objective",
-            "PUT /api/v1/sessions/:session_id/objective",
-            "DELETE /api/v1/sessions/:session_id/objective",
-            "POST /api/v1/sessions/:session_id/objective/transition",
             "POST /api/v1/sessions/:session_id/steer",
             "POST /api/v1/workspaces/create",
             "POST /api/v1/workspaces",
@@ -2176,7 +2162,6 @@ fn is_lifecycle_event(event: &CoreEvent) -> bool {
             | CoreEvent::SessionCompleted { .. }
             | CoreEvent::SessionAborted { .. }
             | CoreEvent::SessionResumed { .. }
-            | CoreEvent::SessionObjectivePaused { .. }
             | CoreEvent::SessionUsageLimitReached { .. }
             | CoreEvent::SessionUsageLimitResumed { .. }
             | CoreEvent::SessionConversationRewound { .. }
@@ -3128,88 +3113,6 @@ async fn dismiss_goal_handler(
     Ok(Json(json!({ "ok": true })))
 }
 
-/// The objective's own errors: a bad draft or a stale generation is the
-/// client's to fix, a missing record is a 404.
-fn objective_error(error: dcc_core::CoreError) -> HttpApiError {
-    match error {
-        dcc_core::CoreError::InvalidInput(message) => HttpApiError::bad_request(message),
-        dcc_core::CoreError::Repository(message) if message.contains("not found") => {
-            HttpApiError::not_found(message)
-        }
-        other => HttpApiError::internal(other.to_string()),
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SetObjectiveBody {
-    draft: dcc_core::domain::objective::SessionObjectiveDraft,
-    #[serde(default)]
-    expected_generation: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TransitionObjectiveBody {
-    transition: dcc_core::domain::objective::ObjectiveTransition,
-    #[serde(default)]
-    expected_generation: Option<u64>,
-}
-
-/// The task's durable objective (the composer's "Objetivo" control).
-async fn get_objective_handler(
-    State(backend): State<Arc<HttpBackend>>,
-    Path(session_id): Path<String>,
-) -> Result<Json<Value>, HttpApiError> {
-    let objective = backend
-        .sessions
-        .session_objective(&SessionId(session_id))
-        .map_err(objective_error)?;
-    Ok(Json(json!({ "objective": objective })))
-}
-
-/// Creates or rewrites it; `expectedGeneration` makes a concurrent edit fail.
-async fn set_objective_handler(
-    State(backend): State<Arc<HttpBackend>>,
-    Path(session_id): Path<String>,
-    Json(body): Json<SetObjectiveBody>,
-) -> Result<Json<Value>, HttpApiError> {
-    let objective = backend
-        .sessions
-        .set_session_objective(&SessionId(session_id), body.draft, body.expected_generation)
-        .await
-        .map_err(objective_error)?;
-    Ok(Json(json!({ "objective": objective })))
-}
-
-/// Pause, resume or complete it.
-async fn transition_objective_handler(
-    State(backend): State<Arc<HttpBackend>>,
-    Path(session_id): Path<String>,
-    Json(body): Json<TransitionObjectiveBody>,
-) -> Result<Json<Value>, HttpApiError> {
-    let objective = backend
-        .sessions
-        .transition_session_objective(
-            &SessionId(session_id),
-            body.transition,
-            body.expected_generation,
-        )
-        .map_err(objective_error)?;
-    Ok(Json(json!({ "objective": objective })))
-}
-
-async fn clear_objective_handler(
-    State(backend): State<Arc<HttpBackend>>,
-    Path(session_id): Path<String>,
-) -> Result<Json<Value>, HttpApiError> {
-    backend
-        .sessions
-        .clear_session_objective(&SessionId(session_id))
-        .map_err(objective_error)?;
-    Ok(Json(json!({ "objective": null })))
-}
-
 /// The queue's and steering's errors: a bad request, a queued turn that is
 /// gone (404), or a turn already wrapping up (409 `steer_window_closed`, the
 /// client queues the guidance instead).
@@ -4040,55 +3943,6 @@ mod tests {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn the_objective_routes_set_transition_and_clear_it() {
-        let fixture = embedded_fixture().await;
-        let uri = "/api/v1/sessions/http-respond/objective";
-        let (status, body) = send_json(&fixture.app, "GET", uri, Value::Null).await;
-        assert_eq!((status, &body["objective"]), (StatusCode::OK, &Value::Null));
-
-        let draft = json!({ "draft": { "intent": "Checkout verde", "doneWhen": "testes passam", "maxTurns": 5 } });
-        let (status, body) = send_json(&fixture.app, "PUT", uri, draft.clone()).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["objective"]["status"], "active");
-        let generation = body["objective"]["generation"].as_u64().unwrap();
-
-        // A second writer that never loaded it fails instead of overwriting.
-        let stale = json!({ "draft": { "intent": "Outro" }, "expectedGeneration": generation + 7 });
-        let (status, _) = send_json(&fixture.app, "PUT", uri, stale).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        let (status, _) = send_json(
-            &fixture.app,
-            "PUT",
-            uri,
-            json!({ "draft": { "intent": "  " } }),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-
-        let (status, body) = post_json(
-            &fixture.app,
-            "/api/v1/sessions/http-respond/objective/transition",
-            json!({ "transition": "pause", "expectedGeneration": generation }),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["objective"]["status"], "paused");
-        assert_eq!(body["objective"]["pauseReason"], "manual");
-
-        let (status, body) = send_json(&fixture.app, "DELETE", uri, Value::Null).await;
-        assert_eq!((status, &body["objective"]), (StatusCode::OK, &Value::Null));
-        let (_, body) = send_json(&fixture.app, "GET", uri, Value::Null).await;
-        assert_eq!(body["objective"], Value::Null);
-        let (status, _) = post_json(
-            &fixture.app,
-            "/api/v1/sessions/http-respond/objective/transition",
-            json!({ "transition": "resume" }),
-        )
-        .await;
-        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test(flavor = "current_thread")]

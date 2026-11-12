@@ -42,12 +42,6 @@ pub enum CoreEvent {
     SessionResumed {
         session_id: String,
     },
-    SessionObjectivePaused {
-        session_id: String,
-        reason: crate::domain::objective::ObjectivePauseReason,
-        consecutive_failures: u32,
-        turns_used: u32,
-    },
     SessionUsageLimitReached {
         session_id: String,
         turn_id: String,
@@ -319,7 +313,6 @@ impl CoreEvent {
             | Self::SessionCompleted { session_id }
             | Self::SessionAborted { session_id, .. }
             | Self::SessionResumed { session_id }
-            | Self::SessionObjectivePaused { session_id, .. }
             | Self::SessionUsageLimitReached { session_id, .. }
             | Self::SessionUsageLimitResumed { session_id, .. }
             | Self::SessionUsageLimitAutoResumeChanged { session_id, .. }
@@ -966,23 +959,6 @@ impl CoreEvent {
                 },
             ) => reason == actual_reason,
             (SessionEventKind::SessionResumed, Self::SessionResumed { .. }) => true,
-            (
-                SessionEventKind::ObjectivePaused {
-                    reason,
-                    consecutive_failures,
-                    turns_used,
-                },
-                Self::SessionObjectivePaused {
-                    reason: actual_reason,
-                    consecutive_failures: actual_failures,
-                    turns_used: actual_turns,
-                    ..
-                },
-            ) => {
-                reason == actual_reason
-                    && consecutive_failures == actual_failures
-                    && turns_used == actual_turns
-            }
             (
                 SessionEventKind::UsageLimitReached {
                     turn_id,

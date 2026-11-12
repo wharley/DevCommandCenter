@@ -11,7 +11,6 @@ use specta::Type;
 use tokio::time::sleep;
 
 use dcc_core::domain::model_registry;
-use dcc_core::domain::objective::{ObjectiveTransition, SessionObjective, SessionObjectiveDraft};
 use dcc_core::{
     application::{
         abort_run as run_abort_run, active_turn_for_steer, plan_conversation_rewind,
@@ -2207,7 +2206,7 @@ pub async fn send_turn_with_state(
 
     let preflight_model_route = input.decision_provider_model_route.clone();
     let mut tool_instructions = state
-        .objective_tool_instructions(&input.session_id, input.tool_instructions.clone())
+        .turn_tool_instructions(&input.session_id, input.tool_instructions.clone())
         .map_err(|error| error.to_string())?;
     // The model route, skill router and memory recall are independent
     // lookups; running them together keeps the time before the provider
@@ -2239,7 +2238,6 @@ pub async fn send_turn_with_state(
     }
     let provider_turn_input = ProviderTurnInput {
         prompt: input.prompt.clone(),
-        // The durable objective rides along as bounded background context.
         tool_instructions,
         plan_mode: input.plan_mode,
         effort: input.effort.clone(),
@@ -2247,7 +2245,6 @@ pub async fn send_turn_with_state(
         approval_policy: input.approval_policy,
         resume_fallback_context: None,
     };
-    let retry_of_turn_id = input.retry_of_turn_id.clone();
     let output = run_send_turn(&*state, &*state, &*state, input)
         .await
         .map_err(|error| error.to_string())?;
@@ -2278,11 +2275,6 @@ pub async fn send_turn_with_state(
     // Turn is now recorded in the event store. Any failure from here must emit
     // TurnAborted so the UI does not get stuck on session.turn.started.
     let turn_id = output.turn.id.clone();
-    if retry_of_turn_id.is_some() {
-        if let Err(error) = state.record_objective_retry(&output.session.id, &turn_id) {
-            eprintln!("[DCC] objective retry accounting failed: {error}");
-        }
-    }
     let session_id = output.session.id.clone();
     let abort_turn = |reason: String| {
         let state = &state;
@@ -2388,37 +2380,6 @@ pub async fn queue_turn_with_state(
     run_queue_turn(state, state, input)
         .await
         .map_err(|error| error.to_string())
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SetSessionObjectiveInput {
-    pub session_id: SessionId,
-    pub draft: SessionObjectiveDraft,
-    #[serde(default)]
-    pub expected_generation: Option<u64>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct TransitionSessionObjectiveInput {
-    pub session_id: SessionId,
-    pub transition: ObjectiveTransition,
-    #[serde(default)]
-    pub expected_generation: Option<u64>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionObjectiveOutput {
-    pub objective: Option<SessionObjective>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct InheritSessionObjectiveInput {
-    pub parent_session_id: SessionId,
-    pub child_session_id: SessionId,
 }
 
 /// Stopping a run without Tauri `State`, shared with the HTTP API.

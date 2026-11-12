@@ -67,8 +67,6 @@ pub struct Conversation {
     pub new_thread: Option<ThreadStart>,
     /// The task's project (`repository.projectId`).
     pub project_id: Option<String>,
-    /// The DCC's own durable objective (the composer's "Objetivo").
-    pub objective: Option<dcc_core::domain::objective::SessionObjective>,
     pub rows: Arc<Vec<TimelineMessage>>,
     /// The task's delegations by id, for the cards' live status and report.
     pub delegations: HashMap<String, DelegationRecord>,
@@ -456,7 +454,6 @@ pub fn load(
         summary.session.state == dcc_core::domain::session::SessionState::Aborted;
     conversation.usage_limit = summary.usage_limit.clone();
     conversation.goal = summary.goal.clone();
-    conversation.objective = sessions.load_session_objective(&summary.session.id)?;
 
     if cache.session_id.as_deref() != Some(session_id.as_str()) {
         *cache = EventCache {
@@ -569,7 +566,6 @@ impl Conversation {
             && self.usage_limit == other.usage_limit
             && format!("{:?}", self.goal) == format!("{:?}", other.goal)
             && self.auto_resume == other.auto_resume
-            && self.objective == other.objective
             && self.queue == other.queue
             && self.start == other.start
             && self.project_id == other.project_id

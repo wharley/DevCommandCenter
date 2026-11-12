@@ -41,7 +41,6 @@ pub mod mcp_conformance;
 pub mod merge_conflict;
 pub mod model_registry;
 pub mod objective;
-pub mod objective_form;
 pub mod pr_review_request;
 pub mod project;
 pub mod provider;
@@ -112,10 +111,7 @@ pub use mcp_conformance::{
     McpConformanceTransportEvidence, MCP_CONFORMANCE_ECHO_TOOL, MCP_CONFORMANCE_FIXTURE_VERSION,
     MCP_CONFORMANCE_MUTATING_TOOL, MCP_CONFORMANCE_SUITE_VERSION, REQUIRED_MCP_CONFORMANCE_CHECKS,
 };
-pub use objective::{
-    merge_objective_instructions, ObjectivePauseReason, ObjectiveStatus, ObjectiveTransition,
-    ObjectiveTurnOutcome, SessionObjective, SessionObjectiveDraft,
-};
+pub use objective::ObjectivePauseReason;
 pub use project::{Project, ProjectId};
 pub use provider::{
     Capabilities, HealthStatus, McpOauthSupport, NativeSubagentStatus, ProviderAccountUsage,

@@ -491,8 +491,10 @@ pub enum SessionEventKind {
         reason: Option<String>,
     },
     SessionResumed,
-    /// The durable objective paused itself (budget or failure limit). Metadata
-    /// only, so the timeline can explain why automatic follow-ups stopped.
+    /// The DCC's own durable objective (removed, replaced by the providers'
+    /// native `/goal`) paused itself on a budget or failure limit. No longer
+    /// recorded; kept so sessions stored before the removal still deserialize
+    /// and their timeline still explains why automatic follow-ups stopped.
     ObjectivePaused {
         reason: super::objective::ObjectivePauseReason,
         #[serde(rename = "consecutiveFailures")]

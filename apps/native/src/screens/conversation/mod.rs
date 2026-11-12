@@ -444,7 +444,6 @@ impl ConversationView {
             branch: next.branch.clone(),
             usage_limit: next.usage_limit.clone(),
             goal: next.goal.clone(),
-            objective: next.objective.clone(),
             queue: next.queue.clone(),
             start: next.start.clone(),
             new_thread: next.new_thread.clone(),

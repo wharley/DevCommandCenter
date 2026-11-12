@@ -556,22 +556,6 @@ fn the_auto_resume_toggle_saves_and_goes_back_on_failure(cx: &mut TestAppContext
     });
 }
 
-fn objective(generation: u64) -> dcc_core::domain::objective::SessionObjective {
-    let draft = dcc_core::domain::objective::SessionObjectiveDraft {
-        intent: "Checkout verde".into(),
-        done_when: "testes passam".into(),
-        max_consecutive_failures: None,
-        max_turns: Some(5),
-    };
-    let mut objective = dcc_core::domain::objective::SessionObjective::new(
-        dcc_core::domain::session::SessionId("a".into()),
-        draft.validate().unwrap(),
-        "2026-10-24T10:00:00Z",
-    );
-    objective.generation = generation;
-    objective
-}
-
 pub(super) fn with_catalog(composer: &mut Composer, port: u16) {
     composer.endpoint = Some(DesktopApi::new(port, "k"));
     composer.catalog = Some(std::sync::Arc::new(catalog()));
@@ -579,159 +563,44 @@ pub(super) fn with_catalog(composer: &mut Composer, port: u16) {
 }
 
 #[gpui::test]
-fn the_objective_panel_creates_one_from_the_form(cx: &mut TestAppContext) {
-    let created = serde_json::json!({ "objective": objective(1) }).to_string();
-    let (port, server) = fake_desktop(created);
+fn the_objective_panel_starts_the_providers_goal(cx: &mut TestAppContext) {
+    let (port, server) = fake_desktop("{}".into());
     let (composer, cx) = open(cx);
     composer.update_in(cx, |composer, window, cx| {
         with_catalog(composer, port);
+        let mut providers = catalog();
+        // Without its own goal the toolbar offers no "Objetivo".
+        composer.catalog = Some(std::sync::Arc::new(providers.clone()));
         composer.set_session(session("a"), cx);
+        assert!(!composer.offers_goal());
+        for provider in &mut providers {
+            provider.capabilities.supports_native_goal = true;
+        }
+        composer.catalog = Some(std::sync::Arc::new(providers));
+        assert!(composer.offers_goal());
         composer.set_objective_open(true, window, cx);
         assert!(composer.objective.open);
-        assert_eq!(composer.objective.form(cx).max_consecutive_failures, "3");
-        assert!(!composer.objective.dirty(cx));
     });
     // The intent field has the focus; Enter is a new line, not a send.
     cx.simulate_input("Checkout");
     cx.simulate_keystrokes("enter");
     cx.simulate_input("verde");
-    composer.update(cx, |composer, cx| {
-        assert!(composer.objective.dirty(cx));
-        assert_eq!(composer.objective.form(cx).intent, "Checkout\nverde");
-        assert_eq!(composer.busy, None, "no turn went out");
-        composer.save_objective(cx);
-    });
-    cx.run_until_parked();
-    let (request, body) = server.join().unwrap();
-    assert_eq!(request, "PUT /api/v1/sessions/a/objective");
-    assert!(body.contains(r#""intent":"Checkout\nverde""#), "{body}");
-    assert!(body.contains(r#""maxConsecutiveFailures":3"#), "{body}");
-    assert!(body.contains(r#""expectedGeneration":null"#), "{body}");
-    composer.read_with(cx, |composer, cx| {
-        assert_eq!(
-            composer.session.objective.as_ref().map(|o| o.generation),
-            Some(1)
-        );
-        assert_eq!(composer.objective.form(cx).intent, "Checkout verde");
-        assert!(!composer.objective.dirty(cx));
-        assert_eq!(composer.objective.busy, None);
-    });
-    // The open panel lays out with its progress and the transitions.
-    cx.update(|window, _| window.refresh());
-    cx.run_until_parked();
-    let bounds = cx
-        .debug_bounds("objective-panel")
-        .expect("the panel painted");
-    assert_eq!(f32::from(bounds.size.width), 520.0);
-}
-
-#[gpui::test]
-fn the_objective_form_refuses_a_bad_draft_before_the_desktop(cx: &mut TestAppContext) {
-    let dead = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let (composer, cx) = open(cx);
     composer.update_in(cx, |composer, window, cx| {
-        with_catalog(composer, dead);
-        composer.set_session(session("a"), cx);
-        composer.set_objective_open(true, window, cx);
         composer
             .objective
-            .max_failures
-            .update(cx, |field, cx| field.set_text("50", cx));
-        composer.save_objective(cx);
-        // Refused here: nothing on its way.
-        assert_eq!(composer.objective.busy, None);
-    });
-}
-
-#[gpui::test]
-fn objective_transitions_and_clear_go_with_the_generation(cx: &mut TestAppContext) {
-    use dcc_core::domain::objective::{ObjectiveStatus, ObjectiveTransition};
-    let mut paused = objective(3);
-    paused.transition(ObjectiveTransition::Pause, "2026-10-24T10:01:00Z");
-    let (port, server) = fake_desktop(serde_json::json!({ "objective": paused }).to_string());
-    let (composer, cx) = open(cx);
-    composer.update_in(cx, |composer, window, cx| {
-        with_catalog(composer, port);
-        composer.set_session(
-            ComposerSession {
-                objective: Some(objective(2)),
-                ..session("a")
-            },
-            cx,
-        );
-        composer.set_objective_open(true, window, cx);
-        composer.transition_objective(ObjectiveTransition::Pause, cx);
-        // Closing waits for the answer.
-        composer.set_objective_open(false, window, cx);
-        assert!(composer.objective.open);
+            .done_when
+            .update(cx, |field, cx| field.set_text("testes passam", cx));
+        composer.start_native_goal(window, cx);
+        assert!(!composer.objective.open, "it closes once started");
+        assert_eq!(composer.objective.intent.read(cx).text(), "");
     });
     cx.run_until_parked();
     let (request, body) = server.join().unwrap();
-    assert_eq!(request, "POST /api/v1/sessions/a/objective/transition");
-    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(
-        body,
-        serde_json::json!({ "transition": "pause", "expectedGeneration": 2 })
+    assert_eq!(request, "POST /api/v1/sessions/a/turns");
+    assert!(
+        body.contains(r#""prompt":"/goal Checkout verde. Pronto quando: testes passam""#),
+        "{body}"
     );
-    composer.read_with(cx, |composer, _| {
-        assert_eq!(
-            composer.session.objective.as_ref().map(|o| o.status),
-            Some(ObjectiveStatus::Paused)
-        );
-    });
-    let (port, server) = fake_desktop(r#"{"objective":null}"#.into());
-    composer.update(cx, |composer, cx| {
-        composer.endpoint = Some(DesktopApi::new(port, "k"));
-        composer.clear_objective(cx);
-    });
-    cx.run_until_parked();
-    let (request, _) = server.join().unwrap();
-    assert_eq!(request, "DELETE /api/v1/sessions/a/objective");
-    composer.read_with(cx, |composer, cx| {
-        assert!(composer.session.objective.is_none());
-        assert!(!composer.objective.open, "clearing closes the panel");
-        assert_eq!(composer.objective.form(cx).intent, "");
-    });
-}
-
-#[gpui::test]
-fn a_refresh_keeps_what_the_person_is_typing(cx: &mut TestAppContext) {
-    let (composer, cx) = open(cx);
-    composer.update(cx, |composer, cx| {
-        with_catalog(composer, 1);
-        composer.set_session(
-            ComposerSession {
-                objective: Some(objective(2)),
-                ..session("a")
-            },
-            cx,
-        );
-        assert_eq!(composer.objective.form(cx).intent, "Checkout verde");
-        composer
-            .objective
-            .intent
-            .update(cx, |field, cx| field.set_text("Checkout azul", cx));
-        assert!(composer.objective.dirty(cx));
-        // The turn ended and the counters moved: the typed text stays.
-        let mut counted = objective(3);
-        counted.turns_used = 1;
-        composer.set_session(
-            ComposerSession {
-                objective: Some(counted),
-                ..session("a")
-            },
-            cx,
-        );
-        assert_eq!(composer.objective.form(cx).intent, "Checkout azul");
-        // Another conversation starts from its own record.
-        composer.set_session(session("b"), cx);
-        assert_eq!(composer.objective.form(cx).intent, "");
-        assert!(!composer.objective.dirty(cx));
-    });
 }
 
 fn queued(id: &str, prompt: &str) -> dcc_core::domain::session::QueuedTurn {

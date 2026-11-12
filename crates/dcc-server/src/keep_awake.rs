@@ -17,10 +17,9 @@
 //! the app, and the first reconcile runs at startup.
 //!
 //! When the last turn ends the hold lingers for `HAND_OFF_GRACE`. A queued
-//! follow-up (sessions without an objective, or with an active one, dispatch
-//! it right after the completion) starts within that window, and releasing in
-//! between would let a Mac that has been idle for hours sleep at once,
-//! before the next turn starts. A queue left behind by a failed turn does not
+//! follow-up (dispatched right after the completion) starts within that
+//! window, and releasing in between would let a Mac that has been idle for
+//! hours sleep at once, before the next turn starts. A queue left behind by a failed turn does not
 //! dispatch by itself, so it does not hold the Mac.
 //!
 //! A task stopped by its plan's usage limit that will continue by itself

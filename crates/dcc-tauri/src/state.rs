@@ -123,10 +123,6 @@ use crate::process_runtime_registry::{
 use crate::terminal_arbiter::{
     PersistThenCommitError, TerminalArbiterError, TerminalClaimResult, TerminalIntent, TerminalKey,
 };
-use dcc_core::domain::objective::{
-    merge_objective_instructions, ObjectiveTransition, ObjectiveTurnOutcome, SessionObjective,
-    SessionObjectiveDraft,
-};
 use dcc_providers::{
     provider_registration, provider_runtime, supports_provider_approval_policy,
     supports_provider_capability, validate_provider_model, validate_provider_runtime_config,
@@ -1323,7 +1319,7 @@ enum TerminalSource {
     Quiesce,
     Cancel,
     /// The provider stopped the turn on the plan's usage limit: captured like
-    /// a provider failure, but not counted against the objective's failures.
+    /// a provider failure.
     UsageLimit,
     /// A TurnStarted whose provider binding was never installed. This path
     /// intentionally has no M4 capture to finalize.
@@ -4218,57 +4214,6 @@ impl SessionCommandState {
             // A delegated child's turn just ended: settle its delegation and
             // hand the result back to the parent, off this terminal path.
             crate::delegation_runtime::spawn_on_session_turn_terminal(self, session_id);
-            let objective_outcome = match (&payload.record.kind, &request) {
-                (SessionEventKind::TurnCompleted { .. }, _) => {
-                    Some(ObjectiveTurnOutcome::Completed)
-                }
-                (
-                    SessionEventKind::TurnAborted { .. },
-                    TerminalRequest::Aborted {
-                        source: TerminalSource::ProviderFailed,
-                        ..
-                    },
-                ) => Some(ObjectiveTurnOutcome::Failed),
-                // A deliberate cancel or an unbound start is not a provider
-                // failure and must not consume the failure budget.
-                _ => None,
-            };
-            if let Some(outcome) = objective_outcome {
-                match self.record_objective_turn_outcome(session_id, turn_id, outcome) {
-                    Ok(Some(objective))
-                        if objective.status
-                            == dcc_core::domain::objective::ObjectiveStatus::Paused
-                            && objective.pause_reason.is_some_and(|reason| {
-                                reason != dcc_core::domain::objective::ObjectivePauseReason::Manual
-                            }) =>
-                    {
-                        // The pause was decided by this very outcome; record it
-                        // durably so the timeline can explain the stop.
-                        let reason = objective.pause_reason.expect("checked above");
-                        if let Err(error) = self
-                            .append_and_publish_session_event(
-                                session_id,
-                                SessionEventKind::ObjectivePaused {
-                                    reason,
-                                    consecutive_failures: objective.consecutive_failures,
-                                    turns_used: objective.turns_used,
-                                },
-                                dcc_core::ports::events::CoreEvent::SessionObjectivePaused {
-                                    session_id: session_id.0.clone(),
-                                    reason,
-                                    consecutive_failures: objective.consecutive_failures,
-                                    turns_used: objective.turns_used,
-                                },
-                            )
-                            .await
-                        {
-                            eprintln!("[DCC] objective pause event failed: {error}");
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(error) => eprintln!("[DCC] objective outcome accounting failed: {error}"),
-                }
-            }
         }
         let remove_binding = matches!(
             (&request, outcome),
@@ -4664,7 +4609,7 @@ impl SessionCommandState {
     /// Ends the turn as stopped by the plan's usage limit: records the limit
     /// (with the session's automatic-resume choice at this moment), then the
     /// turn's abort, which keeps the provider text as its reason. The limit
-    /// is a wait, so the objective does not count it as a failure.
+    /// is a wait, not a failure.
     pub async fn emit_turn_usage_limited(
         &self,
         session_id: &SessionId,
@@ -7190,10 +7135,7 @@ impl SessionCommandState {
                                         .await;
                                 });
                             }
-                            if let Err(error) = state
-                                .dispatch_next_queued_turn_if_objective_allows(&session_id)
-                                .await
-                            {
+                            if let Err(error) = state.dispatch_next_queued_turn(&session_id).await {
                                 eprintln!("[DCC] queued turn dispatch failed: {error}");
                             }
                         }
@@ -7453,143 +7395,20 @@ impl SessionCommandState {
         provider.send_input(&binding.handle, input).await
     }
 
-    // ---- Durable task objective -------------------------------------------
-
-    pub fn session_objective(&self, session_id: &SessionId) -> Result<Option<SessionObjective>> {
-        self.session_repo.load_session_objective(session_id)
-    }
-
-    fn persist_objective(&self, objective: &mut SessionObjective) -> Result<()> {
-        objective.generation = objective.generation.checked_add(1).ok_or_else(|| {
-            dcc_core::CoreError::Repository("session objective generation exhausted".to_string())
-        })?;
-        self.session_repo.save_session_objective(objective)
-    }
-
-    fn require_objective_generation(
-        objective: &SessionObjective,
-        expected_generation: Option<u64>,
-    ) -> Result<()> {
-        if expected_generation.is_some_and(|expected| expected != objective.generation) {
-            return Err(dcc_core::CoreError::InvalidInput(
-                "session objective changed since it was loaded".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Creates or rewrites the person-authored objective of an existing
-    /// session. `expected_generation` makes concurrent edits fail closed.
-    pub async fn set_session_objective(
-        &self,
-        session_id: &SessionId,
-        draft: SessionObjectiveDraft,
-        expected_generation: Option<u64>,
-    ) -> Result<SessionObjective> {
-        let validated = draft
-            .validate()
-            .map_err(dcc_core::CoreError::InvalidInput)?;
-        if self.peek_session(session_id).await?.is_none() {
-            return Err(dcc_core::CoreError::Repository(
-                "session not found".to_string(),
-            ));
-        }
-        let now = Utc::now().to_rfc3339();
-        let mut objective = match self.session_repo.load_session_objective(session_id)? {
-            Some(mut existing) => {
-                Self::require_objective_generation(&existing, expected_generation)?;
-                existing.apply_draft(validated, &now);
-                existing
-            }
-            None => {
-                if expected_generation.is_some() {
-                    return Err(dcc_core::CoreError::InvalidInput(
-                        "session objective no longer exists".to_string(),
-                    ));
-                }
-                SessionObjective::new(session_id.clone(), validated, &now)
-            }
-        };
-        self.persist_objective(&mut objective)?;
-        Ok(objective)
-    }
-
-    pub fn transition_session_objective(
-        &self,
-        session_id: &SessionId,
-        transition: ObjectiveTransition,
-        expected_generation: Option<u64>,
-    ) -> Result<SessionObjective> {
-        let mut objective = self
-            .session_repo
-            .load_session_objective(session_id)?
-            .ok_or_else(|| {
-                dcc_core::CoreError::Repository("session objective not found".to_string())
-            })?;
-        Self::require_objective_generation(&objective, expected_generation)?;
-        if objective.transition(transition, &Utc::now().to_rfc3339()) {
-            self.persist_objective(&mut objective)?;
-        }
-        Ok(objective)
-    }
-
-    /// Gives a delegated child session its own copy of the parent's objective.
-    /// Idempotent: an existing child objective is kept, and a parent objective
-    /// already marked done is not propagated. Returns the child's objective.
-    pub fn inherit_session_objective(
-        &self,
-        parent_session_id: &SessionId,
-        child_session_id: &SessionId,
-    ) -> Result<Option<SessionObjective>> {
-        if parent_session_id == child_session_id {
-            return self.session_repo.load_session_objective(child_session_id);
-        }
-        if let Some(existing) = self.session_repo.load_session_objective(child_session_id)? {
-            return Ok(Some(existing));
-        }
-        let Some(parent) = self
-            .session_repo
-            .load_session_objective(parent_session_id)?
-        else {
-            return Ok(None);
-        };
-        if parent.status == dcc_core::domain::objective::ObjectiveStatus::Done {
-            return Ok(None);
-        }
-        let mut child = parent.inherit_for(child_session_id.clone(), &Utc::now().to_rfc3339());
-        match self.persist_objective(&mut child) {
-            Ok(()) => Ok(Some(child)),
-            // A concurrent writer already created the child's objective.
-            Err(dcc_core::CoreError::Repository(message))
-                if message.contains("generation is stale") =>
-            {
-                self.session_repo.load_session_objective(child_session_id)
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    pub fn clear_session_objective(&self, session_id: &SessionId) -> Result<bool> {
-        self.session_repo.delete_session_objective(session_id)
-    }
-
-    /// Bounded background context appended to every turn's instructions so
-    /// the objective survives provider switches, compaction and restarts.
-    pub fn objective_tool_instructions(
+    /// Bounded background context appended to every turn's instructions: the
+    /// session agent's role and its memory, so they survive provider switches,
+    /// compaction and restarts.
+    pub fn turn_tool_instructions(
         &self,
         session_id: &SessionId,
         base: Option<String>,
     ) -> Result<Option<String>> {
-        let objective = self.session_repo.load_session_objective(session_id)?;
         let agent = self.session_repo.load_session_agent(session_id)?;
         let memory = match &agent {
             Some(agent) => self.agent_turn_context(session_id, &agent.id)?,
             None => None,
         };
-        let merged = dcc_core::domain::agent::merge_agent_instructions(
-            merge_objective_instructions(base, objective.as_ref()),
-            agent.as_ref(),
-        );
+        let merged = dcc_core::domain::agent::merge_agent_instructions(base, agent.as_ref());
         Ok(match (merged, memory) {
             (Some(merged), Some(memory)) => Some(format!("{merged}\n\n{memory}")),
             (merged, memory) => merged.or(memory),
@@ -7636,80 +7455,6 @@ impl SessionCommandState {
         self.session_repo.activity_recap(from, to)
     }
 
-    /// Idempotent per turn. Retries once on a generation race with a
-    /// concurrent person edit; never blocks the turn pipeline.
-    pub(crate) fn record_objective_turn_outcome(
-        &self,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-        outcome: ObjectiveTurnOutcome,
-    ) -> Result<Option<SessionObjective>> {
-        for _attempt in 0..3 {
-            let Some(mut objective) = self.session_repo.load_session_objective(session_id)? else {
-                return Ok(None);
-            };
-            if !objective.record_turn_outcome(&turn_id.0, outcome, &Utc::now().to_rfc3339()) {
-                return Ok(None);
-            }
-            match self.persist_objective(&mut objective) {
-                Ok(()) => return Ok(Some(objective)),
-                Err(dcc_core::CoreError::Repository(message))
-                    if message.contains("generation is stale") =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Err(dcc_core::CoreError::Repository(
-            "session objective outcome could not be recorded".to_string(),
-        ))
-    }
-
-    /// Counts an explicit retry on the objective, once per retrying turn.
-    /// Best-effort: never blocks the turn that already started.
-    pub fn record_objective_retry(
-        &self,
-        session_id: &SessionId,
-        retrying_turn_id: &TurnId,
-    ) -> Result<bool> {
-        for _attempt in 0..3 {
-            let Some(mut objective) = self.session_repo.load_session_objective(session_id)? else {
-                return Ok(false);
-            };
-            if !objective.record_retry(&retrying_turn_id.0, &Utc::now().to_rfc3339()) {
-                return Ok(false);
-            }
-            match self.persist_objective(&mut objective) {
-                Ok(()) => return Ok(true),
-                Err(dcc_core::CoreError::Repository(message))
-                    if message.contains("generation is stale") =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Err(dcc_core::CoreError::Repository(
-            "session objective retry could not be recorded".to_string(),
-        ))
-    }
-
-    /// Automatic follow-ups respect the objective: a paused or done objective
-    /// stops the queue until the person resumes it. Direct turns and manual
-    /// dispatch stay available because a new instruction has priority.
-    pub async fn dispatch_next_queued_turn_if_objective_allows(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<bool> {
-        if let Some(objective) = self.session_repo.load_session_objective(session_id)? {
-            if !objective.allows_automatic_dispatch() {
-                return Ok(false);
-            }
-        }
-        self.dispatch_next_queued_turn(session_id).await
-    }
-
     /// Dispatch the oldest durable follow-up after a provider completes. The
     /// queue is projected from session events, so it survives UI remounts and
     /// app restarts instead of living in composer state.
@@ -7742,7 +7487,7 @@ impl SessionCommandState {
         let provider_input = dcc_core::ports::ProviderTurnInput {
             prompt: input.prompt.clone(),
             tool_instructions: self
-                .objective_tool_instructions(session_id, input.tool_instructions.clone())?,
+                .turn_tool_instructions(session_id, input.tool_instructions.clone())?,
             plan_mode: input.plan_mode,
             effort: input.effort.clone(),
             fast_mode: input.fast_mode,
@@ -9049,12 +8794,12 @@ mod tests {
         assert!(first.contains("not an automatic fallback"));
 
         let resumed = append_dcc_app_mcp_tool_instructions(
-            Some("durable objective context".to_string()),
+            Some("durable agent context".to_string()),
             true,
             None,
         )
         .expect("resumed attached turn has host instructions");
-        assert!(resumed.starts_with("durable objective context\n\n"));
+        assert!(resumed.starts_with("durable agent context\n\n"));
         assert!(resumed.ends_with("[End DCC host tool routing]"));
     }
 
@@ -9527,7 +9272,7 @@ mod tests {
             .bind_session_agent(&session.id, &reviewer.id)
             .expect("bind");
         let instructions = state
-            .objective_tool_instructions(&session.id, Some("base".to_string()))
+            .turn_tool_instructions(&session.id, Some("base".to_string()))
             .unwrap()
             .expect("merged instructions");
         assert!(instructions.starts_with("<dcc_agent_role name=\"Revisor\">"));
@@ -9547,7 +9292,7 @@ mod tests {
             .remember_for_session(&session.id, "Responder em pt-BR", true)
             .expect("remember");
         let instructions = state
-            .objective_tool_instructions(&session.id, Some("base".to_string()))
+            .turn_tool_instructions(&session.id, Some("base".to_string()))
             .unwrap()
             .unwrap();
         assert!(instructions.contains("Everywhere:\n- Responder em pt-BR"));
@@ -9569,7 +9314,7 @@ mod tests {
             .expect("bind home");
         assert!(state.is_agent_conversation(&home.id).unwrap());
         let instructions = state
-            .objective_tool_instructions(&home.id, Some("base".to_string()))
+            .turn_tool_instructions(&home.id, Some("base".to_string()))
             .unwrap()
             .unwrap();
         assert!(instructions.contains("\n\nbase\n\n<dcc_agent_conversation>"));
@@ -9579,7 +9324,7 @@ mod tests {
         let qa = dcc_core::domain::agent_templates::template_draft("qa", "QA").unwrap();
         state.save_resident_agent(None, qa).expect("save QA");
         let with_team = state
-            .objective_tool_instructions(&home.id, Some("base".to_string()))
+            .turn_tool_instructions(&home.id, Some("base".to_string()))
             .unwrap()
             .unwrap();
         assert!(with_team.contains("team room, with: QA."));
@@ -9595,15 +9340,14 @@ mod tests {
         assert!(state.delete_resident_agent(&reviewer.id).unwrap());
         assert_eq!(
             state
-                .objective_tool_instructions(&session.id, Some("base".to_string()))
+                .turn_tool_instructions(&session.id, Some("base".to_string()))
                 .unwrap(),
             Some("base".to_string())
         );
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn a_usage_limit_is_a_wait_that_keeps_the_queue_and_the_objective() {
-        use dcc_core::domain::objective::ObjectiveStatus;
+    async fn a_usage_limit_is_a_wait_that_keeps_the_queue() {
         use dcc_core::domain::session::QueuedTurn;
         use dcc_core::domain::usage_limit::{usage_limit_phase, UsageLimitPhase};
         let root = tempfile::tempdir().expect("state root");
@@ -9614,19 +9358,6 @@ mod tests {
         SessionRepo::save_session(&state, &session)
             .await
             .expect("save session");
-        state
-            .set_session_objective(
-                &session.id,
-                SessionObjectiveDraft {
-                    intent: "finish the plan".to_string(),
-                    done_when: String::new(),
-                    max_consecutive_failures: Some(1),
-                    max_turns: None,
-                },
-                None,
-            )
-            .await
-            .expect("objective");
         let turn = TurnId("turn-limit".to_string());
         state
             .append_session_event(
@@ -9698,10 +9429,6 @@ mod tests {
             SessionEventKind::TurnAborted { turn_id, .. } if *turn_id == turn
         )));
         assert_eq!(list_turn_queue(&state, &session.id).await.unwrap().len(), 1);
-        // A limit is not a failure: one failure would have paused this objective.
-        let objective = state.session_objective(&session.id).unwrap().unwrap();
-        assert_eq!(objective.status, ObjectiveStatus::Active);
-        assert_eq!(objective.consecutive_failures, 0);
         // Automatic resume never runs before the reset or without the choice.
         assert!(state
             .resume_after_usage_limit(&session.id, true)
@@ -9784,125 +9511,6 @@ mod tests {
                 .resets_at,
             Some(resets_at)
         );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn session_objective_is_durable_idempotent_and_gates_automatic_dispatch() {
-        use dcc_core::domain::objective::{ObjectivePauseReason, ObjectiveStatus};
-        let root = tempfile::tempdir().expect("state root");
-        let root = std::fs::canonicalize(root.path()).expect("physical state root");
-        let db_path = root.join("state.sqlite");
-        let state = SessionCommandState::new_headless(db_path.clone(), root.join("app-data"));
-        let session = sample_session("objective");
-        let missing = SessionId("missing".to_string());
-        let draft = SessionObjectiveDraft {
-            intent: "make checkout resilient".to_string(),
-            done_when: "retry test passes".to_string(),
-            max_consecutive_failures: Some(2),
-            max_turns: None,
-        };
-        assert!(state
-            .set_session_objective(&missing, draft.clone(), None)
-            .await
-            .is_err());
-        SessionRepo::save_session(&state, &session)
-            .await
-            .expect("save session");
-        assert_eq!(
-            state
-                .objective_tool_instructions(&session.id, Some("base".to_string()))
-                .unwrap(),
-            Some("base".to_string())
-        );
-        let objective = state
-            .set_session_objective(&session.id, draft.clone(), None)
-            .await
-            .expect("create objective");
-        assert_eq!(objective.generation, 1);
-        let instructions = state
-            .objective_tool_instructions(&session.id, Some("base".to_string()))
-            .unwrap()
-            .expect("merged instructions");
-        assert!(instructions.starts_with("base\n\n<dcc_objective status=\"active\""));
-        assert!(instructions.contains("intent: make checkout resilient"));
-
-        // Stale expected generation fails closed.
-        assert!(state
-            .set_session_objective(&session.id, draft.clone(), Some(0))
-            .await
-            .is_err());
-
-        let turn = TurnId("turn-1".to_string());
-        assert!(state
-            .record_objective_turn_outcome(&session.id, &turn, ObjectiveTurnOutcome::Failed)
-            .unwrap()
-            .is_some());
-        assert!(state
-            .record_objective_turn_outcome(&session.id, &turn, ObjectiveTurnOutcome::Failed)
-            .unwrap()
-            .is_none());
-        let turn2 = TurnId("turn-2".to_string());
-        let paused_now = state
-            .record_objective_turn_outcome(&session.id, &turn2, ObjectiveTurnOutcome::Failed)
-            .unwrap()
-            .expect("changed");
-        assert_eq!(paused_now.status, ObjectiveStatus::Paused);
-        let paused = state
-            .session_objective(&session.id)
-            .unwrap()
-            .expect("objective");
-        assert_eq!(paused.status, ObjectiveStatus::Paused);
-        assert_eq!(
-            paused.pause_reason,
-            Some(ObjectivePauseReason::ConsecutiveFailures)
-        );
-        assert_eq!(paused.consecutive_failures, 2);
-        assert!(!paused.allows_automatic_dispatch());
-        // A paused objective stops automatic dispatch without touching the queue.
-        assert!(!state
-            .dispatch_next_queued_turn_if_objective_allows(&session.id)
-            .await
-            .unwrap());
-
-        assert!(state
-            .record_objective_retry(&session.id, &TurnId("retry-1".to_string()))
-            .unwrap());
-        assert!(!state
-            .record_objective_retry(&session.id, &TurnId("retry-1".to_string()))
-            .unwrap());
-        let paused = state
-            .session_objective(&session.id)
-            .unwrap()
-            .expect("objective");
-        assert_eq!(paused.retries, 1);
-        assert!(state
-            .objective_tool_instructions(&session.id, None)
-            .unwrap()
-            .expect("block")
-            .contains("retries=\"1\""));
-        let resumed = state
-            .transition_session_objective(
-                &session.id,
-                ObjectiveTransition::Resume,
-                Some(paused.generation),
-            )
-            .unwrap();
-        assert_eq!(resumed.status, ObjectiveStatus::Active);
-        assert_eq!(resumed.consecutive_failures, 0);
-        assert!(state
-            .transition_session_objective(&session.id, ObjectiveTransition::Resume, Some(0))
-            .is_err());
-
-        // Survives a fresh state over the same database.
-        let reopened = SessionCommandState::new_headless(db_path, root.join("app-data"));
-        let loaded = reopened
-            .session_objective(&session.id)
-            .unwrap()
-            .expect("durable");
-        assert_eq!(loaded.generation, resumed.generation);
-        assert_eq!(loaded.intent, "make checkout resilient");
-        assert!(reopened.clear_session_objective(&session.id).unwrap());
-        assert_eq!(reopened.session_objective(&session.id).unwrap(), None);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -10257,78 +9865,6 @@ mod tests {
         handed_off.provider_id = "codex".to_string();
         assert_eq!(state.native_resume_id_for_attach(&handed_off, true), None);
         assert_eq!(state.native_resume_id_for_attach(&session, true), None);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn delegated_child_inherits_parent_objective_once_with_fresh_counters() {
-        use dcc_core::domain::objective::ObjectiveStatus;
-        let root = tempfile::tempdir().expect("state root");
-        let root = std::fs::canonicalize(root.path()).expect("physical state root");
-        let state =
-            SessionCommandState::new_headless(root.join("state.sqlite"), root.join("app-data"));
-        let parent = sample_session("objective-parent");
-        let child = sample_session("objective-child");
-        SessionRepo::save_session(&state, &parent)
-            .await
-            .expect("parent");
-        SessionRepo::save_session(&state, &child)
-            .await
-            .expect("child");
-        assert_eq!(
-            state
-                .inherit_session_objective(&parent.id, &child.id)
-                .unwrap(),
-            None,
-            "no parent objective, nothing to inherit"
-        );
-        let draft = SessionObjectiveDraft {
-            intent: "keep the API contract".to_string(),
-            done_when: "contract tests pass".to_string(),
-            max_consecutive_failures: Some(2),
-            max_turns: Some(5),
-        };
-        state
-            .set_session_objective(&parent.id, draft, None)
-            .await
-            .expect("parent objective");
-        state
-            .record_objective_turn_outcome(
-                &parent.id,
-                &TurnId("p-1".to_string()),
-                ObjectiveTurnOutcome::Failed,
-            )
-            .unwrap();
-        let inherited = state
-            .inherit_session_objective(&parent.id, &child.id)
-            .unwrap()
-            .expect("child objective");
-        assert_eq!(inherited.session_id, child.id);
-        assert_eq!(inherited.intent, "keep the API contract");
-        assert_eq!(inherited.max_turns, Some(5));
-        assert_eq!(inherited.consecutive_failures, 0);
-        assert_eq!(inherited.turns_used, 0);
-        assert_eq!(inherited.status, ObjectiveStatus::Active);
-        assert_eq!(inherited.generation, 1);
-        // Idempotent: the child's own record is kept afterwards.
-        let again = state
-            .inherit_session_objective(&parent.id, &child.id)
-            .unwrap()
-            .expect("kept");
-        assert_eq!(again.generation, inherited.generation);
-        // A done parent objective is not propagated to a new child.
-        let done_child = sample_session("objective-child-2");
-        SessionRepo::save_session(&state, &done_child)
-            .await
-            .expect("child 2");
-        state
-            .transition_session_objective(&parent.id, ObjectiveTransition::Complete, None)
-            .unwrap();
-        assert_eq!(
-            state
-                .inherit_session_objective(&parent.id, &done_child.id)
-                .unwrap(),
-            None
-        );
     }
 
     #[test]

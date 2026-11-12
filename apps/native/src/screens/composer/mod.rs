@@ -74,8 +74,6 @@ pub struct ComposerSession {
     pub new_thread: Option<crate::data::conversation::ThreadStart>,
     /// Follow-ups waiting for the running turn (`project_turn_queue`).
     pub queue: std::sync::Arc<Vec<dcc_core::domain::session::QueuedTurn>>,
-    /// The DCC's own objective (the toolbar's "Objetivo").
-    pub objective: Option<dcc_core::domain::objective::SessionObjective>,
     pub auto_resume: bool,
     pub context: Option<crate::data::conversation::ExecutionContext>,
 }

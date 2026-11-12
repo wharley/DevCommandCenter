@@ -9,11 +9,10 @@ use crate::i18n::I18n;
 use crate::ui::command_key;
 
 /// `HELP_TOPIC_IDS`, in order.
-pub const TOPICS: [&str; 32] = [
+pub const TOPICS: [&str; 31] = [
     "workspaces",
     "composer",
     "plan",
-    "objective",
     "goal",
     "inspector",
     "review",
@@ -72,7 +71,6 @@ pub fn icon(topic: &str) -> &'static str {
         "usageLimit" => "hourglass",
         "pullRequests" => "git-pull-request",
         "spec" => "file-text",
-        "objective" => "target",
         "goal" => "goal",
         "multiProject" => "layers",
         "mergeConflict" => "git-merge",

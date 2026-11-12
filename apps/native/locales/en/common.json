@@ -2261,64 +2261,21 @@
       "openFailed": "Could not open the link."
     },
     "objective": {
-      "design": {
-        "subtitle": "Keep the outcome and completion criteria in view.",
-        "close": "Close objective",
-        "progress": "Progress",
-        "turns": "Turns",
-        "failures": "Consecutive failures",
-        "retries": "Retries",
-        "limits": "Execution limits",
-        "limitsHint": "Choose when to pause and review progress.",
-        "persistence": "The objective follows every turn, even after switching agents or resuming the conversation. Your current message always takes priority.",
-        "loadError": "Could not load the objective.",
-        "retry": "Try again"
-      },
-      "open": "Task objective",
       "compact": "Objective",
-      "title": "Task objective",
+      "title": "Objective",
       "tooltipTitle": "Keep the agent focused on the outcome",
-      "tooltipDescription": "Define the task intent, completion criteria and limits. DCC presents this objective to the agent on every turn, including after compaction, model switches or restarts.",
-      "hint": "Kept by DCC and re-sent with every turn as background context, so it survives provider switches, compaction and restarts. Your current message always takes precedence.",
-      "empty": "No objective yet. Set the intent and what \"done\" means.",
-      "loading": "Loading objective…",
       "intent": "Intent",
       "intentPlaceholder": "What should this task achieve?",
       "doneWhen": "Done when",
       "doneWhenPlaceholder": "How will you know it is finished? (optional)",
-      "maxFailures": "Pause after consecutive failures",
-      "maxTurns": "Turn budget",
-      "unlimited": "unlimited",
-      "create": "Set objective",
-      "save": "Save",
-      "clear": "Clear",
-      "saved": "Objective saved",
-      "failed": "Unable to update the objective",
-      "generation": "rev {{generation}}",
-      "retries": "retries {{count}}",
-      "counters": "turns {{turns}} · failures {{failures}}",
-      "status": {
-        "active": "Active",
-        "paused": "Paused",
-        "done": "Done"
-      },
-      "pauseReason": {
-        "manual": "by you",
-        "consecutive_failures": "failure limit",
-        "turn_budget": "turn budget"
-      },
-      "transition": {
-        "pause": "Pause",
-        "resume": "Resume",
-        "complete": "Mark done"
-      },
-      "autoPaused": "Objective paused automatically. Review it and resume when ready.",
-      "dispatchBlocked": "Queued follow-ups will not run automatically until the objective is resumed. Your own messages still go through.",
       "errors": {
-        "intent_required": "Intent is required.",
-        "text_too_long": "Intent and done-when are limited to 2,000 characters.",
-        "failures_out_of_range": "Failure limit must be between 1 and 20.",
-        "turns_out_of_range": "Turn budget must be between 1 and 10,000, or empty."
+        "intent_required": "Intent is required."
+      },
+      "native": {
+        "subtitle": "The agent works on its own until the goal holds, checking the condition every round.",
+        "hint": "The objective goes to the agent as its own /goal. Follow it in the strip above the field; the stop button interrupts it.",
+        "start": "Start objective",
+        "tooltip": "Starts the agent's own /goal: it works on its own until the done condition holds, you stop it, or the limit runs out."
       }
     },
     "evidence": {
@@ -4185,27 +4142,14 @@
         "tip": "The spec does not run the phases by itself. Every step is still your call.",
         "keywords": "spec mission sdd goal scope criteria acceptance plan validate compile context"
       },
-      "objective": {
-        "label": "Task objective",
-        "summary": "Keep the agent focused on the outcome until the task is done.",
-        "whatIs": "The [Task objective] holds the intent and what done means, with turn and failure limits so the agent pauses on its own. Evidence is snippets from the terminal, diff or screen you attach to the composer, grouped by stage: [Observe], [Reproduce], [Investigate], [Fix] and [Verify].",
-        "whenToUse": "In long sessions or bug hunts, when the agent tends to drift and you want a record of what has already been proven.",
-        "steps": [
-          "Open [Task objective] in the composer and fill in [Intent] and [Done when].",
-          "Adjust [Turn budget] and [Pause after consecutive failures] and click [Set objective].",
-          "In the diff or terminal, use [Add as evidence] to attach a finding.",
-          "Evidence shows up in the composer grouped by stage and goes along with the next message."
-        ],
-        "prompt": "Intent: eliminate the 500 error on avatar upload. Done when: a 5 MB upload works, an integration test covers the case and the log no longer shows the exception.",
-        "keywords": "objective intent done when evidence turns failures pause investigate bug"
-      },
       "goal": {
         "label": "Goal until done (/goal)",
         "summary": "The agent keeps working on its own until a condition holds.",
-        "whatIs": "With /goal, the task's own agent (Claude, Codex, Grok and, experimentally, Cursor) repeats turns by itself and checks the condition each round, until it holds, you stop it or the limit runs out. DCC does not run that loop: it follows what the agent reports. The strip above the composer shows [Working on the goal], how many checks there were, the tokens spent and why the latest check said not yet, and at the end [Goal complete]. Not to be confused with the [Task objective], which only reminds the agent of the intent each turn.",
+        "whatIs": "With /goal, the task's own agent (Claude, Codex, Grok and, experimentally, Cursor) repeats turns by itself and checks the condition each round, until it holds, you stop it or the limit runs out. DCC does not run that loop: it follows what the agent reports. The strip above the composer shows [Working on the goal], how many checks there were, the tokens spent and why the latest check said not yet, and at the end [Goal complete].",
         "whenToUse": "To leave a long task running, overnight too, when you can state in a checkable way what done means, for example \"all tests pass\".",
         "steps": [
           "In the composer, type /goal followed by the done condition. The command turns green when the task's agent accepts it; without color it goes as plain text.",
+          "Or click [Objective] in the composer: with these agents it starts the /goal. Fill in [Intent] and [Done when] and click [Start objective].",
           "Send. Every turn the agent takes on its own shows as one turn of the task.",
           "To stop, use the composer's stop button. On Codex the goal becomes [Goal paused] and comes back with [Continue]; [Clear] drops the goal.",
           "When it finishes, the strip shows [Goal complete]; use [Close] to dismiss it."
