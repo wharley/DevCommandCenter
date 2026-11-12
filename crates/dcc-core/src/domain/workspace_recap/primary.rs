@@ -409,6 +409,14 @@ fn last_git_step(input: &WorkspaceRecapInput) -> Primary {
             Tone::Attention,
             Some(Action::Git(mode)),
         ),
+        // Mergeable, but the checks have not finished: not ready yet.
+        CommitMode::Merge if input.pr_checks_running => primary(
+            State::AwaitingReview,
+            "checksRunning",
+            pr(input),
+            Tone::Neutral,
+            Some(Action::Git(mode)),
+        ),
         CommitMode::Merge => primary(
             State::ReadyToDeliver,
             "mergeReady",

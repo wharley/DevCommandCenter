@@ -82,9 +82,20 @@ fn commit_button(
             &Args::default().with("requestLabel", label),
         )
     };
+    // Mergeable, but the checks have not finished: a plain button saying so.
+    let waiting = mode == CommitMode::Merge && column.checks_running();
+    let text = if waiting {
+        cx.t("commit.checksRunning")
+    } else {
+        text
+    };
     let locked = matches!(mode, CommitMode::Merged | CommitMode::Closed);
     let disabled = locked || status == CommitButtonStatus::Busy || column.delivery.busy;
-    let (background, foreground, hover) = button_colors(mode, cx);
+    let (background, foreground, hover) = if waiting {
+        button_colors(CommitMode::Push, cx)
+    } else {
+        button_colors(mode, cx)
+    };
     let dark = cx.theme().appearance == Appearance::Dark;
     let border = if dark { colors.input } else { colors.border };
     div()
@@ -251,7 +262,9 @@ pub(crate) fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyEl
         .gap(px(8.0))
         .overflow_hidden()
         .px(px(12.0))
-        .bg(highlight(mode).unwrap_or(colors.muted.opacity(0.25)))
+        .bg(highlight(mode)
+            .filter(|_| !(mode == CommitMode::Merge && column.checks_running()))
+            .unwrap_or(colors.muted.opacity(0.25)))
         // `shadow-[inset_0_-1px_0_color-mix(in_oklch,var(--border)_60%,transparent)]`
         .border_b_1()
         .border_color(colors.border.opacity(0.6))

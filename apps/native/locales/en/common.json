@@ -922,7 +922,8 @@
       "reviewConflicts": "Conflicts on {{pr}}",
       "reviewLoading": "Checking review",
       "reviewPending": "Waiting for reviewers",
-      "reviewUnavailable": "Review unavailable"
+      "reviewUnavailable": "Review unavailable",
+      "checksRunning": "Checks running"
     },
     "unknownProject": "Unknown project",
     "waiting": "On hold",
@@ -1660,7 +1661,8 @@
       "completeMergeValidationFailed": "A configured check failed. Review the merge resolution before trying again.",
       "completeMergeStateChanged": "The merge resolution changed. Review it before completing.",
       "completeMergeFailed": "Could not complete the merge: {{message}}",
-      "mergeFailed": "Failed to merge {{requestLabel}}: {{message}}"
+      "mergeFailed": "Failed to merge {{requestLabel}}: {{message}}",
+      "mergeChecksRunning": "The {{requestLabel}} checks are still running on GitHub. Merging now does not wait for them; if you can, wait until they finish."
     },
     "pipeline": {
       "title": "Pipeline #{{id}}",
@@ -1937,7 +1939,8 @@
         "prOpen": "{{pr}} is open.",
         "readyForPr_one": "{{count}} file committed against the base — no {{requestLabel}} yet.",
         "readyForPr_other": "{{count}} files committed against the base — no {{requestLabel}} yet.",
-        "clean": "All clean and in sync with the remote."
+        "clean": "All clean and in sync with the remote.",
+        "checksRunning": "The checks on {{pr}} are still running."
       }
     },
     "spec": {
@@ -4435,7 +4438,8 @@
         "done": "Merged",
         "error": "Retry"
       }
-    }
+    },
+    "checksRunning": "Checks running"
   },
   "sessionEventFeed": {
     "title": "Session activity",

@@ -96,6 +96,9 @@ pub fn build_recap(input: &RecapInput) -> Option<Recap> {
         pr_number: input.pr.and_then(|pr| pr.number),
         pr_state: input.pr.and_then(|pr| pr.state.clone()),
         pr_merge_state: input.pr.and_then(|pr| pr.merge_state_status.clone()),
+        pr_checks_running: input
+            .pr
+            .is_some_and(dcc_core::domain::commit_mode::checks_running),
         request_label: label,
         pending_delegation_results_count: input.pending_delegations as i64,
         ..WorkspaceRecapInput::new(resolve_commit_mode(branch, input.git, input.pr))

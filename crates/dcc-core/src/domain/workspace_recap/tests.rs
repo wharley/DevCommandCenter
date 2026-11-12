@@ -233,6 +233,20 @@ fn maps_merge_to_a_ready_to_merge_recap_with_the_pr_reference() {
 }
 
 #[test]
+fn a_mergeable_pr_whose_checks_still_run_is_not_ready_yet() {
+    let recap = build_workspace_recap(&WorkspaceRecapInput {
+        pr_number: Some(12),
+        pr_state: Some("open".into()),
+        pr_merge_state: Some("UNSTABLE".into()),
+        pr_checks_running: true,
+        ..input(CommitMode::Merge)
+    });
+    assert_eq!(recap.message_key, "checksRunning");
+    assert_eq!(recap.state, DeliveryState::AwaitingReview);
+    assert_eq!(recap.tone, RecapTone::Neutral);
+}
+
+#[test]
 fn maps_fix_to_failing_checks_with_attention_tone() {
     let recap = build_workspace_recap(&WorkspaceRecapInput {
         pr_number: Some(9),

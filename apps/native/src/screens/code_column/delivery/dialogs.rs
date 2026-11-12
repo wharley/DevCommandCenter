@@ -226,7 +226,11 @@ fn confirm(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> Option<AnyEleme
     let (title, description, action) = match confirm {
         Confirm::Merge => (
             cx.t_with("inspector.gitConfirmation.mergeTitle", &args),
-            cx.t_with("inspector.gitConfirmation.mergeDescription", &args),
+            if column.checks_running() {
+                cx.t_with("inspector.gitConfirmation.mergeChecksRunning", &args)
+            } else {
+                cx.t_with("inspector.gitConfirmation.mergeDescription", &args)
+            },
             cx.t_with("inspector.gitConfirmation.mergeConfirm", &args),
         ),
         Confirm::SyncBase => (

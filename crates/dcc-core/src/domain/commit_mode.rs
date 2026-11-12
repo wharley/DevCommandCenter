@@ -67,6 +67,15 @@ pub fn commit_translation_key(mode: CommitMode, status: CommitButtonStatus) -> S
     }
 }
 
+/// The pull request waits on checks that are still running: GitHub's
+/// `UNSTABLE` with none failed. It may be merged, but is not ready yet.
+pub fn checks_running(pr: &WorkspacePrStatusOutput) -> bool {
+    pr.merge_state_status
+        .as_deref()
+        .is_some_and(|state| state.eq_ignore_ascii_case("UNSTABLE"))
+        && pr.checks_failing == Some(false)
+}
+
 fn has_changes(git: Option<&WorkspaceGitStatusOutput>) -> bool {
     git.is_some_and(|git| !git.staged.is_empty() || !git.unstaged.is_empty())
 }
@@ -119,8 +128,7 @@ pub fn resolve_commit_mode(
             let merge_state = pr.merge_state_status.as_deref().map(str::to_uppercase);
             // UNSTABLE also covers a check still running: only a failure
             // needs a fix, when the checks are known.
-            let checks_running =
-                merge_state.as_deref() == Some("UNSTABLE") && pr.checks_failing == Some(false);
+            let checks_running = checks_running(pr);
             if matches!(
                 merge_state.as_deref(),
                 Some("DIRTY" | "BLOCKED" | "UNSTABLE")

@@ -922,7 +922,8 @@
       "reviewConflicts": "Conflitos no {{pr}}",
       "reviewLoading": "Verificando review",
       "reviewPending": "Aguardando reviewers",
-      "reviewUnavailable": "Review indisponível"
+      "reviewUnavailable": "Review indisponível",
+      "checksRunning": "Checks rodando"
     },
     "unknownProject": "Projeto desconhecido",
     "waiting": "Em espera",
@@ -1660,7 +1661,8 @@
       "completeMergeValidationFailed": "Um check configurado falhou. Revise a resolução antes de tentar novamente.",
       "completeMergeStateChanged": "A resolução mudou. Revise antes de concluir.",
       "completeMergeFailed": "Não foi possível concluir o merge: {{message}}",
-      "mergeFailed": "Falha ao mesclar {{requestLabel}}: {{message}}"
+      "mergeFailed": "Falha ao mesclar {{requestLabel}}: {{message}}",
+      "mergeChecksRunning": "Os checks do {{requestLabel}} ainda estão rodando no GitHub. Mesclar agora não espera por eles; se puder, aguarde terminarem."
     },
     "pipeline": {
       "title": "Pipeline #{{id}}",
@@ -1937,7 +1939,8 @@
         "prOpen": "{{pr}} está aberto.",
         "readyForPr_one": "{{count}} arquivo commitado sobre a base — ainda sem {{requestLabel}}.",
         "readyForPr_other": "{{count}} arquivos commitados sobre a base — ainda sem {{requestLabel}}.",
-        "clean": "Tudo limpo e sincronizado com o remoto."
+        "clean": "Tudo limpo e sincronizado com o remoto.",
+        "checksRunning": "Os checks de {{pr}} ainda estão rodando."
       }
     },
     "spec": {
@@ -4435,7 +4438,8 @@
         "done": "Mesclado",
         "error": "Retry"
       }
-    }
+    },
+    "checksRunning": "Checks rodando"
   },
   "sessionEventFeed": {
     "title": "Atividade da sessão",

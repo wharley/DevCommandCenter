@@ -215,6 +215,8 @@ pub struct WorkspaceRecapInput {
     /// The forge's merge state (`UNSTABLE`, `BLOCKED`, `DIRTY`…): what keeps
     /// an open pull request from merging.
     pub pr_merge_state: Option<String>,
+    /// The pull request's checks are still running (`checks_running`).
+    pub pr_checks_running: bool,
     /// "PR" or "MR".
     pub request_label: &'static str,
     /// CodeRabbit findings that still match the diff.
@@ -246,6 +248,7 @@ impl WorkspaceRecapInput {
             pr_number: None,
             pr_state: None,
             pr_merge_state: None,
+            pr_checks_running: false,
             request_label: "PR",
             pending_review_findings_count: 0,
             code_rabbit_review_available: false,

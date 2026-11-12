@@ -11,6 +11,14 @@ use super::super::{CodeColumn, CodeColumnEvent};
 use crate::i18n::Translate;
 
 impl CodeColumn {
+    /// The open pull request's checks are still running.
+    pub(crate) fn checks_running(&self) -> bool {
+        self.delivery
+            .pr
+            .as_ref()
+            .is_some_and(dcc_core::domain::commit_mode::checks_running)
+    }
+
     pub(crate) fn fix_checks(&mut self, cx: &mut Context<Self>) {
         let github =
             self.review.forge.as_ref().is_some_and(|forge| {

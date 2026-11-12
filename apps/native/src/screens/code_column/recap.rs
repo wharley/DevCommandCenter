@@ -102,6 +102,7 @@ impl CodeColumn {
             pr_number,
             pr_state: pr.and_then(|pr| pr.state.clone()),
             pr_merge_state: pr.and_then(|pr| pr.merge_state_status.clone()),
+            pr_checks_running: pr.is_some_and(dcc_core::domain::commit_mode::checks_running),
             request_label: self.delivery.request_label(),
             pending_delegation_results_count: self.pending_delegations as i64,
             delivery_failure: review.failure.as_ref().map(|failure| RecapDeliveryFailure {
