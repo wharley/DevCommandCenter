@@ -279,7 +279,7 @@ impl TerminalDock {
     }
 
     /// The scope's active tab and its session, made when missing.
-    fn show_active(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn show_active(&mut self, cx: &mut Context<Self>) {
         let Some(scope) = self.scope() else {
             return;
         };

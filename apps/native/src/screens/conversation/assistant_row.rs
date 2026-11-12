@@ -488,7 +488,7 @@ pub(super) fn assistant_row(
                 .text_color(colors.foreground)
                 .child(render_markdown(
                     &blocks,
-                    MarkdownStyle::reply(),
+                    MarkdownStyle::reply().runnable(),
                     &message.id,
                     window,
                     cx,

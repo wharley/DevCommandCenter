@@ -10,6 +10,7 @@ mod dock_actions;
 mod dock_dialogs;
 mod dock_menus;
 mod dock_view;
+mod run_command;
 pub mod emulator;
 pub mod keys;
 pub mod palette;

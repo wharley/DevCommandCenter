@@ -21,3 +21,22 @@ pub type OpenLink = dyn Fn(&str, &mut gpui::Window, &mut gpui::App);
 pub struct LinkHandler(pub std::rc::Rc<OpenLink>);
 
 impl gpui::Global for LinkHandler {}
+
+/// Runs a command the person clicked "Executar" on (the task's terminal).
+#[derive(Clone)]
+pub struct CommandRunner(pub std::rc::Rc<dyn Fn(&str, &mut gpui::Window, &mut gpui::App)>);
+
+impl gpui::Global for CommandRunner {}
+
+/// A shell block of one command: what "Executar" runs, else none.
+pub fn runnable_command(language: Option<&str>, code: &str) -> Option<String> {
+    let shell = language.is_some_and(|language| {
+        matches!(
+            language.to_ascii_lowercase().as_str(),
+            "bash" | "sh" | "zsh" | "shell" | "console" | "fish"
+        )
+    });
+    let command = code.trim();
+    let command = command.strip_prefix("$ ").unwrap_or(command).trim();
+    (shell && !command.is_empty() && !command.contains('\n')).then(|| command.to_string())
+}

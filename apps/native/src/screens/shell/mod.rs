@@ -269,6 +269,17 @@ impl Shell {
                 let _ = links.update(cx, |shell, cx| shell.open_link(target, window, cx));
             },
         )));
+        // "Executar" on a command in the conversation: the task's terminal.
+        let terminal_runner = cx.entity().downgrade();
+        cx.set_global(crate::markdown::CommandRunner(std::rc::Rc::new(
+            move |command, window, cx| {
+                let _ = terminal_runner.update(cx, |shell, cx| {
+                    shell
+                        .terminal
+                        .update(cx, |dock, cx| dock.run_command(command, window, cx))
+                });
+            },
+        )));
         // The column follows the open task's checkout.
         let conversation_root = cx.observe(&conversation, |this, conversation, cx| {
             let view = conversation.read(cx);

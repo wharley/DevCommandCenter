@@ -27,14 +27,24 @@ pub struct MarkdownStyle {
     pub collapsed_lines: Option<usize>,
     /// A paragraph's line height, relative to its size (1.82 by default).
     pub paragraph_line: f32,
+    /// A one-line shell block offers "Executar" (the task's conversation,
+    /// where the shell's `CommandRunner` runs it in the task's terminal).
+    pub run_commands: bool,
 }
 
 impl MarkdownStyle {
+    /// Shell blocks in it can be run (`run_commands`).
+    pub fn runnable(mut self) -> Self {
+        self.run_commands = true;
+        self
+    }
+
     pub fn reply() -> Self {
         Self {
             size: 16.0,
             collapsed_lines: None,
             paragraph_line: 1.82,
+            run_commands: false,
         }
     }
 
@@ -44,6 +54,7 @@ impl MarkdownStyle {
             size: 12.0,
             collapsed_lines: Some(16),
             paragraph_line: 1.82,
+            run_commands: false,
         }
     }
 
@@ -52,6 +63,7 @@ impl MarkdownStyle {
             size: 13.0,
             collapsed_lines: Some(16),
             paragraph_line: 1.82,
+            run_commands: false,
         }
     }
 
@@ -61,6 +73,7 @@ impl MarkdownStyle {
             size: 13.0,
             collapsed_lines: Some(16),
             paragraph_line: 1.55,
+            run_commands: false,
         }
     }
 }
@@ -291,6 +304,18 @@ fn code_block(
         _ => code.to_string(),
     };
     let copy = copy_action(code, path, window, cx);
+    let run = style
+        .run_commands
+        .then(|| super::runnable_command(language, code))
+        .flatten()
+        .filter(|_| cx.has_global::<super::CommandRunner>())
+        .map(|command| run_action(command, path, cx));
+    let copy = div()
+        .flex()
+        .items_center()
+        .children(run)
+        .child(copy)
+        .into_any_element();
     let (header, floating) = match language {
         Some(language) => (Some((language, copy)), None),
         None => (None, Some(copy)),
@@ -395,6 +420,49 @@ fn code_block(
         )
         .children(toggle)
         .children(floating)
+        .into_any_element()
+}
+
+/// "Executar": the command runs in the task's terminal, which shows.
+fn run_action(command: String, path: &str, cx: &mut App) -> AnyElement {
+    let colors = cx.theme().colors.clone();
+    let (muted, foreground, hover) = (
+        colors.muted_foreground.opacity(0.7),
+        colors.foreground,
+        colors.accent.opacity(0.7),
+    );
+    let button = div()
+        .id(SharedString::from(format!("{path}-run")))
+        .debug_selector(|| "markdown-code-run".into())
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(24.0))
+        .rounded(px(6.0))
+        .cursor_pointer()
+        .text_color(muted)
+        .hover(move |style| style.bg(hover).text_color(foreground))
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            let Some(runner) = cx
+                .try_global::<super::CommandRunner>()
+                .map(|global| global.0.clone())
+            else {
+                return;
+            };
+            runner(&command, window, cx);
+        })
+        .child(crate::ui::Icon::new("play").size(14.0));
+    div()
+        .flex()
+        .items_center()
+        .opacity(0.0)
+        .group_hover(CODE_GROUP, |style| style.opacity(1.0))
+        .child(crate::ui::Tooltip::text(
+            SharedString::from(format!("{path}-run-tip")),
+            button,
+            crate::i18n::Translate::t(cx, "conversation.message.codeRun"),
+        ))
         .into_any_element()
 }
 
@@ -629,5 +697,17 @@ mod tests {
             copied.as_deref(),
             Some("./scripts/package-app.sh\nopen dist/Cmdori.app --args --show")
         );
+    }
+
+    #[test]
+    fn executar_is_offered_on_a_one_line_shell_block_only() {
+        use super::super::runnable_command;
+        assert_eq!(
+            runnable_command(Some("bash"), "$ ssh -4 theo@zbook.local\n").as_deref(),
+            Some("ssh -4 theo@zbook.local")
+        );
+        assert_eq!(runnable_command(Some("rust"), "cargo test"), None);
+        assert_eq!(runnable_command(None, "ls"), None);
+        assert_eq!(runnable_command(Some("sh"), "cd a\nls"), None);
     }
 }

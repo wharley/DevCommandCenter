@@ -112,6 +112,9 @@ pub struct TerminalSession {
     pub activity: Option<TerminalActivity>,
     pub(super) pty_id: Option<String>,
     sender: Option<Sender<Command>>,
+    /// What was typed for it before its PTY opened (a command run from the
+    /// conversation), written once it does.
+    queued: Vec<String>,
     api: Option<DesktopApi>,
     /// Output that came before the shell was known (`bootstrappingWrites`).
     early: Vec<String>,
@@ -158,6 +161,7 @@ impl TerminalSession {
             activity: None,
             pty_id: None,
             sender: None,
+            queued: Vec::new(),
             api,
             early: Vec::new(),
             focus: cx.focus_handle(),
@@ -265,6 +269,9 @@ impl TerminalSession {
             SessionStatus::Running
         };
         self.pty_id = Some(opened.pty_id.clone());
+        for data in self.queued.drain(..) {
+            let _ = sender.send(Command::Write(data));
+        }
         self.sender = Some(sender);
         self.answer();
         cx.emit(SessionEvent::Opened(opened.pty_id));
@@ -327,6 +334,16 @@ impl TerminalSession {
         if let Some(sender) = &self.sender {
             let _ = sender.send(command);
         }
+    }
+
+    /// A command line run as if typed and entered; kept until the PTY opens.
+    pub fn run_line(&mut self, command: &str, cx: &mut Context<Self>) {
+        let line = format!("{command}\r");
+        if self.sender.is_none() {
+            self.queued.push(line);
+            return;
+        }
+        self.input(line, cx);
     }
 
     /// Keys and pastes; the view jumps back to the bottom like xterm.

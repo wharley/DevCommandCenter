@@ -4589,7 +4589,8 @@
       "copyUser": "Copy {{label}} message",
       "codeShowAll": "Show all {{lines}} lines",
       "codeCollapse": "Collapse",
-      "codeCopy": "Copy code"
+      "codeCopy": "Copy code",
+      "codeRun": "Run in terminal"
     },
     "editFromHere": {
       "title": "Edit from this message",
