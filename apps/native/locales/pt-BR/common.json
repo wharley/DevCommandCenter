@@ -3412,7 +3412,7 @@
       "supported": "Disponível neste dispositivo",
       "unsupported": "Indisponível",
       "unsupportedMacHint": "O Computer Use exige macOS {{version}} ou posterior no aplicativo DCC.",
-      "unsupportedPlatformHint": "O Computer Use está disponível apenas no aplicativo DCC no macOS.",
+      "unsupportedPlatformHint": "O Computer Use está disponível no aplicativo DCC no macOS e no Linux com sessão X11 ou Wayland.",
       "permissionsTitle": "Permissões para aplicativos externos",
       "permissionsHint": "Gravação de Tela e Acessibilidade permitem o acesso aos aplicativos que você escolher. O agente ainda precisa da sua autorização na conversa.",
       "devPermissionHint": "Ao executar o DCC em desenvolvimento, o macOS pode atribuir a permissão ao terminal ou editor que o iniciou. Autorize o aplicativo identificado no pedido do macOS e reinicie o DCC se necessário. Permissões concedidas a outros aplicativos não liberam acesso ao DCC.",

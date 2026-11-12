@@ -41,6 +41,13 @@ tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 
+# Desktop computer use on Linux: X11/XWayland windows (inventory, capture,
+# background events, XTEST), AT-SPI 2 and the desktop portals over D-Bus.
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["xtest"] }
+zbus = "5"
+png = "0.17"
+
 [dev-dependencies]
 tempfile = "3"
 dcc-infra = { path = "../dcc-infra", features = ["test-support"] }

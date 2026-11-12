@@ -3,7 +3,9 @@
 //! own `--version`, and how it was installed decides both where the newest
 //! version is read and what updates it (as Synara and T3 Code do):
 //! its own updater for a native install, the npm of the very prefix it lives
-//! in, or Homebrew. After updating, the version is read again — an exit code
+//! in, or Homebrew (`/opt/homebrew` on the Mac, `/home/linuxbrew` on
+//! Linux). A global npm only root can write (a distro's Node under `/usr`)
+//! is updated in a terminal, with `sudo`. After updating, the version is read again — an exit code
 //! alone proves nothing (as MonoCode does) — and its model list is re-read.
 
 use std::path::{Path, PathBuf};
@@ -14,6 +16,7 @@ use dcc_core::{CoreError, Result};
 use serde_json::Value;
 use tokio::process::Command;
 
+use crate::cli_install_places::{homebrew_bins, writable};
 use crate::common::augmented_path;
 
 const FEED_TIMEOUT: Duration = Duration::from_secs(8);
@@ -124,7 +127,12 @@ fn quoted(word: &str) -> String {
     format!("'{}'", word.replace('\'', "'\\''"))
 }
 
-fn terminal_command(cli: &Cli, action: Option<&UpdateAction>, found: &Path) -> String {
+fn terminal_command(
+    cli: &Cli,
+    source: &Source,
+    action: Option<&UpdateAction>,
+    found: &Path,
+) -> String {
     let words = |program: &Path, args: &[String]| {
         std::iter::once(quoted(&program.to_string_lossy()))
             .chain(args.iter().map(|arg| quoted(arg)))
@@ -140,6 +148,16 @@ fn terminal_command(cli: &Cli, action: Option<&UpdateAction>, found: &Path) -> S
             ),
             None => command,
         };
+    }
+    // A global npm only root can write: that npm, with sudo.
+    if let (Source::Npm { prefix }, Some(package)) = (source, cli.npm) {
+        let npm = prefix.join("bin").join("npm");
+        if npm.is_file() {
+            return format!(
+                "sudo {} install -g {package}@latest",
+                quoted(&npm.to_string_lossy())
+            );
+        }
     }
     match (cli.self_update, cli.npm) {
         (Some(args), _) => words(
@@ -264,11 +282,21 @@ fn search_path(provider_id: &str) -> String {
         home.as_deref(),
         &augmented_path(),
     );
-    // Then where the Claude helper also looks.
+    // Then where the Claude helper also looks (Homebrew where this
+    // platform keeps it).
+    let mut system: Vec<String> = homebrew_bins(home.as_deref())
+        .into_iter()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .collect();
+    for dir in ["/usr/local/bin", "/usr/bin"] {
+        if !system.iter().any(|known| known == dir) {
+            system.push(dir.to_string());
+        }
+    }
     let extras = home
         .iter()
         .map(|home| format!("{home}/.claude/local"))
-        .chain(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].map(str::to_string));
+        .chain(system);
     std::iter::once(path)
         .chain(extras)
         .collect::<Vec<_>>()
@@ -288,9 +316,10 @@ fn locate(cli: &Cli) -> Option<PathBuf> {
 }
 
 fn homebrew() -> Option<PathBuf> {
-    ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
-        .map(PathBuf::from)
+    let home = std::env::var("HOME").ok();
+    homebrew_bins(home.as_deref())
         .into_iter()
+        .map(|bin| bin.join("brew"))
         .find(|path| path.is_file())
 }
 
@@ -304,7 +333,8 @@ fn action(cli: &Cli, source: &Source, found: &Path) -> Option<UpdateAction> {
         Source::Npm { prefix } => {
             let bin = prefix.join("bin");
             let npm = bin.join("npm");
-            npm.is_file()
+            // Root's prefix (`/usr`): only a terminal can ask for sudo.
+            (npm.is_file() && writable(&prefix.join("lib").join("node_modules")))
                 .then(|| UpdateAction {
                     program: npm,
                     args: vec![
@@ -426,7 +456,7 @@ async fn check(cli: &Cli) -> Option<CliUpdate> {
         provider_id: cli.provider_id.to_string(),
         installed,
         latest,
-        terminal_command: terminal_command(cli, action.as_ref(), &found),
+        terminal_command: terminal_command(cli, &source, action.as_ref(), &found),
         action,
     })
 }
@@ -654,19 +684,112 @@ mod tests {
             path_prepend: Some(PathBuf::from("/Users/w/.nvm/versions/node/v22.21.1/bin")),
         };
         assert_eq!(
-            terminal_command(cli("codex"), Some(&npm), Path::new("/x/codex")),
+            terminal_command(
+                cli("codex"),
+                &Source::Unknown,
+                Some(&npm),
+                Path::new("/x/codex")
+            ),
             "PATH=/Users/w/.nvm/versions/node/v22.21.1/bin:\"$PATH\" /Users/w/.nvm/versions/node/v22.21.1/bin/npm install -g @openai/codex@latest"
         );
         // Installed somewhere DCC does not know: the CLI's own updater, else npm.
         assert_eq!(
-            terminal_command(cli("codex"), None, Path::new("/My Apps/codex")),
+            terminal_command(
+                cli("codex"),
+                &Source::Unknown,
+                None,
+                Path::new("/My Apps/codex")
+            ),
             "'/My Apps/codex' update"
         );
         assert_eq!(
-            terminal_command(cli("gemini"), None, Path::new("/x/gemini")),
+            terminal_command(
+                cli("gemini"),
+                &Source::Unknown,
+                None,
+                Path::new("/x/gemini")
+            ),
             "npm install -g @google/gemini-cli@latest"
         );
         assert_eq!(quoted("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn linux_installs_are_read_from_their_places() {
+        let home = Path::new("/home/w");
+        // Claude's and Grok's own installers keep the Mac's layout.
+        assert_eq!(
+            source_of(
+                cli("claude_code"),
+                &home.join(".local/bin/claude"),
+                &home.join(".local/share/claude/versions/2.1.293"),
+            ),
+            Source::Native
+        );
+        assert_eq!(
+            source_of(
+                cli("grok"),
+                &home.join(".local/bin/grok"),
+                &home.join(".grok/downloads/grok-1.0.62-linux-x86_64"),
+            ),
+            Source::Native
+        );
+        // Homebrew on Linux: a formula under /home/linuxbrew.
+        assert_eq!(
+            source_of(
+                cli("gemini"),
+                Path::new("/home/linuxbrew/.linuxbrew/bin/gemini"),
+                Path::new("/home/linuxbrew/.linuxbrew/Cellar/gemini-cli/0.32.1/libexec/lib/node_modules/@google/gemini-cli/dist/index.js"),
+            ),
+            Source::Homebrew {
+                name: "gemini-cli".into(),
+                cask: false
+            }
+        );
+        // The distro's Node: npm under /usr.
+        assert_eq!(
+            source_of(
+                cli("codex"),
+                Path::new("/usr/bin/codex"),
+                Path::new("/usr/lib/node_modules/@openai/codex/bin/codex.js"),
+            ),
+            Source::Npm {
+                prefix: PathBuf::from("/usr")
+            }
+        );
+    }
+
+    #[test]
+    fn a_global_npm_only_root_can_write_is_updated_with_sudo_in_a_terminal() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let prefix =
+            std::env::temp_dir().join(format!("dcc-npm-root-test-{}", uuid::Uuid::new_v4()));
+        let modules = prefix.join("lib/node_modules");
+        std::fs::create_dir_all(&modules).unwrap();
+        std::fs::create_dir_all(prefix.join("bin")).unwrap();
+        let npm = prefix.join("bin/npm");
+        std::fs::write(&npm, "#!/bin/sh\n").unwrap();
+        let source = Source::Npm {
+            prefix: prefix.clone(),
+        };
+        let found = Path::new("/usr/bin/codex");
+        assert!(action(cli("codex"), &source, found).is_some(), "writable");
+        std::fs::set_permissions(&modules, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let update = action(cli("codex"), &source, found);
+        let command = terminal_command(cli("codex"), &source, update.as_ref(), found);
+        std::fs::set_permissions(&modules, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_dir_all(&prefix);
+        assert_eq!(update, None);
+        assert_eq!(
+            command,
+            format!(
+                "sudo {} install -g @openai/codex@latest",
+                quoted(&npm.to_string_lossy())
+            )
+        );
     }
 
     fn script(dir: &Path, body: &str) -> PathBuf {

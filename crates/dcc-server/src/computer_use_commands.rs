@@ -1,4 +1,5 @@
-//! App-owned, target-scoped desktop computer use for macOS.
+//! App-owned, target-scoped desktop computer use for macOS and Linux
+//! (`computer_use_linux`).
 //!
 //! This is intentionally separate from Browser control. A provider lease only
 //! proves that DCC can offer tools to a session; it never grants OS input or
@@ -16,6 +17,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
+
+#[cfg(target_os = "linux")]
+#[path = "computer_use_linux/mod.rs"]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux::PlatformComputerNative;
 
 /// A grant ends after this long without a capture or action...
 const GRANT_IDLE_TTL: Duration = Duration::from_secs(10 * 60);
@@ -80,6 +87,10 @@ pub struct ComputerUseStatus {
     pub supported: bool,
     pub unsupported_reason: Option<&'static str>,
     pub minimum_macos_version: Option<u8>,
+    /// How input reaches apps on this desktop, when it differs from the
+    /// Mac's (Linux: X11 or Wayland), for the agent to read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_note: Option<String>,
     pub accessibility: ComputerPermissionStatus,
     pub screen_recording: ComputerPermissionStatus,
     pub runtime_attached: bool,
@@ -464,6 +475,14 @@ impl NativeEffectError {
     }
 
     fn message(&self) -> String {
+        if cfg!(target_os = "linux") {
+            match self {
+                Self::Permission => return "DCC cannot reach the AT-SPI accessibility bus; ask the user to make sure at-spi2-core is installed and accessibility is on for the session".to_string(),
+                Self::Focus => return "the window manager did not bring the target window to the front; a modal dialog or a locked screen may be in the way, so tell the user what you need".to_string(),
+                Self::Event => return "the desktop rejected the synthesized input event".to_string(),
+                _ => {}
+            }
+        }
         match self {
             Self::Permission => "DCC lacks the macOS Accessibility permission; ask the user to enable it in System Settings > Privacy & Security > Accessibility".to_string(),
             Self::Invalid => "the native input bridge rejected these arguments".to_string(),
@@ -495,6 +514,14 @@ trait ComputerNative: Send + Sync {
         None
     }
     fn set_web_accessibility(&self, pid: i32, enabled: bool) -> WebAccessibility;
+    /// Whether desktop computer use works here (the Mac: macOS 14 or later).
+    fn supported(&self) -> bool {
+        self.status().major_version >= 14
+    }
+    /// How input reaches apps here, when the agent must know (Linux).
+    fn input_note(&self) -> Option<String> {
+        None
+    }
     fn click(
         &self,
         target: &ComputerTarget,
@@ -751,7 +778,7 @@ impl ComputerUseState {
     }
 
     fn supported(&self) -> bool {
-        self.native.status().major_version >= 14
+        self.native.supported()
     }
     fn permission_status(&self) -> (ComputerPermissionStatus, ComputerPermissionStatus) {
         let native = self.native.status();
@@ -831,16 +858,21 @@ impl ComputerUseState {
         ComputerUseStatus {
             platform: if cfg!(target_os = "macos") {
                 "macos"
+            } else if cfg!(target_os = "linux") {
+                "linux"
             } else {
                 "unsupported"
             },
             supported,
             unsupported_reason: (!supported).then_some(if cfg!(target_os = "macos") {
                 "macOS 14 or later is required"
+            } else if cfg!(target_os = "linux") {
+                "Desktop computer use on Linux needs an X11 or Wayland session"
             } else {
-                "Desktop computer use is currently available only on macOS"
+                "Desktop computer use is currently available only on macOS and Linux"
             }),
             minimum_macos_version: cfg!(target_os = "macos").then_some(14),
+            input_note: supported.then(|| self.native.input_note()).flatten(),
             accessibility,
             screen_recording,
             runtime_attached,
@@ -2191,7 +2223,7 @@ pub fn appshot_frontmost_target() -> Result<ComputerTarget, String> {
 
 #[cfg(target_os = "macos")]
 struct PlatformComputerNative;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 struct PlatformComputerNative;
 
 #[cfg(target_os = "macos")]
@@ -3734,7 +3766,7 @@ extern "C" {
 
 /// Stand-in for platforms without desktop computer use, and for tests that
 /// need a supported platform which never touches the desktop.
-#[cfg(any(test, not(target_os = "macos")))]
+#[cfg(any(test, not(any(target_os = "macos", target_os = "linux"))))]
 macro_rules! inert_effects {
     ($message:expr) => {
         fn accessibility_tree(&self, _: &ComputerTarget) -> Result<NativeTree, String> {
@@ -3802,7 +3834,7 @@ macro_rules! inert_effects {
     };
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 impl ComputerNative for PlatformComputerNative {
     fn status(&self) -> NativeStatus {
         NativeStatus {

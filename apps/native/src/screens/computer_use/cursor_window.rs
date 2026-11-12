@@ -1,8 +1,10 @@
-//! The agent's cursor window on the Mac: borderless, see-through, never
-//! takes a click or the keyboard, above every app and on every Space, and
-//! placed by its top-left corner at a screen point (top-left origin, as the
-//! desktop reports where the agent acted).
+//! The agent's cursor window on the Mac (on Linux: `cursor_window_x11`):
+//! borderless, see-through, never takes a click or the keyboard, above
+//! every app and on every Space, and placed by its top-left corner at a
+//! screen point (top-left origin, as the desktop reports where the agent
+//! acted).
 
+#[cfg(not(target_os = "linux"))]
 use gpui::Window;
 
 #[cfg(target_os = "macos")]
@@ -78,8 +80,11 @@ pub fn place(window: &Window, x: f64, y: f64) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub use super::cursor_window_x11::{make_overlay, place};
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn make_overlay(_window: &Window) {}
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn place(_window: &Window, _x: f64, _y: f64) {}

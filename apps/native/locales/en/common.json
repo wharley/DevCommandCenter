@@ -3412,7 +3412,7 @@
       "supported": "Available on this device",
       "unsupported": "Unavailable",
       "unsupportedMacHint": "Computer Use requires macOS {{version}} or later in the DCC app.",
-      "unsupportedPlatformHint": "Computer Use is available only in the DCC app on macOS.",
+      "unsupportedPlatformHint": "Computer Use is available in the DCC app on macOS and on Linux with an X11 or Wayland session.",
       "permissionsTitle": "Permissions for external apps",
       "permissionsHint": "Screen Recording and Accessibility enable access to the apps you choose. The agent still needs your authorization in the conversation.",
       "devPermissionHint": "While running DCC in development, macOS may assign permission to the terminal or editor that started it. Approve the app named in the macOS request, then restart DCC if needed. Permissions granted to other apps do not grant DCC access.",

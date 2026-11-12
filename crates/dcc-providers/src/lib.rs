@@ -27,6 +27,7 @@ mod grok_goal;
 #[allow(dead_code)]
 mod grok_mcp;
 pub mod headless_cli;
+mod cli_install_places;
 mod cli_model_lists;
 pub mod cli_updates;
 pub mod model_discovery;

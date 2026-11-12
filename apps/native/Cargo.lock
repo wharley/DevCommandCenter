@@ -1674,6 +1674,7 @@ dependencies = [
  "url",
  "uuid",
  "wry",
+ "x11rb",
 ]
 
 [[package]]
@@ -1727,6 +1728,7 @@ dependencies = [
  "futures-util",
  "hex",
  "libc",
+ "png 0.17.16",
  "portable-pty",
  "rand 0.8.8",
  "regex",
@@ -1748,6 +1750,8 @@ dependencies = [
  "tower-http",
  "url",
  "uuid",
+ "x11rb",
+ "zbus",
 ]
 
 [[package]]

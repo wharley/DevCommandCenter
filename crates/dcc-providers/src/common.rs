@@ -2541,6 +2541,18 @@ pub(crate) fn augmented_path() -> String {
     extra.push(PathBuf::from(&home).join(".local").join("bin"));
     extra.push(PathBuf::from(&home).join("node_modules").join(".bin"));
 
+    // Linux only: user npm prefixes and Homebrew, after the PATH itself.
+    let suffix = crate::cli_install_places::extra_bin_dirs(&home)
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .filter(|path| !existing.split(sep).any(|known| known == path))
+        .collect::<Vec<_>>();
+    let existing = if suffix.is_empty() {
+        existing
+    } else {
+        format!("{existing}{sep}{}", suffix.join(&sep.to_string()))
+    };
+
     let prefix = extra
         .into_iter()
         .map(|path| path.to_string_lossy().into_owned())

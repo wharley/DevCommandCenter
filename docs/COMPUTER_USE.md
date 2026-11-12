@@ -1,4 +1,4 @@
-# Desktop Computer Use on macOS
+# Desktop Computer Use on macOS and Linux
 
 How an agent observes and operates an external app window that the user
 authorized. The trust model (lease, approval, allowlist) is unchanged from
@@ -137,3 +137,34 @@ Qualify each release on:
 6. **Grant end:** after revoking, Accessibility Inspector shows the app's
    `AXManualAccessibility` back to false, when DCC was the one that switched it
    on.
+
+## Linux
+
+The same contract runs on Linux behind the same native trait
+(`crates/dcc-server/src/computer_use_linux/`), with the same three steps per
+action. Each result still says which one was used.
+
+| | X11 and XWayland windows | Native Wayland windows |
+| --- | --- | --- |
+| Inventory | EWMH (`_NET_CLIENT_LIST_STACKING`, `_NET_WM_PID`, `WM_CLASS`) | AT-SPI frames of apps with no X11 window |
+| Capture | `GetImage` on the window | Screenshot portal: the whole screen |
+| Elements | AT-SPI 2, boxes in window pixels | AT-SPI 2, without boxes (Wayland does not expose where a window is) |
+| Accessibility step | AT-SPI `DoAction` (by ref, or a plain click by x/y on a button, link, check box or tab), `SetTextContents`, `InsertText` at the caret | the same, by ref only |
+| Background step | `XSendEvent` to the window: the cursor does not move and the window is not raised. Toolkits on XInput2 (GTK 3, Qt 5+, Chromium) usually ignore it | none |
+| Foreground step | `_NET_ACTIVE_WINDOW`, then XTEST, only with `foreground: true` | RemoteDesktop portal, approved once by the user, only on the active window |
+
+- An app's id is its `WM_CLASS` class (X11) or its AT-SPI name (Wayland),
+  lowercased.
+- `org.a11y.Status.IsEnabled` takes the place of `AXManualAccessibility`. It is
+  global, so DCC switches it off only after the last app it switched it on for.
+  If a screen reader turned it on, DCC leaves it alone.
+- COMMAND acts as Control.
+- `dcc_computer_status` carries an `inputNote` that tells the agent all of this
+  for the session it runs in.
+- The agent's cursor is an override-redirect X11 window with an empty input
+  shape. DCC runs on X11, or on XWayland in a Wayland session. On a session
+  with no X server the cursor stays off, because Wayland lets no client place a
+  window at a screen point or keep it above other apps.
+
+The `live_*` tests in `computer_use_linux/mod.rs` drive a real X11 desktop
+(Xvfb, openbox, zenity, AT-SPI) with `--ignored`.
