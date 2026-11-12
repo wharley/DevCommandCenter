@@ -19,7 +19,9 @@ fn classify(error: DeliveryError) -> HttpApiError {
     match error {
         DeliveryError::NotFound(_) => HttpApiError::NotFound(message),
         DeliveryError::Stale => HttpApiError::Refused("stale", message, Value::Null),
-        DeliveryError::ChecksFailed => HttpApiError::Refused("checks_failed", message, Value::Null),
+        DeliveryError::ChecksFailed(report) => {
+            HttpApiError::Refused("checks_failed", message, json!({ "report": report }))
+        }
         DeliveryError::BehindRemote(target) => {
             HttpApiError::Refused("behind_remote", message, json!({ "target": target }))
         }

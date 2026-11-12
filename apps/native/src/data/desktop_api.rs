@@ -63,6 +63,8 @@ pub enum ApiError {
         message: String,
         /// The outcome's `target` (`behind_remote`: the branch that moved).
         target: Option<String>,
+        /// The outcome's `report` (`checks_failed`: what each check printed).
+        report: Option<Box<dcc_core::domain::merge_conflict::WorkspaceGitValidationReport>>,
     },
     /// The answer did not come within the wait (macOS reports it as
     /// "Resource temporarily unavailable").
@@ -323,6 +325,10 @@ impl DesktopApi {
                         .pointer("/error/outcome/target")
                         .and_then(Value::as_str)
                         .map(str::to_string),
+                    report: value
+                        .pointer("/error/outcome/report")
+                        .and_then(|report| serde_json::from_value(report.clone()).ok())
+                        .map(Box::new),
                 }),
             },
             _ => Err(ApiError::Failed(

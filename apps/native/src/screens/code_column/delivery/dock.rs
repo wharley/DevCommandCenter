@@ -286,7 +286,7 @@ impl CodeColumn {
                     {
                         column.behind_remote(target.unwrap_or_default(), cx)
                     }
-                    Err(error) => dock_failed(error, cx),
+                    Err(error) => column.delivery_failed(error, cx),
                 }
                 column.refresh_git(cx);
                 cx.notify();

@@ -259,6 +259,41 @@ fn a_push_the_checks_stop_says_so(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_push_the_checks_stop_shows_their_report_and_hands_it_to_the_agent(cx: &mut TestAppContext) {
+    let dir = tracked_checkout(true);
+    let refused = (
+        PUSH,
+        409,
+        r#"{"error":{"code":"checks_failed","message":"Os checks falharam.","outcome":{"report":{"status":"failed","sourcePath":null,"steps":[{"command":"npm test","success":false,"exitCode":1,"output":"1 failing","timedOut":false,"durationMs":900,"truncated":false}]}}}}"#
+            .to_string(),
+    );
+    let (column, cx, _setup) = open(cx, &dir.path().join("repo"), None, vec![refused]);
+    let button = cx.debug_bounds("delivery-commit").unwrap();
+    cx.simulate_click(button.center(), Modifiers::none());
+    cx.run_until_parked();
+    column.read_with(cx, |column, _| {
+        let report = column.delivery.blocked.as_ref().expect("the report");
+        assert_eq!(report.steps[0].command, "npm test");
+    });
+    // The dialog is the shell's overlay; its "Pedir ao agente" hands the
+    // failures to the composer and closes it.
+    let asked = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let seen = asked.clone();
+    let _listen = cx.update(|_, cx| {
+        cx.subscribe(&column, move |_, event, _| {
+            if let super::super::CodeColumnEvent::AskAgent { prompt, .. } = event {
+                *seen.borrow_mut() = Some(prompt.clone());
+            }
+        })
+    });
+    column.update(cx, |column, cx| column.ask_agent_to_fix_checks(cx));
+    let prompt = asked.borrow().clone().expect("asked the agent");
+    assert!(prompt.contains("`npm test` (exit 1):"), "{prompt}");
+    assert!(prompt.contains("1 failing"));
+    column.read_with(cx, |column, _| assert!(column.delivery.blocked.is_none()));
+}
+
+#[gpui::test]
 fn a_branch_behind_its_remote_offers_to_pull(cx: &mut TestAppContext) {
     let dir = tracked_checkout(false);
     let pulled = r#"{"branch":"feature","baseBranch":"feature","remote":"origin","updated":true,"conflictCount":0}"#;

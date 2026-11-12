@@ -66,8 +66,9 @@ pub enum DeliveryError {
     NotFound(String),
     /// The local changes are not the ones the caller saw.
     Stale,
-    /// The project's configured before-push checks did not pass.
-    ChecksFailed,
+    /// The project's configured before-push checks did not pass, with what
+    /// each one printed, so the person sees why and can hand it to the agent.
+    ChecksFailed(Box<dcc_core::domain::merge_conflict::WorkspaceGitValidationReport>),
     /// The push was refused because the remote branch moved; "update and
     /// push" (`sync_and_push`) can fix it. Carries `remote/branch`.
     BehindRemote(String),
@@ -85,7 +86,7 @@ impl std::fmt::Display for DeliveryError {
             Self::Stale => f.write_str(
                 "As mudanças da tarefa mudaram desde que você abriu. Confira de novo antes de enviar.",
             ),
-            Self::ChecksFailed => f.write_str(
+            Self::ChecksFailed(_) => f.write_str(
                 "Os checks configurados para antes do push falharam no computador.",
             ),
             Self::BehindRemote(target) => write!(
@@ -383,7 +384,7 @@ async fn run_before_push_checks(state: &WorkspaceCommandState, root: &str) -> Re
     .await?;
     match output.report.status {
         WorkspaceGitValidationStatus::Passed => Ok(()),
-        _ => Err(DeliveryError::ChecksFailed),
+        _ => Err(DeliveryError::ChecksFailed(Box::new(output.report))),
     }
 }
 

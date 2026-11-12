@@ -6119,5 +6119,14 @@
     "recent": "Recent",
     "iphones": "iPhone",
     "ipads": "iPad"
+  },
+  "delivery": {
+    "checksBlocked": {
+      "title": "Push blocked by checks",
+      "description": "The checks the project runs before a push failed on your computer, so nothing was sent. See what each one printed.",
+      "askAgent": "Ask the agent to fix it",
+      "close": "Close",
+      "sentToAgent": "Check failures sent to the agent"
+    }
   }
 }

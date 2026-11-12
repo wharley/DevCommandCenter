@@ -323,5 +323,6 @@ pub(super) fn dialogs(
         .into_iter()
         .chain(confirm(column, cx))
         .chain(super::request::request_dialog(column, window, cx))
+        .chain(super::blocked::blocked_dialog(column, window, cx))
         .collect()
 }

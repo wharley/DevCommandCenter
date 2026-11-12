@@ -36,12 +36,22 @@ fn action_title(mode: CommitMode, label: &str, cx: &App) -> SharedString {
 /// What the step's toast ends on.
 enum Outcome {
     Done(ToastKind, SharedString),
-    /// The before-push checks failed: the push did not run.
-    Blocked,
+    /// The before-push checks failed: the push did not run (with their
+    /// report when the desktop sends it).
+    Blocked(Option<Box<dcc_core::domain::merge_conflict::WorkspaceGitValidationReport>>),
 }
 
 fn checks_failed(error: &ApiError) -> bool {
     matches!(error, ApiError::Refused { code, .. } if code == "checks_failed")
+}
+
+fn checks_report(
+    error: ApiError,
+) -> Option<Box<dcc_core::domain::merge_conflict::WorkspaceGitValidationReport>> {
+    match error {
+        ApiError::Refused { report, .. } => report,
+        _ => None,
+    }
 }
 
 impl CodeColumn {
@@ -286,7 +296,9 @@ impl CodeColumn {
                         _ => return Ok(None),
                     };
                     match outcome {
-                        Err(error) if checks_failed(&error) => Ok(Some(Outcome::Blocked)),
+                        Err(error) if checks_failed(&error) => {
+                            Ok(Some(Outcome::Blocked(checks_report(error))))
+                        }
                         other => other.map(Some),
                     }
                 })
@@ -300,7 +312,14 @@ impl CodeColumn {
                         column.delivery.drafting = None;
                         column.settle_button(CommitButtonStatus::Done, cx);
                     }
-                    Ok(Some(Outcome::Blocked)) => {
+                    Ok(Some(Outcome::Blocked(Some(report)))) => {
+                        Toaster::dismiss_id(toast, cx);
+                        column.show_blocked(report, cx);
+                        column.delivery.preview = None;
+                        column.delivery.drafting = None;
+                        column.settle_button(CommitButtonStatus::Error, cx);
+                    }
+                    Ok(Some(Outcome::Blocked(None))) => {
                         Toaster::settle(
                             toast,
                             ToastKind::Error,

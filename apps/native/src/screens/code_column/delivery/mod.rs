@@ -7,6 +7,7 @@
 //! status.
 
 mod actions;
+mod blocked;
 mod conflicts;
 mod dialogs;
 mod dock;
@@ -105,6 +106,8 @@ pub(crate) struct Delivery {
     pub _conflicts: Option<gpui::Task<()>>,
     /// When each task's own branch was last fetched.
     pub upstream: pull::UpstreamFetches,
+    /// The before-push checks stopped a push: their report, in a dialog.
+    pub blocked: Option<Box<dcc_core::domain::merge_conflict::WorkspaceGitValidationReport>>,
 }
 
 impl Delivery {

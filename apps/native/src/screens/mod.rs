@@ -34,4 +34,5 @@ pub mod skills;
 pub mod stage;
 pub mod terminal;
 pub mod usage;
+pub mod validation_report;
 pub mod workspace_search;

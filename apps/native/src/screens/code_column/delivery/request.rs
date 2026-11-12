@@ -11,7 +11,6 @@ use gpui::{
 
 use super::super::{CodeColumn, Loaded};
 use super::dialogs::field;
-use super::dock::dock_failed;
 use super::draft::{DraftField, draft_label};
 use crate::data::desktop_api::{ChangeRequestContext, RequestInput};
 use crate::data::forge::ForgeContext;
@@ -217,7 +216,7 @@ impl CodeColumn {
                         if let Some(request) = column.delivery.request.as_mut() {
                             request.sending = false;
                         }
-                        dock_failed(error, cx);
+                        column.delivery_failed(error, cx);
                     }
                 }
                 column.refresh_git(cx);

@@ -6119,5 +6119,14 @@
     "recent": "Recentes",
     "iphones": "iPhone",
     "ipads": "iPad"
+  },
+  "delivery": {
+    "checksBlocked": {
+      "title": "Push bloqueado pelos checks",
+      "description": "Os checks que o projeto pede antes do push falharam no seu computador, então nada foi enviado. Veja o que cada um mostrou.",
+      "askAgent": "Pedir ao agente para corrigir",
+      "close": "Fechar",
+      "sentToAgent": "Falhas dos checks enviadas ao agente"
+    }
   }
 }
