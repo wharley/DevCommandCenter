@@ -232,6 +232,8 @@ impl Render for TeamRoom {
         });
         // Away from the end: back down, with the lines new since.
         let jump = self.jump_button(cx);
+        let trail = self.room_trail(cx);
+        let width = self.width.clone();
         let room = cx.entity();
         div()
             .debug_selector(|| "team-room".into())
@@ -252,6 +254,17 @@ impl Render for TeamRoom {
                         list(self.list.state.clone(), move |index, window, cx| {
                             room.update(cx, |room, cx| room.render_item(index, window, cx))
                         })
+                        .size_full(),
+                    )
+                    .children(trail)
+                    .child(
+                        gpui::canvas(
+                            move |bounds, _, _| width.set(f32::from(bounds.size.width)),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
                         .size_full(),
                     )
                     .children(jump),

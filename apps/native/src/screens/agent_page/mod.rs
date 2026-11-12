@@ -134,6 +134,7 @@ mod room_running_tests;
 mod room_said;
 mod room_source_group;
 mod room_status_chips;
+mod room_trail;
 mod room_select;
 #[cfg(test)]
 mod room_select_tests;

@@ -32,6 +32,7 @@ pub mod text_input;
 mod toast;
 mod toggle_group;
 pub mod tooltip;
+pub mod trail;
 
 pub use badge::{Badge, BadgeVariant};
 pub use branch_context::branch_context;
