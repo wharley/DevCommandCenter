@@ -3536,6 +3536,7 @@
         "expand": "Expand preview",
         "shrink": "Shrink preview",
         "stop": "Stop agent",
+        "endAccess": "End access",
         "frameAlt": "Current capture of the {{app}} window",
         "waitingFrame": "Waiting for the first authorized capture…",
         "ready": "Authorized window",

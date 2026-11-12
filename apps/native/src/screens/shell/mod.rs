@@ -191,7 +191,7 @@ pub struct Shell {
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
-    _computer: [Subscription; 3],
+    _computer: [Subscription; 4],
     /// The terminal dock under the conversation (screen 7).
     pub(crate) terminal: Entity<crate::screens::terminal::TerminalDock>,
     _terminal_events: Subscription,
@@ -323,7 +323,14 @@ impl Shell {
             };
             crate::screens::computer_use::approval::ComputerApprovals::new(api, computer_titles, cx)
         });
-        let computer_subscriptions = computer::link(&computer_approvals, &conversation, window, cx);
+        let cursor_titles = browser_opens::conversation_titles(&sidebar, &conversation);
+        let computer_subscriptions = computer::link(
+            &computer_approvals,
+            &conversation,
+            cursor_titles,
+            window,
+            cx,
+        );
         browser::trim_cache_daily(cx);
         #[cfg(target_os = "macos")]
         device::serve_agents(window, cx);

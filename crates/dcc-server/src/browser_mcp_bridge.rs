@@ -356,12 +356,16 @@ impl BrowserMcpBridge {
         phase: &'static str,
     ) {
         let Some(app) = self.app.as_ref() else { return };
+        let point = self.computer.action_point(&binding.session_id);
         let notice = ComputerUseActivityNotice {
             session_id: binding.session_id.clone(),
+            workspace_id: binding.workspace_id.clone(),
             provider_id: binding.provider_id.clone(),
             activity_id: activity_id.to_string(),
             tool: tool.to_string(),
             phase,
+            x: point.map(|point| point.0),
+            y: point.map(|point| point.1),
         };
         if let Ok(event) = serde_json::to_value(&notice) {
             crate::http_api::native_computer().publish("computer-activity", event);
@@ -574,10 +578,18 @@ impl BrowserMcpBridge {
 #[serde(rename_all = "camelCase")]
 struct ComputerUseActivityNotice {
     session_id: String,
+    /// The task's project, to name the task on the agent's cursor.
+    workspace_id: String,
     provider_id: String,
     activity_id: String,
     tool: String,
     phase: &'static str,
+    /// Where the agent last acted, in screen points; none before its first
+    /// action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    x: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    y: Option<f64>,
 }
 
 fn is_computer_activity_tool(name: &str) -> bool {

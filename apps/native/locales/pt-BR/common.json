@@ -3536,6 +3536,7 @@
         "expand": "Ampliar preview",
         "shrink": "Reduzir preview",
         "stop": "Parar agente",
+        "endAccess": "Encerrar acesso",
         "frameAlt": "Captura atual da janela de {{app}}",
         "waitingFrame": "Aguardando a primeira captura autorizada…",
         "ready": "Janela autorizada",

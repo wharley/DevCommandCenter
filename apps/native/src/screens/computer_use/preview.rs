@@ -1,7 +1,8 @@
 //! The agent's screen, floating at the conversation's bottom right
 //! (`ComputerUsePreview`): the authorized window's latest frame, what the
 //! agent is doing (a dot that pings while a step runs, red when it failed,
-//! green when done), "Parar agente" while the turn runs, expand and hide
+//! green when done), "Parar agente" while the turn runs and "Encerrar
+//! acesso" after it, expand and hide
 //! ("Mostrar tela do agente" brings it back). It follows the conversation
 //! on screen: a new frame or the end of the grant arrive from the desktop
 //! (`computer-preview-updated`, `-cleared`); while the turn runs the frame
@@ -239,6 +240,28 @@ impl ComputerPreview {
 
     pub fn stop(&mut self, cx: &mut Context<Self>) {
         cx.emit(PreviewEvent::Stop);
+    }
+
+    /// "Encerrar acesso" once the turn is over: the agent's grant ends now,
+    /// and with it this frame and the agent's cursor.
+    pub fn end_access(&mut self, cx: &mut Context<Self>) {
+        let (Some(api), Some(session)) = (self.api.clone(), self.session.clone()) else {
+            return;
+        };
+        self._grant = Some(cx.spawn(async move |this, cx| {
+            let ended = cx
+                .background_executor()
+                .spawn(async move { api.computer_disarm(&session) })
+                .await;
+            if ended.is_ok() {
+                let _ = this.update(cx, |preview, cx| {
+                    preview.frame = None;
+                    preview.activity = None;
+                    preview.keep_live(cx);
+                    cx.notify();
+                });
+            }
+        }));
     }
 
     #[cfg(test)]

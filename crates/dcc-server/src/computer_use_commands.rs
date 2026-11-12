@@ -490,6 +490,10 @@ trait ComputerNative: Send + Sync {
     fn capture(&self, target: &ComputerTarget) -> Result<Vec<u8>, String>;
     fn accessibility_tree(&self, target: &ComputerTarget) -> Result<NativeTree, String>;
     fn release_tree(&self, handle: u64);
+    /// Where this thread's last pointer action happened, once.
+    fn take_action_point(&self) -> Option<(f64, f64)> {
+        None
+    }
     fn set_web_accessibility(&self, pid: i32, enabled: bool) -> WebAccessibility;
     fn click(
         &self,
@@ -552,6 +556,8 @@ pub struct ComputerUseState {
     /// the task: a later request re-arms these apps without asking, until the
     /// person turns control off or DCC restarts.
     task_approved_apps: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    /// Where each task's agent last acted, for its drawn cursor.
+    action_points: crate::computer_action_points::ActionPoints,
 }
 
 impl Default for ComputerUseState {
@@ -572,6 +578,7 @@ impl ComputerUseState {
             web_accessibility: Arc::new(Mutex::new(HashMap::new())),
             web_accessibility_watcher: Arc::new(AtomicBool::new(false)),
             task_approved_apps: Arc::new(Mutex::new(HashMap::new())),
+            action_points: Default::default(),
         }
     }
 
@@ -627,6 +634,7 @@ impl ComputerUseState {
         if let Ok(mut frames) = self.preview_frames.lock() {
             frames.clear();
         }
+        self.action_points.clear();
         self.reconcile_web_accessibility();
     }
     fn is_projected(&self, session_id: &str) -> bool {
@@ -940,6 +948,7 @@ impl ComputerUseState {
             approved.remove(session_id);
         }
         self.clear_preview_frame(session_id);
+        self.action_points.forget(session_id);
         self.reconcile_web_accessibility();
         self.grant_status(Some(session_id))
     }
@@ -1545,6 +1554,20 @@ impl ComputerUseState {
         }
     }
 
+    /// Where the session's agent last acted (screen points), for its cursor.
+    pub fn action_point(&self, session_id: &str) -> Option<(f64, f64)> {
+        self.action_points.get(session_id)
+    }
+
+    fn note_action(&self, session_id: &str, target: &ComputerTarget, keys: bool) {
+        let at = self.native.take_action_point();
+        let center = (
+            target.x + target.width / 2.0,
+            target.y + target.height / 2.0,
+        );
+        self.action_points.note(session_id, at, center, keys);
+    }
+
     pub fn click(
         &self,
         session_id: &str,
@@ -1569,6 +1592,7 @@ impl ComputerUseState {
             .native
             .click(&current, at, button, click_count, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.note_action(session_id, &current, false);
         self.touch_grant(session_id, expected_lease_id);
         Ok(method)
     }
@@ -1600,6 +1624,7 @@ impl ComputerUseState {
             .native
             .scroll(&current, at, delta_x, delta_y, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.note_action(session_id, &current, false);
         self.touch_grant(session_id, expected_lease_id);
         Ok(method)
     }
@@ -1625,6 +1650,7 @@ impl ComputerUseState {
             .native
             .drag(&current, from, to, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.note_action(session_id, &current, false);
         self.touch_grant(session_id, expected_lease_id);
         Ok(method)
     }
@@ -1654,6 +1680,7 @@ impl ComputerUseState {
         self.native
             .set_value(&current, handle, index, value)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.note_action(session_id, &current, false);
         self.touch_grant(session_id, expected_lease_id);
         Ok(())
     }
@@ -1678,6 +1705,7 @@ impl ComputerUseState {
             .native
             .type_text(&current, text, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.note_action(session_id, &current, true);
         self.touch_grant(session_id, expected_lease_id);
         Ok(method)
     }
@@ -1702,6 +1730,7 @@ impl ComputerUseState {
             .native
             .key(&current, code, flags, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
+        self.note_action(session_id, &current, true);
         self.touch_grant(session_id, expected_lease_id);
         Ok(method)
     }
@@ -2284,6 +2313,10 @@ impl ComputerNative for PlatformComputerNative {
         if handle != 0 {
             unsafe { dcc_computer_ax_tree_release(handle) }
         }
+    }
+    fn take_action_point(&self) -> Option<(f64, f64)> {
+        let (mut x, mut y) = (0.0, 0.0);
+        unsafe { dcc_computer_take_action_point(&mut x, &mut y) }.then_some((x, y))
     }
     fn set_web_accessibility(&self, pid: i32, enabled: bool) -> WebAccessibility {
         match unsafe { dcc_computer_web_accessibility(pid, enabled) } {
@@ -3694,6 +3727,7 @@ extern "C" {
         foreground: bool,
         method: *mut i32,
     ) -> i32;
+    fn dcc_computer_take_action_point(x: *mut f64, y: *mut f64) -> bool;
     fn dcc_computer_free_string(value: *mut std::ffi::c_char);
     fn dcc_computer_free_bytes(value: *mut u8);
 }

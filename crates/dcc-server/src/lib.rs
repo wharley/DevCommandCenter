@@ -15,6 +15,7 @@ pub mod browser_commands;
 pub mod browser_input;
 pub mod browser_mcp_bridge;
 pub mod command_api;
+pub mod computer_action_points;
 pub mod computer_use_commands;
 pub mod daemon_client;
 pub mod daemon_runtime;

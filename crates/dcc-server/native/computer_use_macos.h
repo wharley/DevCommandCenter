@@ -89,5 +89,8 @@ int32_t dcc_computer_key(const char *bundle_id, int32_t pid, uint32_t window_id,
                          double x, double y, double width, double height,
                          uint16_t key_code, uint64_t flags, bool foreground,
                          int32_t *method);
+// Where the calling thread's last click, scroll or drag happened (screen
+// coordinates), once; false when there is none.
+bool dcc_computer_take_action_point(double *x, double *y);
 void dcc_computer_free_string(char *value);
 void dcc_computer_free_bytes(uint8_t *value);

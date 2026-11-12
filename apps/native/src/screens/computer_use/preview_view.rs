@@ -121,7 +121,11 @@ impl Render for ComputerPreview {
                             .text_size(px(10.0))
                             .line_height(px(14.0))
                             .text_color(colors.muted_foreground)
-                            .child(format!("{tool} · {state}")),
+                            .child(if tool == state {
+                                tool.to_string()
+                            } else {
+                                format!("{tool} · {state}")
+                            }),
                     ),
             )
             .when(running, |bar| {
@@ -135,6 +139,19 @@ impl Render for ComputerPreview {
                         .text_color(colors.destructive)
                         .on_click(cx.listener(|preview, _, _, cx| preview.stop(cx)))
                         .child(cx.t("settings.computerUse.preview.stop")),
+                )
+            })
+            .when(!running && self.frame.is_some(), |bar| {
+                bar.child(
+                    Button::new("computer-preview-end")
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::Xs)
+                        .height(22.0)
+                        .padding_x(8.0)
+                        .text_size(10.0)
+                        .text_color(colors.destructive)
+                        .on_click(cx.listener(|preview, _, _, cx| preview.end_access(cx)))
+                        .child(cx.t("settings.computerUse.preview.endAccess")),
                 )
             })
             .child(

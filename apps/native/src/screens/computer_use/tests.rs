@@ -145,6 +145,7 @@ fn the_preview_follows_the_agent_and_stops_it(cx: &mut TestAppContext) {
                     activity_id: "a1".into(),
                     tool: "dcc_computer_click".into(),
                     phase: "started".into(),
+                    ..Default::default()
                 }),
                 cx,
             )

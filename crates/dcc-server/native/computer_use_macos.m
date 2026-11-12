@@ -459,6 +459,24 @@ static int32_t prepare_pointer(const char *bundle_id, pid_t pid, uint32_t window
 
 #pragma mark - Pointer input
 
+// Where this thread's last action happened, in screen coordinates, for the
+// agent's drawn cursor. Read once by dcc_computer_take_action_point.
+static __thread bool dcc_has_action_point = false;
+static __thread CGPoint dcc_action_point;
+
+static void note_action_point(CGPoint point) {
+  dcc_has_action_point = true;
+  dcc_action_point = point;
+}
+
+bool dcc_computer_take_action_point(double *x, double *y) {
+  if (!dcc_has_action_point || !x || !y) return false;
+  dcc_has_action_point = false;
+  *x = dcc_action_point.x;
+  *y = dcc_action_point.y;
+  return true;
+}
+
 // Background delivery comes first unless the agent asked for the foreground:
 // the event reaches the window without raising it or moving the cursor, so a
 // window covered by another app is still reachable. `fresh` is the target as
@@ -488,6 +506,7 @@ static bool local_point_is_valid(double local_x, double local_y, double width, d
 // accessibility action.
 static int32_t pointer_click(const char *bundle_id, pid_t pid, uint32_t window_id, double x, double y, double width, double height, CGPoint point, int32_t button, uint8_t click_count, bool foreground, int32_t *method, char **detail) {
   if ((button != DCC_COMPUTER_BUTTON_LEFT && button != DCC_COMPUTER_BUTTON_RIGHT) || click_count < 1 || click_count > 2) return DCC_COMPUTER_ERR_INVALID;
+  note_action_point(point);
   NSDictionary *fresh = nil;
   if (background_ready(foreground, bundle_id, pid, window_id, x, y, width, height, &fresh)) {
     if (!CGRectContainsPoint(window_rect(fresh), point)) return DCC_COMPUTER_ERR_OUTSIDE_TARGET;
@@ -516,6 +535,7 @@ static int32_t pointer_click(const char *bundle_id, pid_t pid, uint32_t window_i
 
 static int32_t pointer_scroll(const char *bundle_id, pid_t pid, uint32_t window_id, double x, double y, double width, double height, CGPoint point, int32_t delta_x, int32_t delta_y, bool foreground, int32_t *method, char **detail) {
   if ((delta_x == 0 && delta_y == 0) || llabs((long long)delta_x) > 5000 || llabs((long long)delta_y) > 5000) return DCC_COMPUTER_ERR_INVALID;
+  note_action_point(point);
   NSDictionary *fresh = nil;
   if (background_ready(foreground, bundle_id, pid, window_id, x, y, width, height, &fresh)) {
     if (!CGRectContainsPoint(window_rect(fresh), point)) return DCC_COMPUTER_ERR_OUTSIDE_TARGET;
@@ -566,6 +586,7 @@ int32_t dcc_computer_drag(const char *bundle_id, int32_t pid, uint32_t window_id
   @autoreleasepool {
     if (!bundle_id || !method || !local_point_is_valid(from_x, from_y, width, height) || !local_point_is_valid(to_x, to_y, width, height)) return DCC_COMPUTER_ERR_INVALID;
     CGPoint points[2] = {CGPointMake(x + from_x, y + from_y), CGPointMake(x + to_x, y + to_y)};
+    note_action_point(points[1]);
     NSDictionary *fresh = nil;
     if (background_ready(foreground, bundle_id, pid, window_id, x, y, width, height, &fresh) && dcc_background_drag(pid, window_id, window_rect(fresh), points[0], points[1])) {
       *method = DCC_COMPUTER_METHOD_BACKGROUND;
@@ -753,6 +774,8 @@ int32_t dcc_computer_click_element(const char *bundle_id, int32_t pid, uint32_t 
       if (click_count == 1 && button == DCC_COMPUTER_BUTTON_LEFT && element_has_action(element, kAXPressAction)) semantic = kAXPressAction;
       else if (click_count == 1 && button == DCC_COMPUTER_BUTTON_RIGHT && element_has_action(element, kAXShowMenuAction)) semantic = kAXShowMenuAction;
       if (semantic) {
+        CGPoint pressed;
+        if (visible_element_center(element, fresh, &pressed) == DCC_COMPUTER_OK) note_action_point(pressed);
         AXError result = AXUIElementPerformAction(element, semantic);
         if (result == kAXErrorSuccess) { *method = DCC_COMPUTER_METHOD_ACCESSIBILITY; return DCC_COMPUTER_OK; }
         if (result == kAXErrorInvalidUIElement) return DCC_COMPUTER_ERR_ELEMENT_STALE;
@@ -784,6 +807,8 @@ int32_t dcc_computer_set_value(const char *bundle_id, int32_t pid, uint32_t wind
     return with_tree_element(bundle_id, pid, window_id, x, y, width, height, handle, index, ^int32_t(AXUIElementRef element, NSDictionary *fresh, bool is_menu) {
       Boolean settable = false;
       if (AXUIElementIsAttributeSettable(element, kAXValueAttribute, &settable) != kAXErrorSuccess || !settable) return DCC_COMPUTER_ERR_UNSUPPORTED;
+      CGPoint field;
+      if (visible_element_center(element, fresh, &field) == DCC_COMPUTER_OK) note_action_point(field);
       // Focus first, as a person would; forms often validate on focus/blur.
       (void)AXUIElementSetAttributeValue(element, kAXFocusedAttribute, kCFBooleanTrue);
       AXError result = AXUIElementSetAttributeValue(element, kAXValueAttribute, (__bridge CFStringRef)string);

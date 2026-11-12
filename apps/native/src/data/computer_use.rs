@@ -99,7 +99,7 @@ impl AccessKind {
 }
 
 /// What the agent is doing (`ComputerUseActivityEvent`).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Activity {
     pub session_id: String,
@@ -107,6 +107,18 @@ pub struct Activity {
     pub tool: String,
     /// `started`, `completed` or `failed`.
     pub phase: String,
+    /// The task's project and provider, for the agent's cursor.
+    pub workspace_id: String,
+    pub provider_id: String,
+    /// Where the agent last acted, in screen points.
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+}
+
+impl Activity {
+    pub fn point(&self) -> Option<(f64, f64)> {
+        Some((self.x?, self.y?))
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -115,7 +127,7 @@ struct SessionNotice {
     session_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ComputerEvent {
     /// The control requests waiting, soonest to expire first.
     Requests(Vec<ControlRequest>),
@@ -320,6 +332,8 @@ mod tests {
                 activity_id: "a1".into(),
                 tool: "dcc_computer_click".into(),
                 phase: "started".into(),
+                provider_id: "codex".into(),
+                ..Default::default()
             }))
         );
         assert_eq!(
