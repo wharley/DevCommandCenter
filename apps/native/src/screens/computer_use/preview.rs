@@ -38,8 +38,8 @@ impl Frame {
         Some(Self {
             image: Arc::new(Image::from_bytes(ImageFormat::Png, frame.png()?)),
             app: frame.target.name,
-            width: frame.target.width,
-            height: frame.target.height,
+            width: frame.target.width.max(0.0).round() as u32,
+            height: frame.target.height.max(0.0).round() as u32,
         })
     }
 }

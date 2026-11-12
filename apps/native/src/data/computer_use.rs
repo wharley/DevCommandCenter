@@ -126,18 +126,19 @@ pub enum ComputerEvent {
     PreviewCleared(String),
 }
 
-/// The window a preview frame shows.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+/// The window a preview frame shows; the desktop sends its size in points,
+/// as decimals (`586.0`).
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FrameTarget {
     pub bundle_id: String,
     pub name: String,
-    pub width: u32,
-    pub height: u32,
+    pub width: f64,
+    pub height: f64,
 }
 
 /// `ComputerUsePreviewFrame`: a PNG of the authorized window.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PreviewFrame {
     pub session_id: String,
@@ -325,5 +326,22 @@ mod tests {
             ComputerStream::event("computer-preview-cleared", r#"{"sessionId":"s"}"#),
             Some(ComputerEvent::PreviewCleared("s".into()))
         );
+    }
+
+    #[test]
+    fn a_preview_frame_reads_as_the_desktop_sends_it() {
+        // The desktop's window size is f64: `586.0`, never `586`.
+        let frame: Option<PreviewFrame> = DesktopApi::decoded(serde_json::json!({
+            "sessionId": "s",
+            "target": {"bundleId": "com.apple.TextEdit", "name": "TextEdit", "windowId": 575, "title": "Untitled", "width": 586.0, "height": 488.0},
+            "mimeType": "image/png",
+            "imageBase64": "iVBORw0KGgo=",
+            "capturedAtMs": 1
+        }))
+        .unwrap();
+        let frame = frame.expect("a frame");
+        assert_eq!(frame.target.width, 586.0);
+        assert_eq!(frame.target.name, "TextEdit");
+        assert!(frame.png().is_some());
     }
 }
