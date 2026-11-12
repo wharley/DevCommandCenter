@@ -16,10 +16,9 @@ use crate::{
         WorkspaceChangeRequestCreateInput, WorkspaceGitPushInput,
     },
     commands::workspace_support::{
-        ensure_pushable_branch, find_workspace_by_root,
-        preferred_workspace_branch_name, preflight_workspace_root, resolve_branch_diff_base,
-        resolve_current_branch_name, resolve_current_commit_sha, resolve_workspace_target_branch,
-        workspace_branch_hints,
+        ensure_pushable_branch, find_workspace_by_root, preferred_workspace_branch_name,
+        preflight_workspace_root, resolve_branch_diff_base, resolve_current_branch_name,
+        resolve_current_commit_sha, resolve_workspace_target_branch, workspace_branch_hints,
     },
     delivery_failure::{
         capture_workspace_delivery_failure, clear_workspace_delivery_failure,
@@ -482,6 +481,10 @@ pub struct PullRequestHubDraftComment {
     pub body: String,
     pub line: u32,
     pub side: String,
+    /// The first line of a comment on several lines (a suggestion replacing
+    /// them); GitHub only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -2461,12 +2464,18 @@ pub async fn pull_request_hub_submit_review_with_state(
                 .comments
                 .iter()
                 .map(|comment| {
-                    serde_json::json!({
+                    let side = comment.side.to_ascii_uppercase();
+                    let mut sent = serde_json::json!({
                         "path": comment.path,
                         "body": comment.body.trim(),
                         "line": comment.line,
-                        "side": comment.side.to_ascii_uppercase(),
-                    })
+                        "side": side,
+                    });
+                    if let Some(start) = comment.start_line.filter(|start| *start < comment.line) {
+                        sent["start_line"] = serde_json::json!(start);
+                        sent["start_side"] = serde_json::json!(side);
+                    }
+                    sent
                 })
                 .collect::<Vec<_>>();
             let mut payload = serde_json::json!({

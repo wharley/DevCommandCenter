@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use super::pr_hub::{Detail, Item};
 use super::pr_review::{DraftComment, InlineComment, PatchRow, parse_patch};
+use super::pr_review_suggestion::SUGGESTION_RULES;
 
 /// What a prompt carries at most, as `bounded(…, 95_000)`.
 const BOUND: usize = 95_000;
@@ -148,7 +149,7 @@ pub fn review_prompt(item: &Item, detail: &Detail, instruction: &str) -> String 
         .map(|section| format!("\n\n{section}"))
         .unwrap_or_default();
     format!(
-        "{}\n\nReview this pull request for correctness, regressions, security, data loss, concurrency, and missing tests. Focus only on actionable findings introduced by the diff. {}{follow_up}\n\n{VERDICT_RULES}\n\nReturn JSON only with this exact shape:\n{{\"verdict\":\"approve|request_changes|undecided\",\"summary\":\"editable review summary\",\"comments\":[{{\"path\":\"exact changed file path\",\"line\":123,\"side\":\"right\",\"body\":\"concise actionable finding\"}}]}}\n\nUse only lines visible in the supplied patches. If there are no findings, return an empty comments array. Do not publish or modify anything.",
+        "{}\n\nReview this pull request for correctness, regressions, security, data loss, concurrency, and missing tests. Focus only on actionable findings introduced by the diff. {}{follow_up}\n\n{VERDICT_RULES}\n\nReturn JSON only with this exact shape:\n{{\"verdict\":\"approve|request_changes|undecided\",\"summary\":\"editable review summary\",\"comments\":[{{\"path\":\"exact changed file path\",\"line\":123,\"side\":\"right\",\"body\":\"concise actionable finding\"}}]}}\nA comment that covers several lines adds \"startLine\" (its first line; \"line\" is its last).\n\n{SUGGESTION_RULES}\n\nUse only lines visible in the supplied patches. If there are no findings, return an empty comments array. Do not publish or modify anything.",
         pull_request_context(item, detail),
         instruction_text(instruction),
     )
@@ -295,11 +296,19 @@ pub fn parse_review(response: &str, detail: &Detail) -> Result<AgentReview, Stri
                         .unwrap_or("")
                         .trim();
                     let key = super::pr_review::draft_key(path, line, side);
+                    let start_line = super::pr_review_suggestion::start_line(
+                        candidate.get("startLine").and_then(Value::as_u64),
+                        path,
+                        line,
+                        side,
+                        &reviewable,
+                    );
                     (!body.is_empty() && reviewable.contains(&key)).then(|| DraftComment {
                         path: path.to_string(),
                         body: body.to_string(),
                         line,
                         side,
+                        start_line,
                     })
                 })
                 .collect()
@@ -479,5 +488,29 @@ mod tests {
         assert!(prompt.contains("### src/a.rs:2 (open)\n@wharley: Falta teste"));
         assert!(prompt.contains("follow-up round"));
         assert!(prompt.ends_with("Do not publish or modify anything."));
+    }
+
+    #[test]
+    fn a_suggestion_covering_several_lines_keeps_its_range() {
+        let detail = Detail {
+            files: vec![File {
+                path: "src/a.ts".into(),
+                patch: Some("@@ -1,1 +1,4 @@\n keep\n+one\n+two\n+three".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let response = r#"{"verdict":"approve","summary":"Pode aprovar.","comments":[
+            {"path":"src/a.ts","startLine":2,"line":4,"side":"right","body":"Mais simples:\n```suggestion\nconst all = [1, 2, 3];\n```"},
+            {"path":"src/a.ts","startLine":9,"line":3,"side":"right","body":"Linha só."}
+        ]}"#;
+        let review = parse_review(response, &detail).unwrap();
+        assert_eq!(review.comments[0].start_line, Some(2));
+        assert_eq!(review.comments[0].line, 4);
+        // A range that does not stand keeps the comment on its one line.
+        assert_eq!(review.comments[1].start_line, None);
+        let prompt = review_prompt(&Item::default(), &detail, "");
+        assert!(prompt.contains("```suggestion"));
+        assert!(prompt.contains("startLine"));
     }
 }

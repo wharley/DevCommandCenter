@@ -78,6 +78,7 @@ pub mod pr_hub;
 pub mod pr_news;
 pub mod pr_review;
 pub mod pr_review_agent;
+pub mod pr_review_suggestion;
 pub mod pr_review_follow_up;
 pub mod pr_review_jobs;
 pub mod pr_review_verdict;

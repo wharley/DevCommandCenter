@@ -56,13 +56,16 @@ pub struct ReviewCapabilities {
     pub resolve_threads: bool,
 }
 
-/// `PullRequestHubDraftComment`: a comment on a line, sent with the review.
+/// `PullRequestHubDraftComment`: a comment on a line, sent with the review;
+/// one on several lines (a suggestion replacing them) starts at `start_line`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DraftComment {
     pub path: String,
     pub body: String,
     pub line: u32,
     pub side: &'static str,
+    #[serde(rename = "startLine", skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<u32>,
 }
 
 impl DraftComment {

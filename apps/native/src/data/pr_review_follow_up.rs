@@ -237,6 +237,7 @@ mod tests {
             body: "again".into(),
             line,
             side: "right",
+            start_line: None,
         };
         let mut review = AgentReview {
             verdict: None,

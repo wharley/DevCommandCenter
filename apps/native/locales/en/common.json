@@ -1323,6 +1323,7 @@
       "cancel": "Cancel",
       "addToReview": "Add to review",
       "pendingComment": "Pending comment",
+      "lines": "Lines {{from}}–{{to}}",
       "removePendingComment": "Remove pending comment",
       "resolved": "Resolved",
       "reply": "Reply",

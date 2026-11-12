@@ -142,7 +142,7 @@ impl PrHub {
                 out.push(self.thread(comment, mark, width, window, cx));
             }
             if let Some(draft) = self.review.drafts.iter().find(|draft| draft.key() == key) {
-                out.push(self.draft_card(draft, width, cx));
+                out.push(self.draft_card(draft, width, window, cx));
             }
             if self.review.editing.as_deref() == Some(key.as_str()) {
                 out.push(self.line_editor(&file.path, row, width, cx));
@@ -242,7 +242,13 @@ impl PrHub {
     }
 
     /// "Comentário pendente", with its trash.
-    fn draft_card(&self, draft: &DraftComment, width: f32, cx: &mut Context<Self>) -> AnyElement {
+    fn draft_card(
+        &self,
+        draft: &DraftComment,
+        width: f32,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let idea = colors.accent_idea;
         let amber = if dark(cx) {
@@ -273,13 +279,31 @@ impl PrHub {
                                 0.12,
                             )),
                     )
-                    .child(
+                    // A comment on several lines replaces them all with its
+                    // suggestion: which ones, under the label.
+                    .children(draft.start_line.map(|from| {
                         div()
-                            .mt(px(4.0))
-                            .text_size(px(11.0))
-                            .line_height(px(16.0))
-                            .child(draft.body.clone()),
-                    ),
+                            .mt(px(2.0))
+                            .text_size(px(10.5))
+                            .text_color(colors.muted_foreground)
+                            .child(
+                                cx.t_with(
+                                    "pullRequests.code.lines",
+                                    &Args::default()
+                                        .with("from", from.to_string())
+                                        .with("to", draft.line.to_string()),
+                                ),
+                            )
+                    }))
+                    // As it will read on GitHub: markdown, a suggestion as code.
+                    .child(div().mt(px(4.0)).min_w_0().child(
+                        crate::screens::code_column::review::comment_view::comment_body(
+                            &draft.body,
+                            &format!("pr-draft-body-{key}"),
+                            window,
+                            cx,
+                        ),
+                    )),
             )
             .child(
                 Button::new(gpui::SharedString::from(format!("pr-draft-remove-{key}")))

@@ -328,6 +328,7 @@ impl PrHub {
             body,
             line,
             side,
+            start_line: None,
         };
         let key = next.key();
         self.review.drafts.retain(|draft| draft.key() != key);
