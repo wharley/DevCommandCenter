@@ -465,3 +465,77 @@ fn text_after_a_tool_call_starts_a_new_paragraph() {
         "Vou ler a documentação.\n\nWebFetch foi bloqueado.\n\nAchei.\n\nPronto."
     );
 }
+
+#[test]
+fn a_message_sent_mid_turn_reads_where_it_was_sent() {
+    let tool = |id: &str| json!({ "type": "turn_tool_call_started", "turnId": "turn-1", "toolCallId": id, "action": "Run", "command": "ls", "file": null });
+    let done = |id: &str| json!({ "type": "turn_tool_call_completed", "turnId": "turn-1", "toolCallId": id, "detail": { "output": "ok", "exitCode": 0 } });
+    let script = Script::new()
+        .started("turn-1", "Alpha")
+        .message_started("turn-1", "comment-1", "commentary")
+        .message_delta("turn-1", "comment-1", "Vou investigar.")
+        .message_completed("turn-1", "comment-1", "commentary", Some("Vou investigar."))
+        .push(tool("tool-1"))
+        .push(json!({ "type": "turn_steered", "turnId": "turn-1", "prompt": "pode seguir nela" }))
+        .push(done("tool-1"))
+        .push(tool("tool-2"));
+    let rows = script.project();
+    let roles: Vec<(Role, &str)> = rows.iter().map(|row| (row.role, row.id.as_str())).collect();
+    assert_eq!(
+        roles,
+        vec![
+            (Role::User, "user-session-a-turn-1"),
+            (Role::Assistant, "assistant-session-a-turn-1-before-1"),
+            (Role::User, "user-steer-session-a-turn-1-1"),
+            (Role::Assistant, "assistant-session-a-turn-1"),
+        ]
+    );
+    // What came before the message is done; the call it was running ends there.
+    let before = &rows[1];
+    assert!(!before.streaming);
+    assert!(before.annotations.iter().any(|annotation| matches!(
+        annotation,
+        Annotation::ToolCall(call) if call.id == "tool-1" && !call.streaming
+    )));
+    // The turn goes on below the message.
+    let after = &rows[3];
+    assert!(after.streaming);
+    assert!(after.annotations.iter().any(|annotation| matches!(
+        annotation,
+        Annotation::ToolCall(call) if call.id == "tool-2"
+    )));
+    // Once the turn ends, both stay where they were.
+    let settled = script
+        .message_started("turn-1", "final-1", "final_answer")
+        .message_delta("turn-1", "final-1", "Pronto.")
+        .message_completed("turn-1", "final-1", "final_answer", Some("Pronto."))
+        .completed("turn-1")
+        .project();
+    assert_eq!(settled.len(), 4);
+    assert_eq!(settled[3].content, "Pronto.");
+    assert!(!settled[3].streaming);
+}
+
+#[test]
+fn a_streamed_turn_split_by_a_message_keeps_its_text_above_it() {
+    let rows = Script::new()
+        .started("turn-1", "Alpha")
+        .delta("turn-1", "Primeira parte.")
+        .push(json!({ "type": "turn_steered", "turnId": "turn-1", "prompt": "e o banco?" }))
+        .delta("turn-1", "Segunda parte.")
+        .completed("turn-1")
+        .project();
+    let texts: Vec<(Role, &str)> = rows
+        .iter()
+        .map(|row| (row.role, row.content.as_str()))
+        .collect();
+    assert_eq!(
+        texts,
+        vec![
+            (Role::User, "Alpha"),
+            (Role::Assistant, "Primeira parte."),
+            (Role::User, "e o banco?"),
+            (Role::Assistant, "Segunda parte."),
+        ]
+    );
+}

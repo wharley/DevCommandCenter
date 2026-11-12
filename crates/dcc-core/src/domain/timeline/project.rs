@@ -89,6 +89,10 @@ struct Projector {
     confirmed_subagent_models: HashMap<String, String>,
     latest_turn_id: Option<String>,
     steers: HashMap<String, usize>,
+    /// Where a message sent mid-turn split a running turn: the index of each
+    /// such message, by turn. The agent's work before it and after it are
+    /// separate rows, so the message reads where it was sent.
+    steer_breaks: HashMap<String, Vec<usize>>,
     /// Turns whose loose text was interrupted by a tool call or reasoning: the
     /// next text starts a new paragraph instead of running into the last one.
     text_breaks: HashSet<String>,
@@ -131,19 +135,49 @@ impl Projector {
         if let Some(&index) = self.assistant_buckets.get(turn_id) {
             return index;
         }
-        let mut message = TimelineMessage::new(
-            format!("assistant-{}-{turn_id}", self.session_id),
-            Role::Assistant,
-            "Assistant",
-            String::new(),
-        );
+        // After a message sent mid-turn the turn goes on in a row of its own,
+        // folded with the rest of the turn after that message.
+        let split = self
+            .steer_breaks
+            .get(turn_id)
+            .is_some_and(|cuts| !cuts.is_empty());
+        let id = match self.steer_breaks.get(turn_id).map(Vec::len) {
+            Some(after) if after > 0 => {
+                format!("assistant-{}-{turn_id}-after-{after}", self.session_id)
+            }
+            _ => format!("assistant-{}-{turn_id}", self.session_id),
+        };
+        let mut message = TimelineMessage::new(id, Role::Assistant, "Assistant", String::new());
         message.turn_id = Some(turn_id.to_string());
         message.streaming = true;
         message.created_at = Some(created_at);
         self.messages.push(message);
         let index = self.messages.len() - 1;
         self.assistant_buckets.insert(turn_id.to_string(), index);
+        if split {
+            self.turn_messages_mut(turn_id).push(index);
+        }
         index
+    }
+
+    /// A message sent while the turn runs: what the agent did so far stays
+    /// above it, and the rest of the turn starts a new row below it.
+    fn split_at_steer(&mut self, turn_id: &str) {
+        if self.completed_turns.contains(turn_id) || self.aborted_turns.contains_key(turn_id) {
+            return;
+        }
+        let Some(previous) = self.assistant_buckets.remove(turn_id) else {
+            return;
+        };
+        let rows = self.turn_messages_mut(turn_id);
+        if !rows.contains(&previous) {
+            rows.push(previous);
+        }
+        let at = self.messages.len();
+        self.steer_breaks
+            .entry(turn_id.to_string())
+            .or_default()
+            .push(at);
     }
 
     /// `ensureAssistantItemMessage`
@@ -230,7 +264,21 @@ impl Projector {
     }
 
     fn find_tool_call(&mut self, turn_id: &str, id: &str) -> Option<&mut ToolCall> {
-        let index = *self.assistant_buckets.get(turn_id)?;
+        // A call started before a message sent mid-turn ends in its own row.
+        let mut rows: Vec<usize> = self
+            .assistant_buckets
+            .get(turn_id)
+            .copied()
+            .into_iter()
+            .collect();
+        rows.extend(self.turn_messages(turn_id).into_iter().flatten().rev());
+        let has = |message: &TimelineMessage| {
+            message
+                .annotations
+                .iter()
+                .any(|annotation| matches!(annotation, Annotation::ToolCall(call) if call.id == id))
+        };
+        let index = rows.into_iter().find(|&index| has(&self.messages[index]))?;
         self.messages[index]
             .annotations
             .iter_mut()
@@ -242,15 +290,14 @@ impl Projector {
 
     /// The rows a turn's end touches: its native items, or its single bucket.
     fn rows_of_turn(&self, turn_id: &str) -> Vec<usize> {
-        match self.turn_messages(turn_id) {
-            Some(rows) => rows.clone(),
-            None => self
-                .assistant_buckets
-                .get(turn_id)
-                .copied()
-                .into_iter()
-                .collect(),
+        let mut rows = self.turn_messages(turn_id).cloned().unwrap_or_default();
+        // The row the turn went on in after a message sent mid-turn.
+        if let Some(&bucket) = self.assistant_buckets.get(turn_id) {
+            if !rows.contains(&bucket) {
+                rows.push(bucket);
+            }
         }
+        rows
     }
 
     fn apply(&mut self, event: &TimelineEvent) {
@@ -284,6 +331,7 @@ impl Projector {
                 self.messages.push(message);
             }
             SessionEventKind::TurnSteered { turn_id, prompt } => {
+                self.split_at_steer(&turn_id.0);
                 let count = self.steers.entry(turn_id.0.clone()).or_default();
                 *count += 1;
                 let mut message = TimelineMessage::new(
@@ -968,6 +1016,7 @@ impl Projector {
             self.messages,
             &self.assistant_messages_by_turn,
             &settled,
+            &self.steer_breaks,
             &self.session_id,
         );
         place_delegations_after_their_turn(messages)

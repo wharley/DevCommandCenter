@@ -57,21 +57,47 @@ fn merge_annotation(annotations: &mut Vec<Annotation>, incoming: &Annotation) {
     }
 }
 
-/// Every structured turn becomes one assistant row: commentary goes to its
-/// activity and the final answer (or, once settled, the last text) is the
-/// row's content. While the turn runs the content stays empty.
+/// A turn's rows cut where messages were sent mid-turn (`breaks`, the
+/// indexes of those messages): each stretch folds on its own, so the message
+/// sits between what the agent did before and after it.
+fn stretches(rows: &[usize], breaks: &[usize]) -> Vec<Vec<usize>> {
+    let mut stretches: Vec<Vec<usize>> = vec![Vec::new(); breaks.len() + 1];
+    for &index in rows {
+        let stretch = breaks.iter().filter(|&&at| at <= index).count();
+        stretches[stretch].push(index);
+    }
+    stretches.retain(|rows| !rows.is_empty());
+    stretches
+}
+
+/// Every structured turn becomes one assistant row (one per stretch when a
+/// message was sent mid-turn): commentary goes to its activity and the final
+/// answer (or, once settled, the last text) is the row's content. While the
+/// turn runs the content stays empty; a stretch a message cut is done.
 pub(super) fn fold_assistant_turns(
     mut messages: Vec<TimelineMessage>,
     by_turn: &[(String, Vec<usize>)],
     settled_turns: &HashSet<String>,
+    breaks: &HashMap<String, Vec<usize>>,
     session_id: &str,
 ) -> Vec<TimelineMessage> {
     let mut hidden: HashSet<usize> = HashSet::new();
+    let mut groups: Vec<(&String, Vec<usize>, bool, Option<usize>)> = Vec::new();
     for (turn_id, rows) in by_turn {
+        let cuts = breaks.get(turn_id).map(Vec::as_slice).unwrap_or_default();
+        let parts = stretches(rows, cuts);
+        let count = parts.len();
+        for (position, part) in parts.into_iter().enumerate() {
+            let last = position + 1 == count;
+            let settled = settled_turns.contains(turn_id) || !last;
+            groups.push((turn_id, part, settled, (!last).then_some(position + 1)));
+        }
+    }
+    for (turn_id, rows, settled, before) in groups {
+        let rows = &rows;
         if rows.is_empty() {
             continue;
         }
-        let settled = settled_turns.contains(turn_id);
         let final_answer = rows.iter().rev().copied().find(|&index| {
             messages[index].assistant_phase == Some(AssistantMessagePhase::FinalAnswer)
         });
@@ -118,7 +144,10 @@ pub(super) fn fold_assistant_turns(
             }
         }
         let message = &mut messages[terminal];
-        message.id = format!("assistant-{session_id}-{turn_id}");
+        message.id = match before {
+            Some(part) => format!("assistant-{session_id}-{turn_id}-before-{part}"),
+            None => format!("assistant-{session_id}-{turn_id}"),
+        };
         message.turn_id = Some(turn_id.clone());
         message.streaming = !settled;
         message.annotations = folded;
