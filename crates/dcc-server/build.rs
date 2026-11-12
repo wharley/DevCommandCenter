@@ -1,5 +1,6 @@
 //! Computer use on macOS is Objective-C (`native/computer_use_macos.m`):
-//! accessibility, ScreenCaptureKit captures and input.
+//! accessibility, ScreenCaptureKit captures and input; background delivery
+//! lives in `native/computer_use_background.m`.
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
@@ -7,11 +8,11 @@ fn main() {
         return;
     }
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set by Cargo"));
-    let source = PathBuf::from("native/computer_use_macos.m");
-    let object = out_dir.join("computer_use_macos.o");
+    let sources = ["computer_use_macos", "computer_use_background"];
     let archive = out_dir.join("libdcc_computer_use_macos.a");
-    println!("cargo:rerun-if-changed={}", source.display());
-    println!("cargo:rerun-if-changed=native/computer_use_macos.h");
+    for header in ["computer_use_macos.h", "computer_use_background.h"] {
+        println!("cargo:rerun-if-changed=native/{header}");
+    }
     println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
     let target = env::var("TARGET").unwrap_or_default();
     let architecture = if target.starts_with("aarch64-") {
@@ -29,21 +30,29 @@ fn main() {
             "10.13".to_string()
         }
     });
-    let compiled = Command::new("xcrun")
-        .args(["clang", "-fobjc-arc", "-c"])
-        .arg(&source)
-        .args(["-arch", architecture])
-        .arg(format!("-mmacosx-version-min={deployment_target}"))
-        .args(["-o"])
-        .arg(&object)
-        .status()
-        .expect("xcrun clang must be available to build macOS computer use")
-        .success();
-    assert!(compiled, "failed to compile the macOS computer-use bridge");
+    let mut objects = Vec::new();
+    for name in sources {
+        let source = PathBuf::from(format!("native/{name}.m"));
+        let object = out_dir.join(format!("{name}.o"));
+        println!("cargo:rerun-if-changed={}", source.display());
+        let compiled = Command::new("xcrun")
+            .args(["clang", "-fobjc-arc", "-c"])
+            .arg(&source)
+            .args(["-arch", architecture])
+            .arg(format!("-mmacosx-version-min={deployment_target}"))
+            .args(["-o"])
+            .arg(&object)
+            .status()
+            .expect("xcrun clang must be available to build macOS computer use")
+            .success();
+        assert!(compiled, "failed to compile the macOS computer-use bridge");
+        objects.push(object);
+    }
+    let _ = std::fs::remove_file(&archive);
     let archived = Command::new("ar")
         .args(["crus"])
         .arg(&archive)
-        .arg(&object)
+        .args(&objects)
         .status()
         .expect("ar must be available to build macOS computer use")
         .success();

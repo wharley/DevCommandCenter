@@ -159,8 +159,13 @@ pub enum ComputerActionTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ComputerInputMethod {
+    /// The element's own accessibility action: no pointer, no focus.
     Accessibility,
-    Pointer,
+    /// Events delivered to the window behind the person's apps: it was not
+    /// raised and the cursor did not move.
+    Background,
+    /// The app was brought to the front and the real cursor moved.
+    Foreground,
 }
 
 /// Latest locally captured frame for an explicitly authorized provider
@@ -492,6 +497,7 @@ trait ComputerNative: Send + Sync {
         at: NativeAt,
         button: PointerButton,
         click_count: u8,
+        foreground: bool,
     ) -> Result<ComputerInputMethod, NativeEffectError>;
     fn scroll(
         &self,
@@ -499,13 +505,15 @@ trait ComputerNative: Send + Sync {
         at: NativeAt,
         delta_x: i32,
         delta_y: i32,
-    ) -> Result<(), NativeEffectError>;
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, NativeEffectError>;
     fn drag(
         &self,
         target: &ComputerTarget,
         from: (f64, f64),
         to: (f64, f64),
-    ) -> Result<(), NativeEffectError>;
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, NativeEffectError>;
     fn set_value(
         &self,
         target: &ComputerTarget,
@@ -513,13 +521,19 @@ trait ComputerNative: Send + Sync {
         index: u32,
         value: &str,
     ) -> Result<(), NativeEffectError>;
-    fn type_text(&self, target: &ComputerTarget, text: &str) -> Result<(), NativeEffectError>;
+    fn type_text(
+        &self,
+        target: &ComputerTarget,
+        text: &str,
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, NativeEffectError>;
     fn key(
         &self,
         target: &ComputerTarget,
         key_code: u16,
         flags: u64,
-    ) -> Result<(), NativeEffectError>;
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, NativeEffectError>;
 }
 
 #[derive(Clone)]
@@ -1539,6 +1553,7 @@ impl ComputerUseState {
         at: &ComputerActionTarget,
         button: PointerButton,
         click_count: u8,
+        foreground: bool,
     ) -> Result<ComputerInputMethod, ComputerActionError> {
         if !(1..=2).contains(&click_count) {
             return Err(ComputerActionError::Rejected(
@@ -1552,7 +1567,7 @@ impl ComputerUseState {
         let at = resolve_action_target(at, elements.as_deref())?;
         let method = self
             .native
-            .click(&current, at, button, click_count)
+            .click(&current, at, button, click_count, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
         self.touch_grant(session_id, expected_lease_id);
         Ok(method)
@@ -1566,7 +1581,8 @@ impl ComputerUseState {
         at: &ComputerActionTarget,
         delta_x: i32,
         delta_y: i32,
-    ) -> Result<(), ComputerActionError> {
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, ComputerActionError> {
         if (delta_x == 0 && delta_y == 0)
             || delta_x.unsigned_abs() > MAX_SCROLL_DELTA as u32
             || delta_y.unsigned_abs() > MAX_SCROLL_DELTA as u32
@@ -1580,11 +1596,12 @@ impl ComputerUseState {
             .require_target(session_id, expected_lease_id, target)
             .map_err(ComputerActionError::Rejected)?;
         let at = resolve_action_target(at, elements.as_deref())?;
-        self.native
-            .scroll(&current, at, delta_x, delta_y)
+        let method = self
+            .native
+            .scroll(&current, at, delta_x, delta_y, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
         self.touch_grant(session_id, expected_lease_id);
-        Ok(())
+        Ok(method)
     }
 
     pub fn drag(
@@ -1594,7 +1611,8 @@ impl ComputerUseState {
         target: &ComputerTargetSnapshot,
         from: (f64, f64),
         to: (f64, f64),
-    ) -> Result<(), ComputerActionError> {
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, ComputerActionError> {
         if !point_is_inside(target, from.0, from.1) || !point_is_inside(target, to.0, to.1) {
             return Err(ComputerActionError::Rejected(
                 "drag points must be inside the captured target window".to_string(),
@@ -1603,11 +1621,12 @@ impl ComputerUseState {
         let (current, _) = self
             .require_target(session_id, expected_lease_id, target)
             .map_err(ComputerActionError::Rejected)?;
-        self.native
-            .drag(&current, from, to)
+        let method = self
+            .native
+            .drag(&current, from, to, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
         self.touch_grant(session_id, expected_lease_id);
-        Ok(())
+        Ok(method)
     }
 
     pub fn set_value(
@@ -1645,7 +1664,8 @@ impl ComputerUseState {
         expected_lease_id: &str,
         target: &ComputerTargetSnapshot,
         text: &str,
-    ) -> Result<(), ComputerActionError> {
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, ComputerActionError> {
         if text.is_empty() || !valid_input_text(text) {
             return Err(ComputerActionError::Rejected(
                 "desktop text input is invalid".to_string(),
@@ -1654,11 +1674,12 @@ impl ComputerUseState {
         let (current, _) = self
             .require_target(session_id, expected_lease_id, target)
             .map_err(ComputerActionError::Rejected)?;
-        self.native
-            .type_text(&current, text)
+        let method = self
+            .native
+            .type_text(&current, text, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
         self.touch_grant(session_id, expected_lease_id);
-        Ok(())
+        Ok(method)
     }
 
     pub fn key(
@@ -1668,7 +1689,8 @@ impl ComputerUseState {
         target: &ComputerTargetSnapshot,
         key: &str,
         modifiers: &[String],
-    ) -> Result<(), ComputerActionError> {
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, ComputerActionError> {
         let code = key_code(key).ok_or_else(|| {
             ComputerActionError::Rejected("desktop key is unsupported".to_string())
         })?;
@@ -1676,11 +1698,12 @@ impl ComputerUseState {
         let (current, _) = self
             .require_target(session_id, expected_lease_id, target)
             .map_err(ComputerActionError::Rejected)?;
-        self.native
-            .key(&current, code, flags)
+        let method = self
+            .native
+            .key(&current, code, flags, foreground)
             .map_err(|error| ComputerActionError::Failed(error.message()))?;
         self.touch_grant(session_id, expected_lease_id);
-        Ok(())
+        Ok(method)
     }
 }
 
@@ -2275,11 +2298,12 @@ impl ComputerNative for PlatformComputerNative {
         at: NativeAt,
         button: PointerButton,
         click_count: u8,
+        foreground: bool,
     ) -> Result<ComputerInputMethod, NativeEffectError> {
         let bundle = bundle_cstring(target)?;
         let button = pointer_button_code(button);
         let mut detail = std::ptr::null_mut();
-        let mut method = NATIVE_METHOD_POINTER;
+        let mut method = 0;
         let status = unsafe {
             match at {
                 NativeAt::Point { x, y } => dcc_computer_click_point(
@@ -2294,6 +2318,8 @@ impl ComputerNative for PlatformComputerNative {
                     y,
                     button,
                     click_count,
+                    foreground,
+                    &mut method,
                     &mut detail,
                 ),
                 NativeAt::Element { handle, index } => dcc_computer_click_element(
@@ -2308,17 +2334,14 @@ impl ComputerNative for PlatformComputerNative {
                     index,
                     button,
                     click_count,
+                    foreground,
                     &mut method,
                     &mut detail,
                 ),
             }
         };
         effect_result(status, detail)?;
-        Ok(if method == NATIVE_METHOD_ACCESSIBILITY {
-            ComputerInputMethod::Accessibility
-        } else {
-            ComputerInputMethod::Pointer
-        })
+        Ok(input_method(method))
     }
     fn scroll(
         &self,
@@ -2326,9 +2349,11 @@ impl ComputerNative for PlatformComputerNative {
         at: NativeAt,
         delta_x: i32,
         delta_y: i32,
-    ) -> Result<(), NativeEffectError> {
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, NativeEffectError> {
         let bundle = bundle_cstring(target)?;
         let mut detail = std::ptr::null_mut();
+        let mut method = 0;
         let status = unsafe {
             match at {
                 NativeAt::Point { x, y } => dcc_computer_scroll_point(
@@ -2343,6 +2368,8 @@ impl ComputerNative for PlatformComputerNative {
                     y,
                     delta_x,
                     delta_y,
+                    foreground,
+                    &mut method,
                     &mut detail,
                 ),
                 NativeAt::Element { handle, index } => dcc_computer_scroll_element(
@@ -2357,20 +2384,25 @@ impl ComputerNative for PlatformComputerNative {
                     index,
                     delta_x,
                     delta_y,
+                    foreground,
+                    &mut method,
                     &mut detail,
                 ),
             }
         };
-        effect_result(status, detail)
+        effect_result(status, detail)?;
+        Ok(input_method(method))
     }
     fn drag(
         &self,
         target: &ComputerTarget,
         from: (f64, f64),
         to: (f64, f64),
-    ) -> Result<(), NativeEffectError> {
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, NativeEffectError> {
         let bundle = bundle_cstring(target)?;
         let mut detail = std::ptr::null_mut();
+        let mut method = 0;
         let status = unsafe {
             dcc_computer_drag(
                 bundle.as_ptr(),
@@ -2384,10 +2416,13 @@ impl ComputerNative for PlatformComputerNative {
                 from.1,
                 to.0,
                 to.1,
+                foreground,
+                &mut method,
                 &mut detail,
             )
         };
-        effect_result(status, detail)
+        effect_result(status, detail)?;
+        Ok(input_method(method))
     }
     fn set_value(
         &self,
@@ -2416,9 +2451,15 @@ impl ComputerNative for PlatformComputerNative {
         };
         effect_result(status, detail)
     }
-    fn type_text(&self, target: &ComputerTarget, text: &str) -> Result<(), NativeEffectError> {
+    fn type_text(
+        &self,
+        target: &ComputerTarget,
+        text: &str,
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, NativeEffectError> {
         let bundle = bundle_cstring(target)?;
         let text = std::ffi::CString::new(text).map_err(|_| NativeEffectError::Invalid)?;
+        let mut method = 0;
         let status = unsafe {
             dcc_computer_type(
                 bundle.as_ptr(),
@@ -2429,17 +2470,22 @@ impl ComputerNative for PlatformComputerNative {
                 target.width,
                 target.height,
                 text.as_ptr(),
+                foreground,
+                &mut method,
             )
         };
-        effect_result(status, std::ptr::null_mut())
+        effect_result(status, std::ptr::null_mut())?;
+        Ok(input_method(method))
     }
     fn key(
         &self,
         target: &ComputerTarget,
         key_code: u16,
         flags: u64,
-    ) -> Result<(), NativeEffectError> {
+        foreground: bool,
+    ) -> Result<ComputerInputMethod, NativeEffectError> {
         let bundle = bundle_cstring(target)?;
+        let mut method = 0;
         let status = unsafe {
             dcc_computer_key(
                 bundle.as_ptr(),
@@ -2451,16 +2497,29 @@ impl ComputerNative for PlatformComputerNative {
                 target.height,
                 key_code,
                 flags,
+                foreground,
+                &mut method,
             )
         };
-        effect_result(status, std::ptr::null_mut())
+        effect_result(status, std::ptr::null_mut())?;
+        Ok(input_method(method))
     }
 }
 
 #[cfg(target_os = "macos")]
 const NATIVE_METHOD_ACCESSIBILITY: i32 = 1;
 #[cfg(target_os = "macos")]
-const NATIVE_METHOD_POINTER: i32 = 2;
+const NATIVE_METHOD_BACKGROUND: i32 = 3;
+
+/// `DCC_COMPUTER_METHOD_*`; anything else is the foreground path.
+#[cfg(target_os = "macos")]
+fn input_method(code: i32) -> ComputerInputMethod {
+    match code {
+        NATIVE_METHOD_ACCESSIBILITY => ComputerInputMethod::Accessibility,
+        NATIVE_METHOD_BACKGROUND => ComputerInputMethod::Background,
+        _ => ComputerInputMethod::Foreground,
+    }
+}
 
 #[cfg(target_os = "macos")]
 fn bundle_cstring(target: &ComputerTarget) -> Result<std::ffi::CString, NativeEffectError> {
@@ -2604,12 +2663,13 @@ mod tests {
             at: NativeAt,
             _: PointerButton,
             _: u8,
+            foreground: bool,
         ) -> Result<ComputerInputMethod, NativeEffectError> {
             *self.last_at.lock().unwrap() = Some(at);
             self.effect()?;
             Ok(match at {
                 NativeAt::Element { .. } => ComputerInputMethod::Accessibility,
-                NativeAt::Point { .. } => ComputerInputMethod::Pointer,
+                NativeAt::Point { .. } => pointer_method(foreground),
             })
         }
         fn scroll(
@@ -2618,17 +2678,21 @@ mod tests {
             at: NativeAt,
             _: i32,
             _: i32,
-        ) -> Result<(), NativeEffectError> {
+            foreground: bool,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
             *self.last_at.lock().unwrap() = Some(at);
-            self.effect()
+            self.effect()?;
+            Ok(pointer_method(foreground))
         }
         fn drag(
             &self,
             _: &ComputerTarget,
             _: (f64, f64),
             _: (f64, f64),
-        ) -> Result<(), NativeEffectError> {
-            self.effect()
+            foreground: bool,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
+            self.effect()?;
+            Ok(pointer_method(foreground))
         }
         fn set_value(
             &self,
@@ -2640,11 +2704,32 @@ mod tests {
             *self.last_at.lock().unwrap() = Some(NativeAt::Element { handle, index });
             self.effect()
         }
-        fn type_text(&self, _: &ComputerTarget, _: &str) -> Result<(), NativeEffectError> {
-            self.effect()
+        fn type_text(
+            &self,
+            _: &ComputerTarget,
+            _: &str,
+            foreground: bool,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
+            self.effect()?;
+            Ok(pointer_method(foreground))
         }
-        fn key(&self, _: &ComputerTarget, _: u16, _: u64) -> Result<(), NativeEffectError> {
-            self.effect()
+        fn key(
+            &self,
+            _: &ComputerTarget,
+            _: u16,
+            _: u64,
+            foreground: bool,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
+            self.effect()?;
+            Ok(pointer_method(foreground))
+        }
+    }
+    /// The fake delivers in the background unless asked for the foreground.
+    fn pointer_method(foreground: bool) -> ComputerInputMethod {
+        if foreground {
+            ComputerInputMethod::Foreground
+        } else {
+            ComputerInputMethod::Background
         }
     }
     fn point(x: f64, y: f64) -> ComputerActionTarget {
@@ -2892,6 +2977,7 @@ mod tests {
                 &point(20.0, 20.0),
                 PointerButton::Left,
                 1,
+                false,
             )
             .unwrap();
         assert!(state
@@ -2901,7 +2987,8 @@ mod tests {
                 &capture.target,
                 &point(20.0, 20.0),
                 PointerButton::Left,
-                1
+                1,
+                false
             )
             .is_err());
         assert_eq!(*native.effects.lock().unwrap(), 1);
@@ -2921,6 +3008,7 @@ mod tests {
                 &point(20.0, 20.0),
                 0,
                 -120,
+                false,
             )
             .unwrap();
         assert_eq!(*native.effects.lock().unwrap(), 1);
@@ -2935,7 +3023,8 @@ mod tests {
                 &capture.target,
                 &point(20.0, 20.0),
                 0,
-                0
+                0,
+                false
             )
             .is_err());
         assert_eq!(*native.effects.lock().unwrap(), 1);
@@ -2950,7 +3039,8 @@ mod tests {
                 &capture.target,
                 &point(20.0, 20.0),
                 PointerButton::Left,
-                3
+                3,
+                false
             )
             .is_err());
         assert_eq!(*native.effects.lock().unwrap(), 1);
@@ -2970,7 +3060,8 @@ mod tests {
                 &capture.target,
                 &point(20.0, 20.0),
                 PointerButton::Left,
-                1
+                1,
+                false
             )
             .is_err());
         let capture = state
@@ -2986,7 +3077,8 @@ mod tests {
                 &capture.target,
                 &point(20.0, 20.0),
                 PointerButton::Left,
-                1
+                1,
+                false
             )
             .is_err());
     }
@@ -3134,6 +3226,7 @@ mod tests {
                 &element("e2"),
                 PointerButton::Left,
                 1,
+                false,
             )
             .unwrap();
         assert_eq!(method, ComputerInputMethod::Accessibility);
@@ -3163,7 +3256,8 @@ mod tests {
                     &capture.target,
                     &element(reference),
                     PointerButton::Left,
-                    1
+                    1,
+                    false
                 ),
                 Err(ComputerActionError::Rejected(_))
             ));
@@ -3171,7 +3265,7 @@ mod tests {
         // ...so the same capture still works, while a ref it did not list
         // consumes it and asks for the fresh observation.
         assert!(matches!(
-            state.click("session", "lease", &capture.target, &element("e4"), PointerButton::Left, 1),
+            state.click("session", "lease", &capture.target, &element("e4"), PointerButton::Left, 1, false),
             Err(ComputerActionError::Failed(message)) if message.contains("e1-e3")
         ));
         assert_eq!(*native.effects.lock().unwrap(), 0);
@@ -3205,7 +3299,8 @@ mod tests {
                 &capture.target,
                 &element("e1"),
                 PointerButton::Left,
-                1
+                1,
+                false
             )
             .unwrap_err()
             .message()
@@ -3221,11 +3316,31 @@ mod tests {
                     &capture.target,
                     &point(10.0, 10.0),
                     PointerButton::Right,
-                    2
+                    2,
+                    false
                 )
                 .unwrap(),
-            ComputerInputMethod::Pointer
+            ComputerInputMethod::Background
         );
+    }
+
+    #[test]
+    fn input_goes_in_the_background_unless_the_agent_asks_for_the_foreground() {
+        let (state, _) = armed();
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        let method = state
+            .type_text("session", "lease", &capture.target, "oi", false)
+            .unwrap();
+        assert_eq!(method, ComputerInputMethod::Background);
+        let capture = state
+            .capture("session", "lease", "com.example.Editor", 7)
+            .unwrap();
+        let method = state
+            .key("session", "lease", &capture.target, "ENTER", &[], true)
+            .unwrap();
+        assert_eq!(method, ComputerInputMethod::Foreground);
     }
 
     #[test]
@@ -3243,6 +3358,7 @@ mod tests {
                 &point(20.0, 20.0),
                 PointerButton::Left,
                 1,
+                false,
             )
             .unwrap();
         let capture = state
@@ -3250,7 +3366,7 @@ mod tests {
             .unwrap();
         native.targets.lock().unwrap()[0].x = 40.0;
         assert!(matches!(
-            state.click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1),
+            state.click("session", "lease", &capture.target, &point(20.0, 20.0), PointerButton::Left, 1, false),
             Err(ComputerActionError::Rejected(message)) if message.contains("capture it again")
         ));
     }
@@ -3346,6 +3462,7 @@ mod tests {
                 &point(20.0, 20.0),
                 PointerButton::Left,
                 1,
+                false,
             )
             .unwrap_err();
         assert!(matches!(error, ComputerActionError::Failed(_)));
@@ -3357,7 +3474,8 @@ mod tests {
                 &capture.target,
                 &point(20.0, 20.0),
                 PointerButton::Left,
-                1
+                1,
+                false
             )
             .is_err());
         for code in 1..=10 {
@@ -3383,7 +3501,8 @@ mod tests {
                 "lease",
                 &capture.target,
                 (10.0, 10.0),
-                (800.0, 10.0)
+                (800.0, 10.0),
+                false
             ),
             Err(ComputerActionError::Rejected(_))
         ));
@@ -3394,7 +3513,8 @@ mod tests {
                 &capture.target,
                 &point(10.0, 10.0),
                 0,
-                MAX_SCROLL_DELTA + 1
+                MAX_SCROLL_DELTA + 1,
+                false
             ),
             Err(ComputerActionError::Rejected(_))
         ));
@@ -3405,6 +3525,7 @@ mod tests {
                 &capture.target,
                 (10.0, 10.0),
                 (799.0, 599.0),
+                false,
             )
             .unwrap();
         assert_eq!(*native.effects.lock().unwrap(), 1);
@@ -3467,6 +3588,8 @@ extern "C" {
         click_y: f64,
         button: i32,
         click_count: u8,
+        foreground: bool,
+        method: *mut i32,
         detail: *mut *mut std::ffi::c_char,
     ) -> i32;
     fn dcc_computer_click_element(
@@ -3481,6 +3604,7 @@ extern "C" {
         index: u32,
         button: i32,
         click_count: u8,
+        foreground: bool,
         method: *mut i32,
         detail: *mut *mut std::ffi::c_char,
     ) -> i32;
@@ -3496,6 +3620,8 @@ extern "C" {
         scroll_y: f64,
         delta_x: i32,
         delta_y: i32,
+        foreground: bool,
+        method: *mut i32,
         detail: *mut *mut std::ffi::c_char,
     ) -> i32;
     fn dcc_computer_scroll_element(
@@ -3510,6 +3636,8 @@ extern "C" {
         index: u32,
         delta_x: i32,
         delta_y: i32,
+        foreground: bool,
+        method: *mut i32,
         detail: *mut *mut std::ffi::c_char,
     ) -> i32;
     fn dcc_computer_drag(
@@ -3524,6 +3652,8 @@ extern "C" {
         from_y: f64,
         to_x: f64,
         to_y: f64,
+        foreground: bool,
+        method: *mut i32,
         detail: *mut *mut std::ffi::c_char,
     ) -> i32;
     fn dcc_computer_set_value(
@@ -3548,6 +3678,8 @@ extern "C" {
         width: f64,
         height: f64,
         text: *const std::ffi::c_char,
+        foreground: bool,
+        method: *mut i32,
     ) -> i32;
     fn dcc_computer_key(
         bundle_id: *const std::ffi::c_char,
@@ -3559,6 +3691,8 @@ extern "C" {
         height: f64,
         key_code: u16,
         flags: u64,
+        foreground: bool,
+        method: *mut i32,
     ) -> i32;
     fn dcc_computer_free_string(value: *mut std::ffi::c_char);
     fn dcc_computer_free_bytes(value: *mut u8);
@@ -3582,6 +3716,7 @@ macro_rules! inert_effects {
             _: NativeAt,
             _: PointerButton,
             _: u8,
+            _: bool,
         ) -> Result<ComputerInputMethod, NativeEffectError> {
             Err(NativeEffectError::Other($message.to_string()))
         }
@@ -3591,7 +3726,8 @@ macro_rules! inert_effects {
             _: NativeAt,
             _: i32,
             _: i32,
-        ) -> Result<(), NativeEffectError> {
+            _: bool,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
             Err(NativeEffectError::Other($message.to_string()))
         }
         fn drag(
@@ -3599,7 +3735,8 @@ macro_rules! inert_effects {
             _: &ComputerTarget,
             _: (f64, f64),
             _: (f64, f64),
-        ) -> Result<(), NativeEffectError> {
+            _: bool,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
             Err(NativeEffectError::Other($message.to_string()))
         }
         fn set_value(
@@ -3611,10 +3748,21 @@ macro_rules! inert_effects {
         ) -> Result<(), NativeEffectError> {
             Err(NativeEffectError::Other($message.to_string()))
         }
-        fn type_text(&self, _: &ComputerTarget, _: &str) -> Result<(), NativeEffectError> {
+        fn type_text(
+            &self,
+            _: &ComputerTarget,
+            _: &str,
+            _: bool,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
             Err(NativeEffectError::Other($message.to_string()))
         }
-        fn key(&self, _: &ComputerTarget, _: u16, _: u64) -> Result<(), NativeEffectError> {
+        fn key(
+            &self,
+            _: &ComputerTarget,
+            _: u16,
+            _: u64,
+            _: bool,
+        ) -> Result<ComputerInputMethod, NativeEffectError> {
             Err(NativeEffectError::Other($message.to_string()))
         }
     };

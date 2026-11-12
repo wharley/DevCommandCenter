@@ -3,6 +3,7 @@
 #import <ImageIO/ImageIO.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 #import "computer_use_macos.h"
+#import "computer_use_background.h"
 #include <unistd.h>
 
 static const size_t DCCMaxCaptureDimension = 4096;
@@ -458,6 +459,16 @@ static int32_t prepare_pointer(const char *bundle_id, pid_t pid, uint32_t window
 
 #pragma mark - Pointer input
 
+// Background delivery comes first unless the agent asked for the foreground:
+// the event reaches the window without raising it or moving the cursor, so a
+// window covered by another app is still reachable. `fresh` is the target as
+// enumerated now.
+static bool background_ready(bool foreground, const char *bundle_id, pid_t pid, uint32_t window_id, double x, double y, double width, double height, NSDictionary **fresh) {
+  if (foreground || !dcc_background_available() || !AXIsProcessTrusted()) return false;
+  *fresh = validated_window(bundle_id, pid, window_id, x, y, width, height);
+  return *fresh != nil;
+}
+
 static bool post_mouse(CGEventSourceRef source, CGEventType type, CGPoint point, CGMouseButton button, int64_t click_state) {
   CGEventRef event = CGEventCreateMouseEvent(source, type, point, button);
   if (!event) return false;
@@ -475,8 +486,17 @@ static bool local_point_is_valid(double local_x, double local_y, double width, d
 // system cursor moves, exactly as when a person clicks. It is the only path
 // that reaches web content and custom-drawn controls that publish no
 // accessibility action.
-static int32_t pointer_click(const char *bundle_id, pid_t pid, uint32_t window_id, double x, double y, double width, double height, CGPoint point, int32_t button, uint8_t click_count, char **detail) {
+static int32_t pointer_click(const char *bundle_id, pid_t pid, uint32_t window_id, double x, double y, double width, double height, CGPoint point, int32_t button, uint8_t click_count, bool foreground, int32_t *method, char **detail) {
   if ((button != DCC_COMPUTER_BUTTON_LEFT && button != DCC_COMPUTER_BUTTON_RIGHT) || click_count < 1 || click_count > 2) return DCC_COMPUTER_ERR_INVALID;
+  NSDictionary *fresh = nil;
+  if (background_ready(foreground, bundle_id, pid, window_id, x, y, width, height, &fresh)) {
+    if (!CGRectContainsPoint(window_rect(fresh), point)) return DCC_COMPUTER_ERR_OUTSIDE_TARGET;
+    if (dcc_background_click(pid, window_id, window_rect(fresh), point, button == DCC_COMPUTER_BUTTON_RIGHT, click_count)) {
+      *method = DCC_COMPUTER_METHOD_BACKGROUND;
+      return DCC_COMPUTER_OK;
+    }
+  }
+  *method = DCC_COMPUTER_METHOD_POINTER;
   int32_t status = prepare_pointer(bundle_id, pid, window_id, x, y, width, height, &point, 1, detail);
   if (status != DCC_COMPUTER_OK) return status;
   bool right = button == DCC_COMPUTER_BUTTON_RIGHT;
@@ -494,8 +514,17 @@ static int32_t pointer_click(const char *bundle_id, pid_t pid, uint32_t window_i
   return ok ? DCC_COMPUTER_OK : DCC_COMPUTER_ERR_EVENT;
 }
 
-static int32_t pointer_scroll(const char *bundle_id, pid_t pid, uint32_t window_id, double x, double y, double width, double height, CGPoint point, int32_t delta_x, int32_t delta_y, char **detail) {
+static int32_t pointer_scroll(const char *bundle_id, pid_t pid, uint32_t window_id, double x, double y, double width, double height, CGPoint point, int32_t delta_x, int32_t delta_y, bool foreground, int32_t *method, char **detail) {
   if ((delta_x == 0 && delta_y == 0) || llabs((long long)delta_x) > 5000 || llabs((long long)delta_y) > 5000) return DCC_COMPUTER_ERR_INVALID;
+  NSDictionary *fresh = nil;
+  if (background_ready(foreground, bundle_id, pid, window_id, x, y, width, height, &fresh)) {
+    if (!CGRectContainsPoint(window_rect(fresh), point)) return DCC_COMPUTER_ERR_OUTSIDE_TARGET;
+    if (dcc_background_scroll(pid, window_id, window_rect(fresh), point, delta_x, delta_y)) {
+      *method = DCC_COMPUTER_METHOD_BACKGROUND;
+      return DCC_COMPUTER_OK;
+    }
+  }
+  *method = DCC_COMPUTER_METHOD_POINTER;
   int32_t status = prepare_pointer(bundle_id, pid, window_id, x, y, width, height, &point, 1, detail);
   if (status != DCC_COMPUTER_OK) return status;
   CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
@@ -519,24 +548,30 @@ static int32_t pointer_scroll(const char *bundle_id, pid_t pid, uint32_t window_
   return ok ? DCC_COMPUTER_OK : DCC_COMPUTER_ERR_EVENT;
 }
 
-int32_t dcc_computer_click_point(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, double click_x, double click_y, int32_t button, uint8_t click_count, char **detail) {
+int32_t dcc_computer_click_point(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, double click_x, double click_y, int32_t button, uint8_t click_count, bool foreground, int32_t *method, char **detail) {
   @autoreleasepool {
-    if (!bundle_id || !local_point_is_valid(click_x, click_y, width, height)) return DCC_COMPUTER_ERR_INVALID;
-    return pointer_click(bundle_id, pid, window_id, x, y, width, height, CGPointMake(x + click_x, y + click_y), button, click_count, detail);
+    if (!bundle_id || !method || !local_point_is_valid(click_x, click_y, width, height)) return DCC_COMPUTER_ERR_INVALID;
+    return pointer_click(bundle_id, pid, window_id, x, y, width, height, CGPointMake(x + click_x, y + click_y), button, click_count, foreground, method, detail);
   }
 }
 
-int32_t dcc_computer_scroll_point(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, double scroll_x, double scroll_y, int32_t delta_x, int32_t delta_y, char **detail) {
+int32_t dcc_computer_scroll_point(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, double scroll_x, double scroll_y, int32_t delta_x, int32_t delta_y, bool foreground, int32_t *method, char **detail) {
   @autoreleasepool {
-    if (!bundle_id || !local_point_is_valid(scroll_x, scroll_y, width, height)) return DCC_COMPUTER_ERR_INVALID;
-    return pointer_scroll(bundle_id, pid, window_id, x, y, width, height, CGPointMake(x + scroll_x, y + scroll_y), delta_x, delta_y, detail);
+    if (!bundle_id || !method || !local_point_is_valid(scroll_x, scroll_y, width, height)) return DCC_COMPUTER_ERR_INVALID;
+    return pointer_scroll(bundle_id, pid, window_id, x, y, width, height, CGPointMake(x + scroll_x, y + scroll_y), delta_x, delta_y, foreground, method, detail);
   }
 }
 
-int32_t dcc_computer_drag(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, double from_x, double from_y, double to_x, double to_y, char **detail) {
+int32_t dcc_computer_drag(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, double from_x, double from_y, double to_x, double to_y, bool foreground, int32_t *method, char **detail) {
   @autoreleasepool {
-    if (!bundle_id || !local_point_is_valid(from_x, from_y, width, height) || !local_point_is_valid(to_x, to_y, width, height)) return DCC_COMPUTER_ERR_INVALID;
+    if (!bundle_id || !method || !local_point_is_valid(from_x, from_y, width, height) || !local_point_is_valid(to_x, to_y, width, height)) return DCC_COMPUTER_ERR_INVALID;
     CGPoint points[2] = {CGPointMake(x + from_x, y + from_y), CGPointMake(x + to_x, y + to_y)};
+    NSDictionary *fresh = nil;
+    if (background_ready(foreground, bundle_id, pid, window_id, x, y, width, height, &fresh) && dcc_background_drag(pid, window_id, window_rect(fresh), points[0], points[1])) {
+      *method = DCC_COMPUTER_METHOD_BACKGROUND;
+      return DCC_COMPUTER_OK;
+    }
+    *method = DCC_COMPUTER_METHOD_POINTER;
     int32_t status = prepare_pointer(bundle_id, pid, window_id, x, y, width, height, points, 2, detail);
     if (status != DCC_COMPUTER_OK) return status;
     CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
@@ -709,7 +744,7 @@ static int32_t with_tree_element(const char *bundle_id, pid_t pid, uint32_t wind
 // the element publishes no such action (a clickable web div, a double-click,
 // a canvas), the same element is clicked with real pointer input at the
 // center of its visible part.
-int32_t dcc_computer_click_element(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, uint64_t handle, uint32_t index, int32_t button, uint8_t click_count, int32_t *method, char **detail) {
+int32_t dcc_computer_click_element(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, uint64_t handle, uint32_t index, int32_t button, uint8_t click_count, bool foreground, int32_t *method, char **detail) {
   @autoreleasepool {
     if (!method || (button != DCC_COMPUTER_BUTTON_LEFT && button != DCC_COMPUTER_BUTTON_RIGHT) || click_count < 1 || click_count > 2) return DCC_COMPUTER_ERR_INVALID;
     *method = 0;
@@ -725,19 +760,19 @@ int32_t dcc_computer_click_element(const char *bundle_id, int32_t pid, uint32_t 
       CGPoint center;
       int32_t status = visible_element_center(element, fresh, &center);
       if (status != DCC_COMPUTER_OK) return status;
-      *method = DCC_COMPUTER_METHOD_POINTER;
-      return pointer_click(bundle_id, pid, window_id, x, y, width, height, center, button, click_count, detail);
+      return pointer_click(bundle_id, pid, window_id, x, y, width, height, center, button, click_count, foreground, method, detail);
     });
   }
 }
 
-int32_t dcc_computer_scroll_element(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, uint64_t handle, uint32_t index, int32_t delta_x, int32_t delta_y, char **detail) {
+int32_t dcc_computer_scroll_element(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, uint64_t handle, uint32_t index, int32_t delta_x, int32_t delta_y, bool foreground, int32_t *method, char **detail) {
   @autoreleasepool {
+    if (!method) return DCC_COMPUTER_ERR_INVALID;
     return with_tree_element(bundle_id, pid, window_id, x, y, width, height, handle, index, ^int32_t(AXUIElementRef element, NSDictionary *fresh, bool is_menu) {
       CGPoint center;
       int32_t status = visible_element_center(element, fresh, &center);
       if (status != DCC_COMPUTER_OK) return status;
-      return pointer_scroll(bundle_id, pid, window_id, x, y, width, height, center, delta_x, delta_y, detail);
+      return pointer_scroll(bundle_id, pid, window_id, x, y, width, height, center, delta_x, delta_y, foreground, method, detail);
     });
   }
 }
@@ -1028,38 +1063,87 @@ int32_t dcc_computer_web_accessibility(int32_t pid, bool enabled) {
 
 #pragma mark - Keyboard input
 
-static int32_t post_unicode_chunk(pid_t pid, const UniChar *characters, UniCharCount count, const char *bundle_id, uint32_t window_id, double x, double y, double width, double height) {
-  NSDictionary *fresh = validated_window(bundle_id, pid, window_id, x, y, width, height);
+// Where keystrokes go: in the background the target only has to be its app's
+// key window (the app stays behind); in the foreground it must also be active.
+typedef struct {
+  const char *bundle_id;
+  pid_t pid;
+  uint32_t window_id;
+  double x, y, width, height;
+  bool background;
+} DCCKeyTarget;
+
+static int32_t key_target_ready(const DCCKeyTarget *target) {
+  NSDictionary *fresh = validated_window(target->bundle_id, target->pid, target->window_id, target->x, target->y, target->width, target->height);
   if (!fresh) return DCC_COMPUTER_ERR_TARGET_UNAVAILABLE;
-  if (!target_is_active_and_focused(pid, fresh)) return DCC_COMPUTER_ERR_FOCUS;
+  bool focused = target->background ? focused_window_matches(target->pid, fresh) : target_is_active_and_focused(target->pid, fresh);
+  return focused ? DCC_COMPUTER_OK : DCC_COMPUTER_ERR_FOCUS;
+}
+
+// Keyboard events go to the process, never to whichever app is frontmost
+// later: a focus change mid-text cannot leak keystrokes elsewhere.
+static void post_key_pair(const DCCKeyTarget *target, CGEventRef down, CGEventRef up) {
+  if (target->background) {
+    dcc_background_post_key(target->pid, down);
+    usleep(8 * 1000);
+    dcc_background_post_key(target->pid, up);
+  } else {
+    CGEventPostToPid(target->pid, down);
+    CGEventPostToPid(target->pid, up);
+  }
+}
+
+// Background first (the window becomes its app's key window without coming
+// forward); the foreground path raises and activates it.
+static int32_t prepare_keys(DCCKeyTarget *target, bool foreground, int32_t *method) {
+  NSDictionary *fresh = nil;
+  if (background_ready(foreground, target->bundle_id, target->pid, target->window_id, target->x, target->y, target->width, target->height, &fresh)) {
+    DCCKeyTarget probe = *target;
+    probe.background = true;
+    bool (^focused)(void) = ^bool { return key_target_ready(&probe) == DCC_COMPUTER_OK; };
+    if (dcc_background_focus_for_keys(target->pid, target->window_id, focused)) {
+      target->background = true;
+      *method = DCC_COMPUTER_METHOD_BACKGROUND;
+      return DCC_COMPUTER_OK;
+    }
+  }
+  target->background = false;
+  *method = DCC_COMPUTER_METHOD_POINTER;
+  return focus_target_window(target->bundle_id, target->pid, target->window_id, target->x, target->y, target->width, target->height, &fresh);
+}
+
+static int32_t post_unicode_chunk(const DCCKeyTarget *target, const UniChar *characters, UniCharCount count) {
+  int32_t status = key_target_ready(target);
+  if (status != DCC_COMPUTER_OK) return status;
   CGEventRef down = CGEventCreateKeyboardEvent(NULL, 0, true), up = CGEventCreateKeyboardEvent(NULL, 0, false);
   if (!down || !up) { if (down) CFRelease(down); if (up) CFRelease(up); return DCC_COMPUTER_ERR_EVENT; }
   CGEventKeyboardSetUnicodeString(down, count, characters); CGEventKeyboardSetUnicodeString(up, count, characters);
-  // Keyboard events go to the process, never to whichever app is frontmost
-  // later: a focus change mid-text cannot leak keystrokes elsewhere.
-  CGEventPostToPid(pid, down); CGEventPostToPid(pid, up);
+  // No modifiers on text: Chromium reads an uppercase letter with Shift set
+  // as a shortcut.
+  CGEventSetFlags(down, 0); CGEventSetFlags(up, 0);
+  post_key_pair(target, down, up);
   CFRelease(down); CFRelease(up);
   return DCC_COMPUTER_OK;
 }
 
-int32_t dcc_computer_type(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, const char *text) {
+int32_t dcc_computer_type(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, const char *text, bool foreground, int32_t *method) {
   @autoreleasepool {
     if (!AXIsProcessTrusted()) return DCC_COMPUTER_ERR_PERMISSION;
-    if (!bundle_id || !text) return DCC_COMPUTER_ERR_INVALID;
+    if (!bundle_id || !text || !method) return DCC_COMPUTER_ERR_INVALID;
     NSString *value = [NSString stringWithUTF8String:text];
     if (!value || value.length == 0 || value.length > 4000) return DCC_COMPUTER_ERR_INVALID;
-    NSDictionary *fresh = nil;
-    int32_t status = focus_target_window(bundle_id, pid, window_id, x, y, width, height, &fresh);
+    DCCKeyTarget target = {bundle_id, pid, window_id, x, y, width, height, false};
+    int32_t status = prepare_keys(&target, foreground, method);
     if (status != DCC_COMPUTER_OK) return status;
     NSUInteger offset = 0;
     while (offset < value.length) {
-      NSUInteger count = MIN((NSUInteger)20, value.length - offset);
+      NSUInteger count = MIN((NSUInteger)16, value.length - offset);
       if (count > 1 && offset + count < value.length) {
         unichar last = [value characterAtIndex:offset + count - 1], next = [value characterAtIndex:offset + count];
         if (CFStringIsSurrogateHighCharacter(last) && CFStringIsSurrogateLowCharacter(next)) count--;
       }
-      UniChar characters[20]; [value getCharacters:characters range:NSMakeRange(offset, count)];
-      status = post_unicode_chunk(pid, characters, (UniCharCount)count, bundle_id, window_id, x, y, width, height);
+      UniChar characters[16]; [value getCharacters:characters range:NSMakeRange(offset, count)];
+      status = post_unicode_chunk(&target, characters, (UniCharCount)count);
       if (status != DCC_COMPUTER_OK) return status;
       offset += count;
     }
@@ -1076,20 +1160,19 @@ static bool supported_key_code(uint16_t key_code) {
   }
 }
 
-int32_t dcc_computer_key(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, uint16_t key_code, uint64_t flags) {
+int32_t dcc_computer_key(const char *bundle_id, int32_t pid, uint32_t window_id, double x, double y, double width, double height, uint16_t key_code, uint64_t flags, bool foreground, int32_t *method) {
   @autoreleasepool {
     const uint64_t allowed_flags = ((uint64_t)1 << 17) | ((uint64_t)1 << 18) | ((uint64_t)1 << 19) | ((uint64_t)1 << 20);
     if (!AXIsProcessTrusted()) return DCC_COMPUTER_ERR_PERMISSION;
-    if (!bundle_id || !supported_key_code(key_code) || (flags & ~allowed_flags) != 0) return DCC_COMPUTER_ERR_INVALID;
-    NSDictionary *fresh = nil;
-    int32_t status = focus_target_window(bundle_id, pid, window_id, x, y, width, height, &fresh);
+    if (!bundle_id || !method || !supported_key_code(key_code) || (flags & ~allowed_flags) != 0) return DCC_COMPUTER_ERR_INVALID;
+    DCCKeyTarget target = {bundle_id, pid, window_id, x, y, width, height, false};
+    int32_t status = prepare_keys(&target, foreground, method);
     if (status != DCC_COMPUTER_OK) return status;
     CGEventRef down = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)key_code, true), up = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)key_code, false);
     if (!down || !up) { if (down) CFRelease(down); if (up) CFRelease(up); return DCC_COMPUTER_ERR_EVENT; }
     CGEventSetFlags(down, (CGEventFlags)flags); CGEventSetFlags(up, (CGEventFlags)flags);
-    fresh = validated_window(bundle_id, pid, window_id, x, y, width, height);
-    status = !fresh ? DCC_COMPUTER_ERR_TARGET_UNAVAILABLE : (target_is_active_and_focused(pid, fresh) ? DCC_COMPUTER_OK : DCC_COMPUTER_ERR_FOCUS);
-    if (status == DCC_COMPUTER_OK) { CGEventPostToPid(pid, down); CGEventPostToPid(pid, up); }
+    status = key_target_ready(&target);
+    if (status == DCC_COMPUTER_OK) post_key_pair(&target, down, up);
     CFRelease(down); CFRelease(up);
     return status;
   }

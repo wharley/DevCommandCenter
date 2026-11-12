@@ -3502,7 +3502,7 @@
         "remaining": "O pedido expira em {{time}}",
         "appsTitle": "Aplicativos para autorizar",
         "appsHint": "Escolha os aplicativos em execução para este pedido. Nada é selecionado por padrão.",
-        "inputHint": "Para clicar, rolar e arrastar, o DCC traz o aplicativo para a frente e move o ponteiro do mouse. O acesso termina após 10 minutos sem uso pelo agente e, no máximo, em 1 hora.",
+        "inputHint": "O agente clica, rola e digita no aplicativo em segundo plano: ele fica atrás das suas janelas e o seu mouse não se mexe. Só traz o aplicativo para a frente quando ele não aceita isso. O acesso termina após 10 minutos sem uso pelo agente e, no máximo, em 1 hora.",
         "appsEmpty": "Nenhum aplicativo em execução está disponível.",
         "permissions": "Conceda as duas permissões do macOS antes de permitir o controle.",
         "openAccessibility": "Abrir ajustes de Acessibilidade",

@@ -3502,7 +3502,7 @@
         "remaining": "Request expires in {{time}}",
         "appsTitle": "Apps to authorize",
         "appsHint": "Choose the running apps for this request. Nothing is selected by default.",
-        "inputHint": "To click, scroll and drag, DCC brings the app to the front and moves the mouse pointer. Access ends after 10 minutes without use by the agent, and after 1 hour at most.",
+        "inputHint": "The agent clicks, scrolls and types in the app in the background: it stays behind your windows and your mouse does not move. It brings the app to the front only when the app does not accept that. Access ends after 10 minutes without use by the agent, and after 1 hour at most.",
         "appsEmpty": "No running apps are available.",
         "permissions": "Grant both macOS permissions before allowing control.",
         "openAccessibility": "Open Accessibility settings",

@@ -1270,6 +1270,10 @@ struct ComputerClickArgs {
     button: PointerButton,
     #[serde(default = "default_click_count")]
     click_count: u8,
+    /// Raise the app and use the real cursor: only when background input
+    /// had no visible effect.
+    #[serde(default)]
+    foreground: bool,
 }
 
 fn default_click_count() -> u8 {
@@ -1290,6 +1294,10 @@ struct ComputerScrollArgs {
     delta_x: i32,
     #[serde(default)]
     delta_y: i32,
+    /// Raise the app and use the real cursor: only when background input
+    /// had no visible effect.
+    #[serde(default)]
+    foreground: bool,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1299,6 +1307,10 @@ struct ComputerDragArgs {
     from_y: f64,
     to_x: f64,
     to_y: f64,
+    /// Raise the app and use the real cursor: only when background input
+    /// had no visible effect.
+    #[serde(default)]
+    foreground: bool,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1335,6 +1347,10 @@ fn computer_action_target_is_well_formed(target: &Option<ComputerActionTarget>) 
 struct ComputerTypeArgs {
     target: ComputerTargetSnapshot,
     text: String,
+    /// Raise the app and use the real cursor: only when background input
+    /// had no visible effect.
+    #[serde(default)]
+    foreground: bool,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1343,6 +1359,10 @@ struct ComputerKeyArgs {
     key: String,
     #[serde(default)]
     modifiers: Vec<String>,
+    /// Raise the app and use the real cursor: only when background input
+    /// had no visible effect.
+    #[serde(default)]
+    foreground: bool,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2119,6 +2139,7 @@ async fn dispatch_tool(
                             &at,
                             args.button,
                             args.click_count,
+                            args.foreground,
                         )
                         .map(|method| {
                             let clicks = match (args.button, args.click_count) {
@@ -2159,13 +2180,15 @@ async fn dispatch_tool(
                             &at,
                             args.delta_x,
                             args.delta_y,
+                            args.foreground,
                         )
-                        .map(|()| {
+                        .map(|method| {
                             format!(
-                                "Scrolled by {},{} pixels {} with pointer wheel input; the app was brought to the front",
+                                "Scrolled by {},{} pixels {} {}",
                                 args.delta_x,
                                 args.delta_y,
-                                describe_action_target(&at)
+                                describe_action_target(&at),
+                                describe_input_method(method)
                             )
                         }))
                 })
@@ -2191,11 +2214,16 @@ async fn dispatch_tool(
                             &args.target,
                             (args.from_x, args.from_y),
                             (args.to_x, args.to_y),
+                            args.foreground,
                         )
-                        .map(|()| {
+                        .map(|method| {
                             format!(
-                                "Dragged from {},{} to {},{} with pointer input; the app was brought to the front",
-                                args.from_x, args.from_y, args.to_x, args.to_y
+                                "Dragged from {},{} to {},{} {}",
+                                args.from_x,
+                                args.from_y,
+                                args.to_x,
+                                args.to_y,
+                                describe_input_method(method)
                             )
                         }))
                 })
@@ -2242,11 +2270,18 @@ async fn dispatch_tool(
                 let lease_id = binding.lease_id.clone();
                 let result = computer_blocking(move || {
                     Ok(computer
-                        .type_text(&session_id, &lease_id, &args.target, &args.text)
-                        .map(|()| {
+                        .type_text(
+                            &session_id,
+                            &lease_id,
+                            &args.target,
+                            &args.text,
+                            args.foreground,
+                        )
+                        .map(|method| {
                             format!(
-                                "Typed {} characters into the focused element",
-                                args.text.chars().count()
+                                "Typed {} characters into the focused element {}",
+                                args.text.chars().count(),
+                                describe_input_method(method)
                             )
                         }))
                 })
@@ -2272,8 +2307,9 @@ async fn dispatch_tool(
                             &args.target,
                             &args.key,
                             &args.modifiers,
+                            args.foreground,
                         )
-                        .map(|()| {
+                        .map(|method| {
                             let combination = args
                                 .modifiers
                                 .iter()
@@ -2281,7 +2317,7 @@ async fn dispatch_tool(
                                 .chain(std::iter::once(args.key.as_str()))
                                 .collect::<Vec<_>>()
                                 .join("+");
-                            format!("Pressed {combination}")
+                            format!("Pressed {combination} {}", describe_input_method(method))
                         }))
                 })
                 .await;
@@ -2994,8 +3030,11 @@ fn describe_input_method(method: ComputerInputMethod) -> &'static str {
         ComputerInputMethod::Accessibility => {
             "through its accessibility action; the pointer did not move"
         }
-        ComputerInputMethod::Pointer => {
-            "with pointer input; the app was brought to the front and the cursor moved"
+        ComputerInputMethod::Background => {
+            "in the background; the window stayed where it was and the cursor did not move. If nothing changed, the app may ignore background input: try once more with foreground true"
+        }
+        ComputerInputMethod::Foreground => {
+            "in the foreground; the app was brought to the front and the cursor moved"
         }
     }
 }
@@ -3292,12 +3331,12 @@ fn tools() -> Vec<Value> {
         json!({"name":"dcc_computer_status","description":"Read desktop computer-use availability for this provider session. It never lists target apps before approval. After approval it lists only allowed windows and their current dimensions. Capture a window to act on it; every action result carries the next generation. If access is needed, call dcc_computer_request_control. Not for the iOS Simulator: use the dcc_device_* tools for it.","inputSchema":{"type":"object","additionalProperties":false,"properties":{}},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}}),
         json!({"name":"dcc_computer_request_control","description":"Ask the user to authorize desktop computer use for this session. Explain the concrete task in reason. This waits for the user's allow or deny decision and does not expose app metadata before approval.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":false}}),
         json!({"name":"dcc_computer_capture","description":"Observe one allowed target window after approval: a screenshot plus its accessibility elements, one per line as `e<ref> role \"name\" … [actions] @x,y wxh` in the screenshot's window-local pixels (top-left origin), with the app's open menus. It returns a one-shot target generation. Each action consumes it and returns the window afterwards with a new one, so capture again only to start over or to switch windows.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"bundleId":{"type":"string","minLength":1,"maxLength":255},"windowId":{"type":"integer","minimum":1}},"required":["bundleId","windowId"]},"annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}}),
-        json!({"name":"dcc_computer_click","description":"Click in an observed allowed window, by ref or by x/y, not both. Prefer ref, an element from the latest observation: DCC presses it through accessibility when it can, without moving the pointer, and otherwise clicks the center of its visible part. Use x/y in screenshot window-local pixels for what the element list does not show. Pointer clicks bring the app to the front and move the system cursor. button right opens a context menu; clickCount 2 double-clicks. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"ref":computer_ref.clone(),"x":{"type":"number","minimum":0},"y":{"type":"number","minimum":0},"button":{"type":"string","enum":["left","right"],"default":"left"},"clickCount":{"type":"integer","minimum":1,"maximum":2,"default":1}},"required":["target"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
-        json!({"name":"dcc_computer_scroll","description":"Scroll the content under an element ref or an x/y point of an observed allowed window by deltaX/deltaY pixels; positive deltaY reveals content further down, positive deltaX further right. It uses pointer wheel input, so the app comes to the front. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"ref":computer_ref.clone(),"x":{"type":"number","minimum":0},"y":{"type":"number","minimum":0},"deltaX":{"type":"integer","minimum":-MAX_SCROLL_DELTA,"maximum":MAX_SCROLL_DELTA,"default":0},"deltaY":{"type":"integer","minimum":-MAX_SCROLL_DELTA,"maximum":MAX_SCROLL_DELTA,"default":0}},"required":["target"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
-        json!({"name":"dcc_computer_drag","description":"Press the left button at fromX/fromY, move to toX/toY and release, in screenshot window-local pixels of an observed allowed window: sliders, drag and drop, text selection. The app comes to the front and the cursor moves. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"fromX":{"type":"number","minimum":0},"fromY":{"type":"number","minimum":0},"toX":{"type":"number","minimum":0},"toY":{"type":"number","minimum":0}},"required":["target","fromX","fromY","toX","toY"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
+        json!({"name":"dcc_computer_click","description":"Click in an observed allowed window, by ref or by x/y, not both. Prefer ref, an element from the latest observation: DCC presses it through accessibility when it can, without moving the pointer, and otherwise clicks the center of its visible part. Use x/y in screenshot window-local pixels for what the element list does not show. Clicks by point go to the window in the background: it stays behind the person's apps and their cursor does not move. button right opens a context menu; clickCount 2 double-clicks. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"ref":computer_ref.clone(),"x":{"type":"number","minimum":0},"y":{"type":"number","minimum":0},"button":{"type":"string","enum":["left","right"],"default":"left"},"clickCount":{"type":"integer","minimum":1,"maximum":2,"default":1},"foreground":{"type":"boolean","default":false,"description":"Bring the app to the front and use the real cursor and keyboard. Only after a background action had no visible effect."}},"required":["target"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
+        json!({"name":"dcc_computer_scroll","description":"Scroll the content under an element ref or an x/y point of an observed allowed window by deltaX/deltaY pixels; positive deltaY reveals content further down, positive deltaX further right. Wheel input goes to the window in the background. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"ref":computer_ref.clone(),"x":{"type":"number","minimum":0},"y":{"type":"number","minimum":0},"deltaX":{"type":"integer","minimum":-MAX_SCROLL_DELTA,"maximum":MAX_SCROLL_DELTA,"default":0},"deltaY":{"type":"integer","minimum":-MAX_SCROLL_DELTA,"maximum":MAX_SCROLL_DELTA,"default":0},"foreground":{"type":"boolean","default":false,"description":"Bring the app to the front and use the real cursor and keyboard. Only after a background action had no visible effect."}},"required":["target"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
+        json!({"name":"dcc_computer_drag","description":"Press the left button at fromX/fromY, move to toX/toY and release, in screenshot window-local pixels of an observed allowed window: sliders, drag and drop, text selection. It goes to the window in the background. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"fromX":{"type":"number","minimum":0},"fromY":{"type":"number","minimum":0},"toX":{"type":"number","minimum":0},"toY":{"type":"number","minimum":0},"foreground":{"type":"boolean","default":false,"description":"Bring the app to the front and use the real cursor and keyboard. Only after a background action had no visible effect."}},"required":["target","fromX","fromY","toX","toY"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_computer_set_value","description":"Replace the whole value of an element listed as editable, by ref, through accessibility. Prefer it over typing to fill a text field: it is exact and does not move the pointer. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"ref":computer_ref,"value":{"type":"string","maxLength":2000}},"required":["target","ref","value"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
-        json!({"name":"dcc_computer_type","description":"Type bounded text at the keyboard focus of an observed allowed window; click or set focus first. A newline presses Return, which may submit a form. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"text":{"type":"string","minLength":1,"maxLength":2000}},"required":["target","text"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
-        json!({"name":"dcc_computer_key","description":"Press one supported key combination in an observed allowed window, for example COMMAND+L, ENTER, TAB or PAGE_DOWN. It reaches only that app, so system-wide shortcuts do not apply. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target,"key":{"type":"string","enum":computer_keys},"modifiers":{"type":"array","maxItems":4,"items":{"type":"string","enum":["SHIFT","CONTROL","OPTION","COMMAND"]}}},"required":["target","key"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
+        json!({"name":"dcc_computer_type","description":"Type bounded text at the keyboard focus of an observed allowed window; click or set focus first. A newline presses Return, which may submit a form. The keys go to that window in the background. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target.clone(),"text":{"type":"string","minLength":1,"maxLength":2000},"foreground":{"type":"boolean","default":false,"description":"Bring the app to the front and use the real cursor and keyboard. Only after a background action had no visible effect."}},"required":["target","text"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
+        json!({"name":"dcc_computer_key","description":"Press one supported key combination in an observed allowed window, for example COMMAND+L, ENTER, TAB or PAGE_DOWN. It reaches only that app, so system-wide shortcuts do not apply. Returns the window afterwards with a new generation.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"target":computer_target,"key":{"type":"string","enum":computer_keys},"modifiers":{"type":"array","maxItems":4,"items":{"type":"string","enum":["SHIFT","CONTROL","OPTION","COMMAND"]}},"foreground":{"type":"boolean","default":false,"description":"Bring the app to the front and use the real cursor and keyboard. Only after a background action had no visible effect."}},"required":["target","key"]},"annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}}),
         json!({"name":"dcc_delegate_task","description":"Only when the human asks for it: delegate a bounded, self-contained task to another coding agent (a different provider or model) working in this same workspace. Never use it to split up the human's own request. Returns a taskId immediately; DCC later sends you the result as a new message starting with [DCC]. End your turn or keep working on independent parts — do not poll. The child sees only `task` plus the workspace's git context, so include everything it needs. review and explain are read-only. implement edits your checkout directly, so its edits are already in your workspace when the result arrives; if it touches files you are editing, check git status before continuing. A delegated agent cannot delegate again, and a turn started by a [DCC] result cannot delegate either: report it and let the human ask for more.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"task":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TASK_CHARS},"title":{"type":"string","maxLength":MAX_DELEGATED_TITLE_CHARS,"description":"A short name for the task (a few words, in the human's language), shown to them as the child conversation's title, e.g. \"Corrigir respostas antigas\"."},"mode":{"type":"string","enum":["review","explain","implement"],"default":"review"},"provider":{"type":"string","enum":dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS,"description":"Target provider. Omit to let DCC pick an available provider other than yours."},"model":{"type":"string","maxLength":128,"description":"Target model id. Omit for the provider's default."},"wait":{"type":"boolean","default":false,"description":"Block until the task finishes (or timeoutSeconds) and return its result. Use only when you cannot continue without it."},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":600,"default":300}},"required":["task"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
         json!({"name":"dcc_propose_task","description":"Propose a piece of work as its own task: a separate, long-lived conversation in this workspace, on your own provider unless you name another, that the human starts with one click. What the human asked for in this conversation is yours to do here, not a task. Use this only when the human asks to split work off, run it in parallel or open another task, or for an independent piece of work outside their request that you noticed; small follow-ups stay a sentence in your reply. Only one task edits files at a time. Never propose a task to review, re-review, validate or fix another task's work: read its diff, fix it and run the checks yourself in this conversation. Nothing runs until the human starts it. The task sees only your brief plus the workspace, so make it self-contained. Each time the task ends a turn, DCC sends you a short status starting with [DCC]: tell the human where things stand and stop; a [DCC] turn cannot propose tasks. At most 3 proposals per turn. Use start=now only when the human, in this turn, explicitly asked you to start the work. A task cannot propose tasks.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TITLE_CHARS,"description":"A short name in the human's language, shown on the card and as the task's title, e.g. \"Fase 2: notificações push\"."},"task":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TASK_CHARS,"description":"The self-contained brief: goal, files or area, constraints, and what done looks like."},"edits":{"type":"boolean","default":true,"description":"The task changes files, straight in your checkout: its edits are there when it reports back. false keeps it read-only."},"provider":{"type":"string","enum":dcc_tauri::delegation_runtime::DELEGATION_PROVIDER_IDS,"description":"Omit to use your own provider."},"model":{"type":"string","maxLength":128,"description":"Model id. Omit for the provider's default."},"start":{"type":"string","enum":["propose","now"],"default":"propose","description":"propose shows a card the human starts; now starts at once and is refused unless the human started this turn."}},"required":["title","task"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),
         json!({"name":"dcc_task_message","description":"Send a follow-up to one of your open tasks (from dcc_propose_task or dcc_open_task; dcc_overview lists yours, from any room, under yourOpenTasks — continued from another room, a task moves to it). It runs as a turn of its own in that task, and when it ends DCC sends you a short status starting with [DCC]. Only from a turn the human started; from a [DCC] status, tell the human what you would send instead.","inputSchema":{"type":"object","additionalProperties":false,"properties":{"taskId":{"type":"string","minLength":1,"maxLength":128},"message":{"type":"string","minLength":1,"maxLength":MAX_DELEGATED_TASK_CHARS}},"required":["taskId","message"]},"annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}}),

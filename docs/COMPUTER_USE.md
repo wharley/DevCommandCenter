@@ -43,23 +43,36 @@ replaced, or dropped with the grant.
 **Accessibility actions** are exact, do not move the user's cursor, and work
 without bringing the app forward.
 
-**Pointer input** is real HID input posted to `kCGHIDEventTap`, as when a person
-clicks. It is the only path that reaches web content and custom-drawn controls
-that publish no accessibility action. Before posting, DCC brings the exact
-window to the front with keyboard focus: AX raise, AX main, AX frontmost, and
-app activation. These public controls work while DCC itself is not the active
-app, and they select the right window of a multi-window app. DCC then proves
-focus and that the point is not covered. If another app's window covers the
-point, the action fails with that app's name. The target app's own overlays may
-cover it, because they are part of the observation.
+**Background input** comes first for clicks by point, scroll, drag and keys.
+The events go to the target process and window through SkyLight
+(`SLEventPostToPid`), stamped with the window id and the window-local point.
+The window is not raised and the person's cursor does not move, so a window
+covered by another app is still reachable. Before a click or drag, DCC posts
+the window server's focus record to the target only, so the person's front app
+keeps its keyboard. Clicks start with an off-window click at (-1, -1), which
+Chromium and Electron need before they accept a click as a user gesture. Keys
+wait until the target is its app's key window and stop if it never becomes
+one. The technique is ported from trycua/cua (MIT), `native/computer_use_background.m`.
+
+The SkyLight symbols are private and resolved at runtime. When any is missing,
+or the focus record is refused, the action takes the foreground path instead.
+Each result says which path it took (`accessibility`, `background`,
+`foreground`). Some apps ignore background input (canvas apps such as Blender,
+Unity and games). When an action had no visible effect, the agent repeats it
+once with `foreground: true`.
+
+**Foreground input** is real HID input posted to `kCGHIDEventTap`, as when a
+person clicks. Before posting, DCC brings the exact window to the front with
+keyboard focus: AX raise, AX main, AX frontmost, and app activation. These
+public controls work while DCC itself is not the active app, and they select
+the right window of a multi-window app. DCC then proves focus and that the
+point is not covered. If another app's window covers the point, the action
+fails with that app's name. The target app's own overlays may cover it,
+because they are part of the observation.
 
 **Keyboard input** is posted to the target process, never to whichever app is
 frontmost later, so a focus change in the middle of the text cannot leak
 keystrokes elsewhere.
-
-Synthetic events posted to a process without focus, and private SkyLight
-APIs, are deliberately not used. Chromium ignores the former. The latter are
-unsupported and can break with any macOS update.
 
 ## Web content (Chromium, Electron)
 
