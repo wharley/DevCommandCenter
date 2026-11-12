@@ -1,6 +1,5 @@
 //! "DCC Usage" over the window (`setIsUsageOpen`): the sidebar's chart
-//! button and the palette open it, with the open task's project for
-//! "Projeto atual".
+//! button and the palette open it.
 
 use gpui::{AnyElement, AppContext, Context, Entity, IntoElement, Subscription};
 
@@ -14,22 +13,8 @@ impl Shell {
         if self.usage.is_some() {
             return;
         }
-        // `selectedWorkspace.projectId`
-        let project_id = self
-            .conversation
-            .read(cx)
-            .data()
-            .map(|data| data.task_id.clone())
-            .and_then(|task| {
-                self.sidebar
-                    .read(cx)
-                    .tasks()
-                    .iter()
-                    .find(|summary| summary.id == task)
-                    .map(|summary| summary.project_id.clone())
-            });
         let db_path = crate::data::loader::database_path();
-        let usage = cx.new(|cx| Usage::new(db_path, project_id, cx));
+        let usage = cx.new(|cx| Usage::new(db_path, cx));
         let events = cx.subscribe(&usage, |shell, _, event, cx| match event {
             UsageEvent::Closed => {
                 shell.usage = None;

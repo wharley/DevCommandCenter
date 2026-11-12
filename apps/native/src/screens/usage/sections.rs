@@ -1,24 +1,28 @@
-//! `UsageContent`: four summary cards, then the providers' arena beside
-//! the days (`lg:grid-cols-[1fr_1.15fr]`), then the providers' scores
-//! beside the models' ranking. Under 1024px of window each pair stacks and
-//! the cards go two by two, as the desktop's `lg:`.
+//! The dashboard: eight KPI cards, the stats line (active days, streak,
+//! peaks, subagents) with the cost's notes, the metric per day as stacked
+//! bars grouped by runtime, model, via, project or agent, then "Quando
+//! você usa" beside the four bands of the day with the hours' bars. Under
+//! 1024px of window the pair stacks and the cards go two by two.
 
-use dcc_core::domain::usage::UsageDashboard;
+use dcc_core::domain::usage_logs::{GroupBy, Metric, OTHERS_GROUP, Runtime, UsageSummary, Via};
 use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*, px};
 
 use super::Usage;
-use super::charts;
-use crate::data::usage::{compact, dollars, percent, provider_color, short_date};
-use crate::i18n::{Args, I18n, Translate};
+use super::charts::{self, Column};
+use super::filters::{chip, group_key, metric_key, via_key};
+use crate::data::usage::{
+    compact, dollars_compact, group_color, percent, runtime_color, short_date,
+};
+use crate::i18n::{Args, I18n, Locale, Translate};
 use crate::theme::ActiveTheme;
 use crate::theme::color::hex;
-use crate::ui::{Badge, BadgeVariant, Icon, Tracked, tabular_nums};
+use crate::ui::{Icon, Tracked, tabular_nums};
 
 /// The desktop's `lg` breakpoint.
 const LARGE: f32 = 1024.0;
 
 /// `rounded-lg border border-border/60 p-4`
-fn card(cx: &Context<Usage>) -> gpui::Div {
+pub(super) fn card(cx: &Context<Usage>) -> gpui::Div {
     div()
         .min_w_0()
         .rounded(cx.theme().radius.lg)
@@ -28,12 +32,13 @@ fn card(cx: &Context<Usage>) -> gpui::Div {
 }
 
 /// `h3 text-[13px] font-medium` with a 10px line under it.
-fn card_title(
+pub(super) fn card_title(
     title: SharedString,
     subtitle: Option<SharedString>,
     cx: &Context<Usage>,
 ) -> gpui::Div {
     div()
+        .min_w_0()
         .child(
             div()
                 .text_size(px(13.0))
@@ -49,25 +54,15 @@ fn card_title(
         }))
 }
 
-/// Two side by side (each `flex-1`, the right `grow` as given), or stacked.
-fn pair(left: AnyElement, right: AnyElement, grow: f32, large: bool) -> AnyElement {
+/// Two side by side, or stacked.
+fn pair(left: AnyElement, right: AnyElement, large: bool) -> AnyElement {
+    let row = div().flex().gap(px(16.0));
     if large {
-        let mut right_box = div().min_w_0().flex_basis(px(0.0)).child(right);
-        right_box.style().flex_grow = Some(grow);
-        div()
-            .flex()
-            .gap(px(16.0))
-            .child(div().flex_1().flex_basis(px(0.0)).min_w_0().child(left))
-            .child(right_box)
+        row.child(div().flex_1().flex_basis(px(0.0)).min_w_0().child(left))
+            .child(div().flex_1().flex_basis(px(0.0)).min_w_0().child(right))
             .into_any_element()
     } else {
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(16.0))
-            .child(left)
-            .child(right)
-            .into_any_element()
+        row.flex_col().child(left).child(right).into_any_element()
     }
 }
 
@@ -96,11 +91,55 @@ fn grid(items: Vec<AnyElement>, columns: usize, gap: f32) -> AnyElement {
         .into_any_element()
 }
 
+/// A metric's value as the cards and charts write it.
+pub(super) fn metric_value(metric: Metric, value: f64, locale: Locale) -> String {
+    match metric {
+        Metric::Cost => dollars_compact(value, locale),
+        _ => compact(value.round().max(0.0) as u64, locale),
+    }
+}
+
+/// One decimal in the language's style.
+fn decimal(value: f64, locale: Locale) -> String {
+    let text = format!("{value:.1}");
+    match locale {
+        Locale::PtBr => text.replace('.', ","),
+        Locale::En => text,
+    }
+}
+
 impl Usage {
+    /// A legend group's name.
+    pub(super) fn group_label(&self, key: &str, cx: &Context<Self>) -> SharedString {
+        if key == OTHERS_GROUP {
+            return cx.t("usage.group.others");
+        }
+        match self.group_by {
+            GroupBy::Runtime => cx.t(&format!("usage.runtime.{key}")),
+            GroupBy::Via => cx.t(&via_key(Via::parse(key))),
+            GroupBy::Agent if key.is_empty() => cx.t("usage.group.main"),
+            _ if key.is_empty() => cx.t("usage.group.unknown"),
+            _ => SharedString::from(key.to_string()),
+        }
+    }
+
+    /// The colors of the legend's groups, in order.
+    fn group_colors(&self, summary: &UsageSummary) -> Vec<u32> {
+        summary
+            .groups
+            .iter()
+            .enumerate()
+            .map(|(index, (key, _))| match self.group_by {
+                GroupBy::Runtime => runtime_color(key),
+                _ => group_color(index, key == OTHERS_GROUP),
+            })
+            .collect()
+    }
+
     /// `width` is the window's (the breakpoints are the viewport's).
     pub(super) fn content(
         &self,
-        dashboard: &UsageDashboard,
+        summary: &UsageSummary,
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -110,70 +149,120 @@ impl Usage {
             .flex_col()
             .min_w_0()
             .gap(px(16.0))
-            .child(self.summary(dashboard, large, cx))
+            .child(self.kpis(summary, large, cx))
+            .child(self.stats(summary, cx))
+            .child(self.days(summary, cx))
             .child(pair(
-                self.arena(dashboard, cx),
-                self.days(dashboard, cx),
-                1.15,
-                large,
-            ))
-            .child(pair(
-                self.scores(dashboard, cx),
-                self.models(dashboard, cx),
-                1.0,
+                self.heatmap(summary, cx),
+                self.bands(summary, cx),
                 large,
             ))
             .into_any_element()
     }
 
-    fn summary(
-        &self,
-        dashboard: &UsageDashboard,
-        large: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn kpis(&self, summary: &UsageSummary, large: bool, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let locale = cx.global::<I18n>().locale();
-        let totals = &dashboard.totals;
-        let coverage = percent(totals.measured_turns, totals.turns);
-        let cost = totals
-            .cost_usd
-            .map_or_else(|| "—".to_string(), |cost| dollars(cost, locale));
+        let tokens = &summary.tokens;
+        let share = |part: u64, total: u64| format!("{:.0}", percent(part, total));
+        let per = |part: u64, total: u64| {
+            if total == 0 {
+                0.0
+            } else {
+                part as f64 / total as f64
+            }
+        };
+        let metric_name = cx.t(metric_key(self.metric)).to_lowercase();
         let cards = [
             (
                 "sparkles",
-                cx.t("usage.metrics.tokens"),
-                compact(totals.total_tokens, locale),
+                cx.t("usage.metric.totalTokens"),
+                compact(tokens.total(), locale),
                 cx.t_with(
-                    "usage.metrics.tokenBreakdown",
-                    &Args::default()
-                        .with("input", compact(totals.input_tokens, locale))
-                        .with("output", compact(totals.output_tokens, locale)),
+                    "usage.kpi.cacheShare",
+                    &Args::default().with("percent", share(tokens.cache_read, tokens.total())),
                 ),
             ),
             (
-                "activity",
-                cx.t("usage.metrics.activity"),
-                compact(totals.turns, locale),
-                cx.t_with(
-                    "usage.metrics.sessions",
-                    &Args::count(totals.sessions as i64),
-                ),
+                "zap",
+                cx.t("usage.metric.newTokens"),
+                compact(tokens.new_tokens(), locale),
+                cx.t("usage.kpi.newHint"),
             ),
             (
-                "gauge",
-                cx.t("usage.metrics.coverage"),
-                format!("{coverage:.0}%"),
+                "message-square",
+                cx.t("usage.metric.output"),
+                compact(tokens.output, locale),
                 cx.t_with(
-                    "usage.metrics.measuredTurns",
-                    &Args::count(totals.measured_turns as i64),
+                    "usage.kpi.reasoningShare",
+                    &Args::default().with("percent", share(tokens.reasoning, tokens.output)),
                 ),
             ),
             (
                 "coins",
-                cx.t("usage.metrics.cost"),
-                cost,
-                cx.t("usage.metrics.reportedCost"),
+                cx.t("usage.metric.cost"),
+                dollars_compact(summary.cost_usd, locale),
+                cx.t_with(
+                    "usage.kpi.costSplit",
+                    &Args::default()
+                        .with(
+                            "claude",
+                            dollars_compact(
+                                summary.cost_by_runtime[Runtime::Claude.index()],
+                                locale,
+                            ),
+                        )
+                        .with(
+                            "codex",
+                            dollars_compact(
+                                summary.cost_by_runtime[Runtime::Codex.index()],
+                                locale,
+                            ),
+                        ),
+                ),
+            ),
+            (
+                "activity",
+                cx.t("usage.metric.calls"),
+                compact(summary.calls, locale),
+                cx.t_with(
+                    "usage.kpi.perCall",
+                    &Args::default().with(
+                        "value",
+                        compact(per(tokens.total(), summary.calls).round() as u64, locale),
+                    ),
+                ),
+            ),
+            (
+                "messages-square",
+                cx.t("usage.metric.turns"),
+                compact(summary.turns, locale),
+                cx.t_with(
+                    "usage.kpi.perTurn",
+                    &Args::default()
+                        .with("value", decimal(per(summary.calls, summary.turns), locale)),
+                ),
+            ),
+            (
+                "layers",
+                cx.t("usage.kpi.sessions"),
+                compact(summary.sessions, locale),
+                cx.t_with(
+                    "usage.kpi.subagentShare",
+                    &Args::default().with(
+                        "percent",
+                        share(summary.subagent_sessions, summary.sessions),
+                    ),
+                ),
+            ),
+            (
+                "workflow",
+                cx.t("usage.kpi.viaDcc"),
+                format!("{:.0}%", summary.dcc_percent),
+                cx.t_with(
+                    "usage.kpi.viaDccHint",
+                    &Args::default().with("metric", metric_name),
+                ),
             ),
         ]
         .into_iter()
@@ -224,386 +313,298 @@ impl Usage {
         grid(cards, if large { 4 } else { 2 }, 8.0)
     }
 
-    fn arena(&self, dashboard: &UsageDashboard, cx: &mut Context<Self>) -> AnyElement {
+    /// "N de M dias ativos · maior sequência X dias · dia de pico … ·
+    /// hora de pico … · Y% em subagentes", and the cost's notes.
+    fn stats(&self, summary: &UsageSummary, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let locale = cx.global::<I18n>().locale();
-        let tokens = dashboard.totals.total_tokens > 0;
-        let total: u64 = dashboard
-            .providers
-            .iter()
-            .map(|provider| charts::metric(provider, tokens))
-            .sum();
-        let ring = div()
-            .debug_selector(|| "usage-ring".into())
-            .relative()
-            .mx_auto()
-            .flex_none()
-            .size(px(160.0))
-            .child(charts::ring(
-                charts::ring_stops(&dashboard.providers, tokens),
-                colors.muted,
-            ))
-            .child(
-                div()
-                    .absolute()
-                    .top(px(20.0))
-                    .left(px(20.0))
-                    .size(px(120.0))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .rounded_full()
-                    .bg(colors.popover)
-                    .border_1()
-                    .border_color(colors.border.opacity(0.5))
-                    .child(
-                        div()
-                            .text_size(px(20.0))
-                            .line_height(px(28.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .font_features(tabular_nums())
-                            .child(compact(total, locale)),
-                    )
-                    .child(
-                        div()
-                            .text_color(colors.muted_foreground)
-                            .child(Tracked::new(
-                                if tokens {
-                                    cx.t("usage.units.tokens")
-                                } else {
-                                    cx.t("usage.units.turns")
-                                }
-                                .to_uppercase(),
-                                10.0,
-                                0.08,
-                            )),
-                    ),
+        let mut parts: Vec<SharedString> = vec![
+            cx.t_with(
+                "usage.stats.activeDays",
+                &Args::default()
+                    .with("active", summary.active_days.to_string())
+                    .with("total", summary.period_days.to_string()),
+            ),
+            cx.t_with(
+                "usage.stats.streak",
+                &Args::count(i64::from(summary.longest_streak)),
+            ),
+        ];
+        if let Some(peak) = summary.peak_day {
+            parts.push(
+                cx.t_with(
+                    "usage.stats.peakDay",
+                    &Args::default()
+                        .with("date", short_date(&peak.date.to_string(), locale))
+                        .with("value", metric_value(self.metric, peak.value, locale)),
+                ),
             );
-        let legend = dashboard
-            .providers
+        }
+        if let Some(peak) = summary.peak_hour {
+            parts.push(
+                cx.t_with(
+                    "usage.stats.peakHour",
+                    &Args::default()
+                        .with("date", short_date(&peak.date.to_string(), locale))
+                        .with("hour", format!("{:02}", peak.hour))
+                        .with("value", metric_value(self.metric, peak.value, locale)),
+                ),
+            );
+        }
+        parts.push(cx.t_with(
+            "usage.stats.subagents",
+            &Args::default().with("percent", format!("{:.0}", summary.subagent_percent)),
+        ));
+        let line = parts
             .iter()
-            .enumerate()
-            .map(|(index, provider)| {
-                let share = percent(charts::metric(provider, tokens), total);
-                let color = hex(provider_color(&provider.provider_id));
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .rounded(cx.theme().radius.md)
-                    .px(px(8.0))
-                    .py(px(6.0))
-                    .hover(|row| row.bg(colors.muted.opacity(0.4)))
-                    .child(
+            .map(SharedString::as_ref)
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let unpriced = (!summary.unknown_models.is_empty()).then(|| {
+            cx.t_with(
+                "usage.cost.unpriced",
+                &Args::count(summary.unpriced_calls as i64)
+                    .with("models", summary.unknown_models.join(", ")),
+            )
+        });
+        div()
+            .debug_selector(|| "usage-stats".into())
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .text_size(px(12.0))
+            .text_color(colors.muted_foreground)
+            .font_features(tabular_nums())
+            .child(div().text_color(colors.foreground).child(line))
+            .child(div().text_size(px(11.0)).child(cx.t("usage.cost.note")))
+            .children(unpriced.map(|text| div().text_size(px(11.0)).child(text)))
+            .into_any_element()
+    }
+
+    fn legend(&self, summary: &UsageSummary, cx: &Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors.clone();
+        let locale = cx.global::<I18n>().locale();
+        let palette = self.group_colors(summary);
+        div()
+            .flex()
+            .flex_wrap()
+            .gap_x(px(16.0))
+            .gap_y(px(6.0))
+            .children(
+                summary
+                    .groups
+                    .iter()
+                    .zip(palette)
+                    .map(|((key, value), color)| {
+                        let share = if summary.metric_total > 0.0 {
+                            value / summary.metric_total * 100.0
+                        } else {
+                            0.0
+                        };
                         div()
-                            .w(px(20.0))
-                            .flex_none()
-                            .text_center()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
                             .text_size(px(11.0))
-                            .text_color(colors.muted_foreground)
-                            .child((index + 1).to_string()),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .child(div().flex_none().size(px(8.0)).rounded_full().bg(color))
-                                    .child(
-                                        div()
-                                            .truncate()
-                                            .text_size(px(12.0))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .child(self.label(&provider.provider_id)),
-                                    ),
+                                    .flex_none()
+                                    .size(px(8.0))
+                                    .rounded_full()
+                                    .bg(hex(color)),
                             )
                             .child(
                                 div()
-                                    .mt(px(4.0))
-                                    .h(px(4.0))
-                                    .overflow_hidden()
-                                    .rounded_full()
-                                    .bg(colors.muted)
-                                    .child(
-                                        div()
-                                            .h_full()
-                                            .rounded_full()
-                                            .bg(color)
-                                            .w(gpui::relative(share as f32 / 100.0)),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(px(12.0))
-                            .font_weight(FontWeight::BOLD)
-                            .font_features(tabular_nums())
-                            .child(format!("{share:.1}%")),
-                    )
-            });
-        let count = dashboard.providers.len() as i64;
+                                    .max_w(px(220.0))
+                                    .truncate()
+                                    .child(self.group_label(key, cx)),
+                            )
+                            .child(
+                                div()
+                                    .text_color(colors.muted_foreground)
+                                    .font_features(tabular_nums())
+                                    .child(format!(
+                                        "{} · {share:.0}%",
+                                        metric_value(self.metric, *value, locale)
+                                    )),
+                            )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn days(&self, summary: &UsageSummary, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors.clone();
+        let locale = cx.global::<I18n>().locale();
+        let palette: Vec<_> = self.group_colors(summary).into_iter().map(hex).collect();
+        let columns: Vec<Column> = summary
+            .days
+            .iter()
+            .map(|day| {
+                day.parts
+                    .iter()
+                    .zip(&palette)
+                    .map(|(value, color)| (*color, *value))
+                    .collect()
+            })
+            .collect();
+        let top = charts::tallest(&columns);
+        let groups = GroupBy::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(index, group_by)| {
+                chip(
+                    SharedString::from(format!("usage-group-{index}")),
+                    cx.t(group_key(group_by)),
+                    self.group_by == group_by,
+                    None,
+                )
+                .on_click(cx.listener(move |usage, _, _, cx| usage.set_group_by(group_by, cx)))
+                .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        let metric = cx.t(metric_key(self.metric));
+        let first = summary.days.first().map(|day| day.date.to_string());
+        let last = summary.days.last().map(|day| day.date.to_string());
         card(cx)
+            .debug_selector(|| "usage-days".into())
             .child(
                 div()
                     .mb(px(12.0))
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .justify_between()
                     .gap(px(8.0))
                     .child(card_title(
-                        cx.t("usage.arena.title"),
-                        Some(if tokens {
-                            cx.t("usage.arena.byTokens")
-                        } else {
-                            cx.t("usage.arena.byTurns")
-                        }),
+                        cx.t_with("usage.days.title", &Args::default().with("metric", metric)),
+                        None,
                         cx,
                     ))
-                    .child(
-                        Badge::new(
-                            cx.t_with("usage.arena.providerCount", &Args::count(count)),
-                            BadgeVariant::Secondary,
-                        )
-                        .text_size(10.0),
-                    ),
+                    .child(div().flex().flex_wrap().gap(px(2.0)).children(groups)),
             )
-            // `sm:grid-cols-[180px_minmax(0,1fr)] sm:items-center gap-5`
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap(px(20.0))
-                    .child(div().flex().flex_none().w(px(180.0)).child(ring))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .gap(px(8.0))
-                            .children(legend),
-                    ),
+                    .text_size(px(10.0))
+                    .text_color(colors.muted_foreground)
+                    .font_features(tabular_nums())
+                    .child(metric_value(self.metric, top, locale)),
             )
+            .child(charts::stacked_bars(
+                columns,
+                colors.border.opacity(0.5),
+                176.0,
+            ))
+            .child(
+                div()
+                    .mt(px(4.0))
+                    .flex()
+                    .justify_between()
+                    .text_size(px(10.0))
+                    .text_color(colors.muted_foreground)
+                    .children(first.map(|date| short_date(&date, locale)))
+                    .children(last.map(|date| short_date(&date, locale))),
+            )
+            .child(div().mt(px(12.0)).child(self.legend(summary, cx)))
             .into_any_element()
     }
 
-    fn days(&self, dashboard: &UsageDashboard, cx: &mut Context<Self>) -> AnyElement {
+    fn bands(&self, summary: &UsageSummary, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let locale = cx.global::<I18n>().locale();
-        let tokens = dashboard.totals.total_tokens > 0;
-        let (dates, lines) = charts::timeline_lines(&dashboard.daily, &dashboard.providers, tokens);
-        let body = match (dates.first(), dates.last()) {
-            (Some(first), Some(last)) => div()
-                .debug_selector(|| "usage-timeline".into())
-                .min_w_0()
-                .child(charts::timeline(lines, colors.border.opacity(0.5)))
-                .child(
-                    div()
-                        .mt(px(4.0))
-                        .flex()
-                        .justify_between()
-                        .text_size(px(10.0))
-                        .text_color(colors.muted_foreground)
-                        .child(short_date(first, locale))
-                        .child(short_date(last, locale)),
-                )
-                .into_any_element(),
-            _ => div()
-                .flex()
-                .h(px(176.0))
-                .items_center()
-                .justify_center()
-                .text_size(px(12.0))
-                .text_color(colors.muted_foreground)
-                .child("—")
-                .into_any_element(),
-        };
-        card(cx)
-            .child(div().mb(px(8.0)).child(card_title(
-                cx.t("usage.timeline.title"),
-                Some(if tokens {
-                    cx.t("usage.timeline.tokens")
-                } else {
-                    cx.t("usage.timeline.turns")
-                }),
-                cx,
-            )))
-            .child(body)
-            .into_any_element()
-    }
-
-    fn scores(&self, dashboard: &UsageDashboard, cx: &mut Context<Self>) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        let locale = cx.global::<I18n>().locale();
-        let stat = |value: String, unit: SharedString| {
-            div()
-                .flex_1()
-                .flex_basis(px(0.0))
-                .text_center()
-                .child(
-                    div()
-                        .text_size(px(13.0))
-                        .font_weight(FontWeight::BOLD)
-                        .font_features(tabular_nums())
-                        .child(value),
-                )
-                .child(
-                    div()
-                        .text_size(px(9.0))
-                        .text_color(colors.muted_foreground)
-                        .child(unit),
-                )
-        };
-        let tiles = dashboard
-            .providers
+        let names = [
+            ("usage.bands.night", "00–06h"),
+            ("usage.bands.morning", "06–12h"),
+            ("usage.bands.afternoon", "12–18h"),
+            ("usage.bands.evening", "18–24h"),
+        ];
+        let tiles = summary
+            .bands
             .iter()
-            .map(|provider| {
+            .zip(names)
+            .map(|(band, (name, range))| {
                 div()
                     .min_w_0()
                     .rounded(cx.theme().radius.md)
                     .bg(colors.muted.opacity(0.3))
-                    .p(px(12.0))
+                    .p(px(10.0))
                     .child(
                         div()
                             .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .size(px(10.0))
-                                    .rounded_full()
-                                    .bg(hex(provider_color(&provider.provider_id))),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_size(px(12.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(self.label(&provider.provider_id)),
-                            )
-                            .when(provider.measured_turns == 0, |row| {
-                                row.child(
-                                    div().ml_auto().child(
-                                        Badge::new(
-                                            cx.t("usage.providers.noTelemetry"),
-                                            BadgeVariant::Outline,
-                                        )
-                                        .text_size(9.0),
-                                    ),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .mt(px(12.0))
-                            .flex()
-                            .gap(px(8.0))
-                            .child(stat(
-                                provider.sessions.to_string(),
-                                cx.t("usage.units.sessions"),
-                            ))
-                            .child(stat(provider.turns.to_string(), cx.t("usage.units.turns")))
-                            .child(stat(
-                                compact(provider.total_tokens, locale),
-                                cx.t("usage.units.tokens"),
-                            )),
-                    )
-                    .into_any_element()
-            })
-            .collect();
-        card(cx)
-            .child(card_title(cx.t("usage.providers.title"), None, cx))
-            .child(div().mt(px(12.0)).child(grid(tiles, 2, 8.0)))
-            .into_any_element()
-    }
-
-    fn models(&self, dashboard: &UsageDashboard, cx: &mut Context<Self>) -> AnyElement {
-        let colors = cx.theme().colors.clone();
-        let locale = cx.global::<I18n>().locale();
-        let top: Vec<AnyElement> = dashboard
-            .models
-            .iter()
-            .take(8)
-            .enumerate()
-            .map(|(index, model)| {
-                let turns = cx.t_with(
-                    "usage.models.turnCount",
-                    &Args::count(model.measured_turns as i64),
-                );
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .rounded(cx.theme().radius.md)
-                    .bg(colors.muted.opacity(0.25))
-                    .px(px(10.0))
-                    .py(px(8.0))
-                    .child(
-                        div()
-                            .w(px(20.0))
-                            .flex_none()
-                            .text_center()
-                            .text_size(px(10.0))
-                            .text_color(colors.muted_foreground)
-                            .child((index + 1).to_string()),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
+                            .items_baseline()
+                            .justify_between()
+                            .gap(px(4.0))
                             .child(
                                 div()
                                     .truncate()
                                     .text_size(px(11.0))
                                     .font_weight(FontWeight::MEDIUM)
-                                    .child(model.model.clone()),
+                                    .child(cx.t(name)),
                             )
                             .child(
                                 div()
-                                    .truncate()
+                                    .flex_none()
                                     .text_size(px(9.0))
                                     .text_color(colors.muted_foreground)
-                                    .child(format!("{} · {turns}", self.label(&model.provider_id))),
+                                    .child(range),
                             ),
                     )
                     .child(
                         div()
-                            .flex_none()
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::BOLD)
+                            .mt(px(4.0))
+                            .text_size(px(18.0))
+                            .line_height(px(24.0))
+                            .font_weight(FontWeight::SEMIBOLD)
                             .font_features(tabular_nums())
-                            .child(compact(model.total_tokens, locale)),
+                            .child(format!("{:.0}%", band.percent)),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(10.0))
+                            .text_color(colors.muted_foreground)
+                            .font_features(tabular_nums())
+                            .child(metric_value(self.metric, band.value, locale)),
                     )
                     .into_any_element()
             })
             .collect();
-        let body = if top.is_empty() {
-            div()
-                .py(px(40.0))
-                .text_center()
-                .text_size(px(12.0))
-                .text_color(colors.muted_foreground)
-                .child(cx.t("usage.models.awaiting"))
-                .into_any_element()
-        } else {
-            div()
-                .mt(px(12.0))
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .children(top)
-                .into_any_element()
-        };
+        let columns: Vec<Column> = summary
+            .hours
+            .iter()
+            .map(|hour| {
+                Runtime::ALL
+                    .into_iter()
+                    .map(|runtime| (hex(runtime_color(runtime.as_str())), hour[runtime.index()]))
+                    .collect()
+            })
+            .collect();
+        let metric = cx.t(metric_key(self.metric));
         card(cx)
-            .child(card_title(cx.t("usage.models.title"), None, cx))
-            .child(body)
+            .debug_selector(|| "usage-bands".into())
+            .child(div().mb(px(12.0)).child(card_title(
+                cx.t("usage.bands.title"),
+                Some(cx.t_with(
+                    "usage.bands.subtitle",
+                    &Args::default().with("metric", metric),
+                )),
+                cx,
+            )))
+            .child(grid(tiles, 4, 8.0))
+            .child(div().mt(px(16.0)).child(charts::stacked_bars(
+                columns,
+                colors.border.opacity(0.5),
+                96.0,
+            )))
+            .child(
+                div()
+                    .mt(px(4.0))
+                    .flex()
+                    .justify_between()
+                    .text_size(px(10.0))
+                    .text_color(colors.muted_foreground)
+                    .children(["00", "06", "12", "18", "23"].map(|hour| div().child(hour))),
+            )
             .into_any_element()
     }
 }

@@ -1,51 +1,35 @@
 //! The dialog's frame: `sm:max-w-6xl`, the header with the title, the
-//! periods, "Projeto atual" and ⟳; the body scrolls under it, loading, the
-//! error with "Tentar novamente", empty, or the dashboard (`sections.rs`).
+//! indexing progress and ⟳; the body scrolls under it: the filters, then
+//! loading, the error with "Tentar novamente", empty, or the dashboard.
 
 use gpui::{AnyElement, Context, FontWeight, Render, Window, div, prelude::*, px};
 
-use super::{Usage, UsageEvent};
+use super::{Indexing, Usage, UsageEvent};
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog, Icon, spinner};
 
-/// `[7, 30, 90, null]`
-const PERIODS: [Option<u32>; 4] = [Some(7), Some(30), Some(90), None];
-
 impl Usage {
+    fn indexing_label(&self, cx: &Context<Self>) -> Option<gpui::SharedString> {
+        match self.indexing {
+            Indexing::Idle => None,
+            Indexing::Reading(_, 0) => Some(cx.t("usage.indexing")),
+            Indexing::Reading(done, total) => Some(
+                cx.t_with(
+                    "usage.indexingProgress",
+                    &Args::default()
+                        .with("done", done.to_string())
+                        .with("total", total.to_string()),
+                ),
+            ),
+        }
+    }
+
     fn header(&self, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
-        let periods = PERIODS.iter().map(|period| {
-            let period = *period;
-            let label = match period {
-                Some(days) => cx.t_with("usage.period.days", &Args::count(i64::from(days))),
-                None => cx.t("usage.period.all"),
-            };
-            let id = format!("usage-period-{}", period.map_or(0, |days| days));
-            Button::new(gpui::SharedString::from(id))
-                .variant(if self.period == period {
-                    ButtonVariant::Secondary
-                } else {
-                    ButtonVariant::Ghost
-                })
-                .size(ButtonSize::Xs)
-                .text_size(12.0)
-                .on_click(cx.listener(move |usage, _, _, cx| usage.set_period(period, cx)))
-                .child(label)
-        });
-        let project = self.project_id.is_some().then(|| {
-            Button::new("usage-project")
-                .variant(if self.project_only {
-                    ButtonVariant::Secondary
-                } else {
-                    ButtonVariant::Outline
-                })
-                .size(ButtonSize::Xs)
-                .text_size(12.0)
-                .on_click(cx.listener(|usage, _, _, cx| usage.toggle_project(cx)))
-                .child(cx.t("usage.period.project"))
-        });
+        let indexing = self.indexing_label(cx);
+        let busy = indexing.is_some();
         div()
             .border_b_1()
             .border_color(colors.border.opacity(0.6))
@@ -56,7 +40,6 @@ impl Usage {
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
                     .items_start()
                     .justify_between()
                     .gap(px(12.0))
@@ -88,17 +71,24 @@ impl Usage {
                     .child(
                         div()
                             .flex()
-                            .flex_wrap()
+                            .flex_none()
                             .items_center()
-                            .justify_end()
-                            .gap(px(6.0))
-                            .children(periods)
-                            .children(project)
+                            .gap(px(8.0))
+                            .children(indexing.map(|label| {
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .text_size(px(12.0))
+                                    .text_color(colors.muted_foreground)
+                                    .child(spinner("usage-indexing", 12.0))
+                                    .child(label)
+                            }))
                             .child(
                                 Button::new("usage-refresh")
                                     .variant(ButtonVariant::Ghost)
                                     .size(ButtonSize::IconXs)
-                                    .disabled(self.fetching)
+                                    .disabled(busy)
                                     .on_click(cx.listener(|usage, _, _, cx| usage.refresh(cx)))
                                     .child(Icon::new("refresh-cw").size(14.0)),
                             ),
@@ -118,9 +108,9 @@ impl Usage {
                 .justify_center()
                 .text_center()
         };
-        match &self.dashboard {
-            Some(dashboard) if !dashboard.providers.is_empty() => {
-                self.content(dashboard, width, cx)
+        match &self.summary {
+            Some(summary) if summary.calls + summary.turns > 0 => {
+                self.content(&summary.clone(), width, cx)
             }
             None if self.failed => centered()
                 .gap(px(12.0))
@@ -142,7 +132,10 @@ impl Usage {
                 .gap(px(8.0))
                 .text_color(colors.muted_foreground)
                 .child(spinner("usage-loading", 16.0))
-                .child(cx.t("usage.loading"))
+                .child(
+                    self.indexing_label(cx)
+                        .unwrap_or_else(|| cx.t("usage.loading")),
+                )
                 .into_any_element(),
             Some(_) => centered()
                 .gap(px(8.0))
@@ -175,6 +168,7 @@ impl Render for Usage {
         let (width, height) = (f32::from(viewport.width), f32::from(viewport.height));
         let close = cx.entity().downgrade();
         let header = self.header(cx);
+        let filters = self.filters(cx);
         let body = self.state(width, cx);
         Dialog::new("usage-dialog", move |_: &mut Window, cx| {
             let _ = close.update(cx, |_, cx| cx.emit(UsageEvent::Closed));
@@ -191,6 +185,10 @@ impl Render for Usage {
                 .max_h(px(height - 144.0))
                 .overflow_y_scroll()
                 .p(px(20.0))
+                .flex()
+                .flex_col()
+                .gap(px(16.0))
+                .child(filters)
                 .child(body),
         )
     }

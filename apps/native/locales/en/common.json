@@ -4999,57 +4999,105 @@
   },
   "usage": {
     "title": "DCC Usage",
-    "description": "Real activity recorded by DCC, compared across providers and models.",
-    "refresh": "Refresh usage",
-    "loading": "Loading local usage…",
-    "error": "Usage data could not be loaded.",
+    "description": "Claude Code and Codex on this machine, inside and outside DCC, read from their local logs.",
+    "refresh": "Read the logs again",
+    "loading": "Loading usage…",
+    "indexing": "Indexing logs…",
+    "indexingProgress": "Indexing logs… {{done}} of {{total}}",
+    "error": "The usage logs could not be read.",
     "tryAgain": "Try again",
-    "units": {
-      "tokens": "tokens",
-      "turns": "turns",
-      "sessions": "sessions"
-    },
     "period": {
       "days": "{{count}}d",
+      "all": "All"
+    },
+    "runtime": {
+      "claude": "Claude",
+      "codex": "Codex"
+    },
+    "scope": {
       "all": "All",
-      "project": "Current project"
+      "main": "Main",
+      "subagents": "Subagents"
     },
-    "metrics": {
-      "tokens": "Measured tokens",
-      "tokenBreakdown": "{{input}} in · {{output}} out",
-      "activity": "Completed turns",
-      "sessions": "{{count}} sessions",
-      "coverage": "Token coverage",
-      "measuredTurns": "{{count}} measured turns",
-      "cost": "Reported cost",
-      "reportedCost": "Only when supplied by the provider"
+    "via": {
+      "label": "Via",
+      "cli": "CLI",
+      "desktop": "Desktop",
+      "ide": "IDE",
+      "sdk": "SDK",
+      "exec": "exec",
+      "tui": "TUI",
+      "dcc": "DCC",
+      "other": "Other"
     },
-    "arena": {
-      "title": "Provider arena",
-      "byTokens": "Share of measured tokens",
-      "byTurns": "Share of completed turns",
-      "providerCount_one": "{{count}} provider",
-      "providerCount_other": "{{count}} providers"
+    "metric": {
+      "totalTokens": "Total tokens",
+      "newTokens": "New tokens",
+      "output": "Output",
+      "cost": "Est. cost",
+      "calls": "Calls",
+      "turns": "Turns"
     },
-    "timeline": {
-      "title": "Activity over time",
-      "tokens": "Measured tokens by provider",
-      "turns": "Completed turns by provider",
-      "ariaLabel": "DCC usage timeline"
+    "group": {
+      "runtime": "Runtime",
+      "model": "Model",
+      "via": "Via",
+      "project": "Project",
+      "agent": "Agent",
+      "others": "Others",
+      "main": "Main",
+      "unknown": "—"
     },
-    "providers": {
-      "title": "Provider scorecards",
-      "noTelemetry": "no tokens"
+    "kpi": {
+      "cacheShare": "{{percent}}% is cache reads",
+      "newHint": "input + cache written + output",
+      "reasoningShare": "{{percent}}% reasoning/thinking",
+      "costSplit": "Claude {{claude}} · Codex {{codex}}",
+      "perCall": "{{value}} tokens / call",
+      "perTurn": "{{value}} calls / turn",
+      "sessions": "Sessions",
+      "subagentShare": "{{percent}}% subagents",
+      "viaDcc": "Via DCC",
+      "viaDccHint": "of {{metric}} through DCC"
     },
-    "models": {
-      "title": "Model leaderboard",
-      "awaiting": "Model token telemetry will appear after new measured turns.",
-      "turnCount_one": "{{count}} turn",
-      "turnCount_other": "{{count}} turns"
+    "stats": {
+      "activeDays": "{{active}} of {{total}} days active",
+      "streak_one": "longest streak {{count}} day",
+      "streak_other": "longest streak {{count}} days",
+      "peakDay": "peak day {{date}} · {{value}}",
+      "peakHour": "peak hour {{date}}, {{hour}}:00 · {{value}}",
+      "subagents": "{{percent}}% in subagents"
+    },
+    "cost": {
+      "note": "Cost estimated at API list prices; subscriptions do not pay per token.",
+      "unpriced_one": "No price, left out of the cost: {{models}} ({{count}} call)",
+      "unpriced_other": "No price, left out of the cost: {{models}} ({{count}} calls)"
+    },
+    "days": {
+      "title": "{{metric}} per day"
+    },
+    "heatmap": {
+      "title": "When you use it",
+      "subtitle": "Weekday × hour, in your time zone",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat",
+      "sun": "Sun"
+    },
+    "bands": {
+      "title": "Time of day",
+      "subtitle": "{{metric}} per hour, by runtime",
+      "night": "Night",
+      "morning": "Morning",
+      "afternoon": "Afternoon",
+      "evening": "Evening"
     },
     "empty": {
-      "title": "No DCC activity in this period",
-      "body": "Run a provider session or select a longer period to start the comparison."
+      "title": "No usage in this period",
+      "body": "The local Claude Code and Codex logs have no calls with these filters."
     }
   },
   "skills": {

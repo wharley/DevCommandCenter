@@ -67,8 +67,10 @@ pub mod thread;
 pub mod timeline;
 pub mod turn_instructions;
 pub mod turn_review;
+pub mod pricing;
 pub mod usage;
 pub mod usage_limit;
+pub mod usage_logs;
 pub mod workspace;
 pub mod workspace_bundle;
 pub mod workspace_cleanup;
@@ -126,10 +128,7 @@ pub use session::{
     TurnReviewFile, TurnReviewUntrackedFingerprint, TurnState, WorkspaceSessionSummary,
 };
 pub use thread::{Thread, ThreadId};
-pub use usage::{
-    DailyUsageSummary, ModelTokenUsage, ModelUsageSummary, ProviderUsageSummary, UsageDashboard,
-    UsageDashboardInput, UsageTotals,
-};
+pub use usage::ModelTokenUsage;
 pub use workspace::{Workspace, WorkspaceId, WorkspaceState};
 pub use workspace_bundle::{
     WorkspaceBundle, WorkspaceBundleId, WorkspaceBundleIsolation, WorkspaceBundleMember,

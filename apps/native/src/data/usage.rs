@@ -1,41 +1,65 @@
-//! "DCC Usage" (`UsageDialog`): the dashboard read straight from the
-//! database (`usage_dashboard`), and the numbers as the desktop formats them
-//! — `Intl.NumberFormat` compact from 10 000 on, the cost in dollars, the
-//! shares in percent — in the app's language.
+//! "DCC Usage" (`UsageDialog`): the usage of Claude Code and Codex read
+//! from their local logs through the incremental index beside DCC's
+//! database (`dcc_infra::usage_logs`), and the numbers as the desktop
+//! formats them — `Intl.NumberFormat` compact from 10 000 on, the cost in
+//! dollars, the shares in percent — in the app's language.
 
 use std::path::Path;
 
-use dcc_core::domain::usage::{UsageDashboard, UsageDashboardInput};
-use dcc_core::ports::UsageRepo;
+use dcc_core::domain::usage_logs::UsageRows;
+use dcc_infra::usage_logs::{DccHints, RefreshStats, Resolver, Sources, UsageIndex};
 
 use crate::i18n::Locale;
 
-/// `PROVIDER_COLORS` (`providerUsageColor`), as `0xRRGGBB`.
-pub fn provider_color(provider: &str) -> u32 {
-    match provider {
+/// The runtimes' colors (`claude_code` and `codex` of `PROVIDER_COLORS`).
+pub fn runtime_color(runtime: &str) -> u32 {
+    match runtime {
         "codex" => 0x34d399,
-        "claude_code" => 0xfb923c,
-        "gemini" => 0x60a5fa,
-        "cursor" => 0xa78bfa,
-        "droid" => 0x22d3ee,
-        "grok" => 0xf472b6,
+        "claude" => 0xfb923c,
         _ => 0x94a3b8,
     }
 }
 
-/// `loadUsageDashboard({ periodDays, projectId })`
-pub fn load(
+/// The legend's colors in order; the gathered rest is gray.
+const GROUP_COLORS: [u32; 6] = [0x60a5fa, 0xfb923c, 0x34d399, 0xa78bfa, 0xf472b6, 0x22d3ee];
+
+/// The color of the legend's `index`-th group, `others` gray.
+pub fn group_color(index: usize, others: bool) -> u32 {
+    if others {
+        0x94a3b8
+    } else {
+        GROUP_COLORS[index % GROUP_COLORS.len()]
+    }
+}
+
+/// The first millisecond the period can need (a day of slack for the
+/// time zone; the dashboard cuts at local midnight).
+pub fn since_ms(period_days: Option<u32>, now_ms: i64) -> Option<i64> {
+    period_days.map(|days| now_ms - (i64::from(days) + 1) * 86_400_000)
+}
+
+/// Reads what is new in the logs into the index, reporting `(done,
+/// total)` files, then the period's rows. `sources` replaces this
+/// machine's log folders (tests).
+pub fn index_and_load(
     db_path: &Path,
-    period_days: Option<u32>,
-    project_id: Option<String>,
-) -> anyhow::Result<UsageDashboard> {
-    let repo = dcc_infra::db::SqliteSessionRepo::open(db_path)?;
-    Ok(futures::executor::block_on(repo.usage_dashboard(
-        &UsageDashboardInput {
-            period_days,
-            project_id,
-        },
-    ))?)
+    sources: Option<Sources>,
+    since: Option<i64>,
+    progress: &mut dyn FnMut(usize, usize),
+) -> anyhow::Result<(RefreshStats, UsageRows)> {
+    let (sources, hints) = match sources {
+        Some(sources) => (sources, DccHints::default()),
+        None => dcc_infra::usage_logs::discover(Some(db_path)),
+    };
+    let mut index = UsageIndex::open(&dcc_infra::usage_logs::index_path(db_path))?;
+    let stats = index.refresh(&sources, &mut Resolver::new(hints), progress)?;
+    Ok((stats, index.load_rows(since)?))
+}
+
+/// The period's rows as the index has them, without reading the logs.
+pub fn load_rows(db_path: &Path, since: Option<i64>) -> anyhow::Result<UsageRows> {
+    let index = UsageIndex::open(&dcc_infra::usage_logs::index_path(db_path))?;
+    Ok(index.load_rows(since)?)
 }
 
 /// `percent`: the share of `total`, kept in 0–100.
@@ -125,6 +149,18 @@ pub fn dollars(value: f64, locale: Locale) -> String {
     }
 }
 
+/// Dollars short: "US$ 22,4 mil" / "$22.4K" from 10 000 on.
+pub fn dollars_compact(value: f64, locale: Locale) -> String {
+    if value < 10_000.0 {
+        return dollars(value, locale);
+    }
+    let amount = compact(value.round() as u64, locale);
+    match locale {
+        Locale::PtBr => format!("US$\u{a0}{amount}"),
+        Locale::En => format!("${amount}"),
+    }
+}
+
 /// A calendar date (`YYYY-MM-DD`) as `toLocaleDateString()` writes it.
 pub fn short_date(date: &str, locale: Locale) -> String {
     let mut parts = date.splitn(3, '-');
@@ -161,17 +197,25 @@ mod tests {
         assert_eq!(percent(1, 0), 0.0);
         assert_eq!(short_date("2026-10-05", Locale::PtBr), "05/10/2026");
         assert_eq!(short_date("2026-10-05", Locale::En), "10/5/2026");
-        assert_eq!(provider_color("claude_code"), 0xfb923c);
-        assert_eq!(provider_color("other"), 0x94a3b8);
+        assert_eq!(runtime_color("claude"), 0xfb923c);
+        assert_eq!(group_color(7, true), 0x94a3b8);
+        assert_eq!(
+            dollars_compact(22_400.0, Locale::PtBr),
+            "US$\u{a0}22,4\u{a0}mil"
+        );
+        assert_eq!(dollars_compact(16_200.0, Locale::En), "$16.2K");
+        assert_eq!(dollars_compact(12.5, Locale::En), "$12.50");
+        assert_eq!(compact(88_200_000_000, Locale::PtBr), "88,2\u{a0}bi");
+        assert_eq!(compact(226_500_000, Locale::PtBr), "226,5\u{a0}mi");
     }
 
     #[test]
-    fn an_empty_database_has_no_providers() {
+    fn an_empty_machine_indexes_to_no_rows() {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("database.sqlite");
-        drop(dcc_infra::db::SqliteSessionRepo::open(&db).unwrap());
-        let dashboard = load(&db, Some(30), None).unwrap();
-        assert!(dashboard.providers.is_empty());
-        assert_eq!(dashboard.totals.turns, 0);
+        let rows = load_rows(&db, since_ms(Some(30), 0)).unwrap();
+        assert!(rows.rows.is_empty());
+        assert_eq!(since_ms(Some(7), 8 * 86_400_000), Some(0));
+        assert_eq!(since_ms(None, 1), None);
     }
 }

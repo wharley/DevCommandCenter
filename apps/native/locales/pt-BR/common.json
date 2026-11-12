@@ -4999,57 +4999,105 @@
   },
   "usage": {
     "title": "DCC Usage",
-    "description": "Atividade real registrada pelo DCC, comparada entre providers e modelos.",
-    "refresh": "Atualizar uso",
-    "loading": "Carregando uso local…",
-    "error": "Não foi possível carregar os dados de uso.",
+    "description": "Claude Code e Codex nesta máquina, dentro e fora do DCC, lidos dos logs locais.",
+    "refresh": "Ler os logs de novo",
+    "loading": "Carregando uso…",
+    "indexing": "Indexando logs…",
+    "indexingProgress": "Indexando logs… {{done}} de {{total}}",
+    "error": "Não foi possível ler os logs de uso.",
     "tryAgain": "Tentar novamente",
-    "units": {
-      "tokens": "tokens",
-      "turns": "turns",
-      "sessions": "sessões"
-    },
     "period": {
       "days": "{{count}}d",
+      "all": "Tudo"
+    },
+    "runtime": {
+      "claude": "Claude",
+      "codex": "Codex"
+    },
+    "scope": {
       "all": "Tudo",
-      "project": "Projeto atual"
+      "main": "Principais",
+      "subagents": "Subagentes"
     },
-    "metrics": {
-      "tokens": "Tokens medidos",
-      "tokenBreakdown": "{{input}} entrada · {{output}} saída",
-      "activity": "Turns concluídos",
-      "sessions": "{{count}} sessões",
-      "coverage": "Cobertura de tokens",
-      "measuredTurns": "{{count}} turns medidos",
-      "cost": "Custo informado",
-      "reportedCost": "Somente quando fornecido pelo provider"
+    "via": {
+      "label": "Via",
+      "cli": "CLI",
+      "desktop": "Desktop",
+      "ide": "IDE",
+      "sdk": "SDK",
+      "exec": "exec",
+      "tui": "TUI",
+      "dcc": "DCC",
+      "other": "Outro"
     },
-    "arena": {
-      "title": "Arena de providers",
-      "byTokens": "Participação nos tokens medidos",
-      "byTurns": "Participação nos turns concluídos",
-      "providerCount_one": "{{count}} provider",
-      "providerCount_other": "{{count}} providers"
+    "metric": {
+      "totalTokens": "Tokens totais",
+      "newTokens": "Tokens novos",
+      "output": "Output",
+      "cost": "Custo est.",
+      "calls": "Chamadas",
+      "turns": "Turnos"
     },
-    "timeline": {
-      "title": "Atividade ao longo do tempo",
-      "tokens": "Tokens medidos por provider",
-      "turns": "Turns concluídos por provider",
-      "ariaLabel": "Linha do tempo de uso do DCC"
+    "group": {
+      "runtime": "Runtime",
+      "model": "Modelo",
+      "via": "Via",
+      "project": "Projeto",
+      "agent": "Agente",
+      "others": "Outros",
+      "main": "Principal",
+      "unknown": "—"
     },
-    "providers": {
-      "title": "Placar dos providers",
-      "noTelemetry": "sem tokens"
+    "kpi": {
+      "cacheShare": "{{percent}}% é leitura de cache",
+      "newHint": "entrada + cache escrito + output",
+      "reasoningShare": "{{percent}}% reasoning/thinking",
+      "costSplit": "Claude {{claude}} · Codex {{codex}}",
+      "perCall": "{{value}} tokens / chamada",
+      "perTurn": "{{value}} chamadas / turno",
+      "sessions": "Sessões",
+      "subagentShare": "{{percent}}% subagentes",
+      "viaDcc": "Via DCC",
+      "viaDccHint": "de {{metric}} pelo DCC"
     },
-    "models": {
-      "title": "Ranking de modelos",
-      "awaiting": "A telemetria por modelo aparecerá após novos turns medidos.",
-      "turnCount_one": "{{count}} turn",
-      "turnCount_other": "{{count}} turns"
+    "stats": {
+      "activeDays": "{{active}} de {{total}} dias ativos",
+      "streak_one": "maior sequência {{count}} dia",
+      "streak_other": "maior sequência {{count}} dias",
+      "peakDay": "dia de pico {{date}} · {{value}}",
+      "peakHour": "hora de pico {{date}}, {{hour}}:00 · {{value}}",
+      "subagents": "{{percent}}% em subagentes"
+    },
+    "cost": {
+      "note": "Custo estimado pelo preço de lista da API; assinaturas não pagam por token.",
+      "unpriced_one": "Sem preço, fora do custo: {{models}} ({{count}} chamada)",
+      "unpriced_other": "Sem preço, fora do custo: {{models}} ({{count}} chamadas)"
+    },
+    "days": {
+      "title": "{{metric}} por dia"
+    },
+    "heatmap": {
+      "title": "Quando você usa",
+      "subtitle": "Dia da semana × hora, no seu fuso",
+      "mon": "Seg",
+      "tue": "Ter",
+      "wed": "Qua",
+      "thu": "Qui",
+      "fri": "Sex",
+      "sat": "Sáb",
+      "sun": "Dom"
+    },
+    "bands": {
+      "title": "Hora do dia e faixas",
+      "subtitle": "{{metric}} por hora, por runtime",
+      "night": "Madrugada",
+      "morning": "Manhã",
+      "afternoon": "Tarde",
+      "evening": "Noite"
     },
     "empty": {
-      "title": "Nenhuma atividade do DCC neste período",
-      "body": "Execute uma sessão ou selecione um período maior para iniciar a comparação."
+      "title": "Nenhum uso neste período",
+      "body": "Os logs locais do Claude Code e do Codex não têm chamadas com esses filtros."
     }
   },
   "skills": {

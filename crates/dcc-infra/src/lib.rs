@@ -38,6 +38,7 @@ pub mod runtime_owner;
 pub mod skills;
 pub mod skills_context;
 pub mod usage_limit_settings;
+pub mod usage_logs;
 mod repo_config;
 mod workspace_setup_plan;
 

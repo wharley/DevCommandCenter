@@ -67,7 +67,7 @@ use dcc_core::{
             SessionSearchResult, TurnChangeSet, TurnId, WorkspaceSessionSummary,
         },
         thread::{Thread, ThreadId},
-        usage::{ModelTokenUsage, SessionTurnUsage, UsageDashboard, UsageDashboardInput},
+        usage::{ModelTokenUsage, SessionTurnUsage},
         workspace::{Workspace, WorkspaceId},
         workspace_bundle::WorkspaceBundleState,
     },
@@ -2999,10 +2999,6 @@ impl SessionCommandState {
 
     pub fn search_sessions(&self, query: &str, limit: usize) -> Result<Vec<SessionSearchResult>> {
         self.session_repo.search_sessions(query, limit)
-    }
-
-    pub async fn usage_dashboard(&self, input: &UsageDashboardInput) -> Result<UsageDashboard> {
-        UsageRepo::usage_dashboard(&self.session_repo, input).await
     }
 
     pub async fn session_turn_usage(
