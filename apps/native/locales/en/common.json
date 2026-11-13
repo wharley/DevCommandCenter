@@ -5662,9 +5662,7 @@
       "reading": "Reading the changes on the machine…",
       "none": "This task has not changed any file yet.",
       "uncommitted": "Not committed yet",
-      "onBranch": "On the branch",
-      "noDiff": "No text differences to show.",
-      "cut": "The diff was cut for being long."
+      "onBranch": "On the branch"
     },
     "ariaLabel": "Project code",
     "files": "Files",

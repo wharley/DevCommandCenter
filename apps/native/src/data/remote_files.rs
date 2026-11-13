@@ -1,9 +1,11 @@
 //! The files of a task that runs on another machine, to read: the whole
 //! list the tree draws (what git tracks there, plus the ignored files
-//! outside ignored folders) and one file's text. Both are asked by the
+//! outside ignored folders), one file's text, and the two versions of a
+//! changed file for its diff. All are asked by the
 //! task's id on the machine's API (`DesktopApi::on_machine`); nothing here
 //! writes.
 
+use dcc_core::domain::workspace_git::WorkspaceGitPreviewScope;
 use serde::Deserialize;
 
 use super::desktop_api::{ApiError, DesktopApi, encode};
@@ -24,6 +26,25 @@ pub struct RemoteFile {
     pub text: String,
     pub truncated: bool,
     pub binary: bool,
+}
+
+/// A changed file's two versions, as the machine's git reads them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct RemotePreview {
+    pub original: String,
+    pub modified: String,
+    /// Added, removed or new: one column instead of side by side.
+    pub inline: bool,
+}
+
+/// `scope` as the machine's route reads it.
+fn scope_name(scope: &WorkspaceGitPreviewScope) -> &'static str {
+    match scope {
+        WorkspaceGitPreviewScope::Staged => "staged",
+        WorkspaceGitPreviewScope::Unstaged => "unstaged",
+        WorkspaceGitPreviewScope::Committed => "committed",
+    }
 }
 
 /// Why a file of the machine does not open here.
@@ -57,6 +78,29 @@ impl DesktopApi {
             "/api/v1/mobile/workspaces/{}/tree",
             encode(workspace_id)
         ))?)
+    }
+
+    /// A change's diff: the file against HEAD when not committed yet, HEAD
+    /// against `base` for one of the branch.
+    pub fn remote_preview(
+        &self,
+        workspace_id: &str,
+        path: &str,
+        status: &str,
+        scope: &WorkspaceGitPreviewScope,
+        base: Option<&str>,
+    ) -> Result<RemotePreview, ApiError> {
+        let mut address = format!(
+            "/api/v1/mobile/workspaces/{}/preview?path={}&status={}&scope={}",
+            encode(workspace_id),
+            encode(path),
+            encode(status),
+            scope_name(scope)
+        );
+        if let Some(base) = base.filter(|base| !base.is_empty()) {
+            address.push_str(&format!("&base={}", encode(base)));
+        }
+        decode(self.get(&address)?)
     }
 
     pub fn remote_file(&self, workspace_id: &str, path: &str) -> Result<RemoteFile, ApiError> {

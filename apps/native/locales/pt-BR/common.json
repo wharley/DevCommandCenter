@@ -5662,9 +5662,7 @@
       "reading": "Lendo as mudanças na máquina…",
       "none": "Esta tarefa ainda não mudou nenhum arquivo.",
       "uncommitted": "Ainda não commitadas",
-      "onBranch": "No branch",
-      "noDiff": "Sem diferenças de texto para mostrar.",
-      "cut": "O diff foi cortado por ser longo."
+      "onBranch": "No branch"
     },
     "ariaLabel": "Código do projeto",
     "files": "Arquivos",

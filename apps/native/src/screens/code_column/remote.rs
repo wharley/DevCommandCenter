@@ -1,35 +1,24 @@
 //! The changes of a task that runs on another machine, to read: what is not
 //! committed there and what its branch has over its base, each file with its
-//! counts, and its diff under it on a click. Nothing here writes: staging,
+//! counts; a click opens its diff on the stage, read from the machine's
+//! git. Nothing here writes: staging,
 //! committing and the delivery stay on the machine for now. Read when the
 //! column opens on the task, when a turn of it ends, and on "Atualizar" —
 //! no timer.
 
-use std::collections::HashMap;
-
 use gpui::{AnyElement, Context, FontWeight, SharedString, div, img, prelude::*, px};
 
-use super::CodeColumn;
 use super::changes::view::{added_color, status_color};
+use super::{CodeColumn, CodeColumnEvent};
 use crate::data::desktop_api::{ApiError, DesktopApi};
 use crate::data::machines::{RemoteChange, RemoteChanges};
-use crate::data::pr_review::{PatchRow, RowKind, parse_patch};
 use crate::data::tasks::path_leaf;
 use crate::i18n::Translate;
 use crate::project::file_icon::file_icon;
+use crate::screens::stage::DiffRequest;
 use crate::theme::ActiveTheme;
 use crate::ui::{Icon, spinner, tabular_nums};
-
-/// A diff's lines shown at most; the rest is read on the machine.
-const MAX_PATCH_ROWS: usize = 400;
-
-/// A file's diff, once asked for.
-#[derive(Clone, Debug, PartialEq)]
-pub(super) enum Patch {
-    Reading,
-    Read { rows: Vec<PatchRow>, cut: bool },
-    Failed(String),
-}
+use dcc_core::domain::workspace_git::WorkspaceGitPreviewScope;
 
 #[derive(Default)]
 pub(crate) struct Remote {
@@ -39,9 +28,6 @@ pub(crate) struct Remote {
     /// `None` until read; an error says why it could not be.
     pub(super) changes: Option<Result<RemoteChanges, String>>,
     pub(super) reading: bool,
-    /// The file whose diff is open.
-    pub(super) open: Option<String>,
-    pub(super) patches: HashMap<String, Patch>,
     /// The task was running at the last look: its end reads again.
     running: bool,
     /// The task's pull request, from the forge on its machine.
@@ -134,131 +120,39 @@ impl CodeColumn {
                     column.remote.pr = forge.pull_request;
                     column.remote.request_title = forge.request_title;
                 }
-                // What was read before may be stale now.
-                let open = column.remote.open.clone();
-                column.remote.patches.clear();
-                if let Some(path) = open {
-                    column.read_remote_patch(path, cx);
-                }
                 cx.notify();
             });
         })
         .detach();
     }
 
-    fn toggle_remote_file(&mut self, path: String, cx: &mut Context<Self>) {
-        if self.remote.open.as_deref() == Some(path.as_str()) {
-            self.remote.open = None;
-            cx.notify();
-            return;
-        }
-        self.remote.open = Some(path.clone());
-        if !self.remote.patches.contains_key(&path) {
-            self.read_remote_patch(path, cx);
-        }
-        cx.notify();
-    }
-
-    fn read_remote_patch(&mut self, path: String, cx: &mut Context<Self>) {
-        let Some((api, task)) = self.remote_api() else {
+    /// A change's diff on the stage, as a local change opens.
+    fn open_remote_diff(
+        &mut self,
+        change: &RemoteChange,
+        scope: WorkspaceGitPreviewScope,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(root) = self.machine_root.clone() else {
             return;
         };
-        self.remote.patches.insert(path.clone(), Patch::Reading);
-        cx.spawn(async move |this, cx| {
-            let (asked_task, asked_path) = (task.clone(), path.clone());
-            let read = cx
-                .background_executor()
-                .spawn(async move { api.remote_patch(&asked_task, &asked_path) })
-                .await;
-            let _ = this.update(cx, |column, cx| {
-                if column.remote.task.as_deref() != Some(task.as_str()) {
-                    return;
-                }
-                let patch = match read {
-                    Ok((text, truncated)) => {
-                        let mut rows = parse_patch(Some(&text));
-                        let cut = truncated || rows.len() > MAX_PATCH_ROWS;
-                        rows.truncate(MAX_PATCH_ROWS);
-                        Patch::Read { rows, cut }
-                    }
-                    Err(error) => Patch::Failed(reason(error)),
-                };
-                column.remote.patches.insert(path, patch);
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-}
-
-fn patch_lines(patch: &Patch, cx: &Context<CodeColumn>) -> AnyElement {
-    let colors = cx.theme().colors.clone();
-    let mono = cx.theme().fonts.mono.clone();
-    let quiet = |text: SharedString| {
-        div()
-            .px(px(12.0))
-            .py(px(8.0))
-            .text_size(px(11.0))
-            .text_color(colors.muted_foreground)
-            .child(text)
-            .into_any_element()
-    };
-    match patch {
-        Patch::Reading => div()
-            .px(px(12.0))
-            .py(px(8.0))
-            .child(spinner("remote-patch-reading", 14.0))
-            .into_any_element(),
-        Patch::Failed(error) => quiet(error.clone().into()),
-        Patch::Read { rows, .. } if rows.is_empty() => quiet(cx.t("codeColumn.remote.noDiff")),
-        Patch::Read { rows, cut } => {
-            let added = added_color(cx);
-            let lines = rows.iter().map(|row| {
-                let (mark, color, background) = match row.kind {
-                    RowKind::Addition => ("+", added, Some(added.opacity(0.1))),
-                    RowKind::Deletion => (
-                        "−",
-                        colors.destructive,
-                        Some(colors.destructive.opacity(0.1)),
-                    ),
-                    RowKind::Hunk => ("", colors.muted_foreground, Some(colors.muted.opacity(0.4))),
-                    RowKind::Meta => ("", colors.muted_foreground, None),
-                    RowKind::Context => (" ", colors.foreground.opacity(0.8), None),
-                };
-                div()
-                    .flex()
-                    .gap(px(6.0))
-                    .px(px(8.0))
-                    .when_some(background, |line, background| line.bg(background))
-                    .text_color(color)
-                    .child(div().flex_none().w(px(8.0)).child(mark))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .child(row.content.clone()),
-                    )
-            });
-            div()
-                .debug_selector(|| "remote-patch".into())
-                .py(px(4.0))
-                .font_family(mono)
-                .text_size(px(11.0))
-                .line_height(px(17.0))
-                .children(lines)
-                .when(*cut, |patch| {
-                    patch.child(
-                        div()
-                            .px(px(12.0))
-                            .py(px(6.0))
-                            .text_color(colors.muted_foreground)
-                            .child(cx.t("codeColumn.remote.cut")),
-                    )
-                })
-                .into_any_element()
-        }
+        let base = self
+            .remote
+            .changes
+            .as_ref()
+            .and_then(|read| read.as_ref().ok())
+            .map(|changes| changes.base_branch.clone())
+            .filter(|base| !base.is_empty());
+        cx.emit(CodeColumnEvent::OpenDiff(DiffRequest {
+            root,
+            name: path_leaf(&change.path).unwrap_or_else(|| change.path.clone()),
+            path: change.path.clone(),
+            status: change.status.clone(),
+            base: base.filter(|_| scope == WorkspaceGitPreviewScope::Committed),
+            scope,
+            from_changes: true,
+            review: None,
+        }));
     }
 }
 
@@ -266,14 +160,19 @@ fn file_row(
     column: &CodeColumn,
     index: usize,
     change: &RemoteChange,
+    scope: &WorkspaceGitPreviewScope,
     cx: &mut Context<CodeColumn>,
 ) -> AnyElement {
     let colors = cx.theme().colors.clone();
-    let open = column.remote.open.as_deref() == Some(change.path.as_str());
+    // The one whose diff is on the stage.
+    let open = column
+        .open_diff
+        .as_ref()
+        .is_some_and(|(open, path)| open == scope && *path == change.path);
     let name = path_leaf(&change.path).unwrap_or_else(|| change.path.clone());
     let folder = super::changes::tree::short_folder(super::changes::view::dirname(&change.path));
     let hover = colors.accent.opacity(0.55);
-    let path = change.path.clone();
+    let (opened, opened_scope) = (change.clone(), scope.clone());
     let row = div()
         .id(("remote-file", index))
         .debug_selector(move || format!("remote-file-{index}"))
@@ -288,12 +187,9 @@ fn file_row(
         .cursor_pointer()
         .hover(move |style| style.bg(hover))
         .when(open, |row| row.bg(colors.primary.opacity(0.08)))
-        .on_click(cx.listener(move |column, _, _, cx| column.toggle_remote_file(path.clone(), cx)))
-        .child(
-            Icon::new("chevron-right")
-                .size(12.0)
-                .rotate(if open { 90.0 } else { 0.0 }),
-        )
+        .on_click(cx.listener(move |column, _, _, cx| {
+            column.open_remote_diff(&opened, opened_scope.clone(), cx)
+        }))
         .child(img(file_icon(&name)).size(px(14.0)).flex_shrink_0())
         .child(
             div()
@@ -344,16 +240,7 @@ fn file_row(
                         .child(change.status.clone()),
                 ),
         );
-    let patch = open
-        .then(|| column.remote.patches.get(&change.path))
-        .flatten()
-        .map(|patch| patch_lines(patch, cx));
-    div()
-        .w_full()
-        .px(px(4.0))
-        .child(row)
-        .children(patch)
-        .into_any_element()
+    div().w_full().px(px(4.0)).child(row).into_any_element()
 }
 
 fn group(
@@ -361,6 +248,7 @@ fn group(
     title: SharedString,
     changes: &[RemoteChange],
     offset: usize,
+    committed: bool,
     cx: &mut Context<CodeColumn>,
 ) -> Option<AnyElement> {
     if changes.is_empty() {
@@ -370,7 +258,14 @@ fn group(
     let rows: Vec<AnyElement> = changes
         .iter()
         .enumerate()
-        .map(|(index, change)| file_row(column, offset + index, change, cx))
+        .map(|(index, change)| {
+            let scope = match (committed, change.staged) {
+                (true, _) => WorkspaceGitPreviewScope::Committed,
+                (false, true) => WorkspaceGitPreviewScope::Staged,
+                (false, false) => WorkspaceGitPreviewScope::Unstaged,
+            };
+            file_row(column, offset + index, change, &scope, cx)
+        })
         .collect();
     Some(
         div()
@@ -480,6 +375,7 @@ pub(super) fn remote_changes(column: &CodeColumn, cx: &mut Context<CodeColumn>) 
                 cx.t("codeColumn.remote.uncommitted"),
                 &changes.changes,
                 0,
+                false,
                 cx,
             );
             let branch = group(
@@ -487,6 +383,7 @@ pub(super) fn remote_changes(column: &CodeColumn, cx: &mut Context<CodeColumn>) 
                 cx.t("codeColumn.remote.onBranch"),
                 &changes.branch_changes,
                 changes.changes.len(),
+                true,
                 cx,
             );
             div()
@@ -523,10 +420,6 @@ mod tests {
     use crate::theme::{Theme, ThemePreference};
 
     const DELIVERY: &str = "/api/v1/machines/m-1/proxy/api/v1/mobile/workspaces/w-1/delivery";
-    // The fake desktop matches the whole address, query included.
-    const PATCH: &str =
-        "/api/v1/machines/m-1/proxy/api/v1/mobile/workspaces/w-1/patch?path=src%2Fapp%2Fpay.ts";
-
     const FORGE: &str = "/api/v1/machines/m-1/proxy/api/v1/mobile/workspaces/w-1/delivery/forge";
     const COMMIT: &str = "/api/v1/machines/m-1/proxy/api/v1/workspaces/w-1/delivery/commit";
 
@@ -540,13 +433,10 @@ mod tests {
             "changesToken":"tok-1","commitMessage":"feat: pay",
             "changes":[{"path":"src/app/pay.ts","status":"M","insertions":4,"deletions":1,"staged":false}],
             "branchChanges":[{"path":"README.md","status":"A","insertions":9,"deletions":0,"staged":false}]}"#;
-        let patch = r#"{"path":"src/app/pay.ts","truncated":false,
-            "patch":"diff --git a/src/app/pay.ts b/src/app/pay.ts\n@@ -1,2 +1,2 @@\n-old\n+new\n same\n"}"#;
         let forge = r#"{"pullRequest":null,"pipeline":null,"requestTitle":"Checkout"}"#;
         let (port, desktop) = fake_desktop_routes(vec![
             (DELIVERY, 200, changes.into()),
             (FORGE, 200, forge.into()),
-            (PATCH, 200, patch.into()),
             (COMMIT, 200, r#"{"ok":true}"#.into()),
             (DELIVERY, 200, changes.into()),
             (FORGE, 200, forge.into()),
@@ -573,18 +463,40 @@ mod tests {
             cx.debug_bounds("remote-file-1").is_some(),
             "the branch's file"
         );
-        cx.simulate_click(file.center(), Modifiers::none());
-        cx.run_until_parked();
-        column.read_with(cx, |column, _| {
-            let Some(Patch::Read { rows, cut }) = column.remote.patches.get("src/app/pay.ts")
-            else {
-                panic!("the file's diff");
-            };
-            assert!(!cut);
-            let kinds: Vec<RowKind> = rows.iter().map(|row| row.kind).collect();
-            assert!(kinds.contains(&RowKind::Addition) && kinds.contains(&RowKind::Deletion));
+        // A click asks for the file's diff on the stage, on the machine's folder.
+        let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let seen = opened.clone();
+        let _events = cx.update(|_, cx| {
+            cx.subscribe(&column, move |_, event: &CodeColumnEvent, _| {
+                if let CodeColumnEvent::OpenDiff(request) = event {
+                    seen.borrow_mut().push(request.clone());
+                }
+            })
         });
-        assert!(cx.debug_bounds("remote-patch").is_some());
+        cx.simulate_click(file.center(), Modifiers::none());
+        let branch_file = cx.debug_bounds("remote-file-1").unwrap();
+        cx.simulate_click(branch_file.center(), Modifiers::none());
+        cx.run_until_parked();
+        let opened = opened.borrow();
+        assert_eq!(opened.len(), 2);
+        assert_eq!(opened[0].root, "dcc-machine://m-1/srv/app");
+        assert_eq!(
+            (opened[0].path.as_str(), &opened[0].scope, &opened[0].base),
+            ("src/app/pay.ts", &WorkspaceGitPreviewScope::Unstaged, &None)
+        );
+        // The branch's file reads against the machine's base.
+        assert_eq!(
+            (
+                opened[1].path.as_str(),
+                &opened[1].scope,
+                opened[1].base.as_deref()
+            ),
+            (
+                "README.md",
+                &WorkspaceGitPreviewScope::Committed,
+                Some("main")
+            )
+        );
         // The rail says where it stands; the next step runs on the machine
         // only after the person's yes.
         assert!(cx.debug_bounds("remote-rail").is_some());
@@ -612,11 +524,6 @@ mod tests {
         assert_eq!(
             sent,
             serde_json::json!({ "push": true, "changesToken": "tok-1" })
-        );
-        assert!(
-            asked
-                .iter()
-                .any(|(request, _)| request.contains("patch?path=src%2Fapp%2Fpay.ts"))
         );
         // A local task again: the column is this computer's.
         column.update(cx, |column, cx| {

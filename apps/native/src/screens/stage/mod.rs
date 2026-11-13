@@ -246,11 +246,21 @@ impl Stage {
             return;
         };
         let read = request;
+        // A task on another machine: its git reads the two versions.
+        let remote = remote_file::RemoteSource::of(
+            &read.root,
+            self.remote_task.as_deref(),
+            self.endpoint.clone(),
+            cx,
+        );
         let task = cx.spawn(async move |this, cx| {
             let path = read.path.clone();
             let content = cx
                 .background_executor()
                 .spawn(async move {
+                    if let Some(remote) = remote {
+                        return remote.preview(&read.path, &status, &scope, base.as_deref());
+                    }
                     dcc_infra::workspace_file_preview::file_preview_content(
                         &read.root,
                         &read.path,

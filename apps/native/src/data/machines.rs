@@ -245,24 +245,6 @@ impl DesktopApi {
         self.delivery(workspace_id, step.key(), &body).map(|_| ())
     }
 
-    /// One file's diff against the last commit, as git prints it; `true`
-    /// when it was cut for being too long.
-    pub fn remote_patch(&self, workspace_id: &str, path: &str) -> Result<(String, bool), ApiError> {
-        let value = self.get(&format!(
-            "/api/v1/mobile/workspaces/{}/patch?path={}",
-            encode(workspace_id),
-            encode(path)
-        ))?;
-        Ok((
-            value
-                .get("patch")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            value.get("truncated").and_then(Value::as_bool) == Some(true),
-        ))
-    }
-
     /// The machine's card, through its channel: an answer means it is on.
     pub fn machine_card(&self, id: &str) -> Result<MachineCard, ApiError> {
         decode(self.on_machine(id).get("/api/v1/machine")?)

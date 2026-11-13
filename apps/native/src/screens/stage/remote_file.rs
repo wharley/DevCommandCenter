@@ -2,9 +2,11 @@
 //! is asked from the machine by the task's id and shown to read. It is not
 //! edited from here (nothing writes on the machine through this), a binary
 //! or oversized one says so instead of showing half, and an image is not
-//! brought over yet.
+//! brought over yet. A change's diff is read the same way: its two versions
+//! come from the machine's git.
 
 use dcc_core::domain::indentation::{FileIndentation, resolve_file_indentation};
+use dcc_core::domain::workspace_git::WorkspaceGitPreviewScope;
 use gpui::App;
 
 use crate::data::desktop_api::{ApiError, DesktopApi};
@@ -61,6 +63,21 @@ impl RemoteSource {
         let indentation = resolve_file_indentation(config.as_deref(), path, &text);
         Ok((text, indentation))
     }
+
+    /// A change's two versions and whether it reads as one column, as the
+    /// local diff reads them from this computer's git.
+    pub fn preview(
+        &self,
+        path: &str,
+        status: &str,
+        scope: &WorkspaceGitPreviewScope,
+        base: Option<&str>,
+    ) -> Result<(String, String, bool), String> {
+        self.api
+            .remote_preview(&self.task, path, status, scope, base)
+            .map(|preview| (preview.original, preview.modified, preview.inline))
+            .map_err(reason)
+    }
 }
 
 fn reason(error: ApiError) -> String {
@@ -81,6 +98,7 @@ mod tests {
         "/api/v1/machines/m-1/proxy/api/v1/mobile/workspaces/w-1/file?path=src%2Fmain.rs";
     const CONFIG: &str =
         "/api/v1/machines/m-1/proxy/api/v1/mobile/workspaces/w-1/file?path=.editorconfig";
+    const PREVIEW: &str = "/api/v1/machines/m-1/proxy/api/v1/mobile/workspaces/w-1/preview?path=README.md&status=M&scope=committed&base=origin%2Fmain";
     const BIG: &str = "/api/v1/machines/m-1/proxy/api/v1/mobile/workspaces/w-1/file?path=data.sql";
 
     #[gpui::test]
@@ -96,6 +114,11 @@ mod tests {
                 CONFIG,
                 200,
                 r#"{"text":"[*]\nindent_style = tab\n","truncated":false,"binary":false}"#.into(),
+            ),
+            (
+                PREVIEW,
+                200,
+                r#"{"original":"old\n","modified":"new\n","inline":false}"#.into(),
             ),
             (
                 BIG,
@@ -120,6 +143,19 @@ mod tests {
         assert!(indentation.use_tabs, "the machine's .editorconfig");
         // Half a file is not shown as the whole.
         assert_eq!(source.read("data.sql").unwrap_err(), source.too_big);
+        // A change's two versions come from the machine's git.
+        let (original, modified, inline) = source
+            .preview(
+                "README.md",
+                "M",
+                &WorkspaceGitPreviewScope::Committed,
+                Some("origin/main"),
+            )
+            .unwrap();
+        assert_eq!(
+            (original.as_str(), modified.as_str(), inline),
+            ("old\n", "new\n", false)
+        );
         desktop.join().unwrap();
     }
 }
