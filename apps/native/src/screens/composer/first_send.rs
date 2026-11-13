@@ -7,7 +7,7 @@ use dcc_core::domain::task_title::derive_task_title;
 use gpui::Context;
 
 use super::{Busy, Composer, ComposerEvent, api, report};
-use crate::data::desktop_api::TurnOptions;
+use crate::data::desktop_api::{DesktopApi, TurnOptions};
 use crate::i18n::Translate;
 
 impl Composer {
@@ -59,6 +59,12 @@ impl Composer {
                             api.apply_task_title(&session, &start.workspace_id, title)
                     {
                         eprintln!("[dcc-native] automatic task title failed: {error}");
+                    }
+                    // On a machine: its mirror here finds the session now.
+                    if api.machine().is_some()
+                        && let Some(local) = DesktopApi::load()
+                    {
+                        let _ = local.follow_machine_tasks();
                     }
                     Ok(session)
                 })

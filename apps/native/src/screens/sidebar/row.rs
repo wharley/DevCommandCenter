@@ -10,6 +10,7 @@ use super::row_actions::{self, ROW_GROUP};
 use super::row_status::{RowContext, status};
 use super::{Sidebar, meta_chips};
 use crate::data::tasks::path_leaf;
+use crate::i18n::Translate;
 use crate::project::{ProjectGlyph, ProviderIcon};
 use crate::theme::ActiveTheme;
 use crate::theme::color::mix_oklab;
@@ -42,6 +43,11 @@ pub fn render(
         .as_ref()
         .map(|project| project.display_name.clone())
         .or_else(|| path_leaf(&task.root_path));
+    let project_name = crate::data::machines::with_place(
+        project_name,
+        &task.root_path,
+        &cx.t("sidebar.onMachine"),
+    );
     let provider = sidebar.state.data.provider_ids.get(task_id).cloned();
     let git = sidebar.state.row_git(task);
     let state_line = status(

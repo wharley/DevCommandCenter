@@ -101,6 +101,8 @@ pub struct ConversationView {
         Option<Entity<crate::screens::computer_use::preview::ComputerPreview>>,
     /// A task just created: the composer takes the focus at the next frame.
     focus_composer: bool,
+    /// The machine the task on screen runs on; none for this computer.
+    machine: Option<String>,
     /// Text for the composer once the conversation can take it (a note's task).
     prefill: Option<String>,
     _composer_events: gpui::Subscription,
@@ -199,6 +201,7 @@ impl ConversationView {
             composer,
             computer_preview: None,
             focus_composer: false,
+            machine: None,
             prefill: None,
             _composer_events: composer_events,
             task_id: None,
@@ -394,6 +397,34 @@ impl ConversationView {
         self.apply(Rc::new(next), cx);
     }
 
+    /// A task that runs on a machine talks to that machine: its prompts,
+    /// approvals and answers go through this computer's server to it, and
+    /// its mirror is followed again (a follower ends when the machine
+    /// leaves). A local task goes back to this computer's API.
+    fn route_to_machine(&mut self, next: &Conversation, cx: &mut Context<Self>) {
+        let machine = next
+            .root_path
+            .as_deref()
+            .and_then(crate::data::machines::machine_of_path);
+        if machine == self.machine {
+            return;
+        }
+        self.machine = machine;
+        let api = crate::data::machines::api_for_path(next.root_path.as_deref());
+        self.requests.endpoint = api.clone();
+        self.composer
+            .update(cx, |composer, _| composer.endpoint = api);
+        if self.machine.is_some() {
+            cx.background_executor()
+                .spawn(async {
+                    if let Some(local) = crate::data::desktop_api::DesktopApi::load() {
+                        let _ = local.follow_machine_tasks();
+                    }
+                })
+                .detach();
+        }
+    }
+
     fn apply(&mut self, next: Rc<Conversation>, cx: &mut Context<Self>) {
         if self.task_id.as_deref() != Some(next.task_id.as_str()) {
             return;
@@ -452,6 +483,7 @@ impl ConversationView {
             context: next.context.clone(),
         };
         let history = next.rows.clone();
+        self.route_to_machine(&next, cx);
         self.composer.update(cx, |composer, cx| {
             composer.set_history(history);
             composer.set_session(session, cx)

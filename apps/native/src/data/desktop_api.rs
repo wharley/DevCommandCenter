@@ -158,6 +158,9 @@ impl TurnOptions {
     }
 }
 
+/// The field that carries this computer's account for a provider.
+const PROVIDER_RUNTIME: &str = "providerRuntime";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DesktopApi {
     port: u16,
@@ -331,6 +334,18 @@ impl DesktopApi {
         wait: Duration,
     ) -> Result<Value, ApiError> {
         let path = &self.routed(path);
+        // A machine runs agents on its own accounts: this computer's
+        // account for a provider (its folder here) is never sent along.
+        let own;
+        let body = match (&self.machine, body) {
+            (Some(_), Some(Value::Object(fields))) if fields.contains_key(PROVIDER_RUNTIME) => {
+                let mut fields = fields.clone();
+                fields.remove(PROVIDER_RUNTIME);
+                own = Value::Object(fields);
+                Some(&own)
+            }
+            _ => body,
+        };
         let address = SocketAddr::from(([127, 0, 0, 1], self.port));
         let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
             .map_err(|_| ApiError::DesktopClosed)?;

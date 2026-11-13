@@ -935,6 +935,7 @@
       "reviewUnavailable": "Review indisponível",
       "checksRunning": "Checks rodando"
     },
+    "onMachine": "em outra máquina",
     "unknownProject": "Projeto desconhecido",
     "waiting": "Em espera",
     "completed": "Concluídos",

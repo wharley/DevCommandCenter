@@ -935,6 +935,7 @@
       "reviewUnavailable": "Review unavailable",
       "checksRunning": "Checks running"
     },
+    "onMachine": "on another machine",
     "unknownProject": "Unknown project",
     "waiting": "On hold",
     "completed": "Completed",

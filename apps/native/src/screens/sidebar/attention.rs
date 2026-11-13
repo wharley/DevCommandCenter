@@ -112,11 +112,12 @@ fn project_label(sidebar: &Sidebar, item: &AttentionItem, cx: &Context<Sidebar>)
     if members.len() > 1 {
         return members.join(" · ");
     }
-    sidebar
+    let project = sidebar
         .project_for(task)
         .map(|project| project.display_name.clone())
         .or_else(|| path_leaf(task.project_key()))
-        .or_else(|| members.first().map(|name| name.to_string()))
+        .or_else(|| members.first().map(|name| name.to_string()));
+    crate::data::machines::with_place(project, &task.root_path, &cx.t("sidebar.onMachine"))
         .unwrap_or_else(|| cx.t("sidebar.unknownProject").to_string())
 }
 

@@ -50,6 +50,35 @@ impl MachineCard {
     }
 }
 
+/// How a mirrored task's paths start (`dcc_server::machine_mirror`).
+const MACHINE_PATH_SCHEME: &str = "dcc-machine://";
+
+/// The machine a task's path is on; none for a task of this computer.
+pub fn machine_of_path(path: &str) -> Option<String> {
+    let rest = path.strip_prefix(MACHINE_PATH_SCHEME)?;
+    let id = rest.split('/').next().filter(|id| !id.is_empty())?;
+    Some(id.to_string())
+}
+
+/// A row's project name, saying so when the task runs on a machine:
+/// "vendeagora-app · em outra máquina".
+pub fn with_place(project: Option<String>, path: &str, elsewhere: &str) -> Option<String> {
+    if machine_of_path(path).is_none() {
+        return project;
+    }
+    Some(match project {
+        Some(project) => format!("{project} · {elsewhere}"),
+        None => elsewhere.to_string(),
+    })
+}
+
+/// The API a task's calls go to: its machine's through this computer's
+/// server, or none for a local task (each call then loads the local one).
+pub fn api_for_path(path: Option<&str>) -> Option<DesktopApi> {
+    let machine = machine_of_path(path?)?;
+    DesktopApi::load().map(|api| api.on_machine(&machine))
+}
+
 fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
     serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
 }
@@ -137,6 +166,54 @@ mod tests {
         };
         assert_eq!(card.label(), "Linux · v0.3.6");
         assert_eq!(MachineCard::default().label(), "");
+    }
+
+    #[test]
+    fn a_tasks_machine_is_read_from_its_path() {
+        assert_eq!(
+            machine_of_path("dcc-machine://m-1/Users/gio/app").as_deref(),
+            Some("m-1")
+        );
+        assert_eq!(machine_of_path("/Users/me/app"), None);
+        assert_eq!(machine_of_path("dcc-machine:///x"), None);
+        assert!(api_for_path(Some("/Users/me/app")).is_none());
+        assert_eq!(
+            with_place(
+                Some("app".into()),
+                "dcc-machine://m-1/srv/app",
+                "em outra máquina"
+            ),
+            Some("app · em outra máquina".into())
+        );
+        assert_eq!(
+            with_place(Some("app".into()), "/Users/me/app", "em outra máquina"),
+            Some("app".into())
+        );
+        assert!(api_for_path(None).is_none());
+    }
+
+    #[test]
+    fn this_computers_provider_account_never_goes_to_a_machine() {
+        let (port, server) = crate::test_support::fake_desktop("{}".into());
+        let body = json!({ "workspaceId": "w-1", "providerRuntime": { "configDir": "/Users/me/.claude-zedy" } });
+        DesktopApi::new(port, "k")
+            .on_machine("m-1")
+            .post("/api/v1/sessions/start", &body)
+            .unwrap();
+        let (request, sent) = server.join().unwrap();
+        assert_eq!(
+            request,
+            "POST /api/v1/machines/m-1/proxy/api/v1/sessions/start"
+        );
+        let sent: Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(sent, json!({ "workspaceId": "w-1" }));
+        // A local call keeps it.
+        let (port, server) = crate::test_support::fake_desktop("{}".into());
+        DesktopApi::new(port, "k")
+            .post("/api/v1/sessions/start", &body)
+            .unwrap();
+        let sent: Value = serde_json::from_str(&server.join().unwrap().1).unwrap();
+        assert!(sent.get("providerRuntime").is_some());
     }
 
     #[test]
