@@ -304,7 +304,7 @@ fn loads_task_conversations_on_a_database_copy() {
             first.running,
         );
         println!(
-            "    context {:?} · branch {:?} · limit {} · goal {:?} · auto-resume {} · objective {:?}",
+            "    context {:?} · branch {:?} · limit {} · goal {:?} · auto-resume {}",
             first.context.as_ref().map(|context| (
                 context.project_label.as_deref(),
                 context.current_branch.as_deref(),
@@ -315,10 +315,6 @@ fn loads_task_conversations_on_a_database_copy() {
             first.usage_limit.is_some(),
             first.goal.as_ref().map(|goal| goal.status),
             first.auto_resume,
-            first
-                .objective
-                .as_ref()
-                .map(|objective| (objective.status, objective.generation)),
         );
         assert!(first.same_as(&again) || first.running);
     }

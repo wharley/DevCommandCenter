@@ -96,10 +96,10 @@ impl CodeColumn {
         }
     }
 
-    pub(crate) fn toggle_changes_tree(&mut self, cx: &mut Context<Self>) {
-        self.changes.tree = !self.changes.tree;
+    pub(crate) fn cycle_changes_layout(&mut self, cx: &mut Context<Self>) {
+        self.changes.layout = self.changes.layout.next();
         self.changes.closed.clear();
-        if !self.changes.tree {
+        if !self.changes.layout.rows() {
             self.changes.remount(&[
                 ChangeGroup::Staged,
                 ChangeGroup::Unstaged,

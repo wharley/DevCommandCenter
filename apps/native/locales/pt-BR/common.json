@@ -2201,6 +2201,7 @@
         "staged": "Preparadas",
         "unstaged": "Não preparadas"
       },
+      "cardsView": "Mostrar com o diff",
       "listView": "Mostrar como lista",
       "expandAll": "Expandir todos os arquivos",
       "collapseAll": "Recolher todos os arquivos",

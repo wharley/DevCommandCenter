@@ -21,6 +21,8 @@ fn open(cx: &mut TestAppContext) -> (gpui::Entity<CodeColumn>, &mut gpui::Visual
         let mut column = CodeColumn::new(CodeColumnTab::Changes, cx);
         // A database of its own: no task, so the branch's base comes from git.
         column.db_path = DB.with(|dir| dir.path().join("database.sqlite"));
+        // These tests are the cards' (the list is the default).
+        column.changes.layout = super::Layout::Cards;
         column
     })
 }
@@ -479,9 +481,14 @@ fn the_tree_folds_folders_and_shows_a_files_actions_on_hover(cx: &mut TestAppCon
             })
             .collect()
     };
+    column.update(cx, |column, cx| {
+        column.changes.layout = super::Layout::List;
+        cx.notify();
+    });
+    cx.run_until_parked();
     let tree_button = cx
         .debug_bounds("changes-toggle-tree")
-        .expect("list or tree");
+        .expect("list, tree or cards");
     cx.simulate_click(tree_button.center(), Modifiers::none());
     cx.run_until_parked();
     column.read_with(cx, |column, _| {
@@ -607,7 +614,7 @@ fn a_card_and_a_tree_row_open_their_diff_on_the_stage(cx: &mut TestAppContext) {
     );
     // In the tree the row opens it, and the one on the stage is marked.
     column.update(cx, |column, cx| {
-        column.toggle_changes_tree(cx);
+        column.cycle_changes_layout(cx);
         column.set_open_diff(
             Some((WorkspaceGitPreviewScope::Unstaged, "src/lib.rs".into())),
             cx,
@@ -617,4 +624,27 @@ fn a_card_and_a_tree_row_open_their_diff_on_the_stage(cx: &mut TestAppContext) {
     let row = cx.debug_bounds("changes-file-0").expect("the tree row");
     cx.simulate_click(row.center(), Modifiers::none());
     assert_eq!(opened(&events.borrow()).len(), 2);
+}
+
+#[gpui::test]
+fn the_list_shows_a_files_actions_inside_the_column(cx: &mut TestAppContext) {
+    let repo = git_checkout(&[("onboarding-agent-chat.tsx", "1\n")]);
+    std::fs::write(repo.path().join("onboarding-agent-chat.tsx"), "2\n").unwrap();
+    let root = repo.path().to_string_lossy().into_owned();
+    let (column, cx) = open(cx);
+    column.update(cx, |column, cx| {
+        column.changes.layout = super::Layout::List;
+        column.set_root(Some(root), cx)
+    });
+    cx.run_until_parked();
+    cx.simulate_resize(size(px(340.0), px(600.0)));
+    cx.run_until_parked();
+    let row = cx.debug_bounds("changes-file-0").expect("the file's row");
+    assert!(row.right() <= px(340.0), "the row fits: {row:?}");
+    cx.simulate_mouse_move(row.center(), None, Modifiers::none());
+    cx.run_until_parked();
+    let stage = cx
+        .debug_bounds("changes-file-stage-0")
+        .expect("the row's actions on hover");
+    assert!(stage.right() <= px(340.0), "inside the column: {stage:?}");
 }

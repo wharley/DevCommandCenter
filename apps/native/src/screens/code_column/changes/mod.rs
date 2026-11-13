@@ -11,9 +11,11 @@ mod card;
 mod load;
 #[cfg(test)]
 mod tests;
+mod layout;
 mod tree;
 mod view;
 
+pub(crate) use layout::Layout;
 pub(crate) use view::{card_shadow, changes};
 
 use std::collections::HashSet;
@@ -175,7 +177,7 @@ pub(crate) struct Changes {
     pub all_open: Option<(Scope, bool)>,
     /// The scope picked for this checkout (else the default).
     pub picked: Option<Scope>,
-    pub tree: bool,
+    pub layout: Layout,
     /// Folders closed in the tree (they start open).
     pub closed: HashSet<(ChangeGroup, String)>,
     pub branch: Loaded<WorkspaceGitBranchDiffOutput>,
@@ -208,7 +210,7 @@ impl Changes {
             unstaged_open: true,
             all_open: None,
             picked: None,
-            tree: false,
+            layout: Layout::default(),
             closed: HashSet::new(),
             branch: Loaded::Pending,
             flashing: HashSet::new(),
@@ -496,8 +498,12 @@ impl Changes {
     }
 
     fn group_rows(&self, group: ChangeGroup, rows: &mut Vec<ChangesRow>) {
-        if self.tree {
-            tree::rows(self, group, rows);
+        if self.layout.rows() {
+            if self.layout == Layout::Tree {
+                tree::rows(self, group, rows);
+            } else {
+                tree::flat_rows(self, group, rows);
+            }
             rows.push(ChangesRow::Space(8));
         } else {
             rows.extend(

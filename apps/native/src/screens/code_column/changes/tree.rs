@@ -90,6 +90,19 @@ pub(super) fn rows(changes: &Changes, group: ChangeGroup, rows: &mut Vec<Changes
     push(changes, group, &build(changes, group), 0, rows);
 }
 
+/// The list: the group's files one under the other, no folders (each row
+/// names its own).
+pub(super) fn flat_rows(changes: &Changes, group: ChangeGroup, rows: &mut Vec<ChangesRow>) {
+    rows.extend(
+        changes
+            .cards
+            .iter()
+            .enumerate()
+            .filter(|(_, card)| card.group == group)
+            .map(|(card, _)| ChangesRow::File { card, depth: 0 }),
+    );
+}
+
 /// The tree's `pl-1`.
 const TREE_INSET: f32 = 4.0;
 
@@ -145,11 +158,13 @@ pub(super) fn file_row(
     let folder = super::view::dirname(&entry.path).to_string();
     let hover_bg = colors.accent.opacity(0.55);
     let actions = hovered.then(|| actions(column, at, cx)).flatten();
+    let swap = hovered && actions.is_some();
     let selected = column
         .open_diff
         .as_ref()
         .is_some_and(|(scope, path)| *scope == card.group.preview_scope() && *path == entry.path);
     let primary = colors.primary;
+    let flat = column.changes.layout == super::Layout::List;
     div()
         .id(("changes-file", at))
         .debug_selector(move || format!("changes-file-{at}"))
@@ -175,7 +190,12 @@ pub(super) fn file_row(
         .rounded(px(6.0))
         .py(px(4.0))
         .pr(px(8.0))
-        .pl(px(depth as f32 * 12.0 + 22.0))
+        // Under a folder's chevron in the tree; at the edge in the list.
+        .pl(px(if flat {
+            8.0
+        } else {
+            depth as f32 * 12.0 + 22.0
+        }))
         .text_color(colors.muted_foreground)
         .hover(move |style| style.bg(hover_bg))
         .on_hover(cx.listener(move |column, hovered: &bool, _, cx| {
@@ -202,7 +222,7 @@ pub(super) fn file_row(
                 .text_right()
                 .text_size(px(10.0))
                 .text_color(colors.muted_foreground)
-                .when(hovered && actions.is_some(), |folder| folder.invisible())
+                .when(swap, |folder| folder.invisible())
                 .child(folder),
         )
         .children(crate::screens::code_column::review::review_badge(
@@ -211,41 +231,43 @@ pub(super) fn file_row(
             at,
             cx,
         ))
-        .child(
-            div()
-                .flex()
-                .flex_shrink_0()
-                .items_center()
-                .gap(px(4.0))
-                .text_size(px(10.0))
-                .font_features(tabular_nums())
-                .when(hovered && actions.is_some(), |stats| stats.invisible())
-                .when(entry.insertions > 0, |stats| {
-                    stats.child(
+        // On hover the counts give way to the actions.
+        .when(!swap, |row| {
+            row.child(
+                div()
+                    .flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_size(px(10.0))
+                    .font_features(tabular_nums())
+                    .when(entry.insertions > 0, |stats| {
+                        stats.child(
+                            div()
+                                .text_color(added_color(cx))
+                                .child(format!("+{}", entry.insertions)),
+                        )
+                    })
+                    .when(entry.deletions > 0, |stats| {
+                        stats.child(
+                            div()
+                                .text_color(colors.destructive)
+                                .child(format!("−{}", entry.deletions)),
+                        )
+                    })
+                    .child(
                         div()
-                            .text_color(added_color(cx))
-                            .child(format!("+{}", entry.insertions)),
-                    )
-                })
-                .when(entry.deletions > 0, |stats| {
-                    stats.child(
-                        div()
-                            .text_color(colors.destructive)
-                            .child(format!("−{}", entry.deletions)),
-                    )
-                })
-                .child(
-                    div()
-                        .flex()
-                        .h(px(16.0))
-                        .min_w(px(16.0))
-                        .items_center()
-                        .justify_center()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(status_color(&entry.status, cx))
-                        .child(entry.status.clone()),
-                ),
-        )
+                            .flex()
+                            .h(px(16.0))
+                            .min_w(px(16.0))
+                            .items_center()
+                            .justify_center()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(status_color(&entry.status, cx))
+                            .child(entry.status.clone()),
+                    ),
+            )
+        })
         .children(actions)
         .into_any_element()
 }
@@ -283,7 +305,8 @@ fn name(text: String, flashing: bool, at: usize, cx: &Context<CodeColumn>) -> An
     )
 }
 
-/// `ROW_ACTIONS_CLASS`: a small toolbar over the row's right edge.
+/// `ROW_ACTIONS_CLASS`: a small toolbar at the row's right end, in place
+/// of its counts.
 fn actions(column: &CodeColumn, at: usize, cx: &mut Context<CodeColumn>) -> Option<AnyElement> {
     let colors = cx.theme().colors.clone();
     let card = &column.changes.cards[at];
@@ -325,28 +348,20 @@ fn actions(column: &CodeColumn, at: usize, cx: &mut Context<CodeColumn>) -> Opti
         }
         _ => return None,
     };
+    // In the row's own flow, where the counts were: never off its edge.
     Some(
         div()
-            .absolute()
-            .right(px(4.0))
-            .top_0()
-            .bottom_0()
             .flex()
+            .flex_shrink_0()
             .items_center()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(2.0))
-                    .rounded(px(6.0))
-                    .bg(colors.background.opacity(0.95))
-                    .px(px(2.0))
-                    .py(px(1.0))
-                    .shadow_sm()
-                    .border_1()
-                    .border_color(colors.border.opacity(0.6))
-                    .children(buttons),
-            )
+            .gap(px(2.0))
+            .rounded(px(6.0))
+            .bg(colors.background)
+            .px(px(2.0))
+            .py(px(1.0))
+            .border_1()
+            .border_color(colors.border.opacity(0.6))
+            .children(buttons)
             .into_any_element(),
     )
 }

@@ -57,11 +57,6 @@ pub(crate) fn card_shadow() -> Vec<BoxShadow> {
     vec![shadow(2.0, 3.0, 0.025), shadow(8.0, 24.0, 0.04)]
 }
 
-/// `--dcc-surface-edge`: the border 80% of the way.
-fn surface_edge(cx: &Context<CodeColumn>) -> Hsla {
-    cx.theme().colors.border.opacity(0.8)
-}
-
 pub(super) fn dirname(path: &str) -> &str {
     match path.rfind('/') {
         Some(at) if at > 0 => &path[..at],
@@ -172,76 +167,52 @@ fn icon_button(
         .into_any_element()
 }
 
-/// `InspectorReviewScopes`: the switch, each with its count, and the hint.
+/// The scopes as quiet tabs, each with its count; what a scope shows is
+/// its tooltip.
 fn scopes(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
     let colors = cx.theme().colors.clone();
-    let edge = surface_edge(cx);
     let active = column.review_scope();
     // `availableInspectorReviewScopes`: "Último turno" with a session.
     let last_turn = column
         .last_turn_context()
-        .map(|_| (Scope::LastTurn, "clock-3", column.turn.count()));
+        .map(|_| (Scope::LastTurn, column.turn.count()));
     let counts = [(
         Scope::Working,
-        "laptop",
         Some(column.changes.entries(Scope::Working).count()),
     )]
     .into_iter()
     .chain(last_turn)
-    .chain([(
-        Scope::Branch,
-        "git-compare-arrows",
-        column.changes.branch_count(),
-    )]);
+    .chain([(Scope::Branch, column.changes.branch_count())]);
     let buttons: Vec<AnyElement> = counts
         .into_iter()
-        .map(|(scope, icon, count)| {
+        .map(|(scope, count)| {
             let pressed = scope == active;
-            div()
+            let hover = colors.muted.opacity(0.3);
+            let tab = div()
                 .id(SharedString::from(format!("changes-scope-{}", scope.key())))
                 .debug_selector(move || format!("changes-scope-{}", scope.key()))
                 .flex()
-                .flex_1()
                 .min_w_0()
                 .items_center()
-                .justify_center()
                 .gap(px(5.0))
-                .px(px(4.0))
-                .py(px(7.0))
+                .px(px(8.0))
+                .py(px(4.0))
                 .rounded(px(8.0))
-                .text_size(px(10.0))
+                .text_size(px(11.0))
                 .cursor_pointer()
                 .map(|button| {
                     if pressed {
                         button
-                            .bg(colors.background)
+                            .bg(colors.muted.opacity(0.55))
                             .text_color(colors.foreground)
-                            .shadow(vec![
-                                BoxShadow {
-                                    color: Hsla::black().opacity(0.08),
-                                    offset: point(px(0.0), px(1.0)),
-                                    blur_radius: px(4.0),
-                                    spread_radius: px(0.0),
-                                    inset: false,
-                                },
-                                BoxShadow {
-                                    color: edge,
-                                    offset: point(px(0.0), px(0.0)),
-                                    blur_radius: px(0.0),
-                                    spread_radius: px(1.0),
-                                    inset: false,
-                                },
-                            ])
+                            .font_weight(FontWeight::MEDIUM)
                     } else {
-                        button.text_color(colors.muted_foreground)
+                        button
+                            .text_color(colors.muted_foreground)
+                            .hover(move |style| style.bg(hover))
                     }
                 })
                 .on_click(cx.listener(move |column, _, _, cx| column.set_scope(scope, cx)))
-                .child(
-                    Icon::new(icon)
-                        .size(14.0)
-                        .when(pressed, |icon| icon.color(colors.accent_calm)),
-                )
                 .child(
                     div()
                         .truncate()
@@ -249,37 +220,30 @@ fn scopes(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
                 )
                 .child(
                     div()
-                        .text_size(px(9.0))
+                        .flex_shrink_0()
+                        .text_size(px(10.0))
+                        .font_weight(FontWeight::NORMAL)
                         .font_features(tabular_nums())
-                        .opacity(0.65)
+                        .text_color(colors.muted_foreground)
                         .child(count.map_or("—".to_string(), |count| count.to_string())),
-                )
-                .into_any_element()
+                );
+            Tooltip::text(
+                SharedString::from(format!("changes-scope-tip-{}", scope.key())),
+                tab,
+                cx.t(&format!("review.scopes.{}", scope.key())),
+            )
+            .side(Side::Bottom)
+            .into_any_element()
         })
         .collect();
     div()
-        .px(px(8.0))
-        .pb(px(9.0))
-        .child(
-            div()
-                .flex()
-                .gap(px(3.0))
-                .p(px(3.0))
-                .border_1()
-                .border_color(edge)
-                .rounded(px(11.0))
-                .bg(colors.muted.opacity(0.55))
-                .children(buttons),
-        )
-        .child(
-            div()
-                .mt(px(8.0))
-                .mx(px(3.0))
-                .text_size(px(10.0))
-                .line_height(px(15.0))
-                .text_color(colors.muted_foreground)
-                .child(cx.t(&format!("review.scopes.{}", active.key()))),
-        )
+        .flex()
+        .flex_1()
+        .min_w_0()
+        .items_center()
+        .gap(px(2.0))
+        .overflow_hidden()
+        .children(buttons)
         .into_any_element()
 }
 
@@ -322,8 +286,8 @@ fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
     } else {
         column.changes.cards_open(scope)
     };
-    let tree = column.changes.tree;
-    let toggle_cards = (summary.files > 1 && (last_turn || !tree)).then(|| {
+    let layout = column.changes.layout;
+    let toggle_cards = (summary.files > 1 && (last_turn || !layout.rows())).then(|| {
         icon_button(
             "changes-toggle-all",
             if all_open {
@@ -340,19 +304,17 @@ fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
             cx,
         )
     });
-    let toggle_tree = (!last_turn).then(|| {
+    let toggle_layout = (!last_turn).then(|| {
+        let (icon, tooltip) = layout.button();
         icon_button(
             "changes-toggle-tree",
-            if tree { "list" } else { "list-tree" },
-            cx.t(if tree {
-                "inspector.changes.listView"
-            } else {
-                "inspector.changes.treeView"
-            }),
-            |column, cx| column.toggle_changes_tree(cx),
+            icon,
+            cx.t(tooltip),
+            |column, cx| column.cycle_changes_layout(cx),
             cx,
         )
     });
+    // One strip: the scopes, the scope's totals, then how it is laid out.
     div()
         .flex_shrink_0()
         .border_b_1()
@@ -361,39 +323,17 @@ fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
         .child(
             div()
                 .flex()
-                .min_h(px(40.0))
+                .min_h(px(36.0))
                 .items_center()
                 .gap(px(4.0))
-                .px(px(8.0))
-                .py(px(6.0))
-                .child(
-                    div()
-                        .flex()
-                        .size(px(27.0))
-                        .flex_shrink_0()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(9.0))
-                        .bg(colors.accent_calm.opacity(0.12))
-                        .text_color(colors.accent_calm)
-                        .child(Icon::new("git-compare-arrows").size(14.0)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(px(11.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(cx.t("review.changes")),
-                )
+                .px(px(6.0))
+                .child(scopes(column, cx))
                 .when(counted, |row| {
                     row.child(stats(summary.insertions, summary.deletions, true, cx))
                 })
                 .children(toggle_cards)
-                .children(toggle_tree),
+                .children(toggle_layout),
         )
-        .child(scopes(column, cx))
         .when(scope == Scope::Branch, |header| {
             header.child(branch_context(column, cx))
         })
@@ -511,7 +451,7 @@ fn group_header(
                     div()
                         .min_w_0()
                         .overflow_hidden()
-                        .child(Tracked::new(label, 10.5, 0.055)),
+                        .child(Tracked::new(label, 10.0, 0.055)),
                 ),
         )
         .child(batch)
@@ -526,7 +466,7 @@ fn group_header(
                 .px(px(6.0))
                 .bg(colors.secondary)
                 .text_color(colors.secondary_foreground)
-                .text_size(px(9.5))
+                .text_size(px(10.0))
                 .child(count.to_string()),
         )
         .into_any_element()
@@ -550,7 +490,7 @@ fn branch_header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElemen
         .border_b_1()
         .border_color(colors.border.opacity(0.35))
         .px(px(12.0))
-        .text_size(px(10.5))
+        .text_size(px(11.0))
         .text_color(colors.muted_foreground)
         .child(Icon::new("cloud").size(14.0).stroke(1.8))
         .child(div().flex_1().min_w_0().truncate().child(base))
@@ -703,7 +643,7 @@ pub(crate) fn changes(
                     .flex_1()
                     .min_h_0()
                     .bg(colors.muted.opacity(0.08))
-                    .text_size(px(11.5))
+                    .text_size(px(12.0))
                     .child(rows)
                     .child(ListScrollbar::new(
                         "changes-scrollbar",

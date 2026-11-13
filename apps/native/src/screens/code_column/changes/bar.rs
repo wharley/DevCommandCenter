@@ -38,7 +38,7 @@ fn pill_button(
         .gap(px(6.0))
         .rounded_full()
         .px(px(12.0))
-        .text_size(px(14.0))
+        .text_size(px(12.0))
         .font_weight(gpui::FontWeight::MEDIUM)
         .map(|button| {
             if disabled {

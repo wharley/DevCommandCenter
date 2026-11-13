@@ -2201,6 +2201,7 @@
         "staged": "Staged",
         "unstaged": "Not staged"
       },
+      "cardsView": "Show with the diff",
       "listView": "Show as list",
       "expandAll": "Expand all files",
       "collapseAll": "Collapse all files",
