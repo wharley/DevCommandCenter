@@ -205,6 +205,16 @@ pub struct Detail {
     pub reviews: Vec<Review>,
     /// GitHub only: the commits, oldest first.
     pub commits: Vec<Commit>,
+    /// `open`, `merged` or `closed`; none from a desktop that does not say.
+    pub state: Option<String>,
+}
+
+impl Detail {
+    /// Merged or closed: nothing left to review. Open when the desktop
+    /// does not say.
+    pub fn settled(&self) -> bool {
+        matches!(self.state.as_deref(), Some("merged" | "closed"))
+    }
 }
 
 /// `PullRequestHubReview`
@@ -449,6 +459,19 @@ mod tests {
             }),
             ..Item::default()
         }
+    }
+
+    #[test]
+    fn a_merged_or_closed_pull_request_has_nothing_left_to_review() {
+        let detail = |state: Option<&str>| Detail {
+            state: state.map(str::to_string),
+            ..Detail::default()
+        };
+        assert!(detail(Some("merged")).settled());
+        assert!(detail(Some("closed")).settled());
+        assert!(!detail(Some("open")).settled());
+        // An older desktop does not say: reviewed as before.
+        assert!(!detail(None).settled());
     }
 
     #[test]

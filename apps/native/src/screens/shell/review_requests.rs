@@ -13,10 +13,9 @@ use dcc_core::domain::provider::ProviderDescriptor;
 use gpui::{App, Context, Global};
 
 use super::Shell;
-use super::review_trigger::{Checkout, hub_item, local_repository, review_run};
+use super::review_trigger::{Checkout, hub_item, local_repository, read_and_review, review_run};
 use crate::data::desktop_api::DesktopApi;
 use crate::data::pr_hub::Reviewed;
-use crate::data::pr_review_agent::review_prompt;
 use crate::data::pr_review_jobs::PrReviewJobs;
 use crate::i18n::{Args, Translate};
 use crate::ui::Toaster;
@@ -99,20 +98,13 @@ impl Shell {
                 let name = agent.name.clone();
                 let answer = cx
                     .background_executor()
-                    .spawn(async move {
-                        let api =
-                            DesktopApi::load().ok_or_else(|| "DCC is not running".to_string())?;
-                        let detail = api
-                            .pr_hub_detail(&item, true)
-                            .map_err(|error| error.to_string())?;
-                        let prompt = review_prompt(&item, &detail, "");
-                        let run =
-                            review_run(&agent, &providers, &pick, &item.repository_root, prompt)
-                                .ok_or_else(|| "no provider can review".to_string())?;
-                        api.pr_review_agent(&run).map_err(|error| error.to_string())
-                    })
+                    .spawn(async move { read_and_review(&agent, &providers, &pick, &item) })
                     .await;
                 let _ = cx.update(|cx| {
+                    // Merged or closed since it was asked: no review, no card.
+                    let Some(answer) = answer else {
+                        return PrReviewJobs::dismiss(cx, &id);
+                    };
                     let key = if answer.is_ok() {
                         "agents.room.card.reviewed"
                     } else {

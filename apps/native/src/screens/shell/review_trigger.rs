@@ -160,6 +160,37 @@ pub(super) fn review_run(
     })
 }
 
+/// Reads the pull request and runs the agent's review of it, off the UI
+/// thread. `None` when it is already merged or closed: read here, at the
+/// moment of reviewing, because the request may be older than the merge.
+pub(super) fn read_and_review(
+    agent: &AgentRecord,
+    providers: &[ProviderDescriptor],
+    pick: &(Option<String>, Option<String>),
+    item: &Item,
+) -> Option<Result<String, String>> {
+    let read = || {
+        let api = DesktopApi::load().ok_or_else(|| "DCC is not running".to_string())?;
+        let detail = api
+            .pr_hub_detail(item, true)
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>((api, detail))
+    };
+    let (api, detail) = match read() {
+        Ok(read) => read,
+        Err(error) => return Some(Err(error)),
+    };
+    if detail.settled() {
+        return None;
+    }
+    let prompt = review_prompt(item, &detail, "");
+    Some(
+        review_run(agent, providers, pick, &item.repository_root, prompt)
+            .ok_or_else(|| "no provider can review".to_string())
+            .and_then(|run| api.pr_review_agent(&run).map_err(|error| error.to_string())),
+    )
+}
+
 /// "Revisor revisou de novo" — "acme/app #1014 · 3 comentários para revisar".
 fn announce(
     trigger: Trigger,
@@ -246,22 +277,15 @@ impl Shell {
                 let name = reviewer.name.clone();
                 let answer = cx
                     .background_executor()
-                    .spawn(async move {
-                        let api =
-                            DesktopApi::load().ok_or_else(|| "DCC is not running".to_string())?;
-                        let detail = api
-                            .pr_hub_detail(&item, true)
-                            .map_err(|error| error.to_string())?;
-                        let prompt = review_prompt(&item, &detail, "");
-                        let run =
-                            review_run(&reviewer, &providers, &pick, &item.repository_root, prompt)
-                                .ok_or_else(|| "no provider can review".to_string())?;
-                        api.pr_review_agent(&run).map_err(|error| error.to_string())
-                    })
+                    .spawn(async move { read_and_review(&reviewer, &providers, &pick, &item) })
                     .await;
-                let _ = cx.update(|cx| {
-                    announce(trigger, &name, &pr, &answer, cx);
-                    PrReviewJobs::finish(cx, &id, answer);
+                let _ = cx.update(|cx| match answer {
+                    Some(answer) => {
+                        announce(trigger, &name, &pr, &answer, cx);
+                        PrReviewJobs::finish(cx, &id, answer);
+                    }
+                    // Merged or closed meanwhile: no review, no card.
+                    None => PrReviewJobs::dismiss(cx, &id),
                 });
             })
             .detach();

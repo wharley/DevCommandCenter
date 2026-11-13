@@ -374,6 +374,10 @@ pub struct PullRequestHubDetailOutput {
     /// The commits, oldest first (GitHub).
     #[serde(default)]
     pub commits: Vec<PullRequestHubCommit>,
+    /// The forge's state, lowercased: `open` (GitLab's `opened`), `merged`
+    /// or `closed`.
+    #[serde(default)]
+    pub state: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1589,6 +1593,17 @@ fn hub_items_for_repository(
         .collect())
 }
 
+/// The pull request's state as both forges' detail gives it, lowercased,
+/// GitLab's `opened` read as `open`.
+fn hub_detail_state(raw: &Value) -> Option<String> {
+    let state = raw.get("state").and_then(Value::as_str)?.to_lowercase();
+    Some(if state == "opened" {
+        "open".into()
+    } else {
+        state
+    })
+}
+
 /// `gh pr view --json reviews`: who reviewed, how and when.
 fn github_reviews(raw: &Value) -> Vec<PullRequestHubReview> {
     raw.get("reviews")
@@ -2081,6 +2096,7 @@ pub async fn pull_request_hub_detail_with_state(
                 merge_capabilities: Some(github_merge_capabilities(&raw, &repository)),
                 reviews: github_reviews(&raw),
                 commits: github_commits(&raw),
+                state: hub_detail_state(&raw),
             })
         }
         ForgeCliProvider::Gitlab => {
@@ -2172,6 +2188,7 @@ pub async fn pull_request_hub_detail_with_state(
                 merge_capabilities: None,
                 reviews: Vec::new(),
                 commits: Vec::new(),
+                state: hub_detail_state(&raw),
             })
         }
     }
@@ -4373,6 +4390,17 @@ mod tests {
             resolved: Some(false),
             position,
         }
+    }
+
+    #[test]
+    fn a_details_state_reads_the_same_from_both_forges() {
+        use super::hub_detail_state;
+        let state = |raw: &str| hub_detail_state(&serde_json::json!({ "state": raw }));
+        assert_eq!(state("MERGED").as_deref(), Some("merged"));
+        assert_eq!(state("OPEN").as_deref(), Some("open"));
+        assert_eq!(state("opened").as_deref(), Some("open"));
+        assert_eq!(state("closed").as_deref(), Some("closed"));
+        assert_eq!(hub_detail_state(&serde_json::json!({})), None);
     }
 
     #[test]
