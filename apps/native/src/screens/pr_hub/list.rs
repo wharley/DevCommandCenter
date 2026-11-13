@@ -386,7 +386,7 @@ impl PrHub {
             }
         };
         let warnings = match &self.list {
-            Some(Ok(list)) if !list.warnings.is_empty() => Some(list.warnings.len()),
+            Some(Ok(list)) if !list.warnings.is_empty() => Some(list.warnings.clone()),
             _ => None,
         };
         let fetching = self.fetching;
@@ -480,16 +480,43 @@ impl PrHub {
                     .p(px(8.0))
                     .child(body),
             )
-            .children(warnings.map(|count| {
-                div()
+            // Which projects did not answer, and why, on hover.
+            .children(warnings.map(|warnings| {
+                let muted = colors.muted_foreground;
+                let line = div()
+                    .id("pr-list-warning")
+                    .debug_selector(|| "pr-list-warning".into())
                     .flex_none()
                     .border_t_1()
                     .border_color(colors.border.opacity(0.7))
                     .px(px(12.0))
                     .py(px(8.0))
-                    .text_size(px(10.0))
-                    .text_color(if dark { tw::AMBER_400 } else { tw::AMBER_600 }.hsla())
-                    .child(cx.t_with("pullRequests.partialWarning", &Args::count(count as i64)))
+                    .text_size(px(11.0))
+                    .text_color(StateTone::NeedsYou.text(cx.theme()))
+                    .child(cx.t_with(
+                        "pullRequests.partialWarning",
+                        &Args::count(warnings.len() as i64),
+                    ));
+                Tooltip::new("pr-list-warning-tip", line, move |_, _| {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.0))
+                        .children(warnings.iter().map(|warning| {
+                            div()
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(warning.repository_name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(muted)
+                                        .child(crate::data::pr_warnings::reason(&warning.message)),
+                                )
+                        }))
+                        .into_any_element()
+                })
             }))
             .into_any_element()
     }

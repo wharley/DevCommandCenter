@@ -80,6 +80,7 @@ pub mod pr_hub_cache;
 pub mod pr_rail;
 pub mod pr_row_state;
 pub mod pr_sections;
+pub mod pr_warnings;
 pub mod pr_news;
 pub mod pr_review;
 pub mod pr_review_agent;

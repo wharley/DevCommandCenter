@@ -16,6 +16,7 @@ mod merge;
 mod news_tests;
 mod reviewer;
 mod sections;
+mod summary_review;
 #[cfg(test)]
 mod tests;
 

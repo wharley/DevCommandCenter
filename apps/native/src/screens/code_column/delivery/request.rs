@@ -394,7 +394,7 @@ pub(super) fn request_dialog(
             cx,
         )
         .items_start()
-        .rounded(px(10.0))
+        .rounded(px(8.0))
         .border_1()
         .border_color(colors.border.opacity(0.6))
         .bg(colors.muted.opacity(0.2))

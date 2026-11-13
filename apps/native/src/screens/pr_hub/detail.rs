@@ -30,7 +30,7 @@ fn summary_card(title: SharedString, body: AnyElement, cx: &gpui::App) -> AnyEle
         .p(px(18.0))
         .border_1()
         .border_color(surface_edge(theme))
-        .rounded(px(18.0))
+        .rounded(px(12.0))
         .bg(mix_srgb(colors.card, 0.45, colors.background))
         .shadow(card_shadow())
         .child(
@@ -426,58 +426,7 @@ impl PrHub {
                     ))
                     .child(summary_card(cx.t("pullRequests.activity"), activity, cx)),
             );
-        let empty = self.comment.read(cx).text().trim().is_empty();
-        let footer = div()
-            .flex_none()
-            .border_t_1()
-            .border_color(colors.border.opacity(0.7))
-            .bg(colors.background.opacity(0.95))
-            .px(px(pad))
-            .py(px(12.0))
-            .child(
-                div()
-                    .mx_auto()
-                    .max_w(px(896.0))
-                    .flex()
-                    .items_end()
-                    .gap(px(8.0))
-                    .rounded(px(12.0))
-                    .border_1()
-                    .border_color(colors.border)
-                    .bg(colors.muted.opacity(0.25))
-                    .p(px(8.0))
-                    .child(
-                        div()
-                            .debug_selector(|| "pr-comment".into())
-                            .flex_1()
-                            .min_w_0()
-                            .min_h(px(48.0))
-                            .text_size(px(12.0))
-                            .child(self.comment.clone()),
-                    )
-                    .child(Tooltip::text(
-                        "pr-send-comment-tip",
-                        Button::new("pr-send-comment")
-                            .size(ButtonSize::IconSm)
-                            .disabled(empty || self.sending)
-                            .on_click(cx.listener(|hub, _, _, cx| hub.send_comment(cx)))
-                            .child(if self.sending {
-                                spinner("pr-sending", 14.0).into_any_element()
-                            } else {
-                                Icon::new("send").size(14.0).into_any_element()
-                            }),
-                        cx.t("pullRequests.sendComment"),
-                    )),
-            )
-            .children(self.comment_error.clone().map(|error| {
-                div()
-                    .mx_auto()
-                    .mt(px(6.0))
-                    .max_w(px(896.0))
-                    .text_size(px(10.0))
-                    .text_color(tw::RED_500.hsla())
-                    .child(error)
-            }));
+        let footer = self.summary_footer(&item, pad, cx);
         div()
             .debug_selector(|| "pr-detail".into())
             .relative()

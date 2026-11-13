@@ -262,3 +262,70 @@ fn a_github_pull_request_merges_after_its_confirmation(cx: &mut TestAppContext) 
     assert_eq!(body["number"], 1);
     assert_eq!(body["forgeLogin"], "ana");
 }
+
+#[gpui::test]
+fn the_summary_approves_with_its_text_without_opening_the_code(cx: &mut TestAppContext) {
+    use crate::data::pr_review::ReviewEvent;
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let detail = json!({
+        "body": null, "comments": [], "checks": [], "files": [], "inlineComments": [],
+        "reviewCapabilities": { "approve": true, "requestChanges": true },
+    })
+    .to_string();
+    let sent = json!({ "submitted": true, "url": null, "submittedCommentCount": 0,
+        "bodySubmitted": true, "decisionSubmitted": true, "warning": null })
+    .to_string();
+    let (port, desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list.clone()),
+        ("/api/v1/pull-request-hub/detail", 200, detail.clone()),
+        ("/api/v1/pull-request-hub/submit-review", 200, sent),
+        ("/api/v1/pull-request-hub/detail", 200, detail),
+        ("/api/v1/pull-request-hub/list", 200, list),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1400.0), px(900.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    // On the summary: the verdict, the text, then a button that says it.
+    assert!(cx.debug_bounds("pr-summary-footer").is_some());
+    let approve = cx.debug_bounds("pr-review-event-approve").unwrap();
+    cx.simulate_click(approve.center(), Modifiers::none());
+    cx.run_until_parked();
+    hub.update(cx, |hub, cx| {
+        assert_eq!(hub.review.event, ReviewEvent::Approve);
+        let comment = hub.comment.clone();
+        comment.update(cx, |area, cx| area.set_text("Pode entrar", cx));
+    });
+    cx.run_until_parked();
+    let send = cx.debug_bounds("pr-send-comment").unwrap();
+    cx.simulate_click(send.center(), Modifiers::none());
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    cx.run_until_parked();
+    let (_, body) = seen
+        .iter()
+        .find(|(request, _)| request.ends_with("/submit-review"))
+        .expect("the review was sent, not a comment");
+    let review = serde_json::from_str::<serde_json::Value>(body).unwrap();
+    assert_eq!(review["event"], "approve");
+    assert_eq!(review["body"], "Pode entrar");
+    assert!(
+        !seen
+            .iter()
+            .any(|(request, _)| request.ends_with("/comment"))
+    );
+    hub.read_with(cx, |hub, cx| {
+        assert!(hub.comment.read(cx).text().is_empty());
+        assert_eq!(hub.review.event, ReviewEvent::Comment);
+    });
+}

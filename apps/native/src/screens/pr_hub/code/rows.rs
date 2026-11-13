@@ -31,7 +31,7 @@ pub(super) fn thread_card(width: f32, cx: &gpui::App) -> gpui::Div {
         .p(px(14.0))
         .border_1()
         .border_color(surface_edge(cx.theme()))
-        .rounded(px(14.0))
+        .rounded(px(12.0))
         .bg(cx.theme().colors.card)
 }
 
@@ -48,7 +48,7 @@ fn line_plus(id: String, cx: &mut Context<PrHub>) -> gpui::Stateful<gpui::Div> {
         .size(px(20.0))
         .items_center()
         .justify_center()
-        .rounded(px(7.0))
+        .rounded(px(6.0))
         .border_1()
         .border_color(mix_lab(calm, 0.35, colors.border))
         .bg(colors.popover)
@@ -368,7 +368,7 @@ impl PrHub {
             .p(px(14.0))
             .border_1()
             .border_color(surface_edge(cx.theme()))
-            .rounded(px(18.0))
+            .rounded(px(12.0))
             .bg(colors.popover)
             .text_color(colors.popover_foreground)
             .shadow(vec![shadow(0.16, 24.0, 80.0), shadow(0.06, 4.0, 14.0)])
@@ -385,7 +385,7 @@ impl PrHub {
                             .size(px(32.0))
                             .items_center()
                             .justify_center()
-                            .rounded(px(11.0))
+                            .rounded(px(8.0))
                             .bg(calm.opacity(0.12))
                             .text_color(calm)
                             .child(Icon::new("message-square-plus").size(15.0)),

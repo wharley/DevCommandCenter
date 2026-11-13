@@ -76,7 +76,7 @@ fn preparing(cx: &Context<CodeColumn>) -> AnyElement {
         .items_center()
         .justify_center()
         .gap(px(12.0))
-        .rounded(px(10.0))
+        .rounded(px(8.0))
         .border_1()
         .border_color(colors.border.opacity(0.6))
         .bg(colors.muted.opacity(0.2))

@@ -13,6 +13,69 @@ use crate::theme::{ActiveTheme, Appearance};
 use crate::ui::{Button, ButtonSize, Icon, Tooltip, spinner};
 
 impl PrHub {
+    /// "Comentar | Aprovar | Solicitar alterações": the verdict's segments,
+    /// a blocked one dimmed with its reason on hover.
+    pub(in crate::screens::pr_hub) fn review_event_buttons(
+        &self,
+        item: &Item,
+        capabilities: Option<&crate::data::pr_review::ReviewCapabilities>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let colors = cx.theme().colors.clone();
+        let review = &self.review;
+        ReviewEvent::ALL
+            .into_iter()
+            .map(|event| {
+                let blocked = event_blocked(event, item, capabilities);
+                let chosen = review.event == event;
+                let selector = format!("pr-review-event-{}", event.key());
+                let fg = colors.foreground;
+                let button = div()
+                    .id(SharedString::from(selector.clone()))
+                    .debug_selector(move || selector)
+                    .rounded(px(6.0))
+                    .border_1()
+                    .px(px(9.0))
+                    .py(px(3.0))
+                    .text_size(px(11.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .map(|button| {
+                        if chosen {
+                            button
+                                .bg(colors.background)
+                                .shadow_sm()
+                                .border_color(colors.border.opacity(0.7))
+                                .text_color(colors.foreground)
+                        } else {
+                            button
+                                .border_color(gpui::transparent_black())
+                                .text_color(colors.muted_foreground)
+                        }
+                    })
+                    .map(|button| match blocked {
+                        Some(_) => button.opacity(0.35),
+                        None => button
+                            .cursor_pointer()
+                            .hover(move |button| button.text_color(fg))
+                            .on_click(cx.listener(move |hub, _, _, cx| hub.set_event(event, cx))),
+                    })
+                    .child(cx.t(&format!("pullRequests.code.reviewEvents.{}", event.key())));
+                match blocked {
+                    Some(reason) => {
+                        let reason = cx.t(reason);
+                        Tooltip::new(
+                            SharedString::from(format!("pr-review-event-tip-{}", event.key())),
+                            button,
+                            move |_, _| div().child(reason.clone()).into_any_element(),
+                        )
+                        .into_any_element()
+                    }
+                    None => button.into_any_element(),
+                }
+            })
+            .collect()
+    }
+
     pub(super) fn review_footer(
         &self,
         item: &Item,
@@ -80,57 +143,7 @@ impl PrHub {
                 true,
                 cx,
             ));
-        let events: Vec<AnyElement> = ReviewEvent::ALL
-            .into_iter()
-            .map(|event| {
-                let blocked = event_blocked(event, item, detail.review_capabilities.as_ref());
-                let chosen = review.event == event;
-                let selector = format!("pr-review-event-{}", event.key());
-                let fg = colors.foreground;
-                let button = div()
-                    .id(SharedString::from(selector.clone()))
-                    .debug_selector(move || selector)
-                    .rounded(px(6.0))
-                    .border_1()
-                    .px(px(9.0))
-                    .py(px(3.0))
-                    .text_size(px(11.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .map(|button| {
-                        if chosen {
-                            button
-                                .bg(colors.background)
-                                .shadow_sm()
-                                .border_color(colors.border.opacity(0.7))
-                                .text_color(colors.foreground)
-                        } else {
-                            button
-                                .border_color(gpui::transparent_black())
-                                .text_color(colors.muted_foreground)
-                        }
-                    })
-                    .map(|button| match blocked {
-                        Some(_) => button.opacity(0.35),
-                        None => button
-                            .cursor_pointer()
-                            .hover(move |button| button.text_color(fg))
-                            .on_click(cx.listener(move |hub, _, _, cx| hub.set_event(event, cx))),
-                    })
-                    .child(cx.t(&format!("pullRequests.code.reviewEvents.{}", event.key())));
-                match blocked {
-                    Some(reason) => {
-                        let reason = cx.t(reason);
-                        Tooltip::new(
-                            SharedString::from(format!("pr-review-event-tip-{}", event.key())),
-                            button,
-                            move |_, _| div().child(reason.clone()).into_any_element(),
-                        )
-                        .into_any_element()
-                    }
-                    None => button.into_any_element(),
-                }
-            })
-            .collect();
+        let events = self.review_event_buttons(item, detail.review_capabilities.as_ref(), cx);
         let line = |color: gpui::Hsla, icon: &'static str, text: String| {
             div()
                 .mt(px(8.0))
