@@ -1327,7 +1327,8 @@
       "files": "arquivos",
       "additions": "adições",
       "deletions": "remoções",
-      "changedFiles": "{{count}} arquivos alterados",
+      "changedFiles_one": "{{count}} arquivo alterado",
+      "changedFiles_other": "{{count}} arquivos alterados",
       "noFiles": "Nenhum arquivo alterado encontrado",
       "noFilesHint": "O provedor não retornou mudanças para este pull request.",
       "patchUnavailable": "O patch deste arquivo não está disponível no provedor.",
@@ -4393,8 +4394,13 @@
       "stop": "Parar",
       "failed": "Não deu para escrever com IA"
     },
-    "merged": "Merged",
-    "closed": "Closed",
+    "merged": "Mesclado",
+    "closed": "Fechado",
+    "requestOpened": "{{label}} aberto no navegador",
+    "requestInspect": "Abra o {{label}} para ver os checks e os conflitos.",
+    "noWorkspace": "Esta tarefa não tem uma pasta de trabalho para ler as mudanças do Git.",
+    "remoteBase": "Remoto",
+    "loadingFile": "Carregando arquivo…",
     "default": "Commit",
     "preview": {
       "title": "Revisar mensagem do commit",
@@ -4413,49 +4419,49 @@
         "idle": "Criar {{requestLabel}}",
         "busy": "Criando {{requestLabel}}...",
         "done": "{{requestLabel}} criado",
-        "error": "Retry"
+        "error": "Tentar de novo"
       },
       "open-pr": {
         "idle": "Abrir {{requestLabel}}",
         "busy": "Abrindo...",
         "done": "Aberto",
-        "error": "Retry"
+        "error": "Tentar de novo"
       },
       "commit-and-push": {
         "idle": "Commitar e enviar",
         "busy": "Commitando...",
         "done": "Enviado",
-        "error": "Retry"
+        "error": "Tentar de novo"
       },
       "push": {
         "idle": "Enviar",
         "busy": "Enviando...",
         "done": "Enviado",
-        "error": "Retry"
+        "error": "Tentar de novo"
       },
       "fix": {
         "idle": "Corrigir CI",
         "busy": "Corrigindo...",
         "done": "Corrigido",
-        "error": "Retry"
+        "error": "Tentar de novo"
       },
       "resolve-conflicts": {
         "idle": "Resolver",
         "busy": "Resolvendo...",
         "done": "Resolvido",
-        "error": "Retry"
+        "error": "Tentar de novo"
       },
       "complete-merge": {
         "idle": "Concluir",
         "busy": "Concluindo...",
         "done": "Concluído",
-        "error": "Retry"
+        "error": "Tentar de novo"
       },
       "merge": {
         "idle": "Mesclar",
         "busy": "Mesclando...",
         "done": "Mesclado",
-        "error": "Retry"
+        "error": "Tentar de novo"
       }
     },
     "checksRunning": "Checks rodando"

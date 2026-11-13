@@ -288,11 +288,7 @@ fn confirm(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> Option<AnyEleme
                 .on_click(cx.listener(|column, _, _, cx| column.cancel_confirm(cx)))
                 .into_any_element(),
             Button::new("delivery-confirm-run")
-                .variant(if confirm == Confirm::Merge {
-                    ButtonVariant::Destructive
-                } else {
-                    ButtonVariant::Default
-                })
+                .variant(ButtonVariant::Default)
                 .size(ButtonSize::Default)
                 .disabled(busy)
                 .child(action)

@@ -352,7 +352,7 @@ impl PrHub {
                                 .child(cx.t("pullRequests.merge.cancel"))
                                 .into_any_element(),
                             Button::new("pr-merge-confirm")
-                                .variant(ButtonVariant::Destructive)
+                                .variant(ButtonVariant::Default)
                                 .size(ButtonSize::Default)
                                 .text_size(14.0)
                                 .disabled(merging)

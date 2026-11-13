@@ -6,6 +6,7 @@ pub mod density;
 pub mod fonts;
 pub mod metrics;
 pub mod palette;
+pub mod state;
 pub mod tailwind;
 
 use gpui::{App, Global, Window, WindowAppearance};
@@ -15,6 +16,7 @@ pub use density::Density;
 pub use fonts::Fonts;
 pub use metrics::Radius;
 pub use palette::Palette;
+pub use state::StateTone;
 
 /// What the person picked, like the desktop's `dcc-theme` preference.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

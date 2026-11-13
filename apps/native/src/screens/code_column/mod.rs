@@ -47,12 +47,9 @@ pub enum CodeColumnTab {
 }
 
 impl CodeColumnTab {
-    /// `CODE_COLUMN_WIDTH`: files are a narrow list; changes carry stats.
+    /// One width for both tabs, so the column does not jump between them.
     pub fn width(self) -> f32 {
-        match self {
-            Self::Files => 260.0,
-            Self::Changes => 340.0,
-        }
+        340.0
     }
 }
 

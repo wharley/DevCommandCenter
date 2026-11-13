@@ -13,23 +13,23 @@ use gpui::{
 
 use super::super::CodeColumn;
 use crate::i18n::{Args, Translate};
-use crate::theme::color::hex;
 use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tracked, spinner};
 
-/// `--workspace-pr-*-accent` (the same in both themes).
+/// The pull request's states in the named state colours (`StateTone`'s
+/// fills, the same in both themes).
 pub(crate) fn pr_open() -> Hsla {
-    hex(0x238636)
+    tw::EMERALD_600.hsla()
 }
 pub(crate) fn pr_merged() -> Hsla {
-    hex(0x8957e5)
+    tw::VIOLET_600.hsla()
 }
 pub(crate) fn pr_closed() -> Hsla {
-    hex(0xda3633)
+    tw::RED_600.hsla()
 }
 pub(crate) fn pr_conflicts() -> Hsla {
-    crate::theme::color::rgb_triplet(210, 153, 34)
+    tw::AMBER_600.hsla()
 }
 
 /// `gitSectionHeaderHighlightClass`: the accent at 35%, or emerald at 8%.

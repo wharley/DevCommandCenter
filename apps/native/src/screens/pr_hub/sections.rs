@@ -7,8 +7,7 @@ use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*, px};
 use super::PrHub;
 use crate::data::pr_sections::{Section, Tone};
 use crate::i18n::Translate;
-use crate::theme::tailwind as tw;
-use crate::theme::{ActiveTheme, Appearance};
+use crate::theme::{ActiveTheme, StateTone};
 use crate::ui::Icon;
 
 impl PrHub {
@@ -19,18 +18,13 @@ impl PrHub {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
-        let dark = cx.theme().appearance == Appearance::Dark;
         let tone = match section.tone() {
-            Tone::Done => if dark {
-                tw::EMERALD_400
-            } else {
-                tw::EMERALD_600
-            }
-            .hsla(),
-            Tone::Waiting => if dark { tw::SKY_400 } else { tw::SKY_600 }.hsla(),
-            Tone::NeedsYou => if dark { tw::AMBER_400 } else { tw::AMBER_600 }.hsla(),
-            Tone::Quiet => colors.muted_foreground,
-        };
+            Tone::Done => StateTone::Done,
+            Tone::Waiting => StateTone::Waiting,
+            Tone::NeedsYou => StateTone::NeedsYou,
+            Tone::Quiet => StateTone::Quiet,
+        }
+        .text(cx.theme());
         let folded = self.section_folded(section);
         let key = section.key();
         div()

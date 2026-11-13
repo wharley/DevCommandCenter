@@ -14,7 +14,9 @@ use crate::i18n::{Args, I18n, Locale, Translate};
 use crate::theme::color::mix_srgb;
 use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, card_shadow, spinner, surface_edge};
+use crate::ui::{
+    Button, ButtonSize, ButtonVariant, Icon, Tooltip, card_shadow, spinner, surface_edge,
+};
 
 /// `CheckState`: a check, an alert, a clock or a dot.
 pub(super) fn check_icon(state: &str) -> AnyElement {
@@ -445,7 +447,8 @@ impl PrHub {
                                             .child(cx.t("pullRequests.subtitle")),
                                     ),
                             )
-                            .child(
+                            .child(Tooltip::text(
+                                "pr-refresh-tip",
                                 Button::new("pr-refresh")
                                     .variant(ButtonVariant::Ghost)
                                     .size(ButtonSize::IconSm)
@@ -456,7 +459,8 @@ impl PrHub {
                                     } else {
                                         Icon::new("refresh-cw").size(14.0).into_any_element()
                                     }),
-                            ),
+                                cx.t("pullRequests.refresh"),
+                            )),
                     )
                     .child(self.filters(cx))
                     .child(

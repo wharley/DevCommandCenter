@@ -314,7 +314,9 @@ impl Render for Stage {
             .map(|diff| match &diff.load {
                 DiffLoad::Ready(view) => view.clone().into_any_element(),
                 DiffLoad::Failed(error) => centered(error.clone().into(), colors.destructive),
-                DiffLoad::Loading(_) => centered("Loading file...".into(), colors.muted_foreground),
+                DiffLoad::Loading(_) => {
+                    centered(cx.t("commit.loadingFile"), colors.muted_foreground)
+                }
             })
             .or_else(|| file_body(self, cx))
             .or_else(|| super::session::session_body(self));

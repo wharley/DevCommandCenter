@@ -541,7 +541,7 @@ fn branch_header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElemen
         .changes
         .base_branch()
         .map(|base| base.replace("origin/", ""))
-        .unwrap_or_else(|| "Remote".to_string());
+        .unwrap_or_else(|| cx.t("commit.remoteBase").to_string());
     div()
         .flex()
         .min_h(px(32.0))
@@ -637,10 +637,7 @@ pub(crate) fn changes(
             .into_any_element()
     };
     let content = if column.root.is_none() {
-        message(
-            "No workspace path — cannot read git changes.".into(),
-            colors.muted_foreground,
-        )
+        message(cx.t("commit.noWorkspace"), colors.muted_foreground)
     } else if let Some(error) = column
         .status_error
         .clone()

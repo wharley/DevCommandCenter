@@ -102,7 +102,9 @@ impl CodeColumn {
             }
             CommitMode::OpenPr => self.open_request(mode, cx),
             CommitMode::Fix => self.fix_checks(cx),
-            CommitMode::Push | CommitMode::CreatePr => self.run_step(mode, None, cx),
+            CommitMode::Push => self.run_step(mode, None, cx),
+            // Always through the dialog, as the conversation's menu does.
+            CommitMode::CreatePr => self.open_request_dialog(false, window, cx),
             CommitMode::ResolveConflicts => self.open_merge_resolver(cx),
             CommitMode::CompleteMerge => {
                 self.delivery.confirm = Some(Confirm::CompleteMerge);
@@ -205,12 +207,11 @@ impl CodeColumn {
             Some(url) => {
                 cx.open_url(&url);
                 if mode == CommitMode::Fix {
-                    Toaster::info(
-                        format!("Abra o {label} para inspecionar checks e conflitos."),
-                        cx,
-                    );
+                    let args = Args::default().with("label", label);
+                    Toaster::info(cx.t_with("commit.requestInspect", &args), cx);
                 } else {
-                    Toaster::success(format!("{label} aberto no navegador"), cx);
+                    let args = Args::default().with("label", label);
+                    Toaster::success(cx.t_with("commit.requestOpened", &args), cx);
                 }
                 self.settle_button(CommitButtonStatus::Done, cx);
             }

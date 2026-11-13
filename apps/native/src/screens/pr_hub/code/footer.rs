@@ -184,7 +184,8 @@ impl PrHub {
                             .text_size(px(11.0))
                             .child(review.body.clone()),
                     )
-                    .child(
+                    .child(Tooltip::text(
+                        "pr-review-send-tip",
                         Button::new("pr-review-send")
                             .size(ButtonSize::IconSm)
                             .disabled(!ready)
@@ -194,7 +195,8 @@ impl PrHub {
                             } else {
                                 Icon::new("send").size(14.0).into_any_element()
                             }),
-                    ),
+                        cx.t("pullRequests.code.submitReview"),
+                    )),
             )
             .children(review.submit_error.clone().map(|error| {
                 line(

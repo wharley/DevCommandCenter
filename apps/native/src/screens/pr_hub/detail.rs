@@ -17,7 +17,8 @@ use crate::theme::ActiveTheme;
 use crate::theme::color::mix_srgb;
 use crate::theme::tailwind as tw;
 use crate::ui::{
-    Button, ButtonSize, ButtonVariant, Icon, branch_context, card_shadow, spinner, surface_edge,
+    Button, ButtonSize, ButtonVariant, Icon, Tooltip, branch_context, card_shadow, spinner,
+    surface_edge,
 };
 
 /// `dcc-pr-summary-card`, its title with the calm dot.
@@ -207,13 +208,15 @@ impl PrHub {
                                     .into_any_element(),
                             })
                             .children(self.merge_button(&item, cx))
-                            .child(
+                            .child(Tooltip::text(
+                                "pr-open-forge-tip",
                                 Button::new("pr-open-forge")
                                     .variant(ButtonVariant::Ghost)
                                     .size(ButtonSize::IconSm)
                                     .on_click(move |_, _, cx| cx.open_url(&url))
                                     .child(Icon::new("arrow-up-right").size(14.0)),
-                            ),
+                                cx.t("pullRequests.openOnForge"),
+                            )),
                     ),
             )
             .child(
@@ -434,6 +437,8 @@ impl PrHub {
                         .collect::<Vec<_>>(),
                 )
                 .into_any_element(),
+            // Still reading: not "no comments yet".
+            _ if loading => spinner("pr-activity-loading", 16.0).into_any_element(),
             _ => div()
                 .text_size(px(11.0))
                 .text_color(colors.muted_foreground)
@@ -508,7 +513,8 @@ impl PrHub {
                             .text_size(px(12.0))
                             .child(self.comment.clone()),
                     )
-                    .child(
+                    .child(Tooltip::text(
+                        "pr-send-comment-tip",
                         Button::new("pr-send-comment")
                             .size(ButtonSize::IconSm)
                             .disabled(empty || self.sending)
@@ -518,7 +524,8 @@ impl PrHub {
                             } else {
                                 Icon::new("send").size(14.0).into_any_element()
                             }),
-                    ),
+                        cx.t("pullRequests.sendComment"),
+                    )),
             )
             .children(self.comment_error.clone().map(|error| {
                 div()
@@ -529,7 +536,6 @@ impl PrHub {
                     .text_color(tw::RED_500.hsla())
                     .child(error)
             }));
-        let _ = loading;
         div()
             .debug_selector(|| "pr-detail".into())
             .relative()
