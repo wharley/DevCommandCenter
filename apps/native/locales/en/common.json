@@ -5618,12 +5618,48 @@
   },
   "codeColumn": {
     "remote": {
+      "steps": {
+        "commit": "Commit and push",
+        "push": "Push",
+        "request": "Create PR",
+        "merge": "Merge"
+      },
+      "confirm": {
+        "commit": {
+          "title": "Commit and push on the machine?",
+          "description_one": "{{count}} file goes into the commit, with the message \"{{message}}\", and the branch {{branch}} is pushed. It all runs on the machine, with its git.",
+          "description_other": "{{count}} files go into the commit, with the message \"{{message}}\", and the branch {{branch}} is pushed. It all runs on the machine, with its git."
+        },
+        "push": {
+          "title": "Push the machine's branch?",
+          "description": "The commits of {{branch}} are pushed to the remote, from the machine."
+        },
+        "request": {
+          "title": "Create the PR from the machine?",
+          "description": "Opens the pull request of {{branch}} into {{base}} titled \"{{title}}\", with the forge account on the machine."
+        },
+        "merge": {
+          "title": "Merge from the machine?",
+          "description": "The pull request of {{branch}} is merged into {{base}} with the forge account on the machine. This cannot be undone from here."
+        }
+      },
+      "done": {
+        "commit": "Committed and pushed on the machine",
+        "push": "Branch pushed by the machine",
+        "request": "PR created by the machine",
+        "merge": "PR merged by the machine"
+      },
+      "failed": {
+        "commit": "The machine could not commit and push",
+        "push": "The machine could not push",
+        "request": "The machine could not create the PR",
+        "merge": "The machine could not merge"
+      },
       "title": "Changes on the machine",
       "reading": "Reading the changes on the machine…",
       "none": "This task has not changed any file yet.",
       "uncommitted": "Not committed yet",
       "onBranch": "On the branch",
-      "readOnly": "Read-only for now: staging, committing and delivering stay on the machine.",
       "noDiff": "No text differences to show.",
       "cut": "The diff was cut for being long."
     },

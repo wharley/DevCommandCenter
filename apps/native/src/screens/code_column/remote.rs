@@ -44,9 +44,16 @@ pub(crate) struct Remote {
     pub(super) patches: HashMap<String, Patch>,
     /// The task was running at the last look: its end reads again.
     running: bool,
+    /// The task's pull request, from the forge on its machine.
+    pub(super) pr: Option<dcc_core::domain::workspace_git::WorkspacePrStatusOutput>,
+    /// The machine's default title for a new pull request.
+    pub(super) request_title: Option<String>,
+    /// The delivery step waiting for the person's yes, and one running.
+    pub(super) confirm: Option<crate::data::remote_delivery::RemoteStep>,
+    pub(super) delivering: bool,
 }
 
-fn reason(error: ApiError) -> String {
+pub(super) fn reason(error: ApiError) -> String {
     match error {
         ApiError::Failed(message) if !message.trim().is_empty() => message,
         other => other.to_string(),
@@ -54,7 +61,7 @@ fn reason(error: ApiError) -> String {
 }
 
 impl CodeColumn {
-    fn remote_api(&self) -> Option<(DesktopApi, String)> {
+    pub(super) fn remote_api(&self) -> Option<(DesktopApi, String)> {
         let machine = self.remote.machine.as_deref()?;
         let task = self.remote.task.clone()?;
         let api = self.endpoint.clone().or_else(DesktopApi::load)?;
@@ -101,9 +108,17 @@ impl CodeColumn {
         cx.notify();
         cx.spawn(async move |this, cx| {
             let asked = task.clone();
-            let read = cx
+            let (read, forge) = cx
                 .background_executor()
-                .spawn(async move { api.remote_changes(&asked) })
+                .spawn(async move {
+                    let read = api.remote_changes(&asked);
+                    // The pull request only matters once the list was read.
+                    let forge = read
+                        .as_ref()
+                        .ok()
+                        .and_then(|_| api.remote_forge(&asked).ok());
+                    (read, forge)
+                })
                 .await;
             let _ = this.update(cx, |column, cx| {
                 // Another task was opened meanwhile.
@@ -112,6 +127,10 @@ impl CodeColumn {
                 }
                 column.remote.reading = false;
                 column.remote.changes = Some(read.map_err(reason));
+                if let Some(forge) = forge {
+                    column.remote.pr = forge.pull_request;
+                    column.remote.request_title = forge.request_title;
+                }
                 // What was read before may be stale now.
                 let open = column.remote.open.clone();
                 column.remote.patches.clear();
@@ -476,15 +495,6 @@ pub(super) fn remote_changes(column: &CodeColumn, cx: &mut Context<CodeColumn>) 
                 .text_size(px(12.0))
                 .children(local)
                 .children(branch)
-                .child(
-                    div()
-                        .px(px(12.0))
-                        .pt(px(12.0))
-                        .text_size(px(11.0))
-                        .line_height(px(17.0))
-                        .text_color(colors.muted_foreground)
-                        .child(cx.t("codeColumn.remote.readOnly")),
-                )
                 .into_any_element()
         }
     };
@@ -495,6 +505,7 @@ pub(super) fn remote_changes(column: &CodeColumn, cx: &mut Context<CodeColumn>) 
         .min_h_0()
         .flex_col()
         .child(header)
+        .children(super::remote_delivery::delivery_strip(column, cx))
         .child(body)
         .into_any_element()
 }
@@ -513,6 +524,9 @@ mod tests {
     const PATCH: &str =
         "/api/v1/machines/m-1/proxy/api/v1/mobile/workspaces/w-1/patch?path=src%2Fapp%2Fpay.ts";
 
+    const FORGE: &str = "/api/v1/machines/m-1/proxy/api/v1/mobile/workspaces/w-1/delivery/forge";
+    const COMMIT: &str = "/api/v1/machines/m-1/proxy/api/v1/workspaces/w-1/delivery/commit";
+
     #[gpui::test]
     fn a_task_on_a_machine_lists_its_changes_and_opens_a_files_diff(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -520,13 +534,19 @@ mod tests {
             crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
         });
         let changes = r#"{"workspaceId":"w-1","branch":"dcc/checkout","baseBranch":"main",
+            "changesToken":"tok-1","commitMessage":"feat: pay",
             "changes":[{"path":"src/app/pay.ts","status":"M","insertions":4,"deletions":1,"staged":false}],
             "branchChanges":[{"path":"README.md","status":"A","insertions":9,"deletions":0,"staged":false}]}"#;
         let patch = r#"{"path":"src/app/pay.ts","truncated":false,
             "patch":"diff --git a/src/app/pay.ts b/src/app/pay.ts\n@@ -1,2 +1,2 @@\n-old\n+new\n same\n"}"#;
+        let forge = r#"{"pullRequest":null,"pipeline":null,"requestTitle":"Checkout"}"#;
         let (port, desktop) = fake_desktop_routes(vec![
             (DELIVERY, 200, changes.into()),
+            (FORGE, 200, forge.into()),
             (PATCH, 200, patch.into()),
+            (COMMIT, 200, r#"{"ok":true}"#.into()),
+            (DELIVERY, 200, changes.into()),
+            (FORGE, 200, forge.into()),
         ]);
         let (column, cx) = cx.add_window_view(|_, cx| CodeColumn::new(CodeColumnTab::Changes, cx));
         cx.simulate_resize(size(px(380.0), px(700.0)));
@@ -562,11 +582,38 @@ mod tests {
             assert!(kinds.contains(&RowKind::Addition) && kinds.contains(&RowKind::Deletion));
         });
         assert!(cx.debug_bounds("remote-patch").is_some());
+        // The rail says where it stands; the next step runs on the machine
+        // only after the person's yes.
+        assert!(cx.debug_bounds("remote-rail").is_some());
+        let step = cx
+            .debug_bounds("remote-delivery-step")
+            .expect("Commitar e enviar");
+        cx.simulate_click(step.center(), Modifiers::none());
+        cx.run_until_parked();
+        column.read_with(cx, |column, _| {
+            assert_eq!(
+                column.remote.confirm,
+                Some(crate::data::remote_delivery::RemoteStep::CommitAndPush)
+            );
+            assert!(!column.remote.delivering, "nothing ran yet");
+        });
+        column.update(cx, |column, cx| column.run_remote_step_for_tests(cx));
+        cx.run_until_parked();
         let asked = desktop.join().unwrap();
+        cx.run_until_parked();
+        let (_, sent) = asked
+            .iter()
+            .find(|(request, _)| request.ends_with("/delivery/commit"))
+            .expect("the commit went to the machine");
+        let sent: serde_json::Value = serde_json::from_str(sent).unwrap();
+        assert_eq!(
+            sent,
+            serde_json::json!({ "push": true, "changesToken": "tok-1" })
+        );
         assert!(
-            asked[1].0.contains("patch?path=src%2Fapp%2Fpay.ts"),
-            "{:?}",
-            asked[1].0
+            asked
+                .iter()
+                .any(|(request, _)| request.contains("patch?path=src%2Fapp%2Fpay.ts"))
         );
         // A local task again: the column is this computer's.
         column.update(cx, |column, cx| {

@@ -5618,12 +5618,48 @@
   },
   "codeColumn": {
     "remote": {
+      "steps": {
+        "commit": "Commitar e enviar",
+        "push": "Enviar",
+        "request": "Criar PR",
+        "merge": "Mesclar"
+      },
+      "confirm": {
+        "commit": {
+          "title": "Commitar e enviar na máquina?",
+          "description_one": "{{count}} arquivo entra no commit, com a mensagem \"{{message}}\", e a branch {{branch}} é enviada. Tudo roda na máquina, com o git dela.",
+          "description_other": "{{count}} arquivos entram no commit, com a mensagem \"{{message}}\", e a branch {{branch}} é enviada. Tudo roda na máquina, com o git dela."
+        },
+        "push": {
+          "title": "Enviar a branch da máquina?",
+          "description": "Os commits da branch {{branch}} são enviados ao remoto, a partir da máquina."
+        },
+        "request": {
+          "title": "Criar o PR pela máquina?",
+          "description": "Abre o pull request de {{branch}} para {{base}} com o título \"{{title}}\", com a conta do forge que está na máquina."
+        },
+        "merge": {
+          "title": "Mesclar pela máquina?",
+          "description": "O pull request de {{branch}} é mesclado em {{base}} com a conta do forge que está na máquina. Isso não se desfaz por aqui."
+        }
+      },
+      "done": {
+        "commit": "Commit feito e enviado na máquina",
+        "push": "Branch enviada pela máquina",
+        "request": "PR criado pela máquina",
+        "merge": "PR mesclado pela máquina"
+      },
+      "failed": {
+        "commit": "A máquina não conseguiu commitar e enviar",
+        "push": "A máquina não conseguiu enviar",
+        "request": "A máquina não conseguiu criar o PR",
+        "merge": "A máquina não conseguiu mesclar"
+      },
       "title": "Mudanças na máquina",
       "reading": "Lendo as mudanças na máquina…",
       "none": "Esta tarefa ainda não mudou nenhum arquivo.",
       "uncommitted": "Ainda não commitadas",
       "onBranch": "No branch",
-      "readOnly": "Só leitura por enquanto: preparar, commitar e entregar ficam na máquina.",
       "noDiff": "Sem diferenças de texto para mostrar.",
       "cut": "O diff foi cortado por ser longo."
     },

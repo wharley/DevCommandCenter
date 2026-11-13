@@ -79,6 +79,23 @@ pub struct RemoteChanges {
     pub base_branch: String,
     pub changes: Vec<RemoteChange>,
     pub branch_changes: Vec<RemoteChange>,
+    pub ahead_of_remote_count: u32,
+    pub behind_of_remote_count: u32,
+    pub conflict_count: u32,
+    pub merge_in_progress: bool,
+    /// Guards a commit against changes that moved since this was read.
+    pub changes_token: String,
+    /// The machine's own message for what the commit would take.
+    pub commit_message: String,
+}
+
+/// The task's pull request, read from the forge on its machine.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteForge {
+    pub pull_request: Option<dcc_core::domain::workspace_git::WorkspacePrStatusOutput>,
+    /// The machine's default title for a new pull request.
+    pub request_title: Option<String>,
 }
 
 impl RemoteChanges {
@@ -190,6 +207,34 @@ impl DesktopApi {
             "/api/v1/mobile/workspaces/{}/delivery",
             encode(workspace_id)
         ))?)
+    }
+
+    /// The task's pull request and its checks, from the forge the machine
+    /// is signed into (one call there; asked when the list is).
+    pub fn remote_forge(&self, workspace_id: &str) -> Result<RemoteForge, ApiError> {
+        decode(self.get(&format!(
+            "/api/v1/mobile/workspaces/{}/delivery/forge",
+            encode(workspace_id)
+        ))?)
+    }
+
+    /// One delivery step of the task, run on its machine with its git and
+    /// its forge login.
+    pub fn remote_deliver(
+        &self,
+        workspace_id: &str,
+        step: super::remote_delivery::RemoteStep,
+        changes_token: &str,
+    ) -> Result<(), ApiError> {
+        use super::remote_delivery::RemoteStep;
+        let body = match step {
+            // The machine's own message; pushed in the same step.
+            RemoteStep::CommitAndPush => json!({ "push": true, "changesToken": changes_token }),
+            RemoteStep::Push | RemoteStep::Merge => json!({}),
+            // Its default title, ready for review.
+            RemoteStep::CreateRequest => json!({ "draft": false }),
+        };
+        self.delivery(workspace_id, step.key(), &body).map(|_| ())
     }
 
     /// One file's diff against the last commit, as git prints it; `true`

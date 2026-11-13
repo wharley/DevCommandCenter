@@ -743,7 +743,12 @@ impl DesktopApi {
     }
 
     /// One of the task's delivery actions (`workspace_delivery`), by its id.
-    fn delivery(&self, workspace_id: &str, action: &str, body: &Value) -> Result<Value, ApiError> {
+    pub(crate) fn delivery(
+        &self,
+        workspace_id: &str,
+        action: &str,
+        body: &Value,
+    ) -> Result<Value, ApiError> {
         self.request_waiting(
             "POST",
             &format!(

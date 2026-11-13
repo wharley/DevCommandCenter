@@ -320,5 +320,6 @@ pub(super) fn dialogs(
         .chain(confirm(column, cx))
         .chain(super::request::request_dialog(column, window, cx))
         .chain(super::blocked::blocked_dialog(column, window, cx))
+        .chain(crate::screens::code_column::remote_delivery::confirm_dialog(column, window, cx))
         .collect()
 }
