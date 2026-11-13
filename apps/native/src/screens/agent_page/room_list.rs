@@ -23,6 +23,9 @@ pub(crate) struct RoomList {
     built: bool,
     /// The room was notified for something other than the clock's tick.
     dirty: bool,
+    /// The next notify only redraws (the trail under the pointer): the rows
+    /// stay as built.
+    held: bool,
     /// Rows built since the room opened, for the tests.
     #[cfg(test)]
     pub(crate) rows_built: std::cell::Cell<usize>,
@@ -39,6 +42,7 @@ impl Default for RoomList {
             model: Rc::new(RoomModel::default()),
             built: false,
             dirty: false,
+            held: false,
             #[cfg(test)]
             rows_built: Default::default(),
             #[cfg(test)]
@@ -50,7 +54,13 @@ impl Default for RoomList {
 impl RoomList {
     /// The room was notified; `tick` when the shared clock did it alone.
     pub(crate) fn notified(&mut self, tick: bool) {
-        self.dirty |= !tick;
+        let held = std::mem::take(&mut self.held);
+        self.dirty |= !(tick || held);
+    }
+
+    /// The coming notify changes nothing in the rows (`notified`).
+    pub(crate) fn hold_rows(&mut self) {
+        self.held = true;
     }
 
     /// Whether this frame must read the room's data again: it was notified
@@ -171,5 +181,17 @@ mod tests {
             ..Scope::default()
         };
         assert!(list.needs_build(&other), "another room");
+    }
+
+    #[test]
+    fn the_trail_under_the_pointer_redraws_without_reading_the_rows() {
+        let mut list = RoomList::default();
+        let scope = Scope::default();
+        list.take(RoomModel::default());
+        list.hold_rows();
+        list.notified(false);
+        assert!(!list.needs_build(&scope), "the trail moved, nothing else");
+        list.notified(false);
+        assert!(list.needs_build(&scope), "the next change reads them again");
     }
 }

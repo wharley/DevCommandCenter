@@ -75,6 +75,7 @@ impl ConversationView {
                     offset_in_item: px(0.0),
                 });
             },
+            |_, cx| cx.notify(),
             self,
             cx,
         )

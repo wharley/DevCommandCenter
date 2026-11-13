@@ -75,8 +75,9 @@ pub fn weights(count: usize, pointer: f32) -> Vec<f32> {
 }
 
 /// The trail of `items` for a view `V`: `state` reaches its `TrailState`,
-/// `current` is the stop being read, `go` takes the view to a stop. Nothing
-/// below two stops.
+/// `current` is the stop being read, `go` takes the view to a stop and
+/// `redraw` asks for the next frame (a view may keep its rows for it).
+/// Nothing below two stops.
 pub fn trail<V: 'static>(
     id: &'static str,
     items: Rc<Vec<TrailItem>>,
@@ -84,6 +85,7 @@ pub fn trail<V: 'static>(
     viewport_width: f32,
     state: fn(&mut V) -> &mut TrailState,
     go: fn(&mut V, &TrailItem, &mut Context<V>),
+    redraw: fn(&mut V, &mut Context<V>),
     view: &mut V,
     cx: &mut Context<V>,
 ) -> Option<AnyElement> {
@@ -212,13 +214,13 @@ pub fn trail<V: 'static>(
             let trail = state(view);
             if let Some(track) = trail.track.get() {
                 trail.pointer = Some(f32::from(event.position.y - track.top()));
-                cx.notify();
+                redraw(view, cx);
             }
         }))
         .on_hover(cx.listener(move |view, hovered: &bool, _, cx| {
             if !*hovered {
                 state(view).pointer = None;
-                cx.notify();
+                redraw(view, cx);
             }
         }))
         .on_click(cx.listener(move |view, event: &gpui::ClickEvent, _, cx| {
@@ -229,7 +231,7 @@ pub fn trail<V: 'static>(
             let index = focused_index(at, move_items.len());
             if let Some(item) = move_items.get(index) {
                 go(view, item, cx);
-                cx.notify();
+                redraw(view, cx);
             }
         }))
         .child(track);

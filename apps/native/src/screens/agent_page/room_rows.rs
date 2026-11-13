@@ -112,6 +112,8 @@ pub(crate) struct RoomModel {
     pub unread: usize,
     /// The person's and the agents' lines, for "3 novas" (`room_jump`).
     pub talk: usize,
+    /// The trail's stops, read once with the rows (`room_trail`).
+    pub trail: Rc<Vec<crate::ui::trail::TrailItem>>,
 }
 
 impl RoomModel {
@@ -233,6 +235,7 @@ impl TeamRoom {
         let rows = super::room_flow::arrange(rows);
         let rows = super::room_source_group::group(rows, &self.sources_open);
         let talk = super::room_jump::talk(&rows);
+        let trail = Rc::new(super::room_trail::room_trail_items(&rows));
         RoomModel {
             scope: self.scope(),
             agents,
@@ -240,6 +243,7 @@ impl TeamRoom {
             rows,
             unread,
             talk,
+            trail,
         }
     }
 }

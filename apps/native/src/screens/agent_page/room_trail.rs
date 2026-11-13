@@ -1,9 +1,7 @@
 //! The task conversation's trail in the team room (`ui::trail`): a tick per
 //! message of the person's down the left margin, the one under the pointer
-//! shows the message and the answer it got, a click goes there. Only when
-//! the room is wide enough for the margin to hold it.
-
-use std::rc::Rc;
+//! shows the message and the answer it got, a click goes there. In a room
+//! narrower than its column and two margins, the rows make room for it.
 
 use gpui::{AnyElement, Context, ListOffset, px};
 
@@ -14,6 +12,13 @@ use crate::ui::trail::{TrailItem, preview};
 
 /// The room's column (760) and a gutter on each side.
 const TRAIL_WIDTH: f32 = 880.0;
+/// Narrower than this, no trail: the room is too tight for a gutter.
+const MIN_WIDTH: f32 = 420.0;
+
+/// Whether the rows move right to keep the trail's margin free.
+pub(crate) fn needs_gutter(width: f32) -> bool {
+    (MIN_WIDTH..TRAIL_WIDTH).contains(&width)
+}
 
 /// A stop per message of the person's, with the last answer after it.
 pub(crate) fn room_trail_items(rows: &[Row]) -> Vec<TrailItem> {
@@ -45,11 +50,10 @@ pub(crate) fn room_trail_items(rows: &[Row]) -> Vec<TrailItem> {
 impl TeamRoom {
     pub(super) fn room_trail(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let width = self.width.get();
-        if width < TRAIL_WIDTH {
+        if width < MIN_WIDTH {
             return None;
         }
-        let model = self.list.model();
-        let items = Rc::new(room_trail_items(&model.rows));
+        let items = self.list.model().trail.clone();
         let top = self.list.state.logical_scroll_top().item_ix;
         let current = items.iter().rposition(|item| item.row <= top).unwrap_or(0);
         crate::ui::trail::trail(
@@ -64,6 +68,11 @@ impl TeamRoom {
                     offset_in_item: px(0.0),
                 });
             },
+            // The pointer over the trail redraws it, never the rows.
+            |room, cx| {
+                room.list.hold_rows();
+                cx.notify();
+            },
             self,
             cx,
         )
@@ -72,6 +81,8 @@ impl TeamRoom {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use super::super::room_said::Said;
     use super::*;
     use crate::data::agent_mentions::MentionNames;

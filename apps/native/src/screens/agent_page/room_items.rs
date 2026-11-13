@@ -28,8 +28,15 @@ const EDGE: f32 = 20.0;
 const TIGHT: f32 = 4.0;
 
 /// `content` in the column's width; nothing at all when it draws nothing.
-/// `tight` when it joins the row above (an answer in a group).
-fn item(content: Vec<AnyElement>, first: bool, last: bool, tight: bool) -> AnyElement {
+/// `tight` when it joins the row above (an answer in a group); `gutter`
+/// keeps the left margin free for the trail when the room is narrow.
+fn item(
+    content: Vec<AnyElement>,
+    first: bool,
+    last: bool,
+    tight: bool,
+    gutter: bool,
+) -> AnyElement {
     if content.is_empty() {
         return div().when(last, |end| end.h(px(EDGE))).into_any_element();
     }
@@ -37,6 +44,9 @@ fn item(content: Vec<AnyElement>, first: bool, last: bool, tight: bool) -> AnyEl
         .w_full()
         .flex()
         .justify_center()
+        .when(gutter, |row| {
+            row.pl(px(crate::ui::trail::GUTTER_WIDTH - 24.0))
+        })
         .child(
             div()
                 .w_full()
@@ -74,7 +84,14 @@ impl TeamRoom {
             None => self.tail(&model, window, cx),
         };
         let tight = matches!(model.rows.get(index), Some(Row::Line { first: false, .. }));
-        item(content, index == 0, index >= model.rows.len(), tight)
+        let gutter = super::room_trail::needs_gutter(self.width.get());
+        item(
+            content,
+            index == 0,
+            index >= model.rows.len(),
+            tight,
+            gutter,
+        )
     }
 
     fn row(
