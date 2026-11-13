@@ -6,6 +6,7 @@ use gpui::{AnyElement, Context, div, prelude::*, px};
 
 use super::super::CodeColumn;
 use crate::data::pr_hub::{Check, Item};
+use crate::data::pr_rail::split_checks;
 use crate::i18n::{Args, Translate};
 use crate::theme::{ActiveTheme, StateTone};
 use crate::ui::{Icon, spinner};
@@ -17,21 +18,6 @@ pub(crate) struct ChecksList {
     pub read: Option<Result<Vec<Check>, ()>>,
     /// The pull request the checks are of.
     of: Option<u32>,
-}
-
-/// The checks that did not pass (failed first, then running), and how many
-/// passed.
-pub(crate) fn split(checks: &[Check]) -> (Vec<&Check>, usize) {
-    let passed = checks
-        .iter()
-        .filter(|check| check.state == "success")
-        .count();
-    let mut open: Vec<&Check> = checks
-        .iter()
-        .filter(|check| check.state != "success")
-        .collect();
-    open.sort_by_key(|check| check.state != "failure");
-    (open, passed)
 }
 
 impl CodeColumn {
@@ -111,7 +97,8 @@ pub(crate) fn checks_list(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> 
         Some(Err(())) => vec![quiet(cx.t("commit.rail.checks.failed"))],
         Some(Ok(checks)) if checks.is_empty() => vec![quiet(cx.t("pullRequests.noChecks"))],
         Some(Ok(checks)) => {
-            let (open, passed) = split(checks);
+            let (open, passed) = split_checks(checks);
+            let passed = passed.len();
             let mut rows: Vec<AnyElement> = open
                 .into_iter()
                 .map(|check| {
@@ -182,27 +169,4 @@ pub(crate) fn checks_list(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> 
             .children(body)
             .into_any_element(),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn failed_checks_come_first_and_the_passed_ones_are_counted() {
-        let check = |name: &str, state: &str| Check {
-            name: name.into(),
-            state: state.into(),
-        };
-        let checks = [
-            check("lint", "success"),
-            check("e2e", "pending"),
-            check("unit", "failure"),
-            check("build", "success"),
-        ];
-        let (open, passed) = split(&checks);
-        assert_eq!(passed, 2);
-        let names: Vec<&str> = open.iter().map(|check| check.name.as_str()).collect();
-        assert_eq!(names, ["unit", "e2e"]);
-    }
 }

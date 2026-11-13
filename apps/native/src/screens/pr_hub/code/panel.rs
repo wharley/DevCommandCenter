@@ -256,10 +256,18 @@ impl PrHub {
             div().debug_selector(|| "pr-review-agent".into()).child(
                 Button::new("pr-review-agent")
                     .variant(ButtonVariant::Outline)
-                    .size(ButtonSize::IconXs)
+                    .size(ButtonSize::Sm)
+                    .text_size(11.0)
                     .disabled(off)
                     .on_click(cx.listener(|hub, _, _, cx| hub.toggle_agent_panel(cx)))
-                    .child(face),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(face)
+                            .child(label.clone()),
+                    ),
             ),
             move |_, _| div().child(label.clone()).into_any_element(),
         )

@@ -1231,6 +1231,23 @@
       "requestChanges": "Request changes",
       "undecided": "Not decided"
     },
+    "you": "You",
+    "rail": {
+      "opened": "Open",
+      "draft": "Draft",
+      "checks": "Checks",
+      "review": "Review",
+      "merge": "Merge"
+    },
+    "verdicts": {
+      "approved": "Approved",
+      "changesRequested": "Requested changes",
+      "commented": "Commented",
+      "dismissed": "Review dismissed",
+      "requested": "Review requested"
+    },
+    "review": "Review",
+    "reviewTitle": "Review",
     "rowState": {
       "draft": "Draft",
       "checksFailed": "Checks failed",
@@ -1397,6 +1414,11 @@
       "submitReview": "Submit review",
       "pendingCount_one": "{{count}} pending comment",
       "pendingCount_other": "{{count}} pending comments",
+      "sendEvents": {
+        "comment": "Send comment",
+        "approve": "Send approval",
+        "request_changes": "Send change request"
+      },
       "reviewEvents": {
         "comment": "Comment",
         "approve": "Approve",

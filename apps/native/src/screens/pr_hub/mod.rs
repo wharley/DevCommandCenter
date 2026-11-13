@@ -9,6 +9,7 @@
 
 mod code;
 mod detail;
+mod journey;
 mod list;
 mod merge;
 #[cfg(test)]

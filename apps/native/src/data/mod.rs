@@ -77,6 +77,7 @@ pub mod open_project;
 pub mod plan_checklist;
 pub mod pr_hub;
 pub mod pr_hub_cache;
+pub mod pr_rail;
 pub mod pr_row_state;
 pub mod pr_sections;
 pub mod pr_news;

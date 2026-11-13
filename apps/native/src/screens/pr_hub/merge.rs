@@ -105,7 +105,13 @@ impl PrHub {
     }
 
     /// "Mesclar ⌄", GitHub only.
-    pub(super) fn merge_button(&self, item: &Item, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// `primary`: the merge is the next step, so its button is the filled one.
+    pub(super) fn merge_button(
+        &self,
+        item: &Item,
+        primary: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if item.provider != "github" {
             return None;
         }
@@ -173,13 +179,24 @@ impl PrHub {
                         .items_center()
                         .rounded(px(8.0))
                         .border_1()
-                        .border_color(colors.border)
-                        .bg(colors.background)
                         .px(px(10.0))
                         .text_size(px(12.0))
                         .font_weight(FontWeight::MEDIUM)
                         .cursor_pointer()
-                        .hover(|button| button.bg(colors.accent))
+                        .map(|button| {
+                            if primary {
+                                button
+                                    .border_color(colors.primary)
+                                    .bg(colors.primary)
+                                    .text_color(colors.primary_foreground)
+                                    .hover(|button| button.opacity(0.9))
+                            } else {
+                                button
+                                    .border_color(colors.border)
+                                    .bg(colors.background)
+                                    .hover(|button| button.bg(colors.accent))
+                            }
+                        })
                         .when(merging, |button| button.opacity(0.5))
                         .child(trigger)
                         .into_any_element()

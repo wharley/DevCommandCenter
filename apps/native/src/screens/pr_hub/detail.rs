@@ -9,7 +9,7 @@ use gpui::{AnyElement, Context, FontWeight, SharedString, Window, div, prelude::
 
 use super::PrHub;
 use super::code::Tab;
-use super::list::{author_avatar, check_icon};
+use super::list::author_avatar;
 use crate::data::pr_hub::relative_date;
 use crate::i18n::{I18n, Locale, Translate};
 use crate::markdown::{MarkdownStyle, parse, render_markdown};
@@ -118,6 +118,12 @@ impl PrHub {
         let working = self.working_on.as_deref() == Some(item.id.as_str());
         let url = item.url.clone();
         let task = item.linked_workspace_id.clone();
+        let awaits_review = self.awaits_my_review(&item, cx);
+        // The person's own pull request, with nothing in the merge's way.
+        let merge_ready = item.created_by_viewer
+            && item.provider == "github"
+            && crate::data::pr_hub::merge_blocked(&item, self.merge_detail(&item)).is_none();
+        let rail = self.pr_rail(&item, self.merge_detail(&item), cx);
         let header = div()
             .debug_selector(|| "pr-detail-header".into())
             .flex_none()
@@ -178,6 +184,17 @@ impl PrHub {
                             .flex_wrap()
                             .items_center()
                             .gap(px(8.0))
+                            .when(awaits_review, |row| {
+                                row.child(
+                                    Button::new("pr-review")
+                                        .size(ButtonSize::Sm)
+                                        .text_size(12.0)
+                                        .on_click(
+                                            cx.listener(|hub, _, _, cx| hub.set_tab(Tab::Code, cx)),
+                                        )
+                                        .child(cx.t("pullRequests.review")),
+                                )
+                            })
                             .child(match task {
                                 Some(task) => Button::new("pr-open-task")
                                     .variant(ButtonVariant::Outline)
@@ -189,6 +206,13 @@ impl PrHub {
                                     .child(cx.t("pullRequests.openTask"))
                                     .into_any_element(),
                                 None => Button::new("pr-work-on")
+                                    // One filled button: the review or the
+                                    // merge when either is the next step.
+                                    .variant(if awaits_review || merge_ready {
+                                        ButtonVariant::Outline
+                                    } else {
+                                        ButtonVariant::Default
+                                    })
                                     .size(ButtonSize::Sm)
                                     .text_size(12.0)
                                     .disabled(self.working_on.is_some())
@@ -207,7 +231,7 @@ impl PrHub {
                                     )
                                     .into_any_element(),
                             })
-                            .children(self.merge_button(&item, cx))
+                            .children(self.merge_button(&item, merge_ready, cx))
                             .child(Tooltip::text(
                                 "pr-open-forge-tip",
                                 Button::new("pr-open-forge")
@@ -254,65 +278,10 @@ impl PrHub {
                     .child(format!("{} #{}", item.repository_name, item.number))
                     .child("·")
                     .child(relative_date(item.updated_at.as_deref(), now, english)),
-            );
-        let reviewers = if item.reviewers.is_empty() {
-            cx.t("pullRequests.noReviewers").to_string()
-        } else {
-            item.reviewers
-                .iter()
-                .map(|reviewer| format!("@{}", reviewer.login))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let comments = detail
-            .as_ref()
-            .and_then(|detail| detail.as_ref().ok())
-            .map_or(item.comment_count as usize, |detail| detail.comments.len());
-        let check_label = |state: &str, cx: &gpui::App| {
-            let key = format!("pullRequests.checkStates.{state}");
-            let text = cx.t(&key);
-            if text.as_ref() == key {
-                state.to_string()
-            } else {
-                text.to_string()
-            }
-        };
-        let fact = |icon: AnyElement, label: SharedString, value: String| {
-            [
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .text_color(colors.muted_foreground)
-                    .child(icon)
-                    .child(label)
-                    .into_any_element(),
-                div().min_w_0().child(value).into_any_element(),
-            ]
-        };
-        let facts = div()
-            .debug_selector(|| "pr-facts".into())
-            .px(px(4.0))
-            .grid()
-            .grid_cols(2)
-            .gap_x(px(16.0))
-            .gap_y(px(12.0))
-            .text_size(px(12.0))
-            .children(fact(
-                Icon::new("user-round-check").size(14.0).into_any_element(),
-                cx.t("pullRequests.reviewers"),
-                reviewers,
-            ))
-            .children(fact(
-                Icon::new("message-square").size(14.0).into_any_element(),
-                cx.t("pullRequests.comments"),
-                comments.to_string(),
-            ))
-            .children(fact(
-                check_icon(&item.checks_state),
-                cx.t("pullRequests.checks"),
-                check_label(&item.checks_state, cx),
-            ));
+            )
+            .child(rail);
+        let reviewers = self.reviewers_card(&item, self.merge_detail(&item), english, cx);
+        let checks = self.checks_card(self.merge_detail(&item), cx);
         let description: AnyElement = match detail
             .as_ref()
             .and_then(|detail| detail.as_ref().ok())
@@ -329,45 +298,6 @@ impl PrHub {
                 cx,
             ),
             None => cx.t("pullRequests.noDescription").into_any_element(),
-        };
-        let checks: AnyElement = match &detail {
-            None => spinner("pr-checks-loading", 16.0).into_any_element(),
-            Some(Ok(detail)) if !detail.checks.is_empty() => div()
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .children(detail.checks.iter().map(|check| {
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .rounded(px(8.0))
-                        .border_1()
-                        .border_color(colors.border.opacity(0.6))
-                        .px(px(12.0))
-                        .py(px(8.0))
-                        .text_size(px(12.0))
-                        .child(check_icon(&check.state))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .child(check.name.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(10.0))
-                                .text_color(colors.muted_foreground)
-                                .child(check_label(&check.state, cx)),
-                        )
-                }))
-                .into_any_element(),
-            _ => div()
-                .text_size(px(11.0))
-                .text_color(colors.muted_foreground)
-                .child(cx.t("pullRequests.noChecks"))
-                .into_any_element(),
         };
         let activity: AnyElement = match &detail {
             Some(Err(error)) => div()
@@ -469,7 +399,12 @@ impl PrHub {
                         Some(item.base_branch.clone()).filter(|base| !base.is_empty()),
                         cx,
                     ))
-                    .child(facts)
+                    .child(summary_card(
+                        cx.t("pullRequests.reviewTitle"),
+                        reviewers,
+                        cx,
+                    ))
+                    .child(summary_card(cx.t("pullRequests.checks"), checks, cx))
                     .child(summary_card(
                         cx.t("pullRequests.description"),
                         div()
@@ -481,7 +416,6 @@ impl PrHub {
                             .into_any_element(),
                         cx,
                     ))
-                    .child(summary_card(cx.t("pullRequests.checks"), checks, cx))
                     .child(summary_card(cx.t("pullRequests.activity"), activity, cx)),
             );
         let empty = self.comment.read(cx).text().trim().is_empty();

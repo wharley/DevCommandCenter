@@ -38,8 +38,14 @@ pub(super) fn check_icon(state: &str) -> AnyElement {
 
 /// `ActorAvatar`: the picture, else the first two letters.
 pub(super) fn author_avatar(item: &Item, cx: &mut Context<PrHub>) -> AnyElement {
+    actor_avatar(item.author.as_ref(), cx)
+}
+
+pub(super) fn actor_avatar(
+    author: Option<&crate::data::pr_hub::Actor>,
+    cx: &mut Context<PrHub>,
+) -> AnyElement {
     let colors = cx.theme().colors.clone();
-    let author = item.author.as_ref();
     let label = author
         .and_then(|actor| actor.name.clone().filter(|name| !name.is_empty()))
         .or_else(|| author.map(|actor| actor.login.clone()))

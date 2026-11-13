@@ -1231,6 +1231,23 @@
       "requestChanges": "Pedir mudanças",
       "undecided": "Falta decidir"
     },
+    "you": "Você",
+    "rail": {
+      "opened": "Aberto",
+      "draft": "Rascunho",
+      "checks": "Checks",
+      "review": "Revisão",
+      "merge": "Merge"
+    },
+    "verdicts": {
+      "approved": "Aprovou",
+      "changesRequested": "Pediu alterações",
+      "commented": "Comentou",
+      "dismissed": "Revisão descartada",
+      "requested": "Revisão pedida"
+    },
+    "review": "Revisar",
+    "reviewTitle": "Revisão",
     "rowState": {
       "draft": "Rascunho",
       "checksFailed": "Checks falharam",
@@ -1397,6 +1414,11 @@
       "submitReview": "Enviar revisão",
       "pendingCount_one": "{{count}} comentário pendente",
       "pendingCount_other": "{{count}} comentários pendentes",
+      "sendEvents": {
+        "comment": "Enviar comentário",
+        "approve": "Enviar aprovação",
+        "request_changes": "Enviar pedido de alterações"
+      },
       "reviewEvents": {
         "comment": "Comentar",
         "approve": "Aprovar",

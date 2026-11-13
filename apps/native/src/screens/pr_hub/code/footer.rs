@@ -40,7 +40,7 @@ impl PrHub {
                     .border_1()
                     .px(px(9.0))
                     .py(px(3.0))
-                    .text_size(px(10.0))
+                    .text_size(px(11.0))
                     .font_weight(FontWeight::MEDIUM)
                     .map(|button| {
                         if chosen {
@@ -107,16 +107,16 @@ impl PrHub {
                     .flex_wrap()
                     .items_center()
                     .gap(px(8.0))
-                    .child(
-                        Icon::new("message-square-plus")
-                            .size(16.0)
-                            .color(colors.muted_foreground),
-                    )
+                    // The verdict first: it names the send button below.
                     .child(
                         div()
-                            .text_size(px(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(cx.t("pullRequests.code.submitReview")),
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .rounded(px(8.0))
+                            .bg(colors.muted.opacity(0.5))
+                            .p(px(4.0))
+                            .children(events),
                     )
                     .children(review.verdict.map(|verdict| {
                         crate::ui::verdict_chip::verdict_chip("pr-review-verdict", verdict, cx)
@@ -151,18 +151,7 @@ impl PrHub {
                                 &Args::default().with("login", login.clone()),
                             ))
                     }))
-                    .child(self.agent_button(cx))
-                    .child(
-                        div()
-                            .ml_auto()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .rounded(px(8.0))
-                            .bg(colors.muted.opacity(0.5))
-                            .p(px(4.0))
-                            .children(events),
-                    ),
+                    .child(div().ml_auto().child(self.agent_button(cx))),
             )
             .child(
                 div()
@@ -184,19 +173,29 @@ impl PrHub {
                             .text_size(px(11.0))
                             .child(review.body.clone()),
                     )
-                    .child(Tooltip::text(
-                        "pr-review-send-tip",
+                    // The button says what it sends.
+                    .child(
                         Button::new("pr-review-send")
-                            .size(ButtonSize::IconSm)
+                            .size(ButtonSize::Sm)
+                            .text_size(12.0)
                             .disabled(!ready)
                             .on_click(cx.listener(|hub, _, _, cx| hub.submit_review(cx)))
-                            .child(if review.submitting {
-                                spinner("pr-review-sending", 14.0).into_any_element()
-                            } else {
-                                Icon::new("send").size(14.0).into_any_element()
-                            }),
-                        cx.t("pullRequests.code.submitReview"),
-                    )),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(if review.submitting {
+                                        spinner("pr-review-sending", 14.0).into_any_element()
+                                    } else {
+                                        Icon::new("send").size(13.0).into_any_element()
+                                    })
+                                    .child(cx.t(&format!(
+                                        "pullRequests.code.sendEvents.{}",
+                                        review.event.key()
+                                    ))),
+                            ),
+                    ),
             )
             .children(review.submit_error.clone().map(|error| {
                 line(
