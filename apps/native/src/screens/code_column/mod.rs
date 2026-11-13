@@ -49,7 +49,7 @@ pub enum CodeColumnTab {
 impl CodeColumnTab {
     /// One width for both tabs, so the column does not jump between them.
     pub fn width(self) -> f32 {
-        340.0
+        380.0
     }
 }
 

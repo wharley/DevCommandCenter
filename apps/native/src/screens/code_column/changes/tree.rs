@@ -144,6 +144,16 @@ pub(super) fn folder_row(
         .into_any_element()
 }
 
+/// A file's folder for its row: the last two folders, the ones that tell
+/// files of the same name apart, after "…/" when there are more.
+pub(super) fn short_folder(folder: &str) -> String {
+    let parts: Vec<&str> = folder.split('/').filter(|part| !part.is_empty()).collect();
+    match parts.len() {
+        0..=2 => parts.join("/"),
+        count => format!("…/{}", parts[count - 2..].join("/")),
+    }
+}
+
 pub(super) fn file_row(
     column: &CodeColumn,
     at: usize,
@@ -155,7 +165,7 @@ pub(super) fn file_row(
     let entry = &card.entry;
     let hovered = column.changes.hovered_file == Some(at);
     let flashing = card.group == ChangeGroup::Committed && column.changes.is_flashing(&entry.path);
-    let folder = super::view::dirname(&entry.path).to_string();
+    let folder = short_folder(super::view::dirname(&entry.path));
     let hover_bg = colors.accent.opacity(0.55);
     let actions = hovered.then(|| actions(column, at, cx)).flatten();
     let swap = hovered && actions.is_some();
@@ -165,7 +175,7 @@ pub(super) fn file_row(
         .is_some_and(|(scope, path)| *scope == card.group.preview_scope() && *path == entry.path);
     let primary = colors.primary;
     let flat = column.changes.layout == super::Layout::List;
-    div()
+    let row = div()
         .id(("changes-file", at))
         .debug_selector(move || format!("changes-file-{at}"))
         .cursor_pointer()
@@ -181,8 +191,7 @@ pub(super) fn file_row(
             }])
         })
         .relative()
-        .ml(px(TREE_INSET + 4.0))
-        .mr(px(4.0))
+        .w_full()
         .flex()
         .min_h(px(32.0))
         .items_center()
@@ -235,6 +244,7 @@ pub(super) fn file_row(
         .when(!swap, |row| {
             row.child(
                 div()
+                    .debug_selector(move || format!("changes-file-counts-{at}"))
                     .flex()
                     .flex_shrink_0()
                     .items_center()
@@ -268,7 +278,14 @@ pub(super) fn file_row(
                     ),
             )
         })
-        .children(actions)
+        .children(actions);
+    // The list sizes a row to its content: this frame holds it to the
+    // column's width, so a long path is cut and the counts stay in view.
+    div()
+        .w_full()
+        .pl(px(TREE_INSET + 4.0))
+        .pr(px(4.0))
+        .child(row)
         .into_any_element()
 }
 

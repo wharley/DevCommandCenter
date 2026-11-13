@@ -50,7 +50,7 @@ fn changes_list_the_staged_and_unstaged_files_as_cards(cx: &mut TestAppContext) 
     let (column, cx) = open(cx);
     column.update(cx, |column, cx| column.set_root(Some(root), cx));
     cx.run_until_parked();
-    cx.simulate_resize(size(px(340.0), px(900.0)));
+    cx.simulate_resize(size(px(380.0), px(900.0)));
     cx.run_until_parked();
     column.read_with(cx, |column, _| {
         let cards: Vec<(ChangeGroup, &str, &str)> = column
@@ -178,7 +178,7 @@ fn the_wheel_scrolls_a_long_diff_before_the_list(cx: &mut TestAppContext) {
     column.update(cx, |column, cx| column.set_root(Some(root), cx));
     cx.run_until_parked();
     // Tall enough for the delivery header and the card's top.
-    cx.simulate_resize(size(px(340.0), px(520.0)));
+    cx.simulate_resize(size(px(380.0), px(520.0)));
     cx.run_until_parked();
     let body = cx
         .debug_bounds("change-card-body-0")
@@ -262,7 +262,7 @@ fn the_git_actions_go_through_the_desktop(cx: &mut TestAppContext) {
         column.set_root(Some(root.clone()), cx);
     });
     cx.run_until_parked();
-    cx.simulate_resize(size(px(340.0), px(900.0)));
+    cx.simulate_resize(size(px(380.0), px(900.0)));
     cx.run_until_parked();
     // The unstaged card stages; the staged one unstages.
     let unstaged = column.read_with(cx, |column, _| {
@@ -397,7 +397,7 @@ fn a_clean_checkout_opens_on_its_branch_against_the_base(cx: &mut TestAppContext
     let (column, cx) = open(cx);
     column.update(cx, |column, cx| column.set_root(Some(root.clone()), cx));
     cx.run_until_parked();
-    cx.simulate_resize(size(px(340.0), px(900.0)));
+    cx.simulate_resize(size(px(380.0), px(900.0)));
     cx.run_until_parked();
     column.read_with(cx, |column, _| {
         // Nothing local, one file on the branch: "Branch" by default.
@@ -547,7 +547,7 @@ fn only_the_cards_near_the_viewport_read_their_diff(cx: &mut TestAppContext) {
     let (column, cx) = open(cx);
     column.update(cx, |column, cx| column.set_root(Some(root), cx));
     cx.run_until_parked();
-    cx.simulate_resize(size(px(340.0), px(600.0)));
+    cx.simulate_resize(size(px(380.0), px(600.0)));
     column.update(cx, |column, cx| column.toggle_all_cards(cx));
     cx.run_until_parked();
     let read = column.read_with(cx, |column, _| {
@@ -585,7 +585,7 @@ fn a_card_and_a_tree_row_open_their_diff_on_the_stage(cx: &mut TestAppContext) {
         column.set_root(Some(root.clone()), cx);
     });
     cx.run_until_parked();
-    cx.simulate_resize(size(px(340.0), px(900.0)));
+    cx.simulate_resize(size(px(380.0), px(900.0)));
     cx.run_until_parked();
     let expand = cx
         .debug_bounds("change-card-expand-0")
@@ -637,14 +637,47 @@ fn the_list_shows_a_files_actions_inside_the_column(cx: &mut TestAppContext) {
         column.set_root(Some(root), cx)
     });
     cx.run_until_parked();
-    cx.simulate_resize(size(px(340.0), px(600.0)));
+    cx.simulate_resize(size(px(380.0), px(600.0)));
     cx.run_until_parked();
     let row = cx.debug_bounds("changes-file-0").expect("the file's row");
-    assert!(row.right() <= px(340.0), "the row fits: {row:?}");
+    assert!(row.right() <= px(380.0), "the row fits: {row:?}");
     cx.simulate_mouse_move(row.center(), None, Modifiers::none());
     cx.run_until_parked();
     let stage = cx
         .debug_bounds("changes-file-stage-0")
         .expect("the row's actions on hover");
-    assert!(stage.right() <= px(340.0), "inside the column: {stage:?}");
+    assert!(stage.right() <= px(380.0), "inside the column: {stage:?}");
+}
+
+#[gpui::test]
+fn a_long_path_is_cut_and_the_counts_stay_inside_the_column(cx: &mut TestAppContext) {
+    let path = "src/app/(private)/admin/[storeId]/apps/google-ads/[itemId]/components/loading.tsx";
+    let repo = git_checkout(&[(path, "1\n")]);
+    std::fs::write(repo.path().join(path), "2\n").unwrap();
+    let root = repo.path().to_string_lossy().into_owned();
+    let (column, cx) = open(cx);
+    column.update(cx, |column, cx| {
+        column.changes.layout = super::Layout::List;
+        column.set_root(Some(root), cx)
+    });
+    cx.run_until_parked();
+    cx.simulate_resize(size(px(380.0), px(600.0)));
+    cx.run_until_parked();
+    let row = cx.debug_bounds("changes-file-0").expect("the file's row");
+    assert!(row.right() <= px(380.0), "the row fits: {row:?}");
+    let counts = cx
+        .debug_bounds("changes-file-counts-0")
+        .expect("its counts");
+    assert!(counts.right() <= px(380.0), "inside the column: {counts:?}");
+}
+
+#[test]
+fn a_rows_folder_keeps_its_last_two_names() {
+    use super::tree::short_folder;
+    assert_eq!(short_folder(""), "");
+    assert_eq!(short_folder("src/ui"), "src/ui");
+    assert_eq!(
+        short_folder("src/app/(private)/admin/[storeId]/apps/google-ads"),
+        "…/apps/google-ads"
+    );
 }

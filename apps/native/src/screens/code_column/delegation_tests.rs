@@ -73,7 +73,7 @@ fn open<'a>(
         column.set_root(Some(root), cx);
     });
     cx.run_until_parked();
-    cx.simulate_resize(size(px(340.0), px(900.0)));
+    cx.simulate_resize(size(px(380.0), px(900.0)));
     cx.run_until_parked();
     (
         column,

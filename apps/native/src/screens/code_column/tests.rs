@@ -94,7 +94,7 @@ fn the_tabs_and_close_tell_the_shell(cx: &mut TestAppContext) {
         })
         .detach();
         column.set_tab(CodeColumnTab::Changes, cx);
-        assert_eq!(column.tab.width(), 340.0);
+        assert_eq!(column.tab.width(), 380.0);
         column.set_tab(CodeColumnTab::Changes, cx);
         column.open_file("a.rs", cx);
     });

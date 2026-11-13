@@ -192,7 +192,7 @@ fn scopes(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
                 .id(SharedString::from(format!("changes-scope-{}", scope.key())))
                 .debug_selector(move || format!("changes-scope-{}", scope.key()))
                 .flex()
-                .min_w_0()
+                .flex_none()
                 .items_center()
                 .gap(px(5.0))
                 .px(px(8.0))
