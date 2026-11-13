@@ -285,6 +285,8 @@ impl Shell {
             let view = conversation.read(cx);
             let place = terminal::place_of(view, cx);
             let root = view.workspace_path();
+            // The task itself, also when its folder is on another machine.
+            let remote_task = view.task_id().map(str::to_string);
             let session = view.shown_session();
             let waiting = view
                 .data()
@@ -317,8 +319,14 @@ impl Shell {
             this.device_task_changed(cx);
             this.terminal
                 .update(cx, |dock, cx| dock.set_place(place, cx));
+            // A task on another machine: its changes are read there.
+            let machine = root
+                .as_deref()
+                .and_then(crate::data::machines::machine_of_path);
             this.code_column.update(cx, |column, cx| {
                 column.set_root(root, cx);
+                column.set_remote_task(machine, remote_task, cx);
+                column.remote_turn_state(running, cx);
                 column.set_reviews(session, waiting, cx);
                 column.set_conversation_state(running, pending, cx);
             });

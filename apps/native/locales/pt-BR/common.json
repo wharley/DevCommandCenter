@@ -5617,7 +5617,16 @@
     "open": "Atividade, contexto e spec da sessão"
   },
   "codeColumn": {
-    "onMachine": "Esta tarefa roda em outra máquina. Os arquivos e as mudanças dela ainda não aparecem aqui; a conversa, sim.",
+    "remote": {
+      "title": "Mudanças na máquina",
+      "reading": "Lendo as mudanças na máquina…",
+      "none": "Esta tarefa ainda não mudou nenhum arquivo.",
+      "uncommitted": "Ainda não commitadas",
+      "onBranch": "No branch",
+      "readOnly": "Só leitura por enquanto: preparar, commitar e entregar ficam na máquina.",
+      "noDiff": "Sem diferenças de texto para mostrar.",
+      "cut": "O diff foi cortado por ser longo."
+    },
     "ariaLabel": "Código do projeto",
     "files": "Arquivos",
     "changes": "Mudanças",

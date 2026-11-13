@@ -12,8 +12,8 @@ mod load;
 #[cfg(test)]
 mod tests;
 mod layout;
-mod tree;
-mod view;
+pub(super) mod tree;
+pub(super) mod view;
 
 pub(crate) use layout::Layout;
 pub(crate) use view::{card_shadow, changes};

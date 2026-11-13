@@ -6,6 +6,7 @@ mod changes;
 mod delegation;
 pub(crate) mod delivery;
 mod recap;
+mod remote;
 pub(crate) mod review;
 mod tree;
 mod turn;
@@ -99,6 +100,8 @@ pub struct CodeColumn {
     pub(crate) root: Option<String>,
     /// The task on screen runs on another machine (`root` is then none).
     pub(crate) on_machine: bool,
+    /// That task's changes, read on its machine.
+    pub(crate) remote: remote::Remote,
     pub(crate) tab: CodeColumnTab,
     pub(crate) files: Loaded<Files>,
     tree: Arc<CodeTreeNode>,
@@ -168,6 +171,7 @@ impl CodeColumn {
         Self {
             root: None,
             on_machine: false,
+            remote: remote::Remote::default(),
             tab,
             files: Loaded::Pending,
             tree: Arc::default(),

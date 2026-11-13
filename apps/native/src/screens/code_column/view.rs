@@ -145,23 +145,8 @@ impl Render for CodeColumn {
                 .side(crate::ui::tooltip::Side::Bottom),
             );
         let body = if self.on_machine {
-            // Its files and changes are on the machine; not read from here yet.
-            div()
-                .debug_selector(|| "code-column-on-machine".into())
-                .flex()
-                .flex_1()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(px(8.0))
-                .px(px(24.0))
-                .text_center()
-                .text_size(px(12.0))
-                .line_height(px(18.0))
-                .text_color(colors.muted_foreground)
-                .child(Icon::new("server").size(20.0).stroke(1.6))
-                .child(cx.t("codeColumn.onMachine"))
-                .into_any_element()
+            // Its files are on the machine: its changes are read there.
+            super::remote::remote_changes(self, cx)
         } else {
             match self.tab {
                 CodeColumnTab::Files => tree::files_tree(self, cx).into_any_element(),

@@ -146,7 +146,7 @@ pub(super) fn folder_row(
 
 /// A file's folder for its row: the last two folders, the ones that tell
 /// files of the same name apart, after "…/" when there are more.
-pub(super) fn short_folder(folder: &str) -> String {
+pub(in crate::screens::code_column) fn short_folder(folder: &str) -> String {
     let parts: Vec<&str> = folder.split('/').filter(|part| !part.is_empty()).collect();
     match parts.len() {
         0..=2 => parts.join("/"),

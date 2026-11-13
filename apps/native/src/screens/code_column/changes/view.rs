@@ -23,7 +23,7 @@ pub(super) fn dark(cx: &Context<CodeColumn>) -> bool {
 }
 
 /// `text-emerald-600 dark:text-emerald-400`
-pub(super) fn added_color(cx: &Context<CodeColumn>) -> Hsla {
+pub(in crate::screens::code_column) fn added_color(cx: &Context<CodeColumn>) -> Hsla {
     if dark(cx) {
         tw::EMERALD_400.hsla()
     } else {
@@ -32,7 +32,10 @@ pub(super) fn added_color(cx: &Context<CodeColumn>) -> Hsla {
 }
 
 /// `STATUS_BADGE_CLASS`
-pub(super) fn status_color(status: &str, cx: &Context<CodeColumn>) -> Hsla {
+pub(in crate::screens::code_column) fn status_color(
+    status: &str,
+    cx: &Context<CodeColumn>,
+) -> Hsla {
     let (light, dark_color) = match status {
         "M" => (tw::YELLOW_600, tw::YELLOW_500),
         "A" => (tw::GREEN_600, tw::GREEN_500),
@@ -57,7 +60,7 @@ pub(crate) fn card_shadow() -> Vec<BoxShadow> {
     vec![shadow(2.0, 3.0, 0.025), shadow(8.0, 24.0, 0.04)]
 }
 
-pub(super) fn dirname(path: &str) -> &str {
+pub(in crate::screens::code_column) fn dirname(path: &str) -> &str {
     match path.rfind('/') {
         Some(at) if at > 0 => &path[..at],
         _ => "",

@@ -59,6 +59,34 @@ impl MachineCard {
     }
 }
 
+/// One changed file of a task on a machine (`DeliveryChange`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteChange {
+    pub path: String,
+    pub status: String,
+    pub insertions: u32,
+    pub deletions: u32,
+    pub staged: bool,
+}
+
+/// What a task changed on its machine: what is not committed yet, and what
+/// its branch has over its base (`DeliverySummary`, the part that is read).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemoteChanges {
+    pub branch: Option<String>,
+    pub base_branch: String,
+    pub changes: Vec<RemoteChange>,
+    pub branch_changes: Vec<RemoteChange>,
+}
+
+impl RemoteChanges {
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty() && self.branch_changes.is_empty()
+    }
+}
+
 /// How a mirrored task's paths start (`dcc_server::machine_mirror`).
 const MACHINE_PATH_SCHEME: &str = "dcc-machine://";
 
@@ -153,6 +181,33 @@ impl DesktopApi {
     pub fn follow_machine_tasks(&self) -> Result<(), ApiError> {
         self.post("/api/v1/machines/tasks/follow", &json!({}))
             .map(|_| ())
+    }
+
+    /// What a task changed, read on its machine. Call it on the machine's
+    /// API (`on_machine`).
+    pub fn remote_changes(&self, workspace_id: &str) -> Result<RemoteChanges, ApiError> {
+        decode(self.get(&format!(
+            "/api/v1/mobile/workspaces/{}/delivery",
+            encode(workspace_id)
+        ))?)
+    }
+
+    /// One file's diff against the last commit, as git prints it; `true`
+    /// when it was cut for being too long.
+    pub fn remote_patch(&self, workspace_id: &str, path: &str) -> Result<(String, bool), ApiError> {
+        let value = self.get(&format!(
+            "/api/v1/mobile/workspaces/{}/patch?path={}",
+            encode(workspace_id),
+            encode(path)
+        ))?;
+        Ok((
+            value
+                .get("patch")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            value.get("truncated").and_then(Value::as_bool) == Some(true),
+        ))
     }
 
     /// The machine's card, through its channel: an answer means it is on.
