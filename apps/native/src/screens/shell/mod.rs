@@ -660,8 +660,10 @@ impl Shell {
         self.surface = surface;
         // The base of each project comes ahead of the task picked next.
         if surface == Surface::NewTask && !cfg!(test) {
-            self.new_task
-                .update(cx, |new_task, cx| new_task.fetch_bases(cx));
+            self.new_task.update(cx, |new_task, cx| {
+                new_task.fetch_bases(cx);
+                new_task.load_machines(cx);
+            });
         }
         self.feed_notes(cx);
         let page = match surface {

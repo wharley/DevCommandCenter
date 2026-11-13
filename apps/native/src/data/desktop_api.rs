@@ -714,18 +714,7 @@ impl DesktopApi {
     /// "Nova tarefa" in a project: the desktop's own creation (linked
     /// folders, setup report). Answers the new task and how its setup went.
     pub fn create_task(&self, request: &CreateTaskRequest) -> Result<CreatedTask, ApiError> {
-        let value = self.post(
-            "/api/v1/workspaces/create",
-            &json!({
-                "projectId": request.project_id,
-                "workspaceRoot": request.workspace_root,
-                "baseBranch": request.base_branch,
-                "isolationMode": if request.worktree { "protectedWorktree" } else { "localDirect" },
-                "includeLinkedFolders": request.include_linked_folders,
-                "bundleName": request.bundle_name,
-                "name": request.name,
-            }),
-        )?;
+        let value = self.post("/api/v1/workspaces/create", &request.body())?;
         serde_json::from_value(value).map_err(|error| ApiError::Failed(error.to_string()))
     }
 
@@ -1457,6 +1446,21 @@ pub struct CreateTaskRequest {
     pub bundle_name: String,
     /// The task's own name (the quick composer's first line).
     pub name: Option<String>,
+}
+
+impl CreateTaskRequest {
+    /// The creation's fields, for this computer's server or a machine's.
+    pub(crate) fn body(&self) -> Value {
+        json!({
+            "projectId": self.project_id,
+            "workspaceRoot": self.workspace_root,
+            "baseBranch": self.base_branch,
+            "isolationMode": if self.worktree { "protectedWorktree" } else { "localDirect" },
+            "includeLinkedFolders": self.include_linked_folders,
+            "bundleName": self.bundle_name,
+            "name": self.name,
+        })
+    }
 }
 
 /// What a branch or PR URL points at (`WorkspaceSourceUrlResolution`).

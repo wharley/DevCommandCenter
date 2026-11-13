@@ -2284,6 +2284,11 @@
     "hint": "{{workspaceName}}"
   },
   "newTask": {
+    "where": {
+      "label": "Onde",
+      "here": "Este computador",
+      "unreachable": "Não deu para falar com a máquina"
+    },
     "designDescription": "Escolha um projeto e dê espaço à próxima ideia.",
     "title": "Vamos construir",
     "chooseProject": "Escolha um projeto",

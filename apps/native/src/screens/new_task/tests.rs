@@ -159,3 +159,65 @@ fn opening_the_screen_fetches_each_projects_base_once(cx: &mut TestAppContext) {
         ]
     );
 }
+
+#[gpui::test]
+fn a_task_on_a_machine_starts_in_one_of_its_projects(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_answers;
+    let machines = r#"{"machines":[{"id":"m-1","name":"Servidor","fingerprint":"AAAA-BBBB-CCCC","createdAt":"2026-11-13","connected":true}]}"#;
+    let catalog = r#"{"providers":[],"workspaces":[],"repositories":[{"id":"r-9","projectId":"p-9","name":"vendeagora-app","displayName":null,"icon":null,"color":null,"logo":null,"pinnedAt":null,"rootPath":"/srv/vendeagora-app","baseBranch":"main","remote":null,"remoteUrl":null,"forgeProvider":null,"forgeLogin":null,"createdAt":"2026-11-01","updatedAt":"2026-11-01"}]}"#;
+    let (port, server) = fake_desktop_answers(vec![
+        (200, machines.into()),
+        (200, catalog.into()),
+        (200, CREATED.into()),
+    ]);
+    let (view, cx) = open(cx);
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = events.clone();
+    view.update(cx, |view, cx| {
+        cx.subscribe_self(move |_, event: &NewTaskEvent, _| seen.borrow_mut().push(event.clone()))
+            .detach();
+        view.endpoint = Some(DesktopApi::new(port, "k"));
+        view.set_projects(&[project("app", "Checkout")], &HashMap::new(), cx);
+        view.load_machines(cx);
+    });
+    cx.run_until_parked();
+    // "Onde" shows with a machine paired; picking it lists its projects.
+    assert!(cx.debug_bounds("new-task-where").is_some());
+    view.update(cx, |view, cx| {
+        assert_eq!(
+            view.projects().len(),
+            1,
+            "this computer's until a machine is picked"
+        );
+        view.set_place(Some("m-1".into()), cx);
+        assert!(view.projects().is_empty(), "the machine's are being read");
+    });
+    cx.run_until_parked();
+    let remote = view.read_with(cx, |view, _| view.projects().to_vec());
+    assert_eq!(remote.len(), 1);
+    assert_eq!(remote[0].root_path, "/srv/vendeagora-app");
+    assert!(
+        !remote[0].missing,
+        "a machine's folder is not looked for here"
+    );
+    view.update(cx, |view, cx| view.select_project(&remote[0], cx));
+    cx.run_until_parked();
+    let requests = server.join().unwrap();
+    let asked: Vec<&str> = requests
+        .iter()
+        .map(|(request, _)| request.as_str())
+        .collect();
+    assert_eq!(
+        asked,
+        [
+            "GET /api/v1/machines",
+            "GET /api/v1/machines/m-1/proxy/api/v1/mobile/catalog",
+            "POST /api/v1/machines/m-1/tasks",
+        ]
+    );
+    let body: serde_json::Value = serde_json::from_str(&requests[2].1).unwrap();
+    assert_eq!(body["workspaceRoot"], "/srv/vendeagora-app");
+    assert_eq!(body["projectId"], "p-9");
+    assert_eq!(body["isolationMode"], "protectedWorktree");
+    assert_eq!(*events.borrow(), vec![NewTaskEvent::Created("ws-1".into())]);
+}

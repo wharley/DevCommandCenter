@@ -6,7 +6,8 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::desktop_api::{ApiError, DesktopApi, encode};
+use super::desktop_api::{ApiError, CreateTaskRequest, CreatedTask, DesktopApi, encode};
+use super::tasks::Project;
 
 /// The person on the machine has three minutes to approve; a little more
 /// than that here, so its answer is the one that arrives.
@@ -82,6 +83,39 @@ impl DesktopApi {
             .get("removed")
             .and_then(Value::as_bool)
             .unwrap_or(false))
+    }
+
+    /// The projects a machine offers for a new task (its catalog).
+    pub fn machine_projects(&self, id: &str) -> Result<Vec<Project>, ApiError> {
+        let catalog = self.on_machine(id).get("/api/v1/mobile/catalog")?;
+        let repositories: Vec<dcc_core::domain::repository::Repository> = decode(
+            catalog
+                .get("repositories")
+                .cloned()
+                .unwrap_or(Value::Array(Vec::new())),
+        )?;
+        Ok(repositories.iter().map(Project::from_repository).collect())
+    }
+
+    /// "Nova tarefa" on a machine: created there and mirrored here, so it
+    /// is in this app's list when this answers.
+    pub fn create_machine_task(
+        &self,
+        id: &str,
+        request: &CreateTaskRequest,
+    ) -> Result<CreatedTask, ApiError> {
+        let value = self.post(
+            &format!("/api/v1/machines/{}/tasks", encode(id)),
+            &request.body(),
+        )?;
+        decode(value)
+    }
+
+    /// Follows the mirrored tasks again (their machines' streams); cheap
+    /// when there is none or they are already followed.
+    pub fn follow_machine_tasks(&self) -> Result<(), ApiError> {
+        self.post("/api/v1/machines/tasks/follow", &json!({}))
+            .map(|_| ())
     }
 
     /// The machine's card, through its channel: an answer means it is on.

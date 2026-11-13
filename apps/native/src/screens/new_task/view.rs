@@ -155,10 +155,83 @@ fn menu_row(
         .when(pending, |row| {
             row.child(spinner(("new-task-menu-busy", index), 14.0))
         })
-        .when(!busy && !pending, |row| {
+        // A machine's projects are its own: nothing to remove from here.
+        .when(!busy && !pending && view.place.is_none(), |row| {
             row.child(remove_button(index, project, cx))
         })
         .into_any_element()
+}
+
+/// "Onde": this computer or a paired machine. Only with a machine paired.
+fn where_row(view: &NewTaskView, cx: &mut Context<NewTaskView>) -> Option<AnyElement> {
+    if view.machines.is_empty() {
+        return None;
+    }
+    let colors = cx.theme().colors.clone();
+    let busy = view.busy();
+    let places = std::iter::once((None, cx.t("newTask.where.here"), "laptop")).chain(
+        view.machines.iter().map(|machine| {
+            (
+                Some(machine.id.clone()),
+                machine.name.clone().into(),
+                "server",
+            )
+        }),
+    );
+    let pills: Vec<AnyElement> = places
+        .enumerate()
+        .map(
+            |(index, (place, label, icon)): (usize, (Option<String>, SharedString, &str))| {
+                let chosen = view.place == place;
+                let hover = colors.muted.opacity(0.4);
+                div()
+                    .id(("new-task-where", index))
+                    .debug_selector(move || format!("new-task-where-{index}"))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .rounded(px(8.0))
+                    .px(px(10.0))
+                    .py(px(5.0))
+                    .text_size(px(12.0))
+                    .map(|pill| {
+                        if chosen {
+                            pill.bg(colors.muted.opacity(0.7))
+                                .text_color(colors.foreground)
+                                .font_weight(FontWeight::MEDIUM)
+                        } else {
+                            pill.text_color(colors.muted_foreground)
+                                .when(!busy, |pill| {
+                                    pill.cursor_pointer().hover(move |style| style.bg(hover))
+                                })
+                        }
+                    })
+                    .on_click(cx.listener(move |view, _, _, cx| view.set_place(place.clone(), cx)))
+                    .child(Icon::new(icon).size(14.0).stroke(1.8))
+                    .child(div().max_w(px(180.0)).truncate().child(label))
+                    .into_any_element()
+            },
+        )
+        .collect();
+    Some(
+        div()
+            .debug_selector(|| "new-task-where".into())
+            .mt(px(16.0))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .justify_center()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .mr(px(4.0))
+                    .text_size(px(12.0))
+                    .text_color(colors.muted_foreground)
+                    .child(cx.t("newTask.where.label")),
+            )
+            .children(pills)
+            .into_any_element(),
+    )
 }
 
 /// A menu row that is an action, not a project.
@@ -215,6 +288,10 @@ fn action_row(
 fn project_menu(view: &NewTaskView, cx: &mut Context<NewTaskView>) -> AnyElement {
     let colors = cx.theme().colors.clone();
     let busy = view.busy();
+    // A machine's projects: only its own list, no folder picker of this
+    // computer; a spinner while they are read.
+    let remote = view.place.is_some();
+    let reading = remote && view.remote.is_none();
     let hover = colors.muted.opacity(0.4);
     let foreground = colors.foreground;
     let trigger = div()
@@ -233,7 +310,7 @@ fn project_menu(view: &NewTaskView, cx: &mut Context<NewTaskView>) -> AnyElement
                 .cursor_pointer()
                 .hover(move |style| style.bg(hover).text_color(foreground))
         })
-        .when(busy, |trigger| {
+        .when(busy || reading, |trigger| {
             trigger.child(spinner("new-task-creating", 16.0))
         })
         .child(cx.t("newTask.chooseProject"))
@@ -285,8 +362,10 @@ fn project_menu(view: &NewTaskView, cx: &mut Context<NewTaskView>) -> AnyElement
                 .flex_col()
                 .max_h(px(384.0))
                 .overflow_y_scroll()
-                .child(open_other)
-                .child(div().my(px(4.0)).h(px(1.0)).bg(separator))
+                .when(!remote, |list| {
+                    list.child(open_other)
+                        .child(div().my(px(4.0)).h(px(1.0)).bg(separator))
+                })
                 .child(
                     div()
                         .px(px(8.0))
@@ -297,8 +376,10 @@ fn project_menu(view: &NewTaskView, cx: &mut Context<NewTaskView>) -> AnyElement
                         .child(heading),
                 )
                 .children(rows)
-                .child(div().my(px(4.0)).h(px(1.0)).bg(separator))
-                .child(several)
+                .when(!remote, |list| {
+                    list.child(div().my(px(4.0)).h(px(1.0)).bg(separator))
+                        .child(several)
+                })
                 .into_any_element()
         },
         move |open, _, cx| {
@@ -500,7 +581,7 @@ impl Render for NewTaskView {
             |view, next| view.worktree = next,
             cx,
         );
-        let linked = self.any_linked().then(|| {
+        let linked = (self.place.is_none() && self.any_linked()).then(|| {
             option_row(
                 "new-task-linked",
                 self.include_linked,
@@ -579,6 +660,7 @@ impl Render for NewTaskView {
                                     .text_color(colors.muted_foreground)
                                     .child(cx.t("newTask.designDescription")),
                             )
+                            .children(where_row(self, cx))
                             .child(project_menu(self, cx))
                             .child(div().mt(px(12.0)).child(worktree))
                             .children(linked)

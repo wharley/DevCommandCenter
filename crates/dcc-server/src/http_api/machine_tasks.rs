@@ -1,11 +1,14 @@
 //! Tasks that run on a machine, for the app on this computer: creating one
 //! there and keeping its mirror here (`crate::machine_mirror`).
 //!
-//! - `POST /api/v1/machines/:id/tasks` asks the machine for a task (its own
-//!   `POST /api/v1/mobile/tasks`, as a phone does), waits until it started,
-//!   copies its rows here and starts following it.
+//! - `POST /api/v1/machines/:id/tasks` asks the machine for a task in one of
+//!   its projects (its own `POST /api/v1/workspaces/create`, the same
+//!   creation "Nova tarefa" runs locally), copies its rows here and starts
+//!   following it. The task has no session yet: the first prompt starts one
+//!   on the machine, and the next follow finds it.
 //! - `POST /api/v1/machines/tasks/follow` follows every mirrored task again
-//!   (the app asks when it opens: a follower ends when its machine leaves).
+//!   (the app asks when it opens and after a first prompt: a follower ends
+//!   when its machine leaves, or while the task has no session).
 //!
 //! Following a task is push, not polling: the machine's event stream on the
 //! channel says something happened, and only then are its new events read
@@ -20,8 +23,6 @@ use super::*;
 use crate::machine_link::StreamItem;
 use crate::machine_mirror::{self, machine_path, MirroredTask};
 
-/// How long the machine has to create the task and start its session.
-const CREATE_WAIT: Duration = Duration::from_secs(120);
 /// Events arriving together are read in one request.
 const SETTLE: Duration = Duration::from_millis(200);
 const EVENTS_PAGE: usize = 500;
@@ -101,8 +102,8 @@ async fn with_mirror<T: Send + 'static>(
 
 /// Copies the task's workspace, session and thread as the machine has them
 /// now (its name, state and title change as it runs), with its paths marked
-/// as the machine's.
-async fn copy_rows(backend: &HttpBackend, task: &MirroredTask) -> Result<(), String> {
+/// as the machine's. Answers the task's session, empty while it has none.
+async fn copy_rows(backend: &HttpBackend, task: &MirroredTask) -> Result<String, String> {
     let machine = task.machine_id.as_str();
     let catalog = machine_json(backend, machine, "GET", "/api/v1/mobile/catalog", None).await?;
     let workspaces: Vec<Workspace> =
@@ -124,22 +125,38 @@ async fn copy_rows(backend: &HttpBackend, task: &MirroredTask) -> Result<(), Str
     let sessions: Vec<WorkspaceSessionSummary> =
         serde_json::from_value(machine_json(backend, machine, "GET", &path, None).await?)
             .map_err(|error| error.to_string())?;
-    for summary in sessions
+    // The task's session: the one already known, else the one its first
+    // prompt started on the machine (kept from now on).
+    let Some(summary) = sessions
         .into_iter()
-        .filter(|summary| summary.session.id.0 == task.session_id)
-    {
-        let mut session = summary.session;
-        session.working_directory_override = session
-            .working_directory_override
-            .map(|path| machine_path(machine, &path));
-        SessionRepo::save_session(&backend.sessions, &session)
-            .await
-            .map_err(|error| error.to_string())?;
-        ThreadRepo::save_thread(&backend.sessions, &summary.thread)
-            .await
-            .map_err(|error| error.to_string())?;
+        .find(|summary| task.session_id.is_empty() || summary.session.id.0 == task.session_id)
+    else {
+        return Ok(task.session_id.clone());
+    };
+    let session_id = summary.session.id.0.clone();
+    let mut session = summary.session;
+    session.working_directory_override = session
+        .working_directory_override
+        .map(|path| machine_path(machine, &path));
+    SessionRepo::save_session(&backend.sessions, &session)
+        .await
+        .map_err(|error| error.to_string())?;
+    ThreadRepo::save_thread(&backend.sessions, &summary.thread)
+        .await
+        .map_err(|error| error.to_string())?;
+    if task.session_id.is_empty() {
+        let (workspace, machine, session) = (
+            task.workspace_id.clone(),
+            task.machine_id.clone(),
+            session_id.clone(),
+        );
+        with_mirror(backend, move |conn| {
+            machine_mirror::record(conn, &workspace, &machine, &session)
+                .map_err(|error| error.to_string())
+        })
+        .await?;
     }
-    Ok(())
+    Ok(session_id)
 }
 
 /// What one read of the machine's events brought.
@@ -213,8 +230,12 @@ async fn copy_events(backend: &HttpBackend, workspace_id: &str) -> Result<bool, 
 /// Follows a mirrored task until its machine leaves: copies what is there,
 /// then waits on the machine's stream and copies again each time it says
 /// something happened.
-async fn follow(backend: Arc<HttpBackend>, task: MirroredTask) -> Result<(), String> {
-    copy_rows(&backend, &task).await?;
+async fn follow(backend: Arc<HttpBackend>, mut task: MirroredTask) -> Result<(), String> {
+    task.session_id = copy_rows(&backend, &task).await?;
+    if task.session_id.is_empty() {
+        // No prompt was sent yet: nothing to follow until one is.
+        return Ok(());
+    }
     copy_events(&backend, &task.workspace_id).await?;
     let stream_path = format!("/api/v1/events/stream?sessionId={}", id(&task.session_id)?);
     let mut stream = backend
@@ -269,85 +290,51 @@ async fn follow_all(
     Ok(Json(json!({ "started": started })))
 }
 
-/// The machine's journal of the creation: `started` with both ids, or why
-/// it failed.
-pub(super) fn creation_outcome(status: &Value) -> Option<Result<(String, String), String>> {
-    let field = |name: &str| status.get(name).and_then(Value::as_str).map(str::to_string);
-    match status.get("state").and_then(Value::as_str)? {
-        "started" => Some(
-            field("workspaceId")
-                .zip(field("sessionId"))
-                .ok_or_else(|| "the machine started the task without its ids".to_string()),
-        ),
-        "failed" => {
-            Some(Err(field("error").unwrap_or_else(|| {
-                "the machine could not create the task".into()
-            })))
-        }
-        _ => None,
-    }
+/// The new task's id in the machine's answer to its creation.
+pub(super) fn created_workspace(answer: &Value) -> Option<String> {
+    answer
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .filter(|workspace| id(workspace).is_ok())
+        .map(str::to_string)
 }
 
 async fn create(
     State(backend): State<Arc<HttpBackend>>,
     device: Option<axum::Extension<PairedDeviceIdentity>>,
     Path(machine_id): Path<String>,
-    Json(mut input): Json<Value>,
+    Json(input): Json<Value>,
 ) -> Result<Json<Value>, HttpApiError> {
     operator(&device)?;
-    let Some(fields) = input.as_object_mut() else {
-        return Err(HttpApiError::bad_request("a task's fields are expected"));
-    };
-    let request_id = uuid::Uuid::new_v4().to_string();
-    fields.insert("requestId".into(), json!(request_id));
-    machine_json(
+    // The machine's own creation, with the fields "Nova tarefa" sends.
+    let answer = machine_json(
         &backend,
         &machine_id,
         "POST",
-        "/api/v1/mobile/tasks",
+        "/api/v1/workspaces/create",
         Some(&input),
     )
     .await
     .map_err(HttpApiError::BadGateway)?;
-    let status_path = format!("/api/v1/mobile/tasks/{request_id}");
-    let deadline = tokio::time::Instant::now() + CREATE_WAIT;
-    let (workspace_id, session_id) = loop {
-        let status = machine_json(&backend, &machine_id, "GET", &status_path, None)
-            .await
-            .map_err(HttpApiError::BadGateway)?;
-        match creation_outcome(&status) {
-            Some(Ok(ids)) => break ids,
-            Some(Err(error)) => return Err(HttpApiError::BadGateway(error)),
-            None if tokio::time::Instant::now() >= deadline => {
-                return Err(HttpApiError::GatewayTimeout(
-                    "the machine did not start the task in time".into(),
-                ));
-            }
-            None => tokio::time::sleep(Duration::from_secs(1)).await,
-        }
-    };
-    let (workspace, machine, session) =
-        (workspace_id.clone(), machine_id.clone(), session_id.clone());
+    let workspace_id = created_workspace(&answer)
+        .ok_or_else(|| HttpApiError::BadGateway("the machine created no task".into()))?;
+    let (workspace, machine) = (workspace_id.clone(), machine_id.clone());
     with_mirror(&backend, move |conn| {
-        machine_mirror::record(conn, &workspace, &machine, &session)
-            .map_err(|error| error.to_string())
+        machine_mirror::record(conn, &workspace, &machine, "").map_err(|error| error.to_string())
     })
     .await
     .map_err(HttpApiError::internal)?;
     let task = MirroredTask {
-        workspace_id: workspace_id.clone(),
+        workspace_id,
         machine_id,
-        session_id: session_id.clone(),
+        session_id: String::new(),
         cursor: 0,
     };
     // The rows first, so the task is in the list when this answers.
     copy_rows(&backend, &task)
         .await
         .map_err(HttpApiError::BadGateway)?;
-    spawn_follow(&backend, task);
-    Ok(Json(
-        json!({ "workspaceId": workspace_id, "sessionId": session_id }),
-    ))
+    Ok(Json(answer))
 }
 
 #[cfg(test)]
@@ -383,19 +370,10 @@ mod tests {
     }
 
     #[test]
-    fn a_creation_is_read_from_the_machines_journal() {
-        assert_eq!(creation_outcome(&json!({ "state": "creating" })), None);
-        assert_eq!(
-            creation_outcome(&json!({ "state": "started", "workspaceId": "w", "sessionId": "s" })),
-            Some(Ok(("w".into(), "s".into())))
-        );
-        assert_eq!(
-            creation_outcome(&json!({ "state": "failed", "error": "sem provider" })),
-            Some(Err("sem provider".into()))
-        );
-        assert!(matches!(
-            creation_outcome(&json!({ "state": "started" })),
-            Some(Err(_))
-        ));
+    fn a_created_task_is_read_from_the_machines_answer() {
+        let answer = json!({ "workspaceId": "w-1", "setupReport": null, "setupHints": [] });
+        assert_eq!(created_workspace(&answer).as_deref(), Some("w-1"));
+        assert_eq!(created_workspace(&json!({ "workspaceId": "../x" })), None);
+        assert_eq!(created_workspace(&json!({})), None);
     }
 }

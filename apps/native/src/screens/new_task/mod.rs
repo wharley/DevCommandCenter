@@ -14,6 +14,7 @@ use dcc_core::application::linked_task::LinkedFolders;
 use gpui::{Context, EventEmitter, SharedString};
 
 use crate::data::desktop_api::{ApiError, CreateTaskRequest, CreatedTask, DesktopApi};
+use crate::data::machines::Machine;
 use crate::data::setup_report::{Description, Tone, creation_notice};
 use crate::data::tasks::Project;
 use crate::i18n::{Args, Translate};
@@ -41,6 +42,12 @@ pub struct NewTaskView {
     /// The project whose task is being created.
     pub(crate) pending: Option<String>,
     pub(crate) menu_open: bool,
+    /// The machines this DCC is paired with: where a task can also run.
+    pub(crate) machines: Vec<Machine>,
+    /// The machine the next task runs on; none is this computer.
+    pub(crate) place: Option<String>,
+    /// That machine's projects; `None` while they are read.
+    pub(crate) remote: Option<Vec<Project>>,
     /// Tests point the screen at a fake desktop.
     pub(crate) endpoint: Option<DesktopApi>,
     /// When each project's base was last fetched (by root).
@@ -61,6 +68,9 @@ impl NewTaskView {
             include_linked: true,
             pending: None,
             menu_open: false,
+            machines: Vec::new(),
+            place: None,
+            remote: None,
             endpoint: None,
             fetched: HashMap::new(),
         }
@@ -126,8 +136,89 @@ impl NewTaskView {
         cx.notify();
     }
 
+    /// The projects a task can start in: this computer's, or the chosen
+    /// machine's (none while they are read).
     pub(crate) fn projects(&self) -> &[Project] {
-        &self.projects
+        match (&self.place, &self.remote) {
+            (None, _) => &self.projects,
+            (Some(_), Some(remote)) => remote,
+            (Some(_), None) => &[],
+        }
+    }
+
+    /// The paired machines, read when the screen opens: "Onde" shows only
+    /// when there is one.
+    pub fn load_machines(&mut self, cx: &mut Context<Self>) {
+        let endpoint = self.endpoint.clone();
+        cx.spawn(async move |this, cx| {
+            let read = cx
+                .background_executor()
+                .spawn(async move { endpoint.or_else(DesktopApi::load)?.machines().ok() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let machines = read.unwrap_or_default();
+                // A machine removed meanwhile is no place any more.
+                if this
+                    .place
+                    .as_ref()
+                    .is_some_and(|place| !machines.iter().any(|machine| &machine.id == place))
+                {
+                    this.place = None;
+                    this.remote = None;
+                }
+                if this.machines != machines {
+                    this.machines = machines;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// "Onde": this computer (`None`) or a machine, whose projects are read.
+    pub(crate) fn set_place(&mut self, place: Option<String>, cx: &mut Context<Self>) {
+        if self.place == place || self.busy() {
+            return;
+        }
+        self.place = place.clone();
+        self.remote = None;
+        self.menu_open = false;
+        cx.notify();
+        let Some(machine) = place else {
+            return;
+        };
+        let endpoint = self.endpoint.clone();
+        cx.spawn(async move |this, cx| {
+            let asked = machine.clone();
+            let read = cx
+                .background_executor()
+                .spawn(async move {
+                    endpoint
+                        .or_else(DesktopApi::load)
+                        .ok_or(ApiError::DesktopClosed)?
+                        .machine_projects(&asked)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                // Another place was picked while this one was read.
+                if this.place.as_deref() != Some(machine.as_str()) {
+                    return;
+                }
+                match read {
+                    Ok(projects) => this.remote = Some(projects),
+                    Err(error) => {
+                        this.place = None;
+                        Toaster::error_with(
+                            cx.t("newTask.where.unreachable"),
+                            error.to_string(),
+                            cx,
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// "+N" when the project links folders and they come along.
@@ -195,15 +286,20 @@ impl NewTaskView {
             name: None,
         };
         let endpoint = self.endpoint.clone();
+        let place = self.place.clone();
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    endpoint
+                    let api = endpoint
                         .or_else(DesktopApi::load)
-                        .ok_or(ApiError::DesktopClosed)?
-                        .create_task(&request)
+                        .ok_or(ApiError::DesktopClosed)?;
+                    match place {
+                        // On the machine, mirrored here.
+                        Some(machine) => api.create_machine_task(&machine, &request),
+                        None => api.create_task(&request),
+                    }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {

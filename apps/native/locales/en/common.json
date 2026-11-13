@@ -2284,6 +2284,11 @@
     "hint": "{{workspaceName}}"
   },
   "newTask": {
+    "where": {
+      "label": "Where",
+      "here": "This computer",
+      "unreachable": "Could not reach the machine"
+    },
     "designDescription": "Choose a project and make room for your next idea.",
     "title": "Let's build",
     "chooseProject": "Choose a project",
