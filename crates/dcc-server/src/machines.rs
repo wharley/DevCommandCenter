@@ -28,6 +28,10 @@ pub enum MachineError {
     BadLink,
     #[error("no such machine")]
     Unknown,
+    /// The link is this DCC's own: a task "on the machine" would be a task
+    /// here, and its mirror would write over the task itself.
+    #[error("that link is this computer's own")]
+    Itself,
     #[error(transparent)]
     Link(#[from] LinkError),
 }
@@ -146,6 +150,27 @@ fn stored_machine(conn: &Connection, id: &str) -> Result<Option<Machine>, Machin
         .optional()?)
 }
 
+/// Whether `public_key` is the key this DCC answers with on the relay (the
+/// one in its own pairing links). False when it never set the relay up.
+fn is_this_dcc(conn: &Connection, public_key: &[u8]) -> Result<bool, MachineError> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'remote_relay')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(false);
+    }
+    let own: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT static_public FROM remote_relay WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(own.as_deref() == Some(public_key))
+}
+
 /// This computer's name as a machine's person reads it when approving, and
 /// as other DCCs list it: the host's name without its `.local`.
 pub fn this_computer_name() -> String {
@@ -227,6 +252,13 @@ impl MachineRegistry {
         })
     }
 
+    /// This computer's key for those channels, as the person on a machine
+    /// reads it when approving: what they compare before saying yes.
+    pub async fn this_fingerprint(&self) -> Result<String, MachineError> {
+        let keys = self.with_db(identity_keys).await?;
+        Ok(fingerprint(&keys.public))
+    }
+
     pub async fn list(&self) -> Result<Vec<MachineSummary>, MachineError> {
         let machines = self.with_db(stored_machines).await?;
         let links = self.links.lock().await;
@@ -252,6 +284,10 @@ impl MachineRegistry {
         on_pending: impl FnOnce() + Send,
     ) -> Result<MachineSummary, MachineError> {
         let offer = PairingOffer::parse(link.trim()).map_err(|_| MachineError::BadLink)?;
+        let key = offer.desktop_public.to_vec();
+        if self.with_db(move |conn| is_this_dcc(conn, &key)).await? {
+            return Err(MachineError::Itself);
+        }
         let identity = self.identity().await?;
         let channel = MachineLink::pair(&offer, &identity, on_pending).await?;
         let print = fingerprint(&offer.desktop_public);
@@ -387,6 +423,26 @@ mod tests {
         let machine = stored_machine(&conn, "b").unwrap().unwrap();
         assert_eq!(machine.target.public_key, [9u8; KEY_LEN]);
         assert!(stored_machine(&conn, "zz").unwrap().is_none());
+    }
+
+    #[test]
+    fn this_dccs_own_link_is_told_apart_by_its_relay_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open(&dir.path().join("db.sqlite")).unwrap();
+        // The relay was never set up here: no key to compare.
+        assert!(!is_this_dcc(&conn, &[1u8; KEY_LEN]).unwrap());
+        conn.execute_batch(
+            "CREATE TABLE remote_relay (id INTEGER PRIMARY KEY, static_private BLOB,
+                static_public BLOB, room_id TEXT, room_secret TEXT);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO remote_relay VALUES (1, ?1, ?2, 'room', 'secret')",
+            params![vec![0u8; KEY_LEN], vec![1u8; KEY_LEN]],
+        )
+        .unwrap();
+        assert!(is_this_dcc(&conn, &[1u8; KEY_LEN]).unwrap());
+        assert!(!is_this_dcc(&conn, &[2u8; KEY_LEN]).unwrap());
     }
 
     #[tokio::test]

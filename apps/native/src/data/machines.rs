@@ -24,6 +24,15 @@ pub struct Machine {
     pub connected: bool,
 }
 
+/// The paired machines, and the code the person on a machine compares
+/// with the one this computer shows before approving it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MachineList {
+    pub machines: Vec<Machine>,
+    pub this_computer: String,
+}
+
 /// What a machine says of itself (`/api/v1/machine`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -85,13 +94,12 @@ fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ApiError> {
 
 impl DesktopApi {
     pub fn machines(&self) -> Result<Vec<Machine>, ApiError> {
-        let value = self.get("/api/v1/machines")?;
-        decode(
-            value
-                .get("machines")
-                .cloned()
-                .unwrap_or(Value::Array(Vec::new())),
-        )
+        self.machine_list().map(|list| list.machines)
+    }
+
+    /// The machines and this computer's code for pairing with them.
+    pub fn machine_list(&self) -> Result<MachineList, ApiError> {
+        decode(self.get("/api/v1/machines")?)
     }
 
     /// Pairs from the link the machine showed; answers once the person

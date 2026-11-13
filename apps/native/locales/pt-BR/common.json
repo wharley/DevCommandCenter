@@ -2916,7 +2916,7 @@
       },
       "connections": {
         "label": "Conexões",
-        "description": "Celulares e tablets pareados com este desktop."
+        "description": "Celulares pareados com este desktop e outras máquinas com DCC."
       },
       "shortcuts": {
         "label": "Atalhos",
@@ -5617,6 +5617,7 @@
     "open": "Atividade, contexto e spec da sessão"
   },
   "codeColumn": {
+    "onMachine": "Esta tarefa roda em outra máquina. Os arquivos e as mudanças dela ainda não aparecem aqui; a conversa, sim.",
     "ariaLabel": "Código do projeto",
     "files": "Arquivos",
     "changes": "Mudanças",

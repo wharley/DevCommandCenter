@@ -97,6 +97,8 @@ pub(crate) enum Loaded<T> {
 
 pub struct CodeColumn {
     pub(crate) root: Option<String>,
+    /// The task on screen runs on another machine (`root` is then none).
+    pub(crate) on_machine: bool,
     pub(crate) tab: CodeColumnTab,
     pub(crate) files: Loaded<Files>,
     tree: Arc<CodeTreeNode>,
@@ -165,6 +167,7 @@ impl CodeColumn {
     pub fn new(tab: CodeColumnTab, cx: &mut Context<Self>) -> Self {
         Self {
             root: None,
+            on_machine: false,
             tab,
             files: Loaded::Pending,
             tree: Arc::default(),
@@ -228,9 +231,16 @@ impl CodeColumn {
         let root = root
             .map(|root| root.trim().to_string())
             .filter(|root| !root.is_empty());
-        if root == self.root {
+        // A task on another machine has no folder here: nothing is read,
+        // and the column says where its files are.
+        let on_machine = root
+            .as_deref()
+            .is_some_and(|root| crate::data::machines::machine_of_path(root).is_some());
+        let root = root.filter(|_| !on_machine);
+        if root == self.root && on_machine == self.on_machine {
             return;
         }
+        self.on_machine = on_machine;
         self.root = root;
         self.files = Loaded::Pending;
         self.tree = Arc::default();

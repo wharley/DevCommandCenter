@@ -43,6 +43,9 @@ pub(super) struct Connections {
     pub(super) answering: bool,
     /// The log, when open: its entries and whether it is reading.
     pub(super) audit: Option<(Vec<AuditEntry>, bool)>,
+    /// Which side shows: who reaches this computer (0), or the machines
+    /// this computer reaches (1). Two different things, one at a time.
+    pub(super) tab: usize,
     /// The other DCCs this one runs tasks on.
     pub(super) machines: machines::Machines,
     /// A machine's pairing link, pasted.
@@ -82,6 +85,7 @@ impl Connections {
         let machine_link =
             cx.new(|cx| TextInput::new(window, cx).with_placeholder("dcc://pair#…"));
         Self {
+            tab: 0,
             machines: machines::Machines::default(),
             machine_link,
             devices: Vec::new(),

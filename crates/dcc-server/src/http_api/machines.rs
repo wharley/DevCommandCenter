@@ -44,7 +44,9 @@ fn operator(device: &Option<axum::Extension<PairedDeviceIdentity>>) -> Result<()
 
 fn failed(error: MachineError) -> HttpApiError {
     match error {
-        MachineError::BadLink => HttpApiError::bad_request(error.to_string()),
+        MachineError::BadLink | MachineError::Itself => {
+            HttpApiError::bad_request(error.to_string())
+        }
         MachineError::Unknown => HttpApiError::not_found(error.to_string()),
         MachineError::Database(message) => HttpApiError::internal(message),
         MachineError::Link(LinkError::Denied | LinkError::Refused(_)) => {
@@ -72,8 +74,12 @@ async fn list(
     device: Option<axum::Extension<PairedDeviceIdentity>>,
 ) -> Result<Json<Value>, HttpApiError> {
     operator(&device)?;
-    let machines = backend.machines().list().await.map_err(failed)?;
-    Ok(Json(json!({ "machines": machines })))
+    let registry = backend.machines();
+    let machines = registry.list().await.map_err(failed)?;
+    let this_computer = registry.this_fingerprint().await.map_err(failed)?;
+    Ok(Json(
+        json!({ "machines": machines, "thisComputer": this_computer }),
+    ))
 }
 
 #[derive(Debug, Deserialize)]

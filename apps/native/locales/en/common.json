@@ -2916,7 +2916,7 @@
       },
       "connections": {
         "label": "Connections",
-        "description": "Phones and tablets paired with this desktop."
+        "description": "Phones paired with this desktop, and other machines running DCC."
       },
       "shortcuts": {
         "label": "Shortcuts",
@@ -5617,6 +5617,7 @@
     "open": "Session activity, context and spec"
   },
   "codeColumn": {
+    "onMachine": "This task runs on another machine. Its files and changes do not show here yet; its conversation does.",
     "ariaLabel": "Project code",
     "files": "Files",
     "changes": "Changes",

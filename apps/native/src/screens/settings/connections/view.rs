@@ -7,7 +7,7 @@ use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*, px};
 use super::super::Settings;
 use crate::data::remote_access::{AuditEntry, Device, Tone, audit_time, event_label, relative};
 use crate::theme::ActiveTheme;
-use crate::ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, Icon, spinner};
+use crate::ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant, Icon, Tabs, spinner};
 
 /// `rounded-xl border border-border/60`
 pub(super) fn card(cx: &gpui::App) -> gpui::Div {
@@ -128,17 +128,52 @@ impl Settings {
         } else {
             self.devices_table(cx)
         };
-        div()
+        // Two directions that are easy to mix up, so one shows at a time:
+        // who may reach this computer, and the machines it reaches.
+        let this = cx.entity().downgrade();
+        let tabs = Tabs::new(
+            "settings-connections-tabs",
+            vec![
+                "Quem acessa este computador".into(),
+                "Máquinas que eu acesso".into(),
+            ],
+            connections.tab,
+        )
+        .padding_y(5.0)
+        .on_select(move |index, _, cx| {
+            let _ = this.update(cx, |settings, cx| {
+                settings.connections.tab = index;
+                cx.notify();
+            });
+        });
+        let hint = div()
+            .px(px(4.0))
+            .text_size(px(12.0))
+            .line_height(px(18.0))
+            .text_color(colors.muted_foreground)
+            .child(if connections.tab == 0 {
+                "Celulares e outros DCCs que você deixou entrar neste computador. Quem está aqui \
+                 roda tarefas e agentes nele."
+            } else {
+                "Computadores com DCC onde você roda tarefas a partir deste. Conectar a uma máquina \
+                 não abre este computador para ela."
+            });
+        let page = div()
             .debug_selector(|| "settings-connections".into())
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(header)
-            .children(self.relay_card(cx))
-            .child(devices)
-            .child(self.machines_card(cx))
-            .child(self.audit_section(cx))
-            .into_any_element()
+            .child(tabs)
+            .child(hint);
+        if connections.tab == 0 {
+            page.child(header)
+                .children(self.relay_card(cx))
+                .child(devices)
+                .child(self.audit_section(cx))
+                .into_any_element()
+        } else {
+            page.child(self.machines_card(cx)).into_any_element()
+        }
     }
 
     fn devices_table(&self, cx: &mut Context<Self>) -> AnyElement {
