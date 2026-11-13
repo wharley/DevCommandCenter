@@ -1320,6 +1320,23 @@
     },
     "merge": {
       "action": "Merge",
+      "successDeleted": "Pull request merged and branch deleted.",
+      "whenReadySet": "GitHub will merge it when it is ready.",
+      "whenReadyOn": "Merges when ready",
+      "whenReadyCancel": "Cancel",
+      "whenReadyOff": "Automatic merge cancelled.",
+      "whenReadyNote": "On confirm, GitHub merges it by itself once that clears; it can be cancelled later.",
+      "heldNote": "This repository does not allow merging automatically when ready.",
+      "confirmWhenReady": "Merge when ready",
+      "deleteBranch": "Delete the branch after the merge",
+      "wait": {
+        "checksRunning": "The checks are still running.",
+        "checksFailing": "Required checks are failing.",
+        "reviewRequired": "The required approval is missing.",
+        "changesRequested": "A reviewer requested changes.",
+        "behind": "The branch is behind its base.",
+        "blocked": "A rule of the repository still prevents the merge."
+      },
       "chooseMethod": "Choose a merge method",
       "loadingCapabilities": "Checking permissions and available methods…",
       "capabilitiesUnavailable": "Unable to verify the merge conditions.",

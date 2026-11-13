@@ -263,6 +263,94 @@ fn a_github_pull_request_merges_after_its_confirmation(cx: &mut TestAppContext) 
     assert_eq!(body["forgeLogin"], "ana");
 }
 
+/// The merge dialog for one pull request with these merge capabilities;
+/// returns what the merge route received after the confirmation.
+fn merge_with(
+    capabilities: serde_json::Value,
+    delete_branch: bool,
+    cx: &mut TestAppContext,
+) -> (serde_json::Value, bool, bool) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let detail = json!({
+        "body": null, "comments": [], "checks": [], "files": [], "inlineComments": [],
+        "reviewCapabilities": null, "mergeCapabilities": capabilities,
+    })
+    .to_string();
+    let (port, desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list.clone()),
+        ("/api/v1/pull-request-hub/detail", 200, detail.clone()),
+        (
+            "/api/v1/pull-request-hub/merge",
+            200,
+            r#"{"status":"submitted","url":null}"#.into(),
+        ),
+        ("/api/v1/pull-request-hub/detail", 200, detail),
+        ("/api/v1/pull-request-hub/list", 200, list),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1200.0), px(800.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    hub.update(cx, |hub, cx| {
+        hub.ask_merge("squash", cx);
+        hub.merge_delete_branch = delete_branch;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let waits = cx.debug_bounds("pr-merge-wait").is_some();
+    let offers_delete = cx.debug_bounds("pr-merge-delete-branch").is_some();
+    hub.update(cx, |hub, cx| hub.confirm_merge(cx));
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    cx.run_until_parked();
+    let (_, body) = seen
+        .iter()
+        .find(|(path, _)| path.ends_with("/merge"))
+        .expect("the merge was sent");
+    (serde_json::from_str(body).unwrap(), waits, offers_delete)
+}
+
+#[gpui::test]
+fn a_pull_request_that_waits_is_left_to_merge_when_ready(cx: &mut TestAppContext) {
+    // GitHub blocks it (a rule of the repository) and the repository has auto-merge.
+    let (sent, waits, offers_delete) = merge_with(
+        json!({ "allowedMethods": ["squash"], "viewerCanMerge": true, "mergeable": "MERGEABLE",
+            "headSha": "0123456789abcdef0123", "mergeStateStatus": "BLOCKED",
+            "allowAutoMerge": true, "canDeleteBranch": true }),
+        // Asked for, but the branch is never deleted before the merge happens.
+        true,
+        cx,
+    );
+    assert!(waits, "the dialog says what it waits on");
+    assert!(!offers_delete, "no branch to delete yet");
+    assert_eq!(sent["whenReady"], true);
+    assert_eq!(sent["deleteBranch"], false);
+}
+
+#[gpui::test]
+fn a_ready_pull_request_merges_now_and_takes_its_branch_when_asked(cx: &mut TestAppContext) {
+    let (sent, waits, offers_delete) = merge_with(
+        json!({ "allowedMethods": ["squash"], "viewerCanMerge": true, "mergeable": "MERGEABLE",
+            "headSha": "0123456789abcdef0123", "mergeStateStatus": "CLEAN",
+            "allowAutoMerge": true, "canDeleteBranch": true }),
+        true,
+        cx,
+    );
+    assert!(!waits && offers_delete);
+    assert_eq!(sent["whenReady"], false);
+    assert_eq!(sent["deleteBranch"], true);
+}
+
 #[gpui::test]
 fn the_summary_approves_with_its_text_without_opening_the_code(cx: &mut TestAppContext) {
     use crate::data::pr_review::ReviewEvent;

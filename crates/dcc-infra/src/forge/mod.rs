@@ -3,6 +3,7 @@ pub mod context;
 pub mod detect;
 pub mod github;
 pub mod github_checks;
+pub mod github_merge;
 pub mod github_read;
 pub mod github_read_run;
 pub mod gitlab;

@@ -1138,7 +1138,7 @@ pub fn pull_request_detail_json(
             "view",
             &number.to_string(),
             "--json",
-            "body,comments,statusCheckRollup,state,isDraft,mergeable,mergeStateStatus,headRefOid,url,reviews,commits",
+            "body,comments,statusCheckRollup,state,isDraft,mergeable,mergeStateStatus,headRefOid,headRefName,isCrossRepository,autoMergeRequest,url,reviews,commits",
         ],
     )
 }
@@ -1237,6 +1237,7 @@ pub fn merge_pull_request(
     number: u32,
     method: dcc_core::domain::forge::PullRequestHubMergeMethod,
     expected_head_sha: &str,
+    when_ready: bool,
     login: Option<&str>,
 ) -> Result<(), String> {
     let gh = resolve_cli_binary("gh")?;
@@ -1261,6 +1262,7 @@ pub fn merge_pull_request(
             "--match-head-commit",
             expected_head_sha,
         ])
+        .args(super::github_merge::merge_flags(when_ready))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

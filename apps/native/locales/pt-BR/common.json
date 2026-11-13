@@ -1320,6 +1320,23 @@
     },
     "merge": {
       "action": "Mesclar",
+      "successDeleted": "Pull request mesclado e branch apagado.",
+      "whenReadySet": "O GitHub vai mesclar quando estiver pronto.",
+      "whenReadyOn": "Mescla quando estiver pronto",
+      "whenReadyCancel": "Cancelar",
+      "whenReadyOff": "Mesclagem automática cancelada.",
+      "whenReadyNote": "Confirmando, o GitHub mescla sozinho quando isso se resolver; dá para cancelar depois.",
+      "heldNote": "Este repositório não permite mesclar automaticamente quando estiver pronto.",
+      "confirmWhenReady": "Mesclar quando estiver pronto",
+      "deleteBranch": "Apagar o branch depois do merge",
+      "wait": {
+        "checksRunning": "Os checks ainda estão rodando.",
+        "checksFailing": "Há checks obrigatórios falhando.",
+        "reviewRequired": "Falta a aprovação exigida.",
+        "changesRequested": "Um revisor pediu mudanças.",
+        "behind": "O branch está atrás da base.",
+        "blocked": "Uma regra do repositório ainda impede o merge."
+      },
       "chooseMethod": "Escolher método de merge",
       "loadingCapabilities": "Verificando permissões e métodos disponíveis…",
       "capabilitiesUnavailable": "Não foi possível verificar as condições de merge.",

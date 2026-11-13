@@ -8,7 +8,8 @@ use gpui::{AnyElement, Context, FontWeight, SharedString, div, prelude::*, px};
 
 use super::PrHub;
 use super::list::check_icon;
-use crate::data::pr_hub::{Item, MERGE_METHODS, merge_blocked, merge_toast};
+use crate::data::pr_hub::{Item, MERGE_METHODS, merge_blocked};
+use crate::data::pr_merge_readiness::MergePath;
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
 use crate::theme::tailwind as tw;
@@ -41,6 +42,7 @@ impl PrHub {
     /// The method picked: the confirmation opens.
     pub(crate) fn ask_merge(&mut self, method: &'static str, cx: &mut Context<Self>) {
         self.pending_merge = Some(method);
+        self.merge_delete_branch = false;
         self.merge_error = None;
         cx.notify();
     }
@@ -68,19 +70,29 @@ impl PrHub {
         if self.merging {
             return;
         }
+        // Waiting with no auto-merge in the repository: nothing to send.
+        let when_ready = match self.merge_path(&item) {
+            MergePath::Now => false,
+            MergePath::WhenReady(_) => true,
+            MergePath::Held(_) => return,
+        };
+        let delete_branch = self.deletes_branch(&item);
         self.merging = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
             let merged = cx
                 .background_executor()
-                .spawn(async move { api.pr_hub_merge(&item, method, &sha) })
+                .spawn(
+                    async move { api.pr_hub_merge(&item, method, &sha, delete_branch, when_ready) },
+                )
                 .await;
             let _ = this.update(cx, |hub, cx| {
                 hub.merging = false;
                 match merged {
-                    Ok(status) => {
+                    Ok((status, branch_deleted)) => {
                         hub.pending_merge = None;
-                        Toaster::success(cx.t(merge_toast(&status)), cx);
+                        let key = Self::merge_result_key(&status, branch_deleted, when_ready);
+                        Toaster::success(cx.t(key), cx);
                         hub.detail = None;
                         hub.ensure_detail(cx);
                         hub.refresh(cx);
@@ -114,6 +126,10 @@ impl PrHub {
     ) -> Option<AnyElement> {
         if item.provider != "github" {
             return None;
+        }
+        // GitHub will merge it when ready: that, and the way out, instead.
+        if let Some(waiting) = self.auto_merge_button(item, cx) {
+            return Some(waiting);
         }
         let blocked = merge_blocked(item, self.merge_detail(item));
         let merging = self.merging;
@@ -267,6 +283,12 @@ impl PrHub {
         };
         let close = cx.entity().downgrade();
         let merging = self.merging;
+        let path = self.merge_path(&item);
+        let confirm_label = match path {
+            MergePath::WhenReady(_) => "pullRequests.merge.confirmWhenReady",
+            _ => "pullRequests.merge.confirm",
+        };
+        let held = matches!(path, MergePath::Held(_));
         Some(
             Dialog::new("pr-merge-dialog", move |_, cx| {
                 let _ = close.update(cx, |hub, cx| hub.cancel_merge(cx));
@@ -352,6 +374,8 @@ impl PrHub {
                                     .child(cx.t("pullRequests.merge.protectionNotice")),
                             ),
                     )
+                    .children(self.merge_wait_note(&item, cx))
+                    .children(self.delete_branch_row(&item, cx))
                     .children(self.merge_error.clone().map(|error| {
                         div()
                             .text_size(px(11.0))
@@ -372,7 +396,7 @@ impl PrHub {
                                 .variant(ButtonVariant::Default)
                                 .size(ButtonSize::Default)
                                 .text_size(14.0)
-                                .disabled(merging)
+                                .disabled(merging || held)
                                 .on_click(cx.listener(|hub, _, _, cx| hub.confirm_merge(cx)))
                                 .child(
                                     div()
@@ -382,7 +406,7 @@ impl PrHub {
                                         .when(merging, |label| {
                                             label.child(spinner("pr-merge-confirming", 14.0))
                                         })
-                                        .child(cx.t("pullRequests.merge.confirm")),
+                                        .child(cx.t(confirm_label)),
                                 )
                                 .into_any_element(),
                         ],

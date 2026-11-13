@@ -20,6 +20,7 @@ pub(super) fn routes() -> Router<HttpState> {
         .route("/api/v1/pull-request-hub/detail", post(detail))
         .route("/api/v1/pull-request-hub/comment", post(comment))
         .route("/api/v1/pull-request-hub/merge", post(merge))
+        .route("/api/v1/pull-request-hub/action", post(action))
         .route(
             "/api/v1/pull-request-hub/submit-review",
             post(submit_review),
@@ -89,6 +90,20 @@ async fn comment(
 ) -> Result<Json<Value>, HttpApiError> {
     known_repository(&backend, &input.repository_root).await?;
     reply(forge_commands::pull_request_hub_comment_with_state(&backend.workspace, input).await)
+}
+
+async fn action(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::pr_hub_merge_extras::PullRequestHubActionInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    known_repository(&backend, &input.repository_root).await?;
+    reply(
+        dcc_tauri::commands::pr_hub_merge_extras::pull_request_hub_action_with_state(
+            &backend.workspace,
+            input,
+        )
+        .await,
+    )
 }
 
 async fn merge(

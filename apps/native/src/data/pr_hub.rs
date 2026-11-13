@@ -183,6 +183,14 @@ pub struct MergeCapabilities {
     pub viewer_can_merge: bool,
     pub mergeable: Option<String>,
     pub head_sha: Option<String>,
+    /// GitHub's own verdict: `CLEAN`, `BLOCKED`, `BEHIND`, `UNSTABLE`…
+    pub merge_state_status: Option<String>,
+    /// The repository lets GitHub merge it when it becomes ready.
+    pub allow_auto_merge: bool,
+    /// "Merge when ready" is on for it.
+    pub auto_merge_enabled: bool,
+    /// Its branch can be deleted after the merge (not a fork's).
+    pub can_delete_branch: bool,
 }
 
 /// `MERGE_METHODS`, in the menu's order.
@@ -348,15 +356,6 @@ pub fn merge_blocked(item: &Item, detail: Option<&Result<Detail, String>>) -> Op
     None
 }
 
-/// What the forge did with a merge, as the toast's key.
-pub fn merge_toast(status: &str) -> &'static str {
-    match status {
-        "merged" => "pullRequests.merge.success",
-        "queued" => "pullRequests.merge.queued",
-        _ => "pullRequests.merge.submitted",
-    }
-}
-
 /// The list asks every project's forge and the detail reads the patches:
 /// both wait on the network past the usual 20s.
 const FORGE_WAIT: std::time::Duration = std::time::Duration::from_secs(90);
@@ -402,13 +401,17 @@ impl DesktopApi {
         )?)
     }
 
-    /// `pullRequestHubMerge` on the reviewed commit; the forge's status.
+    /// `pullRequestHubMerge` on the reviewed commit: the forge's status and
+    /// whether the branch went with it. `when_ready` leaves the merge to
+    /// GitHub once the pull request's requirements are met.
     pub fn pr_hub_merge(
         &self,
         item: &Item,
         method: &str,
         head_sha: &str,
-    ) -> Result<String, ApiError> {
+        delete_branch: bool,
+        when_ready: bool,
+    ) -> Result<(String, bool), ApiError> {
         let value = self.post(
             "/api/v1/pull-request-hub/merge",
             &json!({
@@ -417,13 +420,17 @@ impl DesktopApi {
                 "method": method,
                 "expectedHeadSha": head_sha,
                 "forgeLogin": item.forge_login,
+                "deleteBranch": delete_branch,
+                "whenReady": when_ready,
             }),
         )?;
-        Ok(value
+        let status = value
             .get("status")
             .and_then(Value::as_str)
             .unwrap_or("submitted")
-            .to_string())
+            .to_string();
+        let deleted = value.get("branchDeleted").and_then(Value::as_bool) == Some(true);
+        Ok((status, deleted))
     }
 
     /// `pullRequestHubComment`
@@ -517,6 +524,7 @@ mod tests {
             viewer_can_merge: true,
             mergeable: Some("MERGEABLE".into()),
             head_sha: Some("abc".into()),
+            ..MergeCapabilities::default()
         };
         assert_eq!(
             merge_blocked(&item, Some(&detail(Some(ready.clone())))),
@@ -546,7 +554,6 @@ mod tests {
             merge_blocked(&item, Some(&detail(Some(no_sha)))),
             Some("pullRequests.merge.commitUnavailable")
         );
-        assert_eq!(merge_toast("queued"), "pullRequests.merge.queued");
     }
 
     #[test]

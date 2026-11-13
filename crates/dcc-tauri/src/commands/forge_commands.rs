@@ -287,6 +287,15 @@ pub struct PullRequestHubMergeCapabilities {
     pub mergeable: Option<String>,
     pub merge_state_status: Option<String>,
     pub head_sha: Option<String>,
+    /// The repository lets GitHub merge it when it becomes ready.
+    #[serde(default)]
+    pub allow_auto_merge: bool,
+    /// "Merge when ready" is on for this pull request.
+    #[serde(default)]
+    pub auto_merge_enabled: bool,
+    /// Its branch can be deleted after the merge (not a fork's).
+    #[serde(default)]
+    pub can_delete_branch: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -423,6 +432,12 @@ pub struct PullRequestHubMergeInput {
     pub method: PullRequestHubMergeMethod,
     pub expected_head_sha: String,
     pub forge_login: Option<String>,
+    /// Delete the head branch on GitHub once it is merged.
+    #[serde(default)]
+    pub delete_branch: bool,
+    /// Let GitHub merge it when its requirements are met.
+    #[serde(default)]
+    pub when_ready: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -438,6 +453,9 @@ pub enum PullRequestHubMergeStatus {
 pub struct PullRequestHubMergeOutput {
     pub status: PullRequestHubMergeStatus,
     pub url: Option<String>,
+    /// The head branch was deleted after the merge.
+    #[serde(default)]
+    pub branch_deleted: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1212,6 +1230,7 @@ fn github_merge_capabilities(
         allowed_methods.push(PullRequestHubMergeMethod::Rebase);
     }
 
+    let extras = crate::commands::pr_hub_merge_extras::merge_extras(pull_request, repository);
     PullRequestHubMergeCapabilities {
         allowed_methods,
         viewer_can_merge: repository
@@ -1231,6 +1250,9 @@ fn github_merge_capabilities(
             .get("headRefOid")
             .and_then(Value::as_str)
             .map(ToString::to_string),
+        allow_auto_merge: extras.allow_auto_merge,
+        auto_merge_enabled: extras.auto_merge_enabled,
+        can_delete_branch: extras.can_delete_branch,
     }
 }
 
@@ -2261,6 +2283,9 @@ pub async fn pull_request_hub_merge_with_state(
     let current_head_sha = capabilities.head_sha.as_deref().ok_or_else(|| {
         "GitHub did not return the current pull request commit. Refresh and try again.".to_string()
     })?;
+    if input.when_ready && !capabilities.allow_auto_merge {
+        return Err("This repository does not allow merging when ready (auto-merge).".to_string());
+    }
     if current_head_sha != expected_head_sha {
         return Err(
             "The pull request received new commits after it was loaded. Refresh and review the latest commit before merging."
@@ -2276,6 +2301,7 @@ pub async fn pull_request_hub_merge_with_state(
         input.number,
         input.method,
         expected_head_sha,
+        input.when_ready,
         context.effective_login.as_deref(),
     )?;
 
@@ -2298,8 +2324,24 @@ pub async fn pull_request_hub_merge_with_state(
     } else {
         PullRequestHubMergeStatus::Submitted
     };
+    // Only once GitHub says it is merged, and only its own repository's branch.
+    let branch_deleted = input.delete_branch
+        && status == PullRequestHubMergeStatus::Merged
+        && capabilities.can_delete_branch
+        && crate::commands::pr_hub_merge_extras::head_branch(&pull_request).is_some_and(|branch| {
+            dcc_infra::forge::github_merge::delete_head_branch(
+                root,
+                &context.host,
+                &context.namespace,
+                &context.repo,
+                branch,
+                context.effective_login.as_deref(),
+            )
+            .is_ok()
+        });
     Ok(PullRequestHubMergeOutput {
         status,
+        branch_deleted,
         url: result
             .get("url")
             .and_then(Value::as_str)

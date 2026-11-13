@@ -12,6 +12,7 @@ mod detail;
 mod journey;
 mod list;
 mod merge;
+mod merge_options;
 #[cfg(test)]
 mod news_tests;
 mod reviewer;
@@ -72,6 +73,8 @@ pub struct PrHub {
     /// The merge method picked, waiting for its confirmation.
     pub(crate) pending_merge: Option<&'static str>,
     pub(crate) merging: bool,
+    /// "Apagar o branch" in the merge dialog.
+    pub(crate) merge_delete_branch: bool,
     pub(crate) merge_error: Option<String>,
     pub(crate) tab: code::Tab,
     /// The code tab's read, with the patches.
@@ -154,6 +157,7 @@ impl PrHub {
             working_on: None,
             pending_merge: None,
             merging: false,
+            merge_delete_branch: false,
             merge_error: None,
             tab: code::Tab::Summary,
             code_detail: None,
