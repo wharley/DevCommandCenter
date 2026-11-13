@@ -61,7 +61,7 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 
 use crate::http_auth::PairedDeviceIdentity;
-use crate::pairing::{self, PairingError};
+use crate::pairing::{self, ClientKind, PairingError};
 use crate::remote_push::{self, PushConfig, PushNotifier, PushPresence};
 
 const OFFER_TTL: Duration = Duration::from_secs(5 * 60);
@@ -760,8 +760,15 @@ impl RemoteHub {
                         Ok(())
                     })
                     .await;
-                self.run_channel(sink, stream, &mut channel, device.device_id, Vec::new())
-                    .await;
+                self.run_channel(
+                    sink,
+                    stream,
+                    &mut channel,
+                    device.device_id,
+                    device.client,
+                    Vec::new(),
+                )
+                .await;
                 Ok(())
             }
             Mode::Pair => {
@@ -901,7 +908,9 @@ impl RemoteHub {
                 .map_err(|_| close::PROTOCOL)?;
                 // From now on the supervisor keeps the relay connection up.
                 self.wake.notify_waiters();
-                self.run_channel(sink, stream, &mut channel, device_id, queued)
+                // What it said it is when it paired decides its reach.
+                let client = ClientKind::from_platform(device.platform.as_deref());
+                self.run_channel(sink, stream, &mut channel, device_id, client, queued)
                     .await;
                 Ok(())
             }
@@ -1007,6 +1016,7 @@ impl RemoteHub {
         stream: &mut Stream,
         channel: &mut SecureChannel,
         device_id: String,
+        client: ClientKind,
         queued: Vec<Frame>,
     ) {
         let (tx, mut rx) = mpsc::channel::<Frame>(OUTBOUND_QUEUE);
@@ -1026,6 +1036,7 @@ impl RemoteHub {
             router: self.router.clone(),
             hub: Arc::downgrade(self),
             device_id: device_id.clone(),
+            client,
             stop: stop.clone(),
             foreground,
         });
@@ -1178,6 +1189,8 @@ struct ChannelContext {
     router: Router,
     hub: std::sync::Weak<RemoteHub>,
     device_id: String,
+    /// A phone or another DCC: what the channel may reach.
+    client: ClientKind,
     stop: Arc<watch::Sender<Option<u16>>>,
     foreground: Arc<StdMutex<Option<Instant>>>,
 }
@@ -1261,16 +1274,23 @@ impl ChannelContext {
     }
 }
 
-/// Phones reach the session API only: never pairing, device management,
-/// remote administration or the compatibility RPC.
+/// What a phone reaches (`path_allowed_for` with a phone).
 pub fn remote_path_allowed(path: &str) -> bool {
+    path_allowed_for(path, ClientKind::Phone)
+}
+
+/// Paired devices reach the session API only: never pairing, device
+/// management, remote administration or the compatibility RPC. Another DCC
+/// (`ClientKind::Desktop`) also reaches the terminals, which a task run from
+/// it needs; a phone does not.
+pub fn path_allowed_for(path: &str, client: ClientKind) -> bool {
     let route = path.split(['?', '#']).next().unwrap_or_default();
     route.starts_with("/api/v1/")
         && !route.contains("..")
         && !route.contains("//")
         && !route.starts_with("/api/v1/auth/")
         && !route.starts_with("/api/v1/remote/")
-        && !route.starts_with("/api/v1/terminals/")
+        && (client == ClientKind::Desktop || !route.starts_with("/api/v1/terminals/"))
         && !route.starts_with("/api/v1/browser/bridge/")
         && !route.starts_with("/api/v1/computer/bridge/")
         && !route.starts_with("/api/v1/quick-composer/")
@@ -1487,7 +1507,7 @@ fn dispatch(
                 }
                 return;
             }
-            if !remote_path_allowed(&request.path) {
+            if !path_allowed_for(&request.path, context.client) {
                 let _ = tx.try_send(error_response(id, 403, "not available remotely"));
                 return;
             }
@@ -1763,6 +1783,20 @@ mod tests {
 
     #[test]
     fn phones_only_reach_the_session_api() {
+        // Another DCC opens terminals on this machine; a phone never does.
+        assert!(!remote_path_allowed("/api/v1/terminals/events/stream"));
+        assert!(path_allowed_for(
+            "/api/v1/terminals/events/stream",
+            ClientKind::Desktop
+        ));
+        assert!(!path_allowed_for(
+            "/api/v1/remote/devices",
+            ClientKind::Desktop
+        ));
+        assert!(!path_allowed_for(
+            "/api/v1/auth/bearer/rotate",
+            ClientKind::Desktop
+        ));
         assert!(remote_path_allowed("/api/v1/sessions"));
         assert!(remote_path_allowed("/api/v1/sessions/abc/events?after=3"));
         assert!(remote_path_allowed("/api/v1/events/stream?sessionId=x"));
@@ -1789,7 +1823,9 @@ mod tests {
         assert!(remote_path_allowed("/api/v1/forge/accounts"));
         assert!(!remote_path_allowed("/api/v1/remote/pairing/offers"));
         assert!(!remote_path_allowed("/api/v1/terminals/spawn"));
-        assert!(!remote_path_allowed("/api/v1/terminals/by-owner/terminal%3Ax"));
+        assert!(!remote_path_allowed(
+            "/api/v1/terminals/by-owner/terminal%3Ax"
+        ));
         assert!(!remote_path_allowed("/api/v1/terminals/activity"));
         assert!(!remote_path_allowed("/api/v1/terminals/events/stream"));
         assert!(!remote_path_allowed("/rpc"));

@@ -162,6 +162,9 @@ impl TurnOptions {
 pub struct DesktopApi {
     port: u16,
     api_key: String,
+    /// Another machine's API through the relay, instead of this computer's
+    /// loopback (`machine_route`).
+    machine: Option<super::machine_route::MachineRoute>,
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -196,14 +199,33 @@ impl DesktopApi {
                     .map(str::to_string)
             })
             .filter(|key| !key.is_empty())?;
-        Some(Self { port, api_key })
+        Some(Self {
+            port,
+            api_key,
+            machine: None,
+        })
     }
 
     pub fn new(port: u16, api_key: impl Into<String>) -> Self {
         Self {
             port,
             api_key: api_key.into(),
+            machine: None,
         }
+    }
+
+    /// The API of another machine, through the relay.
+    pub fn on_machine(route: super::machine_route::MachineRoute) -> Self {
+        Self {
+            port: 0,
+            api_key: String::new(),
+            machine: Some(route),
+        }
+    }
+
+    /// The machine this API is of; none for this computer.
+    pub fn machine(&self) -> Option<&super::machine_route::MachineRoute> {
+        self.machine.as_ref()
     }
 
     pub(crate) fn post(&self, path: &str, body: &Value) -> Result<Value, ApiError> {
@@ -231,6 +253,12 @@ impl DesktopApi {
         read_timeout: Duration,
     ) -> Result<(std::io::BufReader<TcpStream>, bool), ApiError> {
         use std::io::BufRead;
+        if self.machine.is_some() {
+            // A machine's streams come as subscriptions on its channel.
+            return Err(ApiError::Failed(
+                "streams of a remote machine are not read here".into(),
+            ));
+        }
         let address = SocketAddr::from(([127, 0, 0, 1], self.port));
         let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
             .map_err(|_| ApiError::DesktopClosed)?;
@@ -293,6 +321,10 @@ impl DesktopApi {
         body: Option<&Value>,
         wait: Duration,
     ) -> Result<Value, ApiError> {
+        if let Some(machine) = &self.machine {
+            let (status, body) = machine.request(method, path, body, wait)?;
+            return answer(status, &body);
+        }
         let address = SocketAddr::from(([127, 0, 0, 1], self.port));
         let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
             .map_err(|_| ApiError::DesktopClosed)?;
@@ -312,7 +344,14 @@ impl DesktopApi {
         stream.read_to_end(&mut raw).map_err(read_error)?;
         let (status, body) =
             parse_response(&raw).ok_or_else(|| ApiError::Failed("invalid response".into()))?;
-        let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        answer(status, &body)
+    }
+}
+
+/// What a response means, whichever way it came (loopback or a machine).
+fn answer(status: u16, body: &[u8]) -> Result<Value, ApiError> {
+    {
+        let value: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
         match status {
             200..=299 => Ok(value),
             401 | 403 => Err(ApiError::Unauthorized),
@@ -336,7 +375,9 @@ impl DesktopApi {
             )),
         }
     }
+}
 
+impl DesktopApi {
     /// `respondToPermissionRequest` with the person's reason for a denial or
     /// "Sempre permitir"; answers whether the allow was kept for good.
     pub fn respond_permission_with(

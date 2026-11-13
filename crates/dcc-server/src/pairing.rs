@@ -17,6 +17,27 @@ use uuid::Uuid;
 
 pub const MAX_ACTIVE_DEVICES: i64 = 10;
 
+/// What a paired device is, read from the platform it gave when pairing: a
+/// phone drives sessions; another DCC on a computer also opens terminals on
+/// this machine, so the two get different reach (`remote_path_allowed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClientKind {
+    Phone,
+    Desktop,
+}
+
+impl ClientKind {
+    /// A desktop names its system; anything else (a phone's `ios` or
+    /// `android`, or nothing) is a phone, the narrower of the two.
+    pub fn from_platform(platform: Option<&str>) -> Self {
+        match platform.map(str::trim) {
+            Some("macos" | "linux" | "windows") => ClientKind::Desktop,
+            _ => ClientKind::Phone,
+        }
+    }
+}
+
 /// Public representation of a paired device (no key material).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +52,8 @@ pub struct PairedDeviceSummary {
     /// `relay` (pinned Noise key) or `legacy` (paired over the retired LAN
     /// flow; always revoked).
     pub kind: String,
+    /// A phone, or another DCC on a computer.
+    pub client: ClientKind,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -186,6 +209,7 @@ pub struct RelayDevice {
     pub device_id: String,
     pub device_name: String,
     pub revoked: bool,
+    pub client: ClientKind,
 }
 
 pub fn find_relay_device(
@@ -193,7 +217,7 @@ pub fn find_relay_device(
     public_key: &[u8],
 ) -> Result<Option<RelayDevice>, PairingError> {
     conn.query_row(
-        "SELECT device_id, device_name, revoked_at FROM paired_devices
+        "SELECT device_id, device_name, revoked_at, user_agent FROM paired_devices
          WHERE noise_public_key = ?1
          ORDER BY revoked_at IS NULL DESC, created_at DESC LIMIT 1",
         params![public_key],
@@ -202,6 +226,7 @@ pub fn find_relay_device(
                 device_id: row.get(0)?,
                 device_name: row.get(1)?,
                 revoked: row.get::<_, Option<String>>(2)?.is_some(),
+                client: ClientKind::from_platform(row.get::<_, Option<String>>(3)?.as_deref()),
             })
         },
     )
@@ -346,10 +371,12 @@ pub fn list_paired_devices(
     let rows = stmt
         .query_map([], |row| {
             let revoked_at: Option<String> = row.get(6)?;
+            let user_agent: Option<String> = row.get(2)?;
             Ok(PairedDeviceSummary {
                 device_id: row.get(0)?,
                 device_name: row.get(1)?,
-                user_agent: row.get(2)?,
+                client: ClientKind::from_platform(user_agent.as_deref()),
+                user_agent,
                 created_at: row.get(3)?,
                 last_used_at: row.get(4)?,
                 last_ip: row.get(5)?,
@@ -587,6 +614,32 @@ mod tests {
     }
 
     #[test]
+    fn a_device_is_a_desktop_only_when_it_names_a_computers_system() {
+        assert_eq!(
+            ClientKind::from_platform(Some("macos")),
+            ClientKind::Desktop
+        );
+        assert_eq!(
+            ClientKind::from_platform(Some("linux")),
+            ClientKind::Desktop
+        );
+        assert_eq!(ClientKind::from_platform(Some("ios")), ClientKind::Phone);
+        assert_eq!(
+            ClientKind::from_platform(Some("android")),
+            ClientKind::Phone
+        );
+        assert_eq!(ClientKind::from_platform(None), ClientKind::Phone);
+        let conn = fresh_db();
+        let id = register_relay_device(&conn, &[7u8; 32], "Mac", Some("macos"), "AAAA").unwrap();
+        let found = find_relay_device(&conn, &[7u8; 32]).unwrap().unwrap();
+        assert_eq!((found.device_id, found.client), (id, ClientKind::Desktop));
+        assert_eq!(
+            list_paired_devices(&conn, false).unwrap()[0].client,
+            ClientKind::Desktop
+        );
+    }
+
+    #[test]
     fn relay_device_round_trip() {
         let conn = fresh_db();
         let key = [7_u8; 32];
@@ -601,6 +654,7 @@ mod tests {
                 device_id: device_id.clone(),
                 device_name: "iPhone".to_string(),
                 revoked: false,
+                client: ClientKind::Phone,
             })
         );
 

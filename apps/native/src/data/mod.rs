@@ -48,6 +48,7 @@ pub mod delegation_record;
 pub mod deletion;
 pub mod delivery_rail;
 pub mod desktop_api;
+pub mod machine_route;
 #[cfg(target_os = "macos")]
 pub mod device;
 pub mod diagnostics;

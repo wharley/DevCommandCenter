@@ -11,6 +11,8 @@
 //!   message cannot exceed 65535 bytes.
 //! - [`frames`]: the JSON frames of the application protocol.
 //! - [`offer`]: the `dcc://pair` QR payload and what derives from it.
+//! - [`client`]: the side that reaches a machine (a phone, or another DCC),
+//!   without I/O.
 //! - [`coalesce`] and [`sse`]: how the desktop turns its SSE stream into
 //!   `evt` frames without sending every token on its own.
 //!
@@ -18,6 +20,7 @@
 //! both are checked against the same vectors.
 
 pub mod channel;
+pub mod client;
 pub mod coalesce;
 pub mod frames;
 pub mod noise;
