@@ -1,8 +1,8 @@
 //! The hub's list in sections (the room's day separators, for pull
 //! requests), nearest to production first: "Revisando" opens on what the
 //! person approved (about to be merged), then what waits on the author,
-//! then what needs their review; "Criados por você" on what is ready to
-//! merge. Each section folds on a click.
+//! then what needs their review, then the drafts; "Criados por você" on
+//! what is ready to merge. Each section folds on a click.
 
 use super::pr_hub::{Filter, Item};
 
@@ -67,6 +67,9 @@ pub fn section_of(
 ) -> Option<Section> {
     match filter {
         Filter::All => None,
+        // A draft is still being written: neither about to be merged nor
+        // waiting on the person, whatever they said of it (its row says).
+        Filter::Reviewing if item.is_draft => Some(Section::Drafts),
         Filter::Reviewing => Some(match my_review {
             None => Section::NeedsYou,
             Some(_) if new => Section::NeedsYou,
@@ -151,6 +154,25 @@ mod tests {
         );
         assert_eq!(Section::Approved.tone(), Tone::Done);
         assert_eq!(Section::WaitingOnAuthor.tone(), Tone::Waiting);
+    }
+
+    #[test]
+    fn a_draft_the_person_reviewed_goes_with_the_drafts() {
+        let draft = item(5, None, "success", true);
+        for (review, new) in [
+            (Some("APPROVED"), false),
+            (Some("APPROVED"), true),
+            (None, false),
+        ] {
+            assert_eq!(
+                section_of(Filter::Reviewing, &draft, review, new),
+                Some(Section::Drafts)
+            );
+        }
+        let open = item(6, None, "success", false);
+        let groups = grouped(Filter::Reviewing, &[&draft, &open], |_| (None, false));
+        let order: Vec<Option<Section>> = groups.iter().map(|(section, _)| *section).collect();
+        assert_eq!(order, [Some(Section::NeedsYou), Some(Section::Drafts)]);
     }
 
     #[test]
