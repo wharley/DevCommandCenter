@@ -200,4 +200,28 @@ mod tests {
         assert!(!can_resume(rows.first()), "already active");
         assert!(!can_resume(None));
     }
+
+    #[test]
+    fn a_task_opens_on_its_agent_not_on_the_reviewer() {
+        use std::collections::HashSet;
+        let summaries = vec![
+            summary("review", false, false),
+            summary("child", false, false),
+            summary("own", false, false),
+        ];
+        let delegated: HashSet<String> = ["child".to_string()].into();
+        let reviewer = |id: &str| id == "review";
+        let chosen = crate::data::conversation::choose_session(&summaries, &delegated, reviewer);
+        assert_eq!(
+            chosen.map(|summary| summary.session.id.0.as_str()),
+            Some("own")
+        );
+        // The Reviewer's alone: it opens.
+        let alone = vec![summary("review", false, false)];
+        let chosen = crate::data::conversation::choose_session(&alone, &HashSet::new(), reviewer);
+        assert_eq!(
+            chosen.map(|summary| summary.session.id.0.as_str()),
+            Some("review")
+        );
+    }
 }

@@ -1,7 +1,7 @@
 //! `handleCallAgent`: an agent called in the open task. It runs on its own
 //! provider and model (the model it names when the provider has it, else
-//! the recommended one), or on the composer's; its effort clamped to the
-//! model, else medium. The reviewer keeps one conversation per task: a
+//! the recommended one) and its own account, or on the composer's; its
+//! effort clamped to the model, else medium. The reviewer keeps one conversation per task: a
 //! later round goes there, listing what the earlier one found. Any other
 //! call starts a session named after the agent, bound to it (removed when
 //! the binding fails), and sends its kickoff.
@@ -150,7 +150,10 @@ impl ConversationView {
             plan_mode: false,
             fast_mode: false,
             tool_instructions: None,
-            provider_runtime: Some(crate::data::provider_runtime::load().runtime_for(&provider)),
+            // The agent's own account on its own provider (the Reviewer set to
+            // the company's), not the composer's pick (`for_agent`).
+            provider_runtime: crate::data::provider_runtime::for_agent(&agent, &provider.id.0)
+                .or_else(|| Some(crate::data::provider_runtime::load().runtime_for(&provider))),
         };
         let intro = cx.t("agents.review.followUp").to_string();
         let previous_label = cx.t("agents.review.previousFindings").to_string();

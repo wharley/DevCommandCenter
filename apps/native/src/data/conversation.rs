@@ -182,16 +182,24 @@ fn task_port(
     workspaces.workspace_port_base(&record.id).ok()
 }
 
+/// The conversation a task opens on: its own agent's, newest first — not a
+/// delegated child's, and not the Reviewer's (`reviewing`), which only reads
+/// and only opens when asked for or when it is all the task has.
 pub fn choose_session<'a>(
     summaries: &'a [WorkspaceSessionSummary],
     delegated: &HashSet<String>,
+    reviewing: impl Fn(&str) -> bool,
 ) -> Option<&'a WorkspaceSessionSummary> {
-    let mut visible = summaries
+    let visible = summaries
         .iter()
         .filter(|summary| summary.thread.archived_at.is_none());
     let first = visible.clone().next();
-    visible
-        .find(|summary| !delegated.contains(&summary.session.id.0))
+    let own = visible
+        .clone()
+        .filter(|summary| !delegated.contains(&summary.session.id.0));
+    own.clone()
+        .find(|summary| !reviewing(&summary.session.id.0))
+        .or_else(|| own.clone().next())
         .or(first)
 }
 
@@ -383,7 +391,17 @@ pub fn load(
             .iter()
             .find(|summary| summary.session.id.0 == id && summary.thread.archived_at.is_none())
     });
-    let summary = wanted.or_else(|| choose_session(&summaries, &delegated));
+    let summary = wanted.or_else(|| {
+        choose_session(&summaries, &delegated, |id| {
+            sessions
+                .load_session_agent(&SessionId(id.to_string()))
+                .ok()
+                .flatten()
+                .is_some_and(|agent| {
+                    agent.preset.as_deref() == Some(dcc_core::domain::agent::REVIEWER_PRESET)
+                })
+        })
+    });
     let workspaces = SqliteWorkspaceRepo::open(db_path)?;
     let record = block_on(workspaces.get_workspace(&workspace))?;
     if let Some(record) = &record {
