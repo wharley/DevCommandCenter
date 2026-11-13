@@ -1280,7 +1280,41 @@
     "filters": {
       "all": "Todos",
       "reviewing": "Revisando",
-      "mine": "Criados por você"
+      "mine": "Criados por você",
+      "closed": "Fechados"
+    },
+    "actions": {
+      "updateBranch": {
+        "label": "Atualizar com a base",
+        "title": "Atualizar o branch com a base?",
+        "description": "O GitHub faz o merge da base no branch deste pull request. Isso cria um commit novo no branch.",
+        "confirm": "Atualizar",
+        "done": "Branch atualizado com a base."
+      },
+      "close": {
+        "label": "Fechar pull request",
+        "title": "Fechar este pull request?",
+        "description": "Ele é fechado sem merge. Dá para reabrir depois em Fechados.",
+        "confirm": "Fechar pull request",
+        "done": "Pull request fechado.",
+        "doneWithBranch": "Pull request fechado e branch apagado.",
+        "comment": "Comentário (opcional)",
+        "deleteBranch": "Apagar o branch também"
+      },
+      "reopen": {
+        "label": "Reabrir pull request",
+        "title": "Reabrir este pull request?",
+        "description": "Ele volta para os abertos.",
+        "confirm": "Reabrir",
+        "done": "Pull request reaberto."
+      },
+      "deleteBranch": {
+        "label": "Apagar o branch",
+        "title": "Apagar o branch deste pull request?",
+        "description": "O branch é apagado no GitHub. Seu checkout local não é tocado.",
+        "confirm": "Apagar o branch",
+        "done": "Branch apagado."
+      }
     },
     "tabs": {
       "summary": "Resumo",

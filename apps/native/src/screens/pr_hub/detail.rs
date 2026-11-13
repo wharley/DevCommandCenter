@@ -119,9 +119,11 @@ impl PrHub {
         let working = self.working_on.as_deref() == Some(item.id.as_str());
         let url = item.url.clone();
         let task = item.linked_workspace_id.clone();
-        let awaits_review = self.awaits_my_review(&item, cx);
+        let closed = self.is_closed(&item);
+        let awaits_review = !closed && self.awaits_my_review(&item, cx);
         // The person's own pull request, with nothing in the merge's way.
-        let merge_ready = item.created_by_viewer
+        let merge_ready = !closed
+            && item.created_by_viewer
             && item.provider == "github"
             && crate::data::pr_hub::merge_blocked(&item, self.merge_detail(&item)).is_none();
         let rail = self.pr_rail(&item, self.merge_detail(&item), cx);
@@ -232,7 +234,12 @@ impl PrHub {
                                     )
                                     .into_any_element(),
                             })
-                            .children(self.merge_button(&item, merge_ready, cx))
+                            .children(
+                                (!closed)
+                                    .then(|| self.merge_button(&item, merge_ready, cx))
+                                    .flatten(),
+                            )
+                            .children(self.actions_menu(&item, cx))
                             .child(Tooltip::text(
                                 "pr-open-forge-tip",
                                 Button::new("pr-open-forge")
@@ -448,6 +455,7 @@ impl PrHub {
                 ),
             })
             .children(self.merge_dialog(cx))
+            .children(self.action_dialog(cx))
             .into_any_element()
     }
 }

@@ -66,7 +66,7 @@ pub fn section_of(
     new: bool,
 ) -> Option<Section> {
     match filter {
-        Filter::All => None,
+        Filter::All | Filter::Closed => None,
         // A draft is still being written: neither about to be merged nor
         // waiting on the person, whatever they said of it (its row says).
         Filter::Reviewing if item.is_draft => Some(Section::Drafts),

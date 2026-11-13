@@ -11,6 +11,7 @@ mod code;
 mod detail;
 mod journey;
 mod list;
+mod actions;
 mod merge;
 mod merge_options;
 #[cfg(test)]
@@ -76,6 +77,8 @@ pub struct PrHub {
     /// "Apagar o branch" in the merge dialog.
     pub(crate) merge_delete_branch: bool,
     pub(crate) merge_error: Option<String>,
+    /// Update, close, reopen and delete the branch; and the closed ones.
+    pub(crate) actions: actions::PrActions,
     pub(crate) tab: code::Tab,
     /// The code tab's read, with the patches.
     pub(crate) code_detail: Option<DetailRead>,
@@ -159,6 +162,7 @@ impl PrHub {
             merging: false,
             merge_delete_branch: false,
             merge_error: None,
+            actions: actions::PrActions::new(window, cx),
             tab: code::Tab::Summary,
             code_detail: None,
             review,
@@ -181,7 +185,7 @@ impl PrHub {
     }
 
     pub(crate) fn items(&self) -> &[Item] {
-        match &self.list {
+        match self.shown_list() {
             Some(Ok(list)) => &list.items,
             _ => &[],
         }
@@ -271,6 +275,10 @@ impl PrHub {
         if self.fetching {
             return;
         }
+        // "Atualizar" on the closed ones reads them too.
+        if self.filter == Filter::Closed {
+            self.read_closed(true, cx);
+        }
         self.fetching = true;
         cx.notify();
         self.read_reviewed(api.clone(), cx);
@@ -299,6 +307,9 @@ impl PrHub {
 
     pub(crate) fn set_filter(&mut self, filter: Filter, cx: &mut Context<Self>) {
         self.filter = filter;
+        if filter == Filter::Closed {
+            self.read_closed(false, cx);
+        }
         self.follow_selection(cx);
         cx.notify();
     }

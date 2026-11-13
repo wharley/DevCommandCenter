@@ -1280,7 +1280,41 @@
     "filters": {
       "all": "All",
       "reviewing": "Reviewing",
-      "mine": "Created by you"
+      "mine": "Created by you",
+      "closed": "Closed"
+    },
+    "actions": {
+      "updateBranch": {
+        "label": "Update with the base",
+        "title": "Update the branch with the base?",
+        "description": "GitHub merges the base into this pull request's branch. This creates a new commit on the branch.",
+        "confirm": "Update",
+        "done": "Branch updated with the base."
+      },
+      "close": {
+        "label": "Close pull request",
+        "title": "Close this pull request?",
+        "description": "It is closed without a merge. It can be reopened later under Closed.",
+        "confirm": "Close pull request",
+        "done": "Pull request closed.",
+        "doneWithBranch": "Pull request closed and branch deleted.",
+        "comment": "Comment (optional)",
+        "deleteBranch": "Delete the branch too"
+      },
+      "reopen": {
+        "label": "Reopen pull request",
+        "title": "Reopen this pull request?",
+        "description": "It goes back to the open ones.",
+        "confirm": "Reopen",
+        "done": "Pull request reopened."
+      },
+      "deleteBranch": {
+        "label": "Delete the branch",
+        "title": "Delete this pull request's branch?",
+        "description": "The branch is deleted on GitHub. Your local checkout is not touched.",
+        "confirm": "Delete the branch",
+        "done": "Branch deleted."
+      }
     },
     "tabs": {
       "summary": "Summary",

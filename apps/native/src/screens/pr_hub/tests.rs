@@ -352,6 +352,99 @@ fn a_ready_pull_request_merges_now_and_takes_its_branch_when_asked(cx: &mut Test
 }
 
 #[gpui::test]
+fn a_pull_request_is_closed_after_its_confirmation_and_found_under_closed(cx: &mut TestAppContext) {
+    use crate::data::pr_hub::Filter;
+    use crate::screens::pr_hub::actions::Ask;
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let open =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let none = json!({ "items": [], "warnings": [] }).to_string();
+    let detail = |state: &str| {
+        json!({
+            "body": null, "comments": [], "checks": [], "files": [], "inlineComments": [],
+            "reviewCapabilities": null, "state": state,
+            "mergeCapabilities": { "allowedMethods": ["squash"], "viewerCanMerge": true,
+                "mergeable": "MERGEABLE", "headSha": "0123456789abcdef0123",
+                "mergeStateStatus": "CLEAN", "canDeleteBranch": true },
+        })
+        .to_string()
+    };
+    let (port, desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, open.clone()),
+        ("/api/v1/pull-request-hub/detail", 200, detail("open")),
+        (
+            "/api/v1/pull-request-hub/action",
+            200,
+            r#"{"branchDeleted":true}"#.into(),
+        ),
+        // Read again: no longer among the open ones; then the closed ones.
+        ("/api/v1/pull-request-hub/list", 200, none),
+        ("/api/v1/pull-request-hub/list", 200, open),
+        ("/api/v1/pull-request-hub/detail", 200, detail("closed")),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1200.0), px(800.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-actions").is_some(), "the ⋯ menu");
+    assert!(cx.debug_bounds("pr-action-dialog").is_none());
+    // Picked in the menu: nothing is sent before the confirmation.
+    hub.update(cx, |hub, cx| hub.ask_action(Ask::Close, cx));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-action-dialog").is_some());
+    assert!(cx.debug_bounds("pr-close-delete-branch").is_some());
+    hub.update(cx, |hub, cx| {
+        hub.actions.delete_branch = true;
+        hub.actions
+            .comment
+            .update(cx, |area, cx| area.set_text("substituído pelo #9", cx));
+        hub.confirm_action(cx);
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("pr-action-dialog").is_none(),
+        "closed once done"
+    );
+    // "Fechados" is read only when opened, and offers the way back.
+    assert_eq!(hub.read_with(cx, |hub, _| hub.closed_count()), None);
+    hub.update(cx, |hub, cx| hub.set_filter(Filter::Closed, cx));
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    cx.run_until_parked();
+    assert_eq!(hub.read_with(cx, |hub, _| hub.closed_count()), Some(1));
+    let closed = hub.read_with(cx, |hub, cx| {
+        let item = hub.selected_item(cx).expect("the closed one is selected");
+        hub.is_closed(&item)
+    });
+    let merge = cx.debug_bounds("pr-merge").is_some();
+    assert!(closed && !merge, "a closed one is not merged");
+    let (_, sent) = seen
+        .iter()
+        .find(|(path, _)| path.ends_with("/action"))
+        .expect("the close was sent");
+    let sent: serde_json::Value = serde_json::from_str(sent).unwrap();
+    assert_eq!(sent["number"], 1);
+    assert_eq!(
+        sent["action"],
+        json!({ "kind": "close", "comment": "substituído pelo #9", "deleteBranch": true })
+    );
+    let lists: Vec<&str> = seen
+        .iter()
+        .filter(|(path, _)| path.ends_with("/list"))
+        .map(|(_, body)| body.as_str())
+        .collect();
+    assert_eq!(lists.last().copied(), Some(r#"{"closed":true}"#));
+}
+
+#[gpui::test]
 fn the_summary_approves_with_its_text_without_opening_the_code(cx: &mut TestAppContext) {
     use crate::data::pr_review::ReviewEvent;
     use crate::test_support::fake_desktop_routes;

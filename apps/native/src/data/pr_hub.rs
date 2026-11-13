@@ -254,16 +254,19 @@ pub enum Filter {
     /// Opened by the person.
     Mine,
     All,
+    /// Closed without a merge: read apart, when the filter is opened.
+    Closed,
 }
 
 impl Filter {
-    pub const ALL: [Filter; 3] = [Filter::Reviewing, Filter::Mine, Filter::All];
+    pub const ALL: [Filter; 4] = [Filter::Reviewing, Filter::Mine, Filter::All, Filter::Closed];
 
     pub fn key(self) -> &'static str {
         match self {
             Filter::All => "all",
             Filter::Reviewing => "reviewing",
             Filter::Mine => "mine",
+            Filter::Closed => "closed",
         }
     }
 }
@@ -280,7 +283,7 @@ pub fn filtered<'a>(
     items
         .iter()
         .filter(|item| match filter {
-            Filter::All => true,
+            Filter::All | Filter::Closed => true,
             Filter::Reviewing => item.review_requested_for_viewer || reviewed(item),
             Filter::Mine => item.created_by_viewer,
         })
@@ -371,6 +374,16 @@ impl DesktopApi {
             "POST",
             "/api/v1/pull-request-hub/list",
             Some(&json!({})),
+            FORGE_WAIT,
+        )?)
+    }
+
+    /// The pull requests closed without a merge, the latest of each project.
+    pub fn pr_hub_closed(&self) -> Result<List, ApiError> {
+        decode(self.request_waiting(
+            "POST",
+            "/api/v1/pull-request-hub/list",
+            Some(&json!({ "closed": true })),
             FORGE_WAIT,
         )?)
     }
