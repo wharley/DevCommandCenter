@@ -1504,9 +1504,19 @@ pub async fn pull_request_hub_list_with_state(
             .await
             .map_err(|error| error.to_string())?,
     );
+    // An agent's home is a folder of DCC's, never a repository with a forge.
+    let agent_homes = state
+        .db_path
+        .parent()
+        .map(|dir| dir.join("agent-homes"));
     let lookups = repositories
         .into_iter()
         .filter(|repository| !repository.root_path.trim().is_empty())
+        .filter(|repository| {
+            agent_homes.as_ref().is_none_or(|homes| {
+                !std::path::Path::new(repository.root_path.trim()).starts_with(homes)
+            })
+        })
         .map(|repository| {
             let db_path = state.db_path.clone();
             let workspaces = std::sync::Arc::clone(&workspaces);

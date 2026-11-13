@@ -370,16 +370,20 @@ impl PrHub {
                 )
                 .into_any_element(),
             Some(Ok(_)) => {
+                // Each item's section once; a section's count from them.
+                let sections: Vec<_> = visible
+                    .iter()
+                    .map(|item| self.section_of(item, cx))
+                    .collect();
                 let mut rows: Vec<AnyElement> = Vec::new();
                 let mut current = None;
-                for item in &visible {
-                    let section = self.section_of(item, cx);
+                for (item, &section) in visible.iter().zip(&sections) {
                     if section != current {
                         current = section;
                         if let Some(section) = section {
-                            let count = visible
+                            let count = sections
                                 .iter()
-                                .filter(|other| self.section_of(other, cx) == Some(section))
+                                .filter(|other| **other == Some(section))
                                 .count();
                             rows.push(self.section_header(section, count, cx));
                         }

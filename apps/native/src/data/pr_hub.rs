@@ -10,7 +10,7 @@ use super::desktop_api::{ApiError, DesktopApi};
 use super::pr_review::{File, InlineComment, ReviewCapabilities};
 
 /// `PullRequestHubActor`
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Actor {
     pub login: String,
@@ -19,7 +19,7 @@ pub struct Actor {
 }
 
 /// `PullRequestHubItem`
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Item {
     pub id: String,
@@ -143,7 +143,7 @@ pub struct ReviewedList {
     pub issues: Vec<Asked>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Warning {
     pub repository_name: String,
@@ -151,7 +151,7 @@ pub struct Warning {
 }
 
 /// `PullRequestHubListOutput`
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct List {
     pub items: Vec<Item>,

@@ -54,6 +54,9 @@ pub struct PrHub {
     /// `None` while the first read runs.
     pub(crate) list: Option<Result<List, String>>,
     pub(crate) fetching: bool,
+    /// The forges were read since the hub opened: the list is not only the
+    /// one kept from last time (`pr_hub_cache`).
+    pub(crate) fresh: bool,
     pub(crate) filter: Filter,
     pub(crate) search: Entity<TextInput>,
     pub(crate) selected: Option<String>,
@@ -129,8 +132,10 @@ impl PrHub {
         inputs.push(cx.observe_global::<PrNews>(|_, cx| cx.notify()));
         let mut hub = Self {
             api: if cfg!(test) { None } else { DesktopApi::load() },
-            list: None,
+            // The last list at once; the forges are read behind it.
+            list: crate::data::pr_hub_cache::load().map(Ok),
             fetching: false,
+            fresh: false,
             filter: Filter::default(),
             search,
             selected: None,
@@ -261,10 +266,17 @@ impl PrHub {
         cx.spawn(async move |this, cx| {
             let read = cx
                 .background_executor()
-                .spawn(async move { api.pr_hub_list() })
+                .spawn(async move {
+                    let read = api.pr_hub_list();
+                    if let Ok(list) = &read {
+                        crate::data::pr_hub_cache::save(list);
+                    }
+                    read
+                })
                 .await;
             let _ = this.update(cx, |hub, cx| {
                 hub.fetching = false;
+                hub.fresh = true;
                 hub.list = Some(read.map_err(|error| message(error, cx)));
                 hub.follow_selection(cx);
                 hub.follow_request(cx);

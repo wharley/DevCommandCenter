@@ -1117,7 +1117,8 @@ pub fn list_pull_requests_json(
             "--limit",
             "100",
             "--json",
-            "number,title,url,state,isDraft,headRefName,baseRefName,author,reviewDecision,reviewRequests,latestReviews,additions,deletions,changedFiles,comments,statusCheckRollup,updatedAt,body",
+            // No `body`: the list does not show it, the detail reads it.
+            "number,title,url,state,isDraft,headRefName,baseRefName,author,reviewDecision,reviewRequests,latestReviews,additions,deletions,changedFiles,comments,statusCheckRollup,updatedAt",
         ],
     )
 }

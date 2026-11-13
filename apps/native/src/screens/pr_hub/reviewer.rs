@@ -204,6 +204,7 @@ impl PrHub {
             self.tab = Tab::Code;
             self.ensure_detail(cx);
         } else if !self.fetching
+            && self.fresh
             && matches!(self.list, Some(Ok(_)))
             && self.search.read(cx).text().is_empty()
         {
