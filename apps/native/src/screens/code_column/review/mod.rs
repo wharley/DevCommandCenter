@@ -5,6 +5,7 @@
 //! desktop, which keeps the failure and runs the forge's CLI.
 
 mod checks;
+mod checks_list;
 pub(crate) mod comment_view;
 mod failure;
 mod identity;
@@ -17,6 +18,7 @@ mod tests;
 mod threads;
 
 pub(crate) use comment_view::{author_label, comment_entry, comment_preview_line};
+pub(crate) use checks_list::checks_list;
 pub(crate) use failure::{failure_section, recovery_confirm};
 pub(crate) use identity::identity_chip;
 pub(crate) use pipeline::{pipeline_retry_confirm, pipeline_section};
@@ -106,6 +108,8 @@ pub(crate) struct Review {
     pub picked: HashSet<String>,
     seen: HashSet<String>,
     pub pipeline: Option<PipelineLoad>,
+    /// The checks under the delivery rail.
+    pub checks: checks_list::ChecksList,
     pub pipeline_open: bool,
     pub active_job: Option<u64>,
     pub job_log: Option<Result<JobLog, String>>,

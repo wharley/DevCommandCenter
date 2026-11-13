@@ -172,7 +172,8 @@ fn a_merge_asks_first_then_completes_the_task(cx: &mut TestAppContext) {
     column.read_with(cx, |column, _| {
         assert_eq!(column.commit_mode(), CommitMode::Merge)
     });
-    assert!(cx.debug_bounds("delivery-request-link").is_some(), "PR #12");
+    assert!(cx.debug_bounds("delivery-rail-request").is_some(), "PR #12");
+    assert!(cx.debug_bounds("delivery-standing").is_some());
     let button = cx.debug_bounds("delivery-commit").unwrap();
     cx.simulate_click(button.center(), Modifiers::none());
     column.read_with(cx, |column, _| {

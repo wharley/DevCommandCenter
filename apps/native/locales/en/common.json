@@ -4401,6 +4401,42 @@
     "noWorkspace": "This task has no working folder to read git changes from.",
     "remoteBase": "Remote",
     "loadingFile": "Loading file…",
+    "rail": {
+      "steps": {
+        "commit": "Commit",
+        "push": "Pushed",
+        "checks": "Checks",
+        "review": "Review",
+        "merge": "Merge"
+      },
+      "status": {
+        "idle": "Nothing to deliver yet",
+        "toCommit_one": "{{count}} file to commit",
+        "toCommit_other": "{{count}} files to commit",
+        "toPush_one": "{{count}} commit to push",
+        "toPush_other": "{{count}} commits to push",
+        "toRequest": "Ready to open the {{label}}",
+        "draft": "{{label}} is a draft",
+        "checksRunning": "Checks running",
+        "checksFailed": "Checks failed",
+        "changesRequested": "Changes requested in review",
+        "awaitingReview": "Waiting for review",
+        "conflicts": "Conflicts with the base",
+        "blocked": "Blocked by the repository's rules",
+        "readyToMerge": "Ready to merge",
+        "merged": "Merged",
+        "closed": "{{label}} closed"
+      },
+      "approvals_one": "{{received}} of {{count}} approval",
+      "approvals_other": "{{received}} of {{count}} approvals",
+      "checks": {
+        "failed": "Could not read the checks",
+        "failure": "failed",
+        "pending": "running",
+        "passed_one": "{{count}} passed",
+        "passed_other": "{{count}} passed"
+      }
+    },
     "default": "Commit",
     "preview": {
       "title": "Review commit message",

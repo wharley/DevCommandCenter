@@ -19,6 +19,7 @@ mod draft_tests;
 mod header;
 mod overlay;
 mod pull;
+mod rail;
 mod request;
 mod requested;
 #[cfg(test)]

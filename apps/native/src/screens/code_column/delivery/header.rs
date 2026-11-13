@@ -1,7 +1,7 @@
-//! `GitSectionHeader`: 32px over the review, tinted by the button's mode
-//! (green while a PR is open, red on failing checks, amber on conflicts,
-//! purple once merged), with a moving line at its bottom while git is read
-//! again or a step runs.
+//! The delivery header over the review: the branch and the account, the
+//! delivery rail (`rail.rs`), then where things stand with the next step's
+//! button; the pull request's checks open under it. A moving line at its
+//! bottom while git is read again or a step runs.
 
 use std::time::Duration;
 
@@ -15,7 +15,7 @@ use super::super::CodeColumn;
 use crate::i18n::{Args, Translate};
 use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance};
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tracked, spinner};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, spinner};
 
 /// The pull request's states in the named state colours (`StateTone`'s
 /// fills, the same in both themes).
@@ -30,18 +30,6 @@ pub(crate) fn pr_closed() -> Hsla {
 }
 pub(crate) fn pr_conflicts() -> Hsla {
     tw::AMBER_600.hsla()
-}
-
-/// `gitSectionHeaderHighlightClass`: the accent at 35%, or emerald at 8%.
-fn highlight(mode: CommitMode) -> Option<Hsla> {
-    match mode {
-        CommitMode::Fix | CommitMode::Closed => Some(pr_closed().opacity(0.35)),
-        CommitMode::ResolveConflicts => Some(pr_conflicts().opacity(0.35)),
-        CommitMode::CompleteMerge => Some(tw::EMERALD_500.alpha(0.08)),
-        CommitMode::Merge | CommitMode::OpenPr => Some(pr_open().opacity(0.35)),
-        CommitMode::Merged => Some(pr_merged().opacity(0.35)),
-        _ => None,
-    }
 }
 
 /// `commitModeClassName`: a filled button on PR states, else the outline.
@@ -102,11 +90,11 @@ fn commit_button(
         .id("delivery-commit")
         .debug_selector(|| "delivery-commit".into())
         .flex()
-        .h(px(32.0))
+        .h(px(28.0))
         .flex_shrink_0()
         .items_center()
         .gap(px(6.0))
-        .rounded(px(9.0))
+        .rounded(px(8.0))
         .border_1()
         .border_color(border)
         .px(px(10.0))
@@ -158,57 +146,6 @@ fn review_resolution(cx: &mut Context<CodeColumn>) -> AnyElement {
     .into_any_element()
 }
 
-/// "PR #12" with "Draft" when it is one; opens it in the browser.
-fn request_link(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> Option<AnyElement> {
-    let pr = column.delivery.pr.as_ref()?;
-    let url = pr.url.clone()?;
-    let colors = cx.theme().colors.clone();
-    let foreground = colors.foreground;
-    let hover = if cx.theme().appearance == Appearance::Dark {
-        colors.accent.opacity(0.5)
-    } else {
-        colors.accent
-    };
-    let mut text = column.delivery.request_label().to_string();
-    if let Some(number) = pr.number {
-        text.push_str(&format!(" #{number}"));
-    }
-    let draft = pr
-        .is_draft
-        .then(|| cx.t("composer.executionDock.draftBadge").to_uppercase());
-    Some(
-        div()
-            .id("delivery-request-link")
-            .debug_selector(|| "delivery-request-link".into())
-            .flex()
-            .h(px(32.0))
-            .flex_shrink_0()
-            .items_center()
-            .gap(px(6.0))
-            .rounded(px(9.0))
-            .px(px(10.0))
-            .text_size(px(12.0))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(colors.muted_foreground)
-            .cursor_pointer()
-            .hover(move |style| style.bg(hover).text_color(foreground))
-            .on_click(move |_, _, cx| cx.open_url(&url))
-            .child(Icon::new("external-link").size(14.0))
-            .child(text)
-            .when_some(draft, |link, draft| {
-                link.child(
-                    div()
-                        .rounded_full()
-                        .bg(colors.muted)
-                        .px(px(6.0))
-                        .py(px(2.0))
-                        .child(Tracked::new(draft, 9.0, 0.025)),
-                )
-            })
-            .into_any_element(),
-    )
-}
-
 /// The moving line while git is read again (`shine 2s infinite linear`).
 fn shimmer(cx: &Context<CodeColumn>) -> AnyElement {
     let primary = cx.theme().colors.primary.opacity(0.5);
@@ -249,67 +186,90 @@ pub(crate) fn header(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyEl
         mode == CommitMode::CreatePr && column.changes.branch_count().unwrap_or(0) == 0;
     let show_button =
         mode != CommitMode::Merged && !empty_request && column.delivery.task.is_some();
+    let rail = column.delivery_rail(mode);
+    let (standing, approvals) = super::rail::standing_text(column, &rail, cx);
+    let branch = div()
+        .flex()
+        .h(px(32.0))
+        .min_w_0()
+        .items_center()
+        .gap(px(6.0))
+        .px(px(12.0))
+        .child(
+            Icon::new("git-branch")
+                .size(14.0)
+                .stroke(1.8)
+                .color(colors.muted_foreground),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(px(12.0))
+                .font_weight(FontWeight::MEDIUM)
+                .child(title),
+        )
+        .children(crate::screens::code_column::review::identity_chip(
+            column, cx,
+        ));
+    let next = div()
+        .flex()
+        .min_h(px(28.0))
+        .items_center()
+        .gap(px(8.0))
+        .px(px(12.0))
+        .pt(px(8.0))
+        .pb(px(10.0))
+        .child(
+            div()
+                .debug_selector(|| "delivery-standing".into())
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(px(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(standing),
+                )
+                .children(approvals.map(|approvals| {
+                    div()
+                        .truncate()
+                        .text_size(px(11.0))
+                        .text_color(colors.muted_foreground)
+                        .child(approvals)
+                })),
+        )
+        // "Revisar resolução" (`onReviewConflictResolution`).
+        .when(mode == CommitMode::CompleteMerge, |row| {
+            row.child(review_resolution(cx))
+        })
+        .when(show_button, |row| {
+            row.child(commit_button(column, mode, cx))
+        });
     div()
         .id("delivery-header")
         .debug_selector(|| "delivery-header".into())
         .relative()
         .flex()
-        .h(px(32.0))
+        .flex_col()
         .min_w_0()
         .flex_shrink_0()
-        .items_center()
-        .justify_between()
-        .gap(px(8.0))
         .overflow_hidden()
-        .px(px(12.0))
-        .bg(highlight(mode)
-            .filter(|_| !(mode == CommitMode::Merge && column.checks_running()))
-            .unwrap_or(colors.muted.opacity(0.25)))
+        .bg(colors.muted.opacity(0.25))
         // `shadow-[inset_0_-1px_0_color-mix(in_oklch,var(--border)_60%,transparent)]`
         .border_b_1()
         .border_color(colors.border.opacity(0.6))
         .when(refreshing, |header| header.child(shimmer(cx)))
+        .child(branch)
         .child(
             div()
-                .flex()
-                .min_w_0()
-                .items_center()
-                .gap(px(6.0))
-                .child(
-                    Icon::new("git-branch")
-                        .size(14.0)
-                        .stroke(1.8)
-                        .color(colors.muted_foreground),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .mt(px(1.0))
-                        .text_size(px(13.0))
-                        .line_height(px(32.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(colors.muted_foreground)
-                        .child(title),
-                )
-                .children(request_link(column, cx))
-                .children(crate::screens::code_column::review::identity_chip(
-                    column, cx,
-                )),
+                .px(px(8.0))
+                .pt(px(2.0))
+                .child(super::rail::rail_strip(column, &rail, cx)),
         )
-        .child(
-            div()
-                .flex()
-                .flex_shrink_0()
-                .items_center()
-                .gap(px(6.0))
-                // "Revisar resolução" (`onReviewConflictResolution`).
-                .when(mode == CommitMode::CompleteMerge, |row| {
-                    row.child(review_resolution(cx))
-                })
-                .when(show_button, |row| {
-                    row.child(commit_button(column, mode, cx))
-                }),
-        )
+        .child(next)
+        .children(crate::screens::code_column::review::checks_list(column, cx))
         .into_any_element()
 }

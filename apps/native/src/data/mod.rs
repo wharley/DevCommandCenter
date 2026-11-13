@@ -46,6 +46,7 @@ pub mod decision_provider;
 pub mod delegation_lineage;
 pub mod delegation_record;
 pub mod deletion;
+pub mod delivery_rail;
 pub mod desktop_api;
 #[cfg(target_os = "macos")]
 pub mod device;

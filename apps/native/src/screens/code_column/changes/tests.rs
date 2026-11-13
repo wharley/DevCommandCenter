@@ -175,7 +175,8 @@ fn the_wheel_scrolls_a_long_diff_before_the_list(cx: &mut TestAppContext) {
     let (column, cx) = open(cx);
     column.update(cx, |column, cx| column.set_root(Some(root), cx));
     cx.run_until_parked();
-    cx.simulate_resize(size(px(340.0), px(400.0)));
+    // Tall enough for the delivery header and the card's top.
+    cx.simulate_resize(size(px(340.0), px(520.0)));
     cx.run_until_parked();
     let body = cx
         .debug_bounds("change-card-body-0")

@@ -8,6 +8,7 @@ mod button;
 pub mod changed_files;
 pub mod verdict_chip;
 pub mod command;
+pub mod delivery_rail;
 pub mod dialog;
 pub mod diff_squares;
 mod feedback;

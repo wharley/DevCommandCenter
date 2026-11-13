@@ -4401,6 +4401,42 @@
     "noWorkspace": "Esta tarefa não tem uma pasta de trabalho para ler as mudanças do Git.",
     "remoteBase": "Remoto",
     "loadingFile": "Carregando arquivo…",
+    "rail": {
+      "steps": {
+        "commit": "Commit",
+        "push": "Enviado",
+        "checks": "Checks",
+        "review": "Revisão",
+        "merge": "Merge"
+      },
+      "status": {
+        "idle": "Nada para entregar ainda",
+        "toCommit_one": "{{count}} arquivo para commitar",
+        "toCommit_other": "{{count}} arquivos para commitar",
+        "toPush_one": "{{count}} commit para enviar",
+        "toPush_other": "{{count}} commits para enviar",
+        "toRequest": "Pronto para abrir o {{label}}",
+        "draft": "{{label}} em rascunho",
+        "checksRunning": "Checks rodando",
+        "checksFailed": "Checks falharam",
+        "changesRequested": "Pediram alterações na revisão",
+        "awaitingReview": "Aguardando revisão",
+        "conflicts": "Conflitos com a base",
+        "blocked": "Bloqueado pelas regras do repositório",
+        "readyToMerge": "Pronto para mesclar",
+        "merged": "Mesclado",
+        "closed": "{{label}} fechado"
+      },
+      "approvals_one": "{{received}} de {{count}} aprovação",
+      "approvals_other": "{{received}} de {{count}} aprovações",
+      "checks": {
+        "failed": "Não deu para ler os checks",
+        "failure": "falhou",
+        "pending": "rodando",
+        "passed_one": "{{count}} passou",
+        "passed_other": "{{count}} passaram"
+      }
+    },
     "default": "Commit",
     "preview": {
       "title": "Revisar mensagem do commit",
