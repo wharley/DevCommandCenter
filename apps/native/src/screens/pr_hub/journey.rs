@@ -41,11 +41,11 @@ impl PrHub {
         ) == Some(crate::data::pr_sections::Section::NeedsYou)
     }
 
-    /// The pull request's changed files, once its code was read: the
+    /// The pull request's changed files, as its summary lists them: the
     /// paths a comment's chips can open.
-    pub(super) fn changed_paths(&self, item: &Item) -> Vec<String> {
+    pub(crate) fn changed_paths(&self, item: &Item) -> Vec<String> {
         read(self.merge_detail(item))
-            .map(|detail| detail.files.iter().map(|file| file.path.clone()).collect())
+            .map(|detail| detail.changed_paths.clone())
             .unwrap_or_default()
     }
 

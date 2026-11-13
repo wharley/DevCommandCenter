@@ -387,6 +387,9 @@ pub struct PullRequestHubDetailOutput {
     /// or `closed`.
     #[serde(default)]
     pub state: Option<String>,
+    /// The paths it changed (GitHub; GitLab only with the code).
+    #[serde(default)]
+    pub changed_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -2119,6 +2122,7 @@ pub async fn pull_request_hub_detail_with_state(
                 reviews: github_reviews(&raw),
                 commits: github_commits(&raw),
                 state: hub_detail_state(&raw),
+                changed_paths: crate::commands::pr_hub_paths::changed_paths(&raw),
             })
         }
         ForgeCliProvider::Gitlab => {
@@ -2191,6 +2195,7 @@ pub async fn pull_request_hub_detail_with_state(
             } else {
                 (Vec::new(), Vec::new())
             };
+            let changed_paths = files.iter().map(|file| file.path.clone()).collect();
             Ok(PullRequestHubDetailOutput {
                 body: detail
                     .get("description")
@@ -2210,6 +2215,7 @@ pub async fn pull_request_hub_detail_with_state(
                 merge_capabilities: None,
                 reviews: Vec::new(),
                 commits: Vec::new(),
+                changed_paths,
                 state: hub_detail_state(&raw),
             })
         }

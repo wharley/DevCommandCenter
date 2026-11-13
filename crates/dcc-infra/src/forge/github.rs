@@ -1138,7 +1138,7 @@ pub fn pull_request_detail_json(
             "view",
             &number.to_string(),
             "--json",
-            "body,comments,statusCheckRollup,state,isDraft,mergeable,mergeStateStatus,headRefOid,headRefName,isCrossRepository,autoMergeRequest,url,reviews,commits",
+            "body,comments,statusCheckRollup,state,isDraft,mergeable,mergeStateStatus,headRefOid,headRefName,isCrossRepository,autoMergeRequest,url,reviews,commits,files",
         ],
     )
 }

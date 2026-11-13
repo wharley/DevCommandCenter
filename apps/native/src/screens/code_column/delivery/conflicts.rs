@@ -19,6 +19,14 @@ use crate::ui::{ToastKind, Toaster};
 /// `refetchInterval: 5_000`
 const EVERY: Duration = Duration::from_secs(5);
 
+/// The update with the base stopped on something the resolver handles:
+/// the merge left conflicting files, or one was already in progress (the
+/// desktop's own messages, `sync_workspace_branch_inner`).
+pub(super) fn needs_resolver(message: &str) -> bool {
+    let message = message.to_lowercase();
+    message.contains("conflicting file") || message.contains("merge is already in progress")
+}
+
 impl CodeColumn {
     /// A merge with conflicts is going on, as the status says.
     fn merge_conflicted(&self) -> bool {
@@ -173,5 +181,21 @@ impl CodeColumn {
                 cx.notify();
             });
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::needs_resolver;
+
+    #[test]
+    fn an_update_that_stops_on_a_merge_goes_to_the_resolver() {
+        assert!(needs_resolver(
+            "git merge failed: Merge left 2 conflicting file(s)"
+        ));
+        assert!(needs_resolver(
+            "a merge is already in progress; resolve it before updating the base"
+        ));
+        assert!(!needs_resolver("could not resolve host: github.com"));
     }
 }

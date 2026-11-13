@@ -18,7 +18,7 @@ use dcc_core::domain::session::SessionEventRecord;
 use dcc_core::domain::timeline::{Role, project_session};
 use gpui::Context;
 
-use super::{Busy, MergeResolver, MergeResolverEvent, Pending, ResultView};
+use super::{Busy, MergeResolver, MergeResolverEvent, Pending};
 use crate::data::desktop_api::{ApiError, TurnOptions};
 use crate::i18n::{Args, Locale, Translate};
 use crate::ui::Toaster;
@@ -291,7 +291,6 @@ impl MergeResolver {
             open.entry.incoming.text.clone(),
         );
         let (buffer, path) = (open.buffer.clone(), open.entry.path.clone());
-        let has_current = current.is_some();
         let suggestion = parse_agent_resolution(content, token)
             .and_then(|suggestion| {
                 validate_agent_resolution(suggestion, current.as_deref(), incoming.as_deref())
@@ -301,10 +300,9 @@ impl MergeResolver {
         if buffer != source {
             return Err(cx.t("mergeConflict.errors.agentResultChanged").to_string());
         }
+        // The suggestion lands in the editor, to be changed like any text;
+        // the comparisons are a click away.
         self.set_result(suggestion.resolved_content, cx);
-        if has_current {
-            self.set_view(ResultView::CompareCurrent, cx);
-        }
         self.suggestion = Some(AppliedSuggestion {
             path,
             explanation: suggestion.explanation,

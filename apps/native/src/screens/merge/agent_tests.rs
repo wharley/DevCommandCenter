@@ -172,7 +172,7 @@ fn the_agents_answer_goes_to_the_editor_for_review(cx: &mut TestAppContext) {
     run.resolver.read_with(run.cx, |resolver, cx| {
         let open = resolver.open.as_ref().unwrap();
         assert_eq!(open.buffer, "before\nmine\ntheirs\nafter\n");
-        assert_eq!(open.view, ResultView::CompareCurrent);
+        assert_eq!(open.view, ResultView::Edit, "the suggestion stays editable");
         assert!(!open.editor.read(cx).read_only);
         assert_eq!(
             resolver.agent.as_ref().unwrap().status,

@@ -531,6 +531,57 @@ fn a_failed_actions_check_shows_what_failed_and_runs_again(cx: &mut TestAppConte
 }
 
 #[gpui::test]
+fn a_file_named_in_the_activity_opens_in_the_code_tab(cx: &mut TestAppContext) {
+    use crate::screens::pr_hub::code::Tab;
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    // The summary's read: the paths the pull request changed, no patches.
+    let detail = json!({
+        "body": null, "checks": [], "files": [], "inlineComments": [],
+        "reviewCapabilities": null, "mergeCapabilities": null,
+        "changedPaths": ["src/login.rs", "README.md"],
+        "comments": [{ "id": "c-1", "body": "Falta ver `src/login.rs` e `docs/other.md`.",
+            "author": { "login": "ana" }, "createdAt": "2026-11-13T10:00:00Z" }],
+    })
+    .to_string();
+    let (port, _desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list),
+        ("/api/v1/pull-request-hub/detail", 200, detail.clone()),
+        ("/api/v1/pull-request-hub/detail", 200, detail),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1200.0), px(800.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    // The summary knows the pull request's files without reading its code.
+    hub.read_with(cx, |hub, cx| {
+        let item = hub.selected_item(cx).unwrap();
+        assert_eq!(hub.changed_paths(&item), ["src/login.rs", "README.md"]);
+        assert_eq!(hub.tab, Tab::Summary);
+    });
+    // Its chip was clicked (the renderer hands the path over).
+    cx.update(|_, cx| {
+        cx.set_global(crate::markdown::files::FileRequest(Some(
+            "src/login.rs".into(),
+        )));
+    });
+    cx.run_until_parked();
+    hub.read_with(cx, |hub, _| {
+        assert_eq!(hub.tab, Tab::Code);
+        assert_eq!(hub.review.path.as_deref(), Some("src/login.rs"));
+    });
+}
+
+#[gpui::test]
 fn the_summary_approves_with_its_text_without_opening_the_code(cx: &mut TestAppContext) {
     use crate::data::pr_review::ReviewEvent;
     use crate::test_support::fake_desktop_routes;

@@ -217,6 +217,8 @@ pub struct Detail {
     pub commits: Vec<Commit>,
     /// `open`, `merged` or `closed`; none from a desktop that does not say.
     pub state: Option<String>,
+    /// The paths it changed, without the patches.
+    pub changed_paths: Vec<String>,
 }
 
 impl Detail {

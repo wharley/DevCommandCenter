@@ -183,8 +183,9 @@ fn task_port(
 }
 
 /// The conversation a task opens on: its own agent's, newest first — not a
-/// delegated child's, and not the Reviewer's (`reviewing`), which only reads
-/// and only opens when asked for or when it is all the task has.
+/// delegated child's, and not the Reviewer's (`reviewing`) nor one that only
+/// suggested a merge conflict's resolution to the resolver: those open when
+/// asked for, or when they are all the task has.
 pub fn choose_session<'a>(
     summaries: &'a [WorkspaceSessionSummary],
     delegated: &HashSet<String>,
@@ -197,8 +198,14 @@ pub fn choose_session<'a>(
     let own = visible
         .clone()
         .filter(|summary| !delegated.contains(&summary.session.id.0));
+    let resolver = |summary: &WorkspaceSessionSummary| {
+        summary
+            .last_turn_prompt
+            .as_deref()
+            .is_some_and(dcc_core::domain::merge_conflict::agent::is_agent_resolution_prompt)
+    };
     own.clone()
-        .find(|summary| !reviewing(&summary.session.id.0))
+        .find(|summary| !reviewing(&summary.session.id.0) && !resolver(summary))
         .or_else(|| own.clone().next())
         .or(first)
 }

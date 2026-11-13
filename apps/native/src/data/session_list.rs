@@ -224,4 +224,38 @@ mod tests {
             Some("review")
         );
     }
+
+    #[test]
+    fn a_conflict_suggestion_is_never_the_tasks_conversation() {
+        use crate::data::conversation::choose_session;
+        use std::collections::HashSet;
+        use dcc_core::domain::merge_conflict::agent::{
+            AgentResolutionInput, build_agent_resolution_prompt,
+        };
+        let prompt = build_agent_resolution_prompt(
+            &AgentResolutionInput {
+                path: "src/a.rs",
+                kind: dcc_core::domain::merge_conflict::WorkspaceGitConflictKind::BothModified,
+                current_ref: "feat",
+                incoming_ref: "origin/main",
+                base_text: None,
+                current_text: Some("a"),
+                incoming_text: Some("b"),
+                result_text: "<<<<<<<",
+                response_language: "português",
+            },
+            "tok",
+        );
+        // The newest conversation only suggested a resolution to the resolver.
+        let mut helper = summary("helper", false, false);
+        helper.last_turn_prompt = Some(prompt);
+        let own = summary("own", false, false);
+        let both = [helper.clone(), own];
+        let chosen = choose_session(&both, &HashSet::new(), |_| false).unwrap();
+        assert_eq!(chosen.session.id.0, "own");
+        // All the task has: it opens rather than nothing.
+        let alone = [helper];
+        let chosen = choose_session(&alone, &HashSet::new(), |_| false).unwrap();
+        assert_eq!(chosen.session.id.0, "helper");
+    }
 }

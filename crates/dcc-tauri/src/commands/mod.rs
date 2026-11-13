@@ -16,6 +16,7 @@ pub mod pr_hub_checkin;
 pub mod pr_hub_checks;
 pub mod pr_hub_failing;
 pub mod pr_hub_merge_extras;
+pub mod pr_hub_paths;
 pub mod pr_hub_received;
 pub mod pr_hub_since;
 pub mod provider_commands;

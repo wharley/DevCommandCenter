@@ -1786,6 +1786,7 @@
       "completeMergeLoading": "Completing merge...",
       "syncSuccess": "Worktree updated with {{baseRef}}",
       "syncAlreadyCurrent": "Worktree was already current with {{baseRef}}",
+      "syncConflicts": "The base brought conflicts. Resolve them to continue.",
       "syncFailed": "Update failed: {{message}}",
       "mergeSuccess": "{{requestLabel}} merged",
       "completeMergeSuccess": "Merge completed and pushed",

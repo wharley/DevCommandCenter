@@ -459,11 +459,20 @@ impl CodeColumn {
                         Toaster::settle(toast, kind, cx.t_with(key, &args), None, cx);
                     }
                     Err(error) => {
-                        let text = cx.t_with(
-                            "inspector.gitConfirmation.syncFailed",
-                            &Args::default().with("message", message_of(error, cx)),
-                        );
-                        Toaster::settle(toast, ToastKind::Error, text, None, cx);
+                        let message = message_of(error, cx);
+                        // The base left conflicts, or a merge was already
+                        // under way: the resolver is where that is dealt with.
+                        if super::conflicts::needs_resolver(&message) {
+                            let text = cx.t("inspector.gitConfirmation.syncConflicts");
+                            Toaster::settle(toast, ToastKind::Info, text, None, cx);
+                            column.open_merge_resolver(cx);
+                        } else {
+                            let text = cx.t_with(
+                                "inspector.gitConfirmation.syncFailed",
+                                &Args::default().with("message", message),
+                            );
+                            Toaster::settle(toast, ToastKind::Error, text, None, cx);
+                        }
                     }
                 }
                 column.refresh_git(cx);
