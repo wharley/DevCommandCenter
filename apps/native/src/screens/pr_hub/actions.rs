@@ -3,14 +3,15 @@
 //! close it, reopen a closed one, delete the branch of a closed one. Each
 //! is picked in the "⋯" menu (or on the closed pull request itself) and
 //! runs only after its confirmation. What GitHub refuses is shown as
-//! GitHub says it. The closed pull requests are read only when their
-//! filter is opened.
+//! GitHub says it. A pull request just closed leaves the list of open ones
+//! but stays on screen, closed, with "Reabrir", until another is picked:
+//! there is no list of closed ones to read.
 
 use gpui::{AnyElement, AppContext, Context, Entity, SharedString, Window, div, prelude::*, px};
 
 use super::PrHub;
 use crate::data::desktop_api::ApiError;
-use crate::data::pr_hub::{Filter, Item, List};
+use crate::data::pr_hub::Item;
 use crate::data::pr_merge_readiness::PrAction;
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;
@@ -76,9 +77,8 @@ pub(crate) struct PrActions {
     pub delete_branch: bool,
     /// The close's optional comment.
     pub comment: Entity<TextArea>,
-    /// The closed pull requests; `None` until their filter is opened.
-    pub closed: Option<Result<List, String>>,
-    pub reading_closed: bool,
+    /// The one just closed, kept on screen though no longer listed.
+    pub held: Option<Item>,
 }
 
 impl PrActions {
@@ -90,62 +90,19 @@ impl PrActions {
             error: None,
             delete_branch: false,
             comment: cx.new(|cx| TextArea::new(window, cx).with_placeholder(placeholder)),
-            closed: None,
-            reading_closed: false,
+            held: None,
         }
     }
 }
 
 impl PrHub {
-    /// The list the filter shows: the closed ones have their own read.
-    pub(crate) fn shown_list(&self) -> &Option<Result<List, String>> {
-        if self.filter == Filter::Closed {
-            &self.actions.closed
-        } else {
-            &self.list
-        }
-    }
-
-    /// How many a filter holds; none for the closed ones until read.
-    pub(crate) fn closed_count(&self) -> Option<usize> {
-        match &self.actions.closed {
-            Some(Ok(list)) => Some(list.items.len()),
-            _ => None,
-        }
-    }
-
-    /// The closed pull requests, read when their filter opens (and again
-    /// with `again`: after an action, or "Atualizar").
-    pub(crate) fn read_closed(&mut self, again: bool, cx: &mut Context<Self>) {
-        let Some(api) = self.api.clone() else {
-            return;
-        };
-        if self.actions.reading_closed || (self.actions.closed.is_some() && !again) {
-            return;
-        }
-        self.actions.reading_closed = true;
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let read = cx
-                .background_executor()
-                .spawn(async move { api.pr_hub_closed() })
-                .await;
-            let _ = this.update(cx, |hub, cx| {
-                hub.actions.reading_closed = false;
-                hub.actions.closed = Some(read.map_err(|error| error.text(cx)));
-                if hub.filter == Filter::Closed {
-                    hub.follow_selection(cx);
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    /// The selected pull request is closed (its detail says, or it came
-    /// from the closed ones).
+    /// The selected pull request is closed: the one just closed here, or
+    /// what its detail says.
     pub(crate) fn is_closed(&self, item: &Item) -> bool {
-        self.filter == Filter::Closed
+        self.actions
+            .held
+            .as_ref()
+            .is_some_and(|held| held.id == item.id)
             || self
                 .merge_detail(item)
                 .and_then(|detail| detail.as_ref().ok())
@@ -216,7 +173,10 @@ impl PrHub {
         cx.spawn(async move |this, cx| {
             let done = cx
                 .background_executor()
-                .spawn(async move { api.pr_hub_action(&item, &action) })
+                .spawn({
+                    let item = item.clone();
+                    async move { api.pr_hub_action(&item, &action) }
+                })
                 .await;
             let _ = this.update(cx, |hub, cx| {
                 hub.actions.running = false;
@@ -229,11 +189,14 @@ impl PrHub {
                             format!("pullRequests.actions.{}.done", ask.key())
                         };
                         Toaster::success(cx.t(&key), cx);
-                        // Both lists may have changed: read what is on screen.
+                        // Closed: it stays on screen with its way back.
+                        // Reopened: it is among the open ones again.
+                        hub.actions.held = match ask {
+                            Ask::Close => Some(item.clone()),
+                            Ask::Reopen => None,
+                            _ => hub.actions.held.take(),
+                        };
                         hub.detail = None;
-                        if hub.actions.closed.is_some() {
-                            hub.read_closed(true, cx);
-                        }
                         hub.refresh(cx);
                         hub.ensure_detail(cx);
                     }

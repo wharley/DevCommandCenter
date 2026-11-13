@@ -352,8 +352,9 @@ fn a_ready_pull_request_merges_now_and_takes_its_branch_when_asked(cx: &mut Test
 }
 
 #[gpui::test]
-fn a_pull_request_is_closed_after_its_confirmation_and_found_under_closed(cx: &mut TestAppContext) {
-    use crate::data::pr_hub::Filter;
+fn a_pull_request_is_closed_after_its_confirmation_and_stays_to_be_reopened(
+    cx: &mut TestAppContext,
+) {
     use crate::screens::pr_hub::actions::Ask;
     use crate::test_support::fake_desktop_routes;
     cx.update(|cx| {
@@ -375,16 +376,15 @@ fn a_pull_request_is_closed_after_its_confirmation_and_found_under_closed(cx: &m
         .to_string()
     };
     let (port, desktop) = fake_desktop_routes(vec![
-        ("/api/v1/pull-request-hub/list", 200, open.clone()),
+        ("/api/v1/pull-request-hub/list", 200, open),
         ("/api/v1/pull-request-hub/detail", 200, detail("open")),
         (
             "/api/v1/pull-request-hub/action",
             200,
             r#"{"branchDeleted":true}"#.into(),
         ),
-        // Read again: no longer among the open ones; then the closed ones.
+        // Read again: no longer among the open ones.
         ("/api/v1/pull-request-hub/list", 200, none),
-        ("/api/v1/pull-request-hub/list", 200, open),
         ("/api/v1/pull-request-hub/detail", 200, detail("closed")),
     ]);
     let (hub, cx) = cx.add_window_view(PrHub::new);
@@ -409,23 +409,28 @@ fn a_pull_request_is_closed_after_its_confirmation_and_found_under_closed(cx: &m
         hub.confirm_action(cx);
     });
     cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    cx.run_until_parked();
     assert!(
         cx.debug_bounds("pr-action-dialog").is_none(),
         "closed once done"
     );
-    // "Fechados" is read only when opened, and offers the way back.
-    assert_eq!(hub.read_with(cx, |hub, _| hub.closed_count()), None);
-    hub.update(cx, |hub, cx| hub.set_filter(Filter::Closed, cx));
-    cx.run_until_parked();
-    let seen = desktop.join().unwrap();
-    cx.run_until_parked();
-    assert_eq!(hub.read_with(cx, |hub, _| hub.closed_count()), Some(1));
-    let closed = hub.read_with(cx, |hub, cx| {
-        let item = hub.selected_item(cx).expect("the closed one is selected");
-        hub.is_closed(&item)
+    // No longer listed, but still on screen, closed, with its way back.
+    let (listed, closed) = hub.read_with(cx, |hub, cx| {
+        let item = hub
+            .selected_item(cx)
+            .expect("the closed one stays selected");
+        (hub.items().len(), hub.is_closed(&item))
     });
-    let merge = cx.debug_bounds("pr-merge").is_some();
-    assert!(closed && !merge, "a closed one is not merged");
+    assert_eq!((listed, closed), (0, true));
+    assert!(
+        cx.debug_bounds("pr-merge").is_none(),
+        "a closed one is not merged"
+    );
+    assert!(
+        cx.debug_bounds("pr-actions").is_some(),
+        "Reabrir is offered"
+    );
     let (_, sent) = seen
         .iter()
         .find(|(path, _)| path.ends_with("/action"))
@@ -436,12 +441,6 @@ fn a_pull_request_is_closed_after_its_confirmation_and_found_under_closed(cx: &m
         sent["action"],
         json!({ "kind": "close", "comment": "substituído pelo #9", "deleteBranch": true })
     );
-    let lists: Vec<&str> = seen
-        .iter()
-        .filter(|(path, _)| path.ends_with("/list"))
-        .map(|(_, body)| body.as_str())
-        .collect();
-    assert_eq!(lists.last().copied(), Some(r#"{"closed":true}"#));
 }
 
 #[gpui::test]

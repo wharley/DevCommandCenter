@@ -214,11 +214,7 @@ pub struct WorkspacePrReviewCommentsInput {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct PullRequestHubListInput {
-    /// The pull requests closed without a merge, instead of the open ones.
-    #[serde(default)]
-    pub closed: bool,
-}
+pub struct PullRequestHubListInput {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1523,9 +1519,8 @@ const HUB_LIST_PARALLELISM: usize = 6;
 /// `pull_request_hub_list` for callers without a Tauri `State` (the HTTP API).
 pub async fn pull_request_hub_list_with_state(
     state: &WorkspaceCommandState,
-    input: PullRequestHubListInput,
+    _input: PullRequestHubListInput,
 ) -> Result<PullRequestHubListOutput, String> {
-    let closed = input.closed;
     use futures::StreamExt;
 
     let repo = SqliteWorkspaceRepo::open(&state.db_path).map_err(|error| error.to_string())?;
@@ -1554,7 +1549,7 @@ pub async fn pull_request_hub_list_with_state(
             async move {
                 let looked_up = repository.clone();
                 let result = tokio::task::spawn_blocking(move || {
-                    hub_items_for_repository(&db_path, &looked_up, &workspaces, closed)
+                    hub_items_for_repository(&db_path, &looked_up, &workspaces)
                 })
                 .await
                 .unwrap_or_else(|error| Err(error.to_string()));
@@ -1586,7 +1581,6 @@ fn hub_items_for_repository(
     db_path: &std::path::Path,
     repository: &dcc_core::domain::repository::Repository,
     workspaces: &[dcc_core::domain::workspace::Workspace],
-    closed: bool,
 ) -> Result<Vec<PullRequestHubItem>, String> {
     let root = repository.root_path.trim();
     let context = forge_context::resolve_workspace_forge_context(
@@ -1600,10 +1594,7 @@ fn hub_items_for_repository(
             root,
             &context.host,
             context.effective_login.as_deref(),
-            closed,
         )?,
-        // Closing and reopening from the hub is GitHub's only.
-        ForgeCliProvider::Gitlab if closed => return Ok(Vec::new()),
         ForgeCliProvider::Gitlab => crate::commands::forge::gitlab::list_merge_requests_json(
             root,
             &context.host,

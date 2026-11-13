@@ -1280,8 +1280,7 @@
     "filters": {
       "all": "Todos",
       "reviewing": "Revisando",
-      "mine": "Criados por você",
-      "closed": "Fechados"
+      "mine": "Criados por você"
     },
     "checkActions": {
       "log": "Ver o que falhou",
@@ -1301,7 +1300,7 @@
       "close": {
         "label": "Fechar pull request",
         "title": "Fechar este pull request?",
-        "description": "Ele é fechado sem merge. Dá para reabrir depois em Fechados.",
+        "description": "Ele é fechado sem merge. Dá para reabrir em seguida, aqui mesmo, enquanto ele estiver na tela.",
         "confirm": "Fechar pull request",
         "done": "Pull request fechado.",
         "doneWithBranch": "Pull request fechado e branch apagado.",

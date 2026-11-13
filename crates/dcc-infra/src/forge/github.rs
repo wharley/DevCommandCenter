@@ -1100,19 +1100,11 @@ fn run_hub_gh_json(
         .map_err(|error| format!("Failed to decode GitHub response: {error}"))
 }
 
-/// The open pull requests, or with `closed` the 20 closed without a merge
-/// that moved last.
 pub fn list_pull_requests_json(
     root: &str,
     host: &str,
     login: Option<&str>,
-    closed: bool,
 ) -> Result<Value, String> {
-    let (state, limit) = if closed {
-        ("closed", "20")
-    } else {
-        ("open", "100")
-    };
     run_hub_gh_json(
         root,
         host,
@@ -1121,9 +1113,9 @@ pub fn list_pull_requests_json(
             "pr",
             "list",
             "--state",
-            state,
+            "open",
             "--limit",
-            limit,
+            "100",
             "--json",
             // No `body`: the list does not show it, the detail reads it.
             "number,title,url,state,isDraft,headRefName,baseRefName,author,reviewDecision,reviewRequests,latestReviews,additions,deletions,changedFiles,comments,statusCheckRollup,updatedAt",

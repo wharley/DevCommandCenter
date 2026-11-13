@@ -1280,8 +1280,7 @@
     "filters": {
       "all": "All",
       "reviewing": "Reviewing",
-      "mine": "Created by you",
-      "closed": "Closed"
+      "mine": "Created by you"
     },
     "checkActions": {
       "log": "See what failed",
@@ -1301,7 +1300,7 @@
       "close": {
         "label": "Close pull request",
         "title": "Close this pull request?",
-        "description": "It is closed without a merge. It can be reopened later under Closed.",
+        "description": "It is closed without a merge. It can be reopened right after, here, while it is on screen.",
         "confirm": "Close pull request",
         "done": "Pull request closed.",
         "doneWithBranch": "Pull request closed and branch deleted.",

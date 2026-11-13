@@ -189,7 +189,7 @@ impl PrHub {
     }
 
     pub(crate) fn items(&self) -> &[Item] {
-        match self.shown_list() {
+        match &self.list {
             Some(Ok(list)) => &list.items,
             _ => &[],
         }
@@ -249,7 +249,11 @@ impl PrHub {
 
     pub(crate) fn selected_item(&self, cx: &gpui::App) -> Option<Item> {
         let id = self.selected.as_deref()?;
-        self.visible(cx).into_iter().find(|item| item.id == id)
+        self.visible(cx)
+            .into_iter()
+            .find(|item| item.id == id)
+            // The one just closed is no longer listed, and stays on screen.
+            .or_else(|| self.actions.held.clone().filter(|item| item.id == id))
     }
 
     /// The first visible one when the chosen one is no longer listed.
@@ -258,7 +262,10 @@ impl PrHub {
         let kept = self
             .selected
             .as_deref()
-            .is_some_and(|id| visible.iter().any(|item| item.id == id));
+            .is_some_and(|id| {
+                visible.iter().any(|item| item.id == id)
+                    || self.actions.held.as_ref().is_some_and(|held| held.id == id)
+            });
         if !kept {
             self.selected = visible.first().map(|item| item.id.clone());
         }
@@ -278,10 +285,6 @@ impl PrHub {
         };
         if self.fetching {
             return;
-        }
-        // "Atualizar" on the closed ones reads them too.
-        if self.filter == Filter::Closed {
-            self.read_closed(true, cx);
         }
         self.fetching = true;
         cx.notify();
@@ -311,14 +314,15 @@ impl PrHub {
 
     pub(crate) fn set_filter(&mut self, filter: Filter, cx: &mut Context<Self>) {
         self.filter = filter;
-        if filter == Filter::Closed {
-            self.read_closed(false, cx);
-        }
         self.follow_selection(cx);
         cx.notify();
     }
 
     pub(crate) fn select(&mut self, id: String, cx: &mut Context<Self>) {
+        // Another one picked: the closed one leaves the screen.
+        if self.actions.held.as_ref().is_some_and(|held| held.id != id) {
+            self.actions.held = None;
+        }
         self.selected = Some(id);
         self.detail_open = true;
         self.see_selected(cx);

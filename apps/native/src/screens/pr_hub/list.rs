@@ -129,21 +129,10 @@ impl PrHub {
             .map(|filter| {
                 let on = self.filter == filter;
                 // How many it holds, whatever is being searched.
-                // The closed ones have no count until they are read.
-                let count = if filter == Filter::Closed {
-                    self.closed_count()
-                } else {
-                    let open = match &self.list {
-                        Some(Ok(list)) => list.items.as_slice(),
-                        _ => &[],
-                    };
-                    Some(
-                        filtered(open, filter, "", |item| {
-                            crate::data::pr_news::reviewed(item, cx)
-                        })
-                        .len(),
-                    )
-                };
+                let count = filtered(self.items(), filter, "", |item| {
+                    crate::data::pr_news::reviewed(item, cx)
+                })
+                .len();
                 div()
                     .id(SharedString::from(format!("pr-filter-{}", filter.key())))
                     .debug_selector(move || format!("pr-filter-{}", filter.key()))
@@ -152,7 +141,6 @@ impl PrHub {
                         Filter::All => 0.8,
                         Filter::Reviewing => 1.0,
                         Filter::Mine => 1.45,
-                        Filter::Closed => 0.95,
                     })
                     .flex_basis(px(0.0))
                     .min_w_0()
@@ -191,7 +179,7 @@ impl PrHub {
                             .flex_none()
                             .font_weight(FontWeight::NORMAL)
                             .text_color(colors.muted_foreground)
-                            .children(count.map(|count| count.to_string())),
+                            .child(count.to_string()),
                     )
                     .into_any_element()
             })
@@ -316,7 +304,7 @@ impl PrHub {
         let dark = cx.theme().appearance == Appearance::Dark;
         let english = cx.global::<I18n>().locale() == Locale::En;
         let visible = self.visible(cx);
-        let body: AnyElement = match self.shown_list() {
+        let body: AnyElement = match &self.list {
             None => div()
                 .flex()
                 .h(px(192.0))
@@ -397,11 +385,11 @@ impl PrHub {
                 div().flex().flex_col().children(rows).into_any_element()
             }
         };
-        let warnings = match self.shown_list() {
+        let warnings = match &self.list {
             Some(Ok(list)) if !list.warnings.is_empty() => Some(list.warnings.clone()),
             _ => None,
         };
-        let fetching = self.fetching || self.actions.reading_closed;
+        let fetching = self.fetching;
         div()
             .debug_selector(|| "pr-list".into())
             .flex()
