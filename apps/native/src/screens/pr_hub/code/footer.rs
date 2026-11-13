@@ -18,6 +18,7 @@ impl PrHub {
         item: &Item,
         detail: &Detail,
         narrow: bool,
+        window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme().clone();
@@ -26,6 +27,59 @@ impl PrHub {
         let review = &self.review;
         let body = review.body.read(cx).text().to_string();
         let ready = can_submit(review.event, review.drafts.len(), &body, review.submitting);
+        // Nothing to preview: back to writing.
+        let preview = review.preview && !body.trim().is_empty();
+        // The pull request's files as chips that open them above.
+        let mut preview_blocks = Vec::new();
+        if preview {
+            preview_blocks = crate::markdown::parse(&body);
+            let paths: Vec<String> = detail.files.iter().map(|file| file.path.clone()).collect();
+            crate::markdown::files::mark(&mut preview_blocks, &paths);
+        }
+        let mode = |id: &'static str, key: &str, on: bool, to: bool, cx: &mut Context<Self>| {
+            let fg = colors.foreground;
+            div()
+                .id(id)
+                .debug_selector(move || id.to_string())
+                .rounded(px(6.0))
+                .px(px(8.0))
+                .py(px(3.0))
+                .text_size(px(11.0))
+                .font_weight(FontWeight::MEDIUM)
+                .cursor_pointer()
+                .map(|button| {
+                    if on {
+                        button.bg(colors.muted.opacity(0.7)).text_color(fg)
+                    } else {
+                        button
+                            .text_color(colors.muted_foreground)
+                            .hover(move |button| button.text_color(fg))
+                    }
+                })
+                .on_click(cx.listener(move |hub, _, _, cx| {
+                    hub.review.preview = to;
+                    cx.notify();
+                }))
+                .child(cx.t(key))
+        };
+        let modes = div()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .child(mode(
+                "pr-review-write",
+                "pullRequests.code.write",
+                !preview,
+                false,
+                cx,
+            ))
+            .child(mode(
+                "pr-review-preview-tab",
+                "pullRequests.code.preview",
+                preview,
+                true,
+                cx,
+            ));
         let events: Vec<AnyElement> = ReviewEvent::ALL
             .into_iter()
             .map(|event| {
@@ -156,44 +210,76 @@ impl PrHub {
             .child(
                 div()
                     .mt(px(8.0))
+                    // The text has the field's whole width; the button sits
+                    // under it, so a labelled button never narrows the text.
                     .flex()
-                    .items_end()
+                    .flex_col()
                     .gap(px(8.0))
                     .rounded(px(12.0))
                     .border_1()
                     .border_color(colors.border)
                     .bg(colors.muted.opacity(0.25))
                     .p(px(8.0))
-                    .child(
+                    .child(if preview {
+                        div()
+                            .id("pr-review-preview")
+                            .debug_selector(|| "pr-review-preview".into())
+                            .w_full()
+                            .min_w_0()
+                            .min_h(px(36.0))
+                            .max_h(px(220.0))
+                            .overflow_y_scroll()
+                            .text_size(px(12.0))
+                            .child(crate::markdown::render_markdown(
+                                &preview_blocks,
+                                crate::markdown::MarkdownStyle::card(),
+                                "pr-review-preview-text",
+                                window,
+                                cx,
+                            ))
+                            .into_any_element()
+                    } else {
                         div()
                             .debug_selector(|| "pr-review-body".into())
-                            .flex_1()
+                            .w_full()
                             .min_w_0()
-                            .min_h(px(56.0))
-                            .text_size(px(11.0))
-                            .child(review.body.clone()),
-                    )
-                    // The button says what it sends.
+                            // Shorter while empty: the button's row is new.
+                            .min_h(px(36.0))
+                            .text_size(px(12.0))
+                            .line_height(px(18.0))
+                            .child(review.body.clone())
+                            .into_any_element()
+                    })
+                    // "Escrever | Prévia", then the button that says what
+                    // it sends.
                     .child(
-                        Button::new("pr-review-send")
-                            .size(ButtonSize::Sm)
-                            .text_size(12.0)
-                            .disabled(!ready)
-                            .on_click(cx.listener(|hub, _, _, cx| hub.submit_review(cx)))
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(modes)
                             .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .child(if review.submitting {
-                                        spinner("pr-review-sending", 14.0).into_any_element()
-                                    } else {
-                                        Icon::new("send").size(13.0).into_any_element()
-                                    })
-                                    .child(cx.t(&format!(
-                                        "pullRequests.code.sendEvents.{}",
-                                        review.event.key()
-                                    ))),
+                                Button::new("pr-review-send")
+                                    .size(ButtonSize::Sm)
+                                    .text_size(12.0)
+                                    .disabled(!ready)
+                                    .on_click(cx.listener(|hub, _, _, cx| hub.submit_review(cx)))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(6.0))
+                                            .child(if review.submitting {
+                                                spinner("pr-review-sending", 14.0)
+                                                    .into_any_element()
+                                            } else {
+                                                Icon::new("send").size(13.0).into_any_element()
+                                            })
+                                            .child(cx.t(&format!(
+                                                "pullRequests.code.sendEvents.{}",
+                                                review.event.key()
+                                            ))),
+                                    ),
                             ),
                     ),
             )

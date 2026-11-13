@@ -66,7 +66,7 @@ fn the_code_tab_drafts_replies_resolves_and_sends(cx: &mut TestAppContext) {
         ("/api/v1/pull-request-hub/list", 200, list),
     ]);
     let (hub, cx) = cx.add_window_view(PrHub::new);
-    cx.simulate_resize(size(px(1400.0), px(900.0)));
+    cx.simulate_resize(size(px(1400.0), px(1000.0)));
     hub.update(cx, |hub, cx| {
         hub.api = Some(DesktopApi::new(port, "k"));
         hub.refresh(cx);
@@ -122,6 +122,26 @@ fn the_code_tab_drafts_replies_resolves_and_sends(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("pr-thread-reply-field").is_none());
     let bounds = cx.debug_bounds("pr-thread-resolve-c-1").unwrap();
     cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    // The review's text can be read as GitHub will show it, and written again.
+    hub.update(cx, |hub, cx| {
+        let body = hub.review.body.clone();
+        body.update(cx, |area, cx| area.set_text("Ver `login.rs`", cx));
+    });
+    cx.run_until_parked();
+    let bounds = cx.debug_bounds("pr-review-preview-tab").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-review-preview").is_some());
+    assert!(cx.debug_bounds("pr-review-body").is_none());
+    let bounds = cx.debug_bounds("pr-review-write").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-review-body").is_some());
+    hub.update(cx, |hub, cx| {
+        let body = hub.review.body.clone();
+        body.update(cx, |area, cx| area.set_text("", cx));
+    });
     cx.run_until_parked();
     // Approve, with the draft.
     let bounds = cx.debug_bounds("pr-review-event-approve").unwrap();

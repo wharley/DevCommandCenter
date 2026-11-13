@@ -18,6 +18,8 @@ pub struct SpanStyle {
     pub site: bool,
     /// An `@Agent` of the team, in its mascot's `0xRRGGBB` (`super::mentions`).
     pub mention: Option<u32>,
+    /// A file the view can open, drawn as a chip (`super::files`).
+    pub file: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

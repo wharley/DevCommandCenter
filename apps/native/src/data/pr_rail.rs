@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::data::delivery_rail::StepState;
-use crate::data::pr_hub::{Actor, Check, Item, Review};
+use crate::data::pr_hub::{Actor, Check, Detail, Item, Review};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrStep {
@@ -158,6 +158,52 @@ pub fn reviewer_lines(reviews: &[Review], requested: &[Actor]) -> Vec<ReviewerLi
     lines
 }
 
+/// One entry of a pull request's activity: a comment, or a review that came
+/// with text (its `verdict` says which).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActivityEntry {
+    pub id: String,
+    pub author: Option<Actor>,
+    pub created_at: Option<String>,
+    pub body: String,
+    pub verdict: Option<Verdict>,
+}
+
+/// The comments and the reviews that say something, newest first: a review
+/// sent as a comment (a draft cannot be approved) still shows what it said.
+pub fn activity_entries(detail: &Detail) -> Vec<ActivityEntry> {
+    let comments = detail.comments.iter().map(|comment| ActivityEntry {
+        id: comment.id.clone(),
+        author: comment.author.clone(),
+        created_at: comment.created_at.clone(),
+        body: comment.body.clone(),
+        verdict: None,
+    });
+    let reviews = detail
+        .reviews
+        .iter()
+        .enumerate()
+        .filter(|(_, review)| !review.body.trim().is_empty())
+        .filter_map(|(index, review)| {
+            Some(ActivityEntry {
+                id: format!("review-{index}"),
+                author: review.author.clone(),
+                created_at: review.submitted_at.clone(),
+                body: review.body.clone(),
+                verdict: Some(verdict(&review.state)?),
+            })
+        });
+    let mut entries: Vec<ActivityEntry> = comments.chain(reviews).collect();
+    // ISO times sort as text; an entry without one stays last.
+    entries.sort_by(|left, right| match (&left.created_at, &right.created_at) {
+        (Some(left), Some(right)) => right.cmp(left),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    entries
+}
+
 /// The checks still in the way (failed first, then the rest), and the ones
 /// that passed.
 pub fn split_checks(checks: &[Check]) -> (Vec<&Check>, Vec<&Check>) {
@@ -219,6 +265,7 @@ mod tests {
             }),
             state: state.into(),
             submitted_at: Some(at.into()),
+            body: String::new(),
         }
     }
 
@@ -253,6 +300,45 @@ mod tests {
                 ("bia", Verdict::Commented),
                 ("caio", Verdict::Requested),
                 ("duda", Verdict::Requested),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_review_with_text_joins_the_activity_newest_first() {
+        use crate::data::pr_hub::Comment;
+        let mut said = review("ana", "COMMENTED", "2026-11-02T10:00:00Z");
+        said.body = "Aprovado: nada bloqueia.".into();
+        let detail = Detail {
+            comments: vec![
+                Comment {
+                    id: "c-1".into(),
+                    body: "Primeiro".into(),
+                    created_at: Some("2026-11-01T10:00:00Z".into()),
+                    ..Comment::default()
+                },
+                Comment {
+                    id: "c-2".into(),
+                    body: "Depois".into(),
+                    created_at: Some("2026-11-03T10:00:00Z".into()),
+                    ..Comment::default()
+                },
+            ],
+            // A review without text adds nothing to read.
+            reviews: vec![said, review("bia", "APPROVED", "2026-11-02T11:00:00Z")],
+            ..Detail::default()
+        };
+        let entries = activity_entries(&detail);
+        let read: Vec<(&str, Option<Verdict>)> = entries
+            .iter()
+            .map(|entry| (entry.body.as_str(), entry.verdict))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("Depois", None),
+                ("Aprovado: nada bloqueia.", Some(Verdict::Commented)),
+                ("Primeiro", None),
             ]
         );
     }

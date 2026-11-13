@@ -1,6 +1,7 @@
 //! Markdown for messages: parsed to a block model (`parse`), drawn with the
 //! desktop's `.assistant-markdown-scale` measures (`render`).
 
+pub mod files;
 mod html;
 mod image;
 pub mod mentions;

@@ -123,7 +123,7 @@ impl PrHub {
             .children(self.since_strip(item, &detail, cx))
             .children(self.agent_section(cx))
             .child(body)
-            .child(self.review_footer(item, &detail, narrow, cx))
+            .child(self.review_footer(item, &detail, narrow, window, cx))
             .into_any_element()
     }
 

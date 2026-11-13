@@ -131,6 +131,11 @@ impl PrHub {
             }),
         );
         inputs.push(cx.observe_global::<PrNews>(|_, cx| cx.notify()));
+        inputs.push(
+            cx.observe_global::<crate::markdown::files::FileRequest>(|hub, cx| {
+                hub.open_requested_file(cx)
+            }),
+        );
         let mut hub = Self {
             api: if cfg!(test) { None } else { DesktopApi::load() },
             // The last list at once; the forges are read behind it.

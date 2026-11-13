@@ -158,6 +158,7 @@ mod tests {
                 author: actor("Wharley"),
                 state: "COMMENTED".into(),
                 submitted_at: Some("2026-11-01T17:51:51Z".into()),
+                ..Default::default()
             }],
             commits: vec![
                 Commit {

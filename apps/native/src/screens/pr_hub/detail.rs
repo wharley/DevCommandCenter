@@ -11,6 +11,7 @@ use super::PrHub;
 use super::code::Tab;
 use super::list::author_avatar;
 use crate::data::pr_hub::relative_date;
+use crate::data::pr_rail::activity_entries;
 use crate::i18n::{I18n, Locale, Translate};
 use crate::markdown::{MarkdownStyle, parse, render_markdown};
 use crate::theme::ActiveTheme;
@@ -299,6 +300,7 @@ impl PrHub {
             ),
             None => cx.t("pullRequests.noDescription").into_any_element(),
         };
+        let paths = self.changed_paths(&item);
         let activity: AnyElement = match &detail {
             Some(Err(error)) => div()
                 .text_size(px(11.0))
@@ -309,16 +311,21 @@ impl PrHub {
                     error.clone()
                 })
                 .into_any_element(),
-            Some(Ok(detail)) if !detail.comments.is_empty() => div()
+            Some(Ok(detail)) if !activity_entries(detail).is_empty() => div()
                 .flex()
                 .flex_col()
                 .gap(px(12.0))
                 .children(
-                    detail
-                        .comments
+                    activity_entries(detail)
                         .iter()
                         .map(|entry| {
-                            let blocks = parse(&entry.body);
+                            let mut blocks = parse(&entry.body);
+                            // The pull request's files, as chips that open
+                            // them in "Código".
+                            crate::markdown::files::mark(&mut blocks, &paths);
+                            let reviewed = entry.verdict.map(|verdict| {
+                                cx.t(&format!("pullRequests.reviewed.{}", verdict.key()))
+                            });
                             div()
                                 .rounded(px(12.0))
                                 .border_1()
@@ -346,6 +353,7 @@ impl PrHub {
                                                     )
                                                 )),
                                         )
+                                        .children(reviewed)
                                         .child("·")
                                         .child(relative_date(
                                             entry.created_at.as_deref(),

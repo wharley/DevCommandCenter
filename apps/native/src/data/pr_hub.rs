@@ -214,6 +214,8 @@ pub struct Review {
     pub author: Option<Actor>,
     pub state: String,
     pub submitted_at: Option<String>,
+    /// What the reviewer wrote with it, when anything.
+    pub body: String,
 }
 
 /// `PullRequestHubCommit`

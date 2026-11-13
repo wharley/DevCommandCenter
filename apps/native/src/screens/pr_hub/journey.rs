@@ -22,11 +22,44 @@ fn read<'a>(detail: Loaded<'a>) -> Option<&'a Detail> {
 }
 
 impl PrHub {
-    /// The person is asked to review it, and it is not their own.
+    /// The pull request waits on the person's review: asked and not
+    /// reviewed, or new since their review — what "Precisa de você" lists.
     pub(super) fn awaits_my_review(&self, item: &Item, cx: &gpui::App) -> bool {
-        !item.created_by_viewer
-            && !item.is_draft
-            && (item.review_requested_for_viewer || crate::data::pr_news::is_new(item, cx))
+        if item.created_by_viewer || item.is_draft {
+            return false;
+        }
+        let (mine, new) = self.review_of(item, cx);
+        // Only what "Revisando" lists: asked of the person, or reviewed.
+        if !item.review_requested_for_viewer && !crate::data::pr_news::reviewed(item, cx) {
+            return false;
+        }
+        crate::data::pr_sections::section_of(
+            crate::data::pr_hub::Filter::Reviewing,
+            item,
+            mine.as_deref(),
+            new,
+        ) == Some(crate::data::pr_sections::Section::NeedsYou)
+    }
+
+    /// The pull request's changed files, once its code was read: the
+    /// paths a comment's chips can open.
+    pub(super) fn changed_paths(&self, item: &Item) -> Vec<String> {
+        read(self.merge_detail(item))
+            .map(|detail| detail.files.iter().map(|file| file.path.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// A file's chip was clicked: "Código" opens on that file.
+    pub(super) fn open_requested_file(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = cx
+            .try_global::<crate::markdown::files::FileRequest>()
+            .and_then(|request| request.0.clone())
+        else {
+            return;
+        };
+        cx.set_global(crate::markdown::files::FileRequest(None));
+        self.review.path = Some(path);
+        self.set_tab(super::code::Tab::Code, cx);
     }
 
     pub(super) fn pr_rail(

@@ -383,6 +383,9 @@ pub struct PullRequestHubReview {
     /// `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`…
     pub state: String,
     pub submitted_at: Option<String>,
+    /// What the reviewer wrote with it, when anything.
+    #[serde(default)]
+    pub body: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -1505,10 +1508,7 @@ pub async fn pull_request_hub_list_with_state(
             .map_err(|error| error.to_string())?,
     );
     // An agent's home is a folder of DCC's, never a repository with a forge.
-    let agent_homes = state
-        .db_path
-        .parent()
-        .map(|dir| dir.join("agent-homes"));
+    let agent_homes = state.db_path.parent().map(|dir| dir.join("agent-homes"));
     let lookups = repositories
         .into_iter()
         .filter(|repository| !repository.root_path.trim().is_empty())
@@ -1608,6 +1608,11 @@ fn github_reviews(raw: &Value) -> Vec<PullRequestHubReview> {
                 .get("submittedAt")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
+            body: review
+                .get("body")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
         })
         .collect()
 }

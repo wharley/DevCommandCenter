@@ -136,7 +136,13 @@ fn styled_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
             style.background_color = Some(fill);
             style.font_weight = Some(FontWeight::MEDIUM);
         }
-        if let (true, Some(link)) = (span.style.site, &span.link) {
+        if let (true, Some(link)) = (span.style.file, &span.link) {
+            // A file's chip: a quiet fill, its path in the text's color.
+            style.color = Some(colors.foreground);
+            style.background_color = Some(colors.accent_calm.opacity(0.14));
+            style.font_weight = Some(FontWeight::MEDIUM);
+            links.push((span.range.clone(), link.clone()));
+        } else if let (true, Some(link)) = (span.style.site, &span.link) {
             // `.composer-link`: the address itself, on a faint fill.
             style.color = Some(site);
             style.background_color = Some(site.opacity(0.09));
@@ -165,6 +171,11 @@ fn styled_text(inline: &Inline, id: SharedString, cx: &App) -> AnyElement {
     let targets: Vec<String> = links.into_iter().map(|(_, url)| url).collect();
     let interactive = InteractiveText::new(id, text).on_click(ranges, move |index, window, cx| {
         let target = targets[index].clone();
+        // A file's chip: the view that owns the file opens it.
+        if let Some(path) = target.strip_prefix(super::files::LINK_PREFIX) {
+            cx.set_global(super::files::FileRequest(Some(path.to_string())));
+            return;
+        }
         // The app opens what it can (a task's file on the stage).
         if let Some(handler) = cx
             .try_global::<super::LinkHandler>()

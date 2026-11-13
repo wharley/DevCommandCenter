@@ -1248,6 +1248,13 @@
     },
     "review": "Review",
     "reviewTitle": "Review",
+    "reviewed": {
+      "approved": "approved",
+      "changesRequested": "requested changes",
+      "commented": "reviewed and commented",
+      "dismissed": "review dismissed",
+      "requested": ""
+    },
     "rowState": {
       "draft": "Draft",
       "checksFailed": "Checks failed",
@@ -1414,6 +1421,8 @@
       "submitReview": "Submit review",
       "pendingCount_one": "{{count}} pending comment",
       "pendingCount_other": "{{count}} pending comments",
+      "write": "Write",
+      "preview": "Preview",
       "sendEvents": {
         "comment": "Send comment",
         "approve": "Send approval",

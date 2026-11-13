@@ -75,6 +75,8 @@ pub(crate) struct CodeReview {
     pub verdict: Option<crate::data::pr_review_verdict::Verdict>,
     /// The finished review already applied on this visit.
     pub applied: Option<u64>,
+    /// The review's text shown as GitHub will render it, not as typed.
+    pub preview: bool,
 }
 
 impl CodeReview {
@@ -159,6 +161,7 @@ impl CodeReview {
             agent_result: None,
             verdict: None,
             applied: None,
+            preview: false,
         };
         (review, subscriptions)
     }
@@ -185,6 +188,7 @@ impl PrHub {
         review.editing = None;
         review.event = ReviewEvent::Comment;
         review.verdict = None;
+        review.preview = false;
         review.submitting = false;
         review.submitted = false;
         review.warning = None;

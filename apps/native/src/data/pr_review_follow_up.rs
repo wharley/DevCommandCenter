@@ -190,6 +190,7 @@ mod tests {
             }),
             state: "COMMENTED".into(),
             submitted_at: Some("2026-11-01T17:51:51Z".into()),
+            ..Default::default()
         }];
         detail.commits = vec![Commit {
             oid: "7788a5a".into(),
