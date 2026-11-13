@@ -1231,6 +1231,16 @@
       "requestChanges": "Pedir mudanças",
       "undecided": "Falta decidir"
     },
+    "rowState": {
+      "draft": "Rascunho",
+      "checksFailed": "Checks falharam",
+      "checksRunning": "Checks rodando",
+      "changesRequested": "Você pediu alterações",
+      "commented": "Você comentou",
+      "approved": "Aprovado",
+      "checksPassed": "Checks passaram",
+      "open": "Aberto"
+    },
     "myReview": {
       "approved": "Você aprovou",
       "changesRequested": "Você pediu alterações",

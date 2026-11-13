@@ -1,22 +1,20 @@
 //! The hub's frame and its list column (`dcc-pr-list`): the title with
-//! "Atualizar", the three filters, the search, then the cards — repository,
-//! number and time, the title, the author, the branch, the checks and +/− —
-//! or loading, the error, or "nenhum PR"; a warning when some projects did
-//! not answer.
+//! "Atualizar", the three filters with how many each holds, the search,
+//! then a row per pull request — its state in one icon, the title, and
+//! "repo #n · author · age" — or loading, the error, or "nenhum PR"; a
+//! warning when some projects did not answer.
 
-use gpui::{
-    AnyElement, Context, FontWeight, Hsla, SharedString, Window, canvas, div, prelude::*, px,
-};
+use gpui::{AnyElement, Context, FontWeight, SharedString, Window, canvas, div, prelude::*, px};
 
 use super::PrHub;
-use crate::data::pr_hub::{Filter, Item, relative_date};
+use crate::data::pr_hub::{Filter, Item, filtered, relative_date};
+use crate::data::pr_row_state::row_state;
+use crate::data::pr_sections::Section;
 use crate::i18n::{Args, I18n, Locale, Translate};
 use crate::theme::color::mix_srgb;
 use crate::theme::tailwind as tw;
-use crate::theme::{ActiveTheme, Appearance};
-use crate::ui::{
-    Button, ButtonSize, ButtonVariant, Icon, Tooltip, card_shadow, spinner, surface_edge,
-};
+use crate::theme::{ActiveTheme, Appearance, StateTone};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip, spinner};
 
 /// `CheckState`: a check, an alert, a clock or a dot.
 pub(super) fn check_icon(state: &str) -> AnyElement {
@@ -124,6 +122,11 @@ impl PrHub {
             .into_iter()
             .map(|filter| {
                 let on = self.filter == filter;
+                // How many it holds, whatever is being searched.
+                let count = filtered(self.items(), filter, "", |item| {
+                    crate::data::pr_news::reviewed(item, cx)
+                })
+                .len();
                 div()
                     .id(SharedString::from(format!("pr-filter-{}", filter.key())))
                     .debug_selector(move || format!("pr-filter-{}", filter.key()))
@@ -139,7 +142,7 @@ impl PrHub {
                     .rounded(px(6.0))
                     .px(px(6.0))
                     .py(px(6.0))
-                    .text_size(px(10.5))
+                    .text_size(px(11.0))
                     .font_weight(FontWeight::MEDIUM)
                     .whitespace_nowrap()
                     .cursor_pointer()
@@ -158,7 +161,20 @@ impl PrHub {
                         }
                     })
                     .on_click(cx.listener(move |hub, _, _, cx| hub.set_filter(filter, cx)))
-                    .child(cx.t(&format!("pullRequests.filters.{}", filter.key())))
+                    .gap(px(5.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child(cx.t(&format!("pullRequests.filters.{}", filter.key()))),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_weight(FontWeight::NORMAL)
+                            .text_color(colors.muted_foreground)
+                            .child(count.to_string()),
+                    )
                     .into_any_element()
             })
             .collect();
@@ -173,14 +189,43 @@ impl PrHub {
             .into_any_element()
     }
 
-    fn card(&self, item: &Item, english: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// A pull request's row: its state in one icon, the title, then
+    /// "repo #n · author · age"; a third line only for news since the
+    /// person's review.
+    fn card(
+        &self,
+        item: &Item,
+        section: Option<Section>,
+        english: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = cx.theme().clone();
         let colors = &theme.colors;
         let selected = self.selected.as_deref() == Some(item.id.as_str());
         let now = crate::data::time::now_ms();
         let id = item.id.clone();
-        let edge = surface_edge(&theme);
-        let (green, red): (Hsla, Hsla) = (tw::EMERALD_500.hsla(), tw::RED_500.hsla());
+        let mine = crate::data::pr_news::my_review(item, cx);
+        let state = row_state(item, mine.as_deref());
+        let tone = state.tone().text(&theme);
+        let author = item
+            .author
+            .as_ref()
+            .map(|actor| actor.login.clone())
+            .unwrap_or_else(|| cx.t("pullRequests.unknownAuthor").to_string());
+        let age = relative_date(item.updated_at.as_deref(), now, english);
+        let icon = Tooltip::text(
+            SharedString::from(format!("pr-state-tip-{}", item.id)),
+            div()
+                .id(SharedString::from(format!("pr-state-{}", item.id)))
+                .debug_selector({
+                    let id = item.id.clone();
+                    move || format!("pr-state-{id}")
+                })
+                .mt(px(1.0))
+                .flex_none()
+                .child(Icon::new(state.icon()).size(15.0).stroke(1.9).color(tone)),
+            cx.t(&format!("pullRequests.rowState.{}", state.key())),
+        );
         div()
             .id(SharedString::from(format!("pr-card-{}", item.id)))
             .debug_selector({
@@ -188,121 +233,57 @@ impl PrHub {
                 move || format!("pr-card-{id}")
             })
             .w_full()
-            .mb(px(4.0))
-            .rounded(px(12.0))
-            .border_1()
-            .px(px(12.0))
-            .py(px(10.0))
+            .mb(px(2.0))
+            .flex()
+            .items_start()
+            .gap(px(10.0))
+            .rounded(px(8.0))
+            .px(px(10.0))
+            .py(px(8.0))
             .cursor_pointer()
             .map(|card| {
                 if selected {
-                    card.border_color(mix_srgb(colors.accent_calm, 0.26, edge))
-                        .bg(mix_srgb(colors.accent_calm, 0.05, colors.background))
-                        .shadow(card_shadow())
+                    card.bg(mix_srgb(colors.accent_calm, 0.1, colors.background))
                 } else {
-                    card.border_color(gpui::transparent_black())
-                        .hover(|card| card.bg(colors.accent.opacity(0.4)))
+                    card.hover(|card| card.bg(colors.accent.opacity(0.4)))
                 }
             })
             .on_click(cx.listener(move |hub, _, _, cx| hub.select(id.clone(), cx)))
+            .child(icon)
             .child(
                 div()
-                    .flex()
-                    .items_start()
-                    .gap(px(10.0))
+                    .flex_1()
+                    .min_w_0()
                     .child(
                         div()
-                            .mt(px(2.0))
-                            .rounded(px(6.0))
-                            .bg(green.opacity(0.1))
-                            .p(px(6.0))
-                            .child(
-                                Icon::new("git-pull-request")
-                                    .size(14.0)
-                                    .stroke(1.9)
-                                    .color(green),
-                            ),
+                            .line_clamp(2)
+                            .text_size(px(12.0))
+                            .line_height(px(17.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(colors.foreground)
+                            .child(item.title.clone()),
                     )
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
+                            .mt(px(2.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .text_size(px(11.0))
+                            .line_height(px(15.0))
+                            .text_color(colors.muted_foreground)
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .text_size(px(10.0))
-                                    .text_color(colors.muted_foreground)
-                                    .child(
-                                        div()
-                                            .truncate()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .child(item.repository_name.clone()),
-                                    )
-                                    .child(format!("#{}", item.number))
-                                    .child(div().ml_auto().flex_none().child(relative_date(
-                                        item.updated_at.as_deref(),
-                                        now,
-                                        english,
-                                    ))),
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(format!("{} #{}", item.repository_name, item.number)),
                             )
-                            .child(
-                                div()
-                                    .mt(px(4.0))
-                                    .line_clamp(2)
-                                    .text_size(px(12.0))
-                                    .line_height(px(17.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(colors.foreground)
-                                    .child(item.title.clone()),
-                            )
-                            .children(review_row(item, cx))
-                            .child(
-                                div()
-                                    .mt(px(8.0))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .text_size(px(10.0))
-                                    .text_color(colors.muted_foreground)
-                                    .child(author_avatar(item, cx))
-                                    .child(
-                                        div().max_w(px(96.0)).truncate().child(
-                                            item.author
-                                                .as_ref()
-                                                .map(|actor| actor.login.clone())
-                                                .unwrap_or_else(|| {
-                                                    cx.t("pullRequests.unknownAuthor").to_string()
-                                                }),
-                                        ),
-                                    )
-                                    .child(
-                                        div().min_w_0().truncate().child(item.head_branch.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .ml_auto()
-                                            .flex()
-                                            .flex_none()
-                                            .items_center()
-                                            .gap(px(4.0))
-                                            .child(check_icon(&item.checks_state))
-                                            .children(item.additions.map(|added| {
-                                                div()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(green)
-                                                    .child(format!("+{added}"))
-                                            }))
-                                            .children(item.deletions.map(|removed| {
-                                                div()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(red)
-                                                    .child(format!("−{removed}"))
-                                            })),
-                                    ),
-                            ),
-                    ),
+                            .child(div().flex_none().child("·"))
+                            .child(div().min_w_0().truncate().child(author))
+                            .child(div().flex_none().child("·"))
+                            .child(div().flex_none().child(age)),
+                    )
+                    .children(review_row(item, section, mine.as_deref(), cx)),
             )
             .into_any_element()
     }
@@ -393,7 +374,7 @@ impl PrHub {
                     if section.is_some_and(|section| self.section_folded(section)) {
                         continue;
                     }
-                    rows.push(self.card(item, english, cx));
+                    rows.push(self.card(item, section, english, cx));
                 }
                 div().flex().flex_col().children(rows).into_any_element()
             }
@@ -508,64 +489,58 @@ impl PrHub {
     }
 }
 
-/// Under the title of a pull request the person reviewed: their latest
-/// review ("Você aprovou"), so they know they reviewed it, and what came
-/// since ("2 commits novos · @daniel respondeu no PR") until they open it
-/// again (amber: it needs them).
-fn review_row(item: &Item, cx: &mut Context<PrHub>) -> Option<AnyElement> {
-    let state = crate::data::pr_news::my_review(item, cx)?;
-    let dark = cx.theme().appearance == crate::theme::Appearance::Dark;
-    let pick = |light: tw::Oklch, darker: tw::Oklch| {
-        if dark { light.hsla() } else { darker.hsla() }
-    };
-    let (key, color) = match state.as_str() {
-        "APPROVED" => ("approved", pick(tw::EMERALD_400, tw::EMERALD_600)),
-        "CHANGES_REQUESTED" => ("changesRequested", pick(tw::RED_400, tw::RED_600)),
-        "DISMISSED" => ("dismissed", cx.theme().colors.muted_foreground),
-        _ => ("commented", cx.theme().colors.muted_foreground),
-    };
-    let id = item.id.clone();
-    let mine = div()
-        .debug_selector(move || format!("pr-my-review-{id}"))
-        .flex_none()
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(color.opacity(0.3))
-        .px(px(6.0))
-        .py(px(1.0))
-        .text_size(px(10.0))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(color)
-        .child(cx.t(&format!("pullRequests.myReview.{key}")));
+/// Under a pull request the person reviewed: what came since ("2 commits
+/// novos · @daniel respondeu no PR") until they open it again, in amber,
+/// after their own review ("Você aprovou") where the section does not
+/// already say it.
+fn review_row(
+    item: &Item,
+    section: Option<Section>,
+    mine: Option<&str>,
+    cx: &mut Context<PrHub>,
+) -> Option<AnyElement> {
+    let state = mine?;
+    let theme = cx.theme().clone();
+    let said_by_section = matches!(section, Some(Section::Approved | Section::WaitingOnAuthor));
+    let mine = (!said_by_section).then(|| {
+        let key = match state {
+            "APPROVED" => "approved",
+            "CHANGES_REQUESTED" => "changesRequested",
+            "DISMISSED" => "dismissed",
+            _ => "commented",
+        };
+        let id = item.id.clone();
+        div()
+            .debug_selector(move || format!("pr-my-review-{id}"))
+            .flex_none()
+            .text_color(theme.colors.muted_foreground)
+            .child(cx.t(&format!("pullRequests.myReview.{key}")))
+    });
     let news = crate::data::pr_news::is_new(item, cx)
         .then(|| crate::data::pr_news::item_news_text(item, cx))
         .flatten()
         .map(|text| {
-            let amber = pick(tw::AMBER_400, tw::AMBER_600);
             let id = item.id.clone();
             div()
                 .debug_selector(move || format!("pr-news-{id}"))
                 .min_w_0()
-                .flex()
-                .items_center()
-                .gap(px(5.0))
-                .rounded(px(6.0))
-                .bg(tw::AMBER_500.hsla().opacity(0.1))
-                .px(px(6.0))
-                .py(px(2.0))
-                .text_size(px(10.0))
+                .truncate()
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(amber)
-                .child(div().flex_none().size(px(6.0)).rounded_full().bg(amber))
-                .child(div().min_w_0().truncate().child(text))
+                .text_color(StateTone::NeedsYou.text(&theme))
+                .child(text)
         });
+    if mine.is_none() && news.is_none() {
+        return None;
+    }
     Some(
         div()
-            .mt(px(6.0))
+            .mt(px(2.0))
             .flex()
             .items_center()
             .gap(px(6.0))
-            .child(mine)
+            .text_size(px(11.0))
+            .line_height(px(15.0))
+            .children(mine)
             .children(news)
             .into_any_element(),
     )
