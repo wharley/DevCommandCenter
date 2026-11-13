@@ -425,6 +425,7 @@ impl PrHub {
                     .line_height(gpui::relative(1.6))
                     .child(self.review.draft.clone()),
             )
+            .child(self.range_row(path, line, side, cx))
             .child(
                 div()
                     .mt(px(12.0))

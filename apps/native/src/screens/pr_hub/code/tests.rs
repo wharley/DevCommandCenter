@@ -386,3 +386,128 @@ fn the_reviewers_verdict_picks_the_event(cx: &mut TestAppContext) {
         ReviewEvent::Approve
     );
 }
+
+/// The hub on the code tab of one pull request with one two-file detail.
+fn code_tab(cx: &mut TestAppContext) -> (gpui::Entity<PrHub>, &mut gpui::VisualTestContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let detail = json!({
+        "body": null, "comments": [], "checks": [],
+        "files": [
+            { "path": "src/login.rs", "status": "modified", "additions": 2, "deletions": 1,
+              "patch": "@@ -1,2 +1,3 @@\n fn login() {\n-    old();\n+    new();\n+    more();" },
+            { "path": "README.md", "status": "added", "additions": 1, "deletions": 0, "patch": "@@ -0,0 +1 @@\n+hi" },
+        ],
+        "inlineComments": [],
+        "reviewCapabilities": { "inlineComments": true, "approve": true, "requestChanges": true,
+            "replyToThreads": true, "resolveThreads": true },
+        "mergeCapabilities": null,
+    })
+    .to_string();
+    let (port, _desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list),
+        ("/api/v1/pull-request-hub/detail", 200, detail.clone()),
+        ("/api/v1/pull-request-hub/detail", 200, detail),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1200.0), px(800.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    hub.update(cx, |hub, cx| hub.set_tab(Tab::Code, cx));
+    for _ in 0..200 {
+        cx.run_until_parked();
+        if cx.debug_bounds("pr-file-1").is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        cx.debug_bounds("pr-file-1").is_some(),
+        "the files were read"
+    );
+    (hub, cx)
+}
+
+#[gpui::test]
+fn a_line_comment_takes_in_the_lines_above_and_suggests_them(cx: &mut TestAppContext) {
+    let (hub, cx) = code_tab(cx);
+    // The "+" of the last added line (row 4: hunk, context, removed, added, added).
+    let bounds = cx.debug_bounds("pr-line-plus-4").unwrap();
+    cx.simulate_click(bounds.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-line-range").is_some());
+    assert!(cx.debug_bounds("pr-line-suggest").is_some(), "the new side");
+    hub.update(cx, |hub, cx| {
+        // One line up; a second step stops at the hunk's first line.
+        hub.reach("src/login.rs", 3, "right", true, cx);
+        assert_eq!(hub.review.span, 1);
+        hub.suggest("src/login.rs", 3, "right", cx);
+        assert_eq!(
+            hub.review.draft.read(cx).text(),
+            "```suggestion\n    new();\n    more();\n```"
+        );
+        hub.save_line_comment("src/login.rs", 3, "right", cx);
+        assert_eq!(hub.review.drafts.len(), 1);
+        assert_eq!(hub.review.drafts[0].start_line, Some(2));
+        assert_eq!(hub.review.span, 0, "the next comment starts on one line");
+    });
+}
+
+#[gpui::test]
+fn a_kept_review_comes_back_and_seen_files_can_be_left_out(cx: &mut TestAppContext) {
+    use crate::data::pr_review::DraftComment;
+    use crate::data::pr_review_drafts::Kept;
+    let (hub, cx) = code_tab(cx);
+    // What was kept of this pull request's review comes back as it was.
+    hub.update(cx, |hub, cx| {
+        let draft = DraftComment {
+            path: "src/login.rs".into(),
+            body: "why?".into(),
+            line: 2,
+            side: "right",
+            start_line: None,
+        };
+        hub.apply_kept(
+            Kept::new(&[draft], "quase lá", ReviewEvent::RequestChanges),
+            cx,
+        );
+        assert_eq!(hub.review.drafts.len(), 1);
+        assert_eq!(hub.review.event, ReviewEvent::RequestChanges);
+        assert_eq!(hub.review.body.read(cx).text(), "quase lá");
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-draft-src/login.rs:right:2").is_some());
+    // Ticking a file as seen counts it, and the seen ones can be left out
+    // (never the one on screen).
+    assert!(cx.debug_bounds("pr-files-viewed").is_none());
+    let tick = cx.debug_bounds("pr-file-viewed-1").unwrap();
+    cx.simulate_click(tick.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("pr-files-viewed").is_some());
+    hub.read_with(cx, |hub, _| {
+        assert_eq!(hub.review.viewed.len(), 1);
+        assert_ne!(
+            hub.review.path.as_deref(),
+            Some("README.md"),
+            "the tick did not open it"
+        );
+    });
+    let hide = cx.debug_bounds("pr-files-hide-viewed").unwrap();
+    cx.simulate_click(hide.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("pr-file-1").is_none(),
+        "the seen file is left out"
+    );
+    assert!(cx.debug_bounds("pr-file-0").is_some());
+}

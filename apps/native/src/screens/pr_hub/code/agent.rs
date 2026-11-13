@@ -180,6 +180,7 @@ impl PrHub {
                     .drafts
                     .retain(|draft| !generated.contains(&draft.key()));
                 self.review.drafts.extend(review.comments);
+                self.keep_review(cx);
                 self.review.submitted = false;
             }
             Err(error) => {

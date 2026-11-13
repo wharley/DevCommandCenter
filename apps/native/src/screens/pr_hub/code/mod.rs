@@ -8,7 +8,9 @@ mod agent;
 #[cfg(test)]
 mod agent_tests;
 mod footer;
+mod kept;
 mod panel;
+mod range;
 mod rows;
 mod runs_on;
 mod since;
@@ -16,6 +18,7 @@ mod since;
 mod tests;
 mod thread;
 mod view;
+mod viewed;
 
 use std::time::Instant;
 
@@ -45,6 +48,8 @@ pub(crate) struct CodeReview {
     pub drafts: Vec<DraftComment>,
     /// The line whose comment is being written (its draft key).
     pub editing: Option<String>,
+    /// How many lines above it that comment takes in.
+    pub span: u32,
     pub event: ReviewEvent,
     pub submitting: bool,
     pub submitted: bool,
@@ -77,6 +82,10 @@ pub(crate) struct CodeReview {
     pub applied: Option<u64>,
     /// The review's text shown as GitHub will render it, not as typed.
     pub preview: bool,
+    /// The files marked as seen: path → the patch's mark when it was.
+    pub viewed: std::collections::BTreeMap<String, String>,
+    /// The seen files are left out of the list.
+    pub hide_viewed: bool,
 }
 
 impl CodeReview {
@@ -141,6 +150,7 @@ impl CodeReview {
             path: None,
             drafts: Vec::new(),
             editing: None,
+            span: 0,
             event: ReviewEvent::Comment,
             submitting: false,
             submitted: false,
@@ -162,6 +172,8 @@ impl CodeReview {
             verdict: None,
             applied: None,
             preview: false,
+            viewed: Default::default(),
+            hide_viewed: false,
         };
         (review, subscriptions)
     }
@@ -181,10 +193,13 @@ impl PrHub {
         if self.review.for_id == self.selected {
             return;
         }
+        // What was being written stays with the pull request left behind.
+        self.keep_review(cx);
         let review = &mut self.review;
         review.for_id = self.selected.clone();
         review.path = None;
         review.drafts.clear();
+        review.viewed.clear();
         review.editing = None;
         review.event = ReviewEvent::Comment;
         review.verdict = None;
@@ -205,6 +220,7 @@ impl PrHub {
         ] {
             area.update(cx, |area, cx| area.set_text("", cx));
         }
+        self.restore_review(cx);
         self.set_body_placeholder(cx);
     }
 
@@ -220,6 +236,8 @@ impl PrHub {
 
     pub(crate) fn set_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
         self.tab = tab;
+        // Leaving the code: the text typed so far is kept too.
+        self.keep_review(cx);
         self.ensure_code_detail(cx);
         self.apply_review_job(cx);
         cx.notify();
@@ -284,6 +302,7 @@ impl PrHub {
         self.review.submitted = false;
         self.review.warning = None;
         self.set_body_placeholder(cx);
+        self.keep_review(cx);
         cx.notify();
     }
 
@@ -297,6 +316,7 @@ impl PrHub {
         cx: &mut Context<Self>,
     ) {
         self.review.editing = Some(draft_key(path, line, side));
+        self.review.span = 0;
         let draft = self.review.draft.clone();
         draft.update(cx, |area, cx| area.set_text("", cx));
         let placeholder = cx.t_with(
@@ -310,6 +330,7 @@ impl PrHub {
 
     pub(crate) fn cancel_line_comment(&mut self, cx: &mut Context<Self>) {
         self.review.editing = None;
+        self.review.span = 0;
         let draft = self.review.draft.clone();
         draft.update(cx, |area, cx| area.set_text("", cx));
         cx.notify();
@@ -332,17 +353,19 @@ impl PrHub {
             body,
             line,
             side,
-            start_line: None,
+            start_line: self.comment_start(path, line, side),
         };
         let key = next.key();
         self.review.drafts.retain(|draft| draft.key() != key);
         self.review.drafts.push(next);
         self.review.submitted = false;
         self.cancel_line_comment(cx);
+        self.keep_review(cx);
     }
 
     pub(crate) fn remove_draft(&mut self, key: &str, cx: &mut Context<Self>) {
         self.review.drafts.retain(|draft| draft.key() != key);
+        self.keep_review(cx);
         cx.notify();
     }
 
@@ -474,6 +497,8 @@ impl PrHub {
                             crate::data::pr_review_jobs::PrReviewJobs::dismiss(cx, &item_id);
                         }
                         hub.review.warning = result.warning;
+                        // What the forge took is no longer kept.
+                        hub.keep_review(cx);
                         hub.detail = None;
                         hub.ensure_detail(cx);
                         hub.reread_code(cx);

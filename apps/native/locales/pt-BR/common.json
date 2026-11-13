@@ -1426,6 +1426,17 @@
       "noFiles": "Nenhum arquivo alterado encontrado",
       "noFilesHint": "O provedor não retornou mudanças para este pull request.",
       "patchUnavailable": "O patch deste arquivo não está disponível no provedor.",
+      "viewed": {
+        "mark": "Marcar como visto",
+        "unmark": "Desmarcar visto",
+        "count": "{{seen}} de {{total}} vistos",
+        "hide": "Esconder vistos",
+        "show": "Mostrar vistos"
+      },
+      "range": {
+        "one": "Linha {{line}}",
+        "suggest": "Sugerir"
+      },
       "addInlineComment": "Comentar na linha {{line}}",
       "inlinePlaceholder": "Comentário sobre {{path}}…",
       "cancel": "Cancelar",

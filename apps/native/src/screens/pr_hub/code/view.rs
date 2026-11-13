@@ -149,6 +149,7 @@ impl PrHub {
             .files
             .iter()
             .enumerate()
+            .filter(|(_, file)| self.shows_file(file, current.as_deref()))
             .map(|(index, file)| {
                 let chosen = current.as_deref() == Some(file.path.as_str());
                 let drafts = self
@@ -286,12 +287,7 @@ impl PrHub {
                                     .child(format!("−{}", file.deletions)),
                             ),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .opacity(0.5)
-                            .child(Icon::new("chevron-right").size(12.0)),
-                    )
+                    .child(self.viewed_toggle(index, file, cx))
                     .into_any_element()
             })
             .collect();
@@ -334,6 +330,7 @@ impl PrHub {
                         0.12,
                     )),
             )
+            .children(self.viewed_summary(detail, cx))
             .child(div().flex().flex_col().gap(px(2.0)).children(rows))
             .into_any_element()
     }
