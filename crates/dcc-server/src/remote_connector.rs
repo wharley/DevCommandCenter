@@ -1803,6 +1803,10 @@ mod tests {
         assert!(path_allowed_for("/api/v1/machine", ClientKind::Desktop));
         assert!(!path_allowed_for("/api/v1/machines", ClientKind::Desktop));
         assert!(!path_allowed_for(
+            "/api/v1/machines/tasks/follow",
+            ClientKind::Desktop
+        ));
+        assert!(!path_allowed_for(
             "/api/v1/machines/m/proxy/api/v1/sessions",
             ClientKind::Desktop
         ));

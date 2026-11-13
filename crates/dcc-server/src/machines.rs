@@ -16,7 +16,9 @@ use dcc_remote::offer::{fingerprint, PairingOffer};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-use crate::machine_link::{LinkError, LinkIdentity, LinkResponse, MachineLink, MachineTarget};
+use crate::machine_link::{
+    LinkError, LinkIdentity, LinkResponse, MachineLink, MachineTarget, StreamItem,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum MachineError {
@@ -174,6 +176,9 @@ pub fn this_platform() -> &'static str {
 pub struct MachineRegistry {
     db_path: PathBuf,
     links: tokio::sync::Mutex<HashMap<String, MachineLink>>,
+    /// The mirrored tasks being followed now, by workspace id: one
+    /// follower each.
+    following: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl MachineRegistry {
@@ -181,6 +186,25 @@ impl MachineRegistry {
         Self {
             db_path,
             links: tokio::sync::Mutex::new(HashMap::new()),
+            following: std::sync::Mutex::new(std::collections::HashSet::new()),
+        }
+    }
+
+    pub fn db_path(&self) -> &Path {
+        &self.db_path
+    }
+
+    /// Takes the task to follow; false when it is already followed.
+    pub fn start_following(&self, workspace_id: &str) -> bool {
+        self.following
+            .lock()
+            .map(|mut following| following.insert(workspace_id.to_string()))
+            .unwrap_or(false)
+    }
+
+    pub fn stop_following(&self, workspace_id: &str) {
+        if let Ok(mut following) = self.following.lock() {
+            following.remove(workspace_id);
         }
     }
 
@@ -318,6 +342,18 @@ impl MachineRegistry {
     ) -> Result<LinkResponse, MachineError> {
         let link = self.link(id).await?;
         Ok(link.request(method, path, headers, body).await?)
+    }
+}
+
+impl MachineRegistry {
+    /// One of the machine's event streams, on its channel.
+    pub async fn subscribe(
+        &self,
+        id: &str,
+        path: &str,
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<StreamItem>, MachineError> {
+        let link = self.link(id).await?;
+        Ok(link.subscribe(path)?)
     }
 }
 

@@ -106,6 +106,13 @@ async fn remove(
 ) -> Result<Json<Value>, HttpApiError> {
     operator(&device)?;
     let removed = backend.machines().remove(&id).await.map_err(failed)?;
+    // Its tasks stay as history, no longer followed.
+    let path = backend.workspace.db_path.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::machine_mirror::open(&path)
+            .and_then(|conn| crate::machine_mirror::forget_machine(&conn, &id))
+    })
+    .await;
     Ok(Json(json!({ "removed": removed })))
 }
 

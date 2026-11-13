@@ -82,6 +82,7 @@ mod git_changes;
 mod git_conflicts;
 mod keep_awake;
 mod local_branches;
+mod machine_tasks;
 mod machines;
 mod mcp;
 mod menu_bar;
@@ -1238,6 +1239,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(remote_respond_approval_handler),
         )
         .merge(remote_devices::routes())
+        .merge(machine_tasks::routes())
         .merge(machines::routes())
         .merge(pull_request_hub::routes());
     let protected_routes = if backend.terminals {
