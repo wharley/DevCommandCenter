@@ -9,6 +9,7 @@
 mod dialogs;
 mod files;
 mod image;
+mod remote_file;
 mod review;
 mod review_view;
 mod save;
@@ -128,6 +129,8 @@ pub struct Stage {
     pub(crate) focus_editor: bool,
     /// The desktop to save through (tests point it elsewhere).
     pub(crate) endpoint: Option<crate::data::desktop_api::DesktopApi>,
+    /// The task on screen, to ask its machine for a file by.
+    pub(crate) remote_task: Option<String>,
     /// The database the branch's base is read from (tests use their own).
     pub(crate) db_path: std::path::PathBuf,
     _save: Option<Task<()>>,
@@ -156,6 +159,7 @@ impl Stage {
             reconcile: None,
             focus_editor: false,
             endpoint: None,
+            remote_task: None,
             db_path: crate::data::loader::database_path(),
             _save: None,
         }

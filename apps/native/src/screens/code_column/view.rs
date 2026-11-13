@@ -144,14 +144,12 @@ impl Render for CodeColumn {
                 )
                 .side(crate::ui::tooltip::Side::Bottom),
             );
-        let body = if self.on_machine {
-            // Its files are on the machine: its changes are read there.
-            super::remote::remote_changes(self, cx)
-        } else {
-            match self.tab {
-                CodeColumnTab::Files => tree::files_tree(self, cx).into_any_element(),
-                CodeColumnTab::Changes => changes::changes(self, window, cx),
-            }
+        let body = match self.tab {
+            // The same tree for a task on another machine, from its listing.
+            CodeColumnTab::Files => tree::files_tree(self, cx).into_any_element(),
+            // Its changes are read on the machine.
+            CodeColumnTab::Changes if self.on_machine => super::remote::remote_changes(self, cx),
+            CodeColumnTab::Changes => changes::changes(self, window, cx),
         };
         div()
             .id("code-column")

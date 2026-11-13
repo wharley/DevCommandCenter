@@ -133,6 +133,15 @@ impl Stage {
 
     fn load_active_file(&mut self, cx: &mut Context<Self>) {
         let dark = cx.theme_dark();
+        // A task on another machine: its file is asked there, to read.
+        let remote = self.files.as_ref().and_then(|tabs| {
+            super::remote_file::RemoteSource::of(
+                &tabs.root,
+                self.remote_task.as_deref(),
+                self.endpoint.clone(),
+                cx,
+            )
+        });
         let Some(tabs) = self.files.as_mut() else {
             return;
         };
@@ -148,6 +157,10 @@ impl Stage {
             return;
         }
         let path = file.path.clone();
+        if let (true, Some(remote)) = (is_viewable_image(&path), &remote) {
+            file.load = Some(FileLoad::Failed(remote.image.clone()));
+            return;
+        }
         if is_viewable_image(&path) {
             let absolute =
                 match dcc_infra::workspace_file_preview::validate_git_relative_path(&path) {
@@ -161,10 +174,14 @@ impl Stage {
             return;
         }
         let read_path = path.clone();
+        let read_only = remote.is_some();
         let task = cx.spawn(async move |this, cx| {
             let text = cx
                 .background_executor()
                 .spawn(async move {
+                    if let Some(remote) = remote {
+                        return remote.read(&read_path);
+                    }
                     use dcc_infra::workspace_file_preview::{
                         read_worktree_file_text, validate_git_relative_path,
                     };
@@ -200,6 +217,7 @@ impl Stage {
                             let mut view =
                                 FileView::new(name, text, indentation, dark, cx).annotatable();
                             view.focus(line, cx);
+                            view.read_only = read_only;
                             view
                         });
                         // The first edit pins a preview tab.

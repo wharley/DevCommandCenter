@@ -311,8 +311,10 @@ impl Shell {
                 this.code_column
                     .update(cx, |column, cx| column.set_open_diff(None, cx));
             }
-            this.stage
-                .update(cx, |stage, cx| stage.set_agent_working(running, cx));
+            this.stage.update(cx, |stage, cx| {
+                stage.remote_task = remote_task.clone();
+                stage.set_agent_working(running, cx)
+            });
             let task_id = place.as_ref().map(|place| place.workspace_id.clone());
             this.browser_task_changed(task_id.as_deref(), cx);
             #[cfg(target_os = "macos")]
@@ -588,7 +590,7 @@ impl Shell {
                     column.set_open_diff(None, cx);
                     column.reveal(Some(path.clone()), cx);
                 });
-                if let Some(root) = self.code_column.read(cx).root.clone() {
+                if let Some(root) = self.code_column.read(cx).tree_root() {
                     self.stage.update(cx, |stage, cx| {
                         stage.open_file(root, path, None, window, cx)
                     });

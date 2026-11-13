@@ -110,6 +110,7 @@ mod skills;
 mod task_proposals;
 mod terminals;
 mod turn_review;
+mod workspace_tree;
 
 pub use browser_bridge::{
     native_browser_bridge, BridgeOpKind, BridgeReply, BrowserFuture, DesktopBrowser, PageReport,
@@ -678,6 +679,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/mobile/workspaces/:workspace_id/files",
             get(mobile::workspace_files),
+        )
+        .route(
+            "/api/v1/mobile/workspaces/:workspace_id/tree",
+            get(workspace_tree::tree),
         )
         .route(
             "/api/v1/mobile/repositories/:repository_id/files",

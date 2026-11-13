@@ -107,6 +107,7 @@ pub mod rail;
 pub mod recap;
 pub mod remote_access;
 pub mod remote_delivery;
+pub mod remote_files;
 pub mod review_comment_text;
 pub mod rewind;
 pub mod room_approvals;

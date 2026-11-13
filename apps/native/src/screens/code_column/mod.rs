@@ -8,6 +8,7 @@ pub(crate) mod delivery;
 mod recap;
 mod remote;
 mod remote_delivery;
+mod remote_files;
 pub(crate) mod review;
 mod tree;
 mod turn;
@@ -101,6 +102,8 @@ pub struct CodeColumn {
     pub(crate) root: Option<String>,
     /// The task on screen runs on another machine (`root` is then none).
     pub(crate) on_machine: bool,
+    /// That task's folder on its machine, as the mirror stores it.
+    pub(crate) machine_root: Option<String>,
     /// That task's changes, read on its machine.
     pub(crate) remote: remote::Remote,
     pub(crate) tab: CodeColumnTab,
@@ -172,6 +175,7 @@ impl CodeColumn {
         Self {
             root: None,
             on_machine: false,
+            machine_root: None,
             remote: remote::Remote::default(),
             tab,
             files: Loaded::Pending,
@@ -241,11 +245,13 @@ impl CodeColumn {
         let on_machine = root
             .as_deref()
             .is_some_and(|root| crate::data::machines::machine_of_path(root).is_some());
+        let machine_root = root.clone().filter(|_| on_machine);
         let root = root.filter(|_| !on_machine);
-        if root == self.root && on_machine == self.on_machine {
+        if root == self.root && machine_root == self.machine_root {
             return;
         }
         self.on_machine = on_machine;
+        self.machine_root = machine_root;
         self.root = root;
         self.files = Loaded::Pending;
         self.tree = Arc::default();
@@ -285,7 +291,7 @@ impl CodeColumn {
             return;
         }
         self.selected = path.clone();
-        if let (Some(path), Some(root)) = (path, self.root.clone()) {
+        if let (Some(path), Some(root)) = (path, self.tree_root()) {
             let open = self.expanded.entry(root).or_default();
             open.extend(ancestor_folder_paths(&path));
             self.sync_rows();
@@ -310,7 +316,7 @@ impl CodeColumn {
     }
 
     fn open_folders(&self) -> HashSet<String> {
-        self.root
+        self.tree_root()
             .as_ref()
             .and_then(|root| self.expanded.get(root))
             .cloned()
@@ -342,7 +348,7 @@ impl CodeColumn {
     }
 
     pub(crate) fn toggle_folder(&mut self, path: &str, cx: &mut Context<Self>) {
-        let Some(root) = self.root.clone() else {
+        let Some(root) = self.tree_root() else {
             return;
         };
         let open = self.expanded.entry(root).or_default();
@@ -354,7 +360,7 @@ impl CodeColumn {
     }
 
     pub(crate) fn set_folder_open(&mut self, path: &str, open: bool, cx: &mut Context<Self>) {
-        let Some(root) = self.root.clone() else {
+        let Some(root) = self.tree_root() else {
             return;
         };
         let folders = self.expanded.entry(root).or_default();

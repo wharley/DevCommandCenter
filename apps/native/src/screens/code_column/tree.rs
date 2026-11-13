@@ -260,7 +260,7 @@ fn key_down(column: &mut CodeColumn, event: &KeyDownEvent, cx: &mut Context<Code
 
 pub(super) fn files_tree(column: &CodeColumn, cx: &mut Context<CodeColumn>) -> AnyElement {
     let colors = cx.theme().colors.clone();
-    let body = if column.root.is_none() {
+    let body = if column.tree_root().is_none() {
         note(
             cx.t("inspector.codeSection.unavailable"),
             colors.muted_foreground,

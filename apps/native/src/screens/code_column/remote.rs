@@ -86,6 +86,7 @@ impl CodeColumn {
             ..Remote::default()
         };
         self.read_remote_changes(cx);
+        self.load_remote_files(cx);
     }
 
     /// A turn that ended may have changed files: read again, once.
@@ -94,6 +95,8 @@ impl CodeColumn {
         self.remote.running = running;
         if ended && self.remote.task.is_some() {
             self.read_remote_changes(cx);
+            // The turn may have created or removed files.
+            self.load_remote_files(cx);
         }
     }
 
