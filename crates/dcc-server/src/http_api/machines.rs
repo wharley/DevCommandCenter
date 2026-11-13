@@ -31,6 +31,10 @@ pub(super) fn routes() -> Router<HttpState> {
             "/api/v1/machines/:id/proxy/*rest",
             axum::routing::any(proxy),
         )
+        .route(
+            "/api/v1/machines/:id/terminals/events/stream",
+            get(terminal_stream),
+        )
 }
 
 fn operator(device: &Option<axum::Extension<PairedDeviceIdentity>>) -> Result<(), HttpApiError> {
@@ -162,6 +166,43 @@ async fn proxy(
         .cloned()
         .unwrap_or_else(|| "application/json".to_string());
     Ok((status, [(header::CONTENT_TYPE, content_type)], answer.body).into_response())
+}
+
+/// What the machine's terminals print, as the app's dock reads its own
+/// (`/api/v1/terminals/events/stream`): the channel's subscription, event by
+/// event. It ends when the machine leaves; the dock opens it again.
+async fn terminal_stream(
+    State(backend): State<Arc<HttpBackend>>,
+    device: Option<axum::Extension<PairedDeviceIdentity>>,
+    Path(id): Path<String>,
+) -> Result<
+    Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>,
+    HttpApiError,
+> {
+    use tokio_stream::wrappers::UnboundedReceiverStream;
+    use tokio_stream::StreamExt as _;
+
+    operator(&device)?;
+    let events = backend
+        .machines()
+        .subscribe(&id, crate::remote_terminals::STREAM_PATH)
+        .await
+        .map_err(failed)?;
+    let stream = UnboundedReceiverStream::new(events)
+        .map_while(|item| match item {
+            crate::machine_link::StreamItem::Event(event) => Some(event),
+            crate::machine_link::StreamItem::End(_) => None,
+        })
+        .map(|event| {
+            Ok(Event::default()
+                .event(event.event)
+                .data(event.data.to_string()))
+        });
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
 }
 
 #[cfg(test)]

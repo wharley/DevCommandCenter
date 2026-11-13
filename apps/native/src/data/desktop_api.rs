@@ -158,6 +158,10 @@ impl TurnOptions {
     }
 }
 
+/// Every terminal's output, and where a machine's comes from here.
+pub(crate) const TERMINAL_STREAM: &str = "/api/v1/terminals/events/stream";
+const TERMINAL_STREAM_OF_MACHINE: &str = "/terminals/events/stream";
+
 /// The field that carries this computer's account for a provider.
 const PROVIDER_RUNTIME: &str = "providerRuntime";
 
@@ -264,13 +268,25 @@ impl DesktopApi {
         read_timeout: Duration,
     ) -> Result<(std::io::BufReader<TcpStream>, bool), ApiError> {
         use std::io::BufRead;
-        if self.machine.is_some() {
-            // A machine's streams come as subscriptions on its channel,
-            // which the proxy does not carry yet.
-            return Err(ApiError::Failed(
-                "streams of a remote machine are not read here".into(),
-            ));
-        }
+        // A machine's streams come as subscriptions on its channel, which
+        // this computer's server hands over on a route of its own: its
+        // terminals', for now.
+        let machine_stream;
+        let path = match &self.machine {
+            None => path,
+            Some(id) if path == TERMINAL_STREAM => {
+                machine_stream = format!(
+                    "/api/v1/machines/{}{TERMINAL_STREAM_OF_MACHINE}",
+                    encode(id)
+                );
+                &machine_stream
+            }
+            Some(_) => {
+                return Err(ApiError::Failed(
+                    "this stream of a remote machine is not read here".into(),
+                ));
+            }
+        };
         let address = SocketAddr::from(([127, 0, 0, 1], self.port));
         let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
             .map_err(|_| ApiError::DesktopClosed)?;

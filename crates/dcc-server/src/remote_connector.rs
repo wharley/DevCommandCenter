@@ -1037,6 +1037,7 @@ impl RemoteHub {
             hub: Arc::downgrade(self),
             device_id: device_id.clone(),
             client,
+            terminals: Arc::default(),
             stop: stop.clone(),
             foreground,
         });
@@ -1191,6 +1192,8 @@ struct ChannelContext {
     device_id: String,
     /// A phone or another DCC: what the channel may reach.
     client: ClientKind,
+    /// The terminals this channel opened here (another DCC's only).
+    terminals: Arc<crate::remote_terminals::ChannelTerminals>,
     stop: Arc<watch::Sender<Option<u16>>>,
     foreground: Arc<StdMutex<Option<Instant>>>,
 }
@@ -1513,6 +1516,11 @@ fn dispatch(
                 let _ = tx.try_send(error_response(id, 403, "not available remotely"));
                 return;
             }
+            // A terminal's own routes: only the ones this channel opened.
+            if !context.terminals.may_reach(&request.path) {
+                let _ = tx.try_send(error_response(id, 403, "not this channel's terminal"));
+                return;
+            }
             let task = tokio::spawn(handle_request(context.clone(), request, tx.clone()));
             if let Some(previous) = tasks.insert(id, task.abort_handle()) {
                 previous.abort();
@@ -1520,7 +1528,18 @@ fn dispatch(
         }
         Frame::Sub(subscribe) => {
             let id = subscribe.id;
-            let task = tokio::spawn(handle_subscription(context.clone(), subscribe, tx.clone()));
+            // Another DCC's terminals here: their output, its own only.
+            let terminals = context.client == ClientKind::Desktop
+                && subscribe.path == crate::remote_terminals::STREAM_PATH;
+            let task = if terminals {
+                tokio::spawn(crate::remote_terminals::stream(
+                    context.terminals.clone(),
+                    id,
+                    tx.clone(),
+                ))
+            } else {
+                tokio::spawn(handle_subscription(context.clone(), subscribe, tx.clone()))
+            };
             if let Some(previous) = tasks.insert(id, task.abort_handle()) {
                 previous.abort();
             }
@@ -1553,6 +1572,7 @@ async fn handle_request(
             return;
         }
     };
+    let path = request.path.clone();
     let http_request = match context.request(&request.method, &request.path, &request.headers, body)
     {
         Ok(request) => request,
@@ -1582,12 +1602,15 @@ async fn handle_request(
         }
     }
     let frame = match axum::body::to_bytes(response.into_body(), MAX_RESPONSE_BODY).await {
-        Ok(bytes) => Frame::Res(FrameResponse {
-            id,
-            status,
-            headers,
-            body: FrameBody::from_bytes(bytes.to_vec()),
-        }),
+        Ok(bytes) => {
+            context.terminals.note_opened(&path, status, &bytes);
+            Frame::Res(FrameResponse {
+                id,
+                status,
+                headers,
+                body: FrameBody::from_bytes(bytes.to_vec()),
+            })
+        }
         Err(_) => error_response(id, 502, "response too large for the remote channel"),
     };
     let _ = tx.send(frame).await;

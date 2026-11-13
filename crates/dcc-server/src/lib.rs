@@ -44,6 +44,7 @@ pub mod prompt_attachments;
 pub mod quick_composer_journal;
 pub mod remote_connector;
 pub mod remote_push;
+pub(crate) mod remote_terminals;
 pub mod review_tools;
 pub mod github_tool;
 pub mod github_tool_repo;

@@ -114,6 +114,14 @@ pub fn machine_of_path(path: &str) -> Option<String> {
     Some(id.to_string())
 }
 
+/// The machine's own path of a mirrored task's path (a shell's folder
+/// there); none for a path of this computer.
+pub fn remote_path(path: &str) -> Option<String> {
+    let rest = path.strip_prefix(MACHINE_PATH_SCHEME)?;
+    let (_, on_machine) = rest.split_once('/')?;
+    Some(format!("/{on_machine}"))
+}
+
 /// A row's project name, saying so when the task runs on a machine:
 /// "vendeagora-app · em outra máquina".
 pub fn with_place(project: Option<String>, path: &str, elsewhere: &str) -> Option<String> {
@@ -283,6 +291,11 @@ mod tests {
             Some("m-1")
         );
         assert_eq!(machine_of_path("/Users/me/app"), None);
+        assert_eq!(
+            remote_path("dcc-machine://m-1/Users/gio/app").as_deref(),
+            Some("/Users/gio/app")
+        );
+        assert_eq!(remote_path("/Users/me/app"), None);
         assert_eq!(machine_of_path("dcc-machine:///x"), None);
         assert!(api_for_path(Some("/Users/me/app")).is_none());
         assert_eq!(
@@ -322,6 +335,21 @@ mod tests {
             .unwrap();
         let sent: Value = serde_json::from_str(&server.join().unwrap().1).unwrap();
         assert!(sent.get("providerRuntime").is_some());
+    }
+
+    #[test]
+    fn a_machines_terminals_are_heard_on_this_computers_route_for_them() {
+        let (port, server) = crate::test_support::fake_desktop(String::new());
+        let machine = DesktopApi::new(port, "k").on_machine("m-1");
+        let _ = machine.terminal_events();
+        let (request, _) = server.join().unwrap();
+        assert_eq!(request, "GET /api/v1/machines/m-1/terminals/events/stream");
+        // No other stream of a machine is read from here yet.
+        assert!(
+            machine
+                .open_stream("/api/v1/events/stream", std::time::Duration::from_secs(1))
+                .is_err()
+        );
     }
 
     #[test]

@@ -121,6 +121,7 @@ pub use keep_awake::DesktopKeepAwake;
 pub use menu_bar::DesktopMenuBar;
 pub use shortcuts::native_quick_composer;
 pub use shortcuts::DesktopShortcuts;
+pub(crate) use terminals::subscribe_desktop_terminal_events;
 pub use terminals::{publish_desktop_terminal_event, DesktopTerminalEvent, DesktopTerminals};
 
 pub fn recover_mobile_tasks(db_path: &FsPath) -> Result<(), String> {

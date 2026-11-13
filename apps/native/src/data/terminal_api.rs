@@ -233,7 +233,7 @@ impl DesktopApi {
     /// Every terminal's output and end, until the desktop closes.
     pub fn terminal_events(&self) -> Result<TerminalEvents, ApiError> {
         let (reader, chunked) =
-            self.open_stream("/api/v1/terminals/events/stream", Duration::from_secs(45))?;
+            self.open_stream(super::desktop_api::TERMINAL_STREAM, Duration::from_secs(45))?;
         Ok(TerminalEvents {
             body: Body::new(reader, chunked),
             decoder: SseDecoder::default(),

@@ -29,7 +29,7 @@ pub enum DesktopTerminalEvent {
 }
 
 impl DesktopTerminalEvent {
-    fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::Output { .. } => "terminal-output",
             Self::Exit { .. } => "terminal-exit",
@@ -43,6 +43,12 @@ const EVENT_CAPACITY: usize = 1024;
 fn events() -> &'static broadcast::Sender<DesktopTerminalEvent> {
     static EVENTS: OnceLock<broadcast::Sender<DesktopTerminalEvent>> = OnceLock::new();
     EVENTS.get_or_init(|| broadcast::channel(EVENT_CAPACITY).0)
+}
+
+/// What every PTY prints from now on, for the relay channel of another DCC
+/// (`remote_terminals`), which keeps only its own.
+pub(crate) fn subscribe_desktop_terminal_events() -> broadcast::Receiver<DesktopTerminalEvent> {
+    events().subscribe()
 }
 
 /// Called by the runtime next to each `terminal-output` / `terminal-exit`.

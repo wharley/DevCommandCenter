@@ -23,6 +23,10 @@ const MIN_CHAT_HEIGHT: f32 = 360.0;
 const FIRST_COLS: u16 = 120;
 const FIRST_ROWS: u16 = 32;
 const ACTIVITY_EVERY: Duration = Duration::from_secs(2);
+/// How long before a terminal stream that ended is opened again; a
+/// machine's wait grows up to the second one while it does not answer.
+const STREAM_RETRY: Duration = Duration::from_secs(2);
+const STREAM_RETRY_MAX: Duration = Duration::from_secs(60);
 
 /// `clampHeight` inside a parent this tall.
 pub fn clamp_height(height: f32, parent: f32) -> f32 {
@@ -154,6 +158,9 @@ pub struct TerminalDock {
     /// "Há um processo em execução": the tab and what runs in it.
     pub(super) closing: Option<(String, String)>,
     _stream: Option<Task<()>>,
+    /// A machine's terminal stream, by machine: the shells of tasks that
+    /// run there.
+    _machine_streams: HashMap<String, Task<()>>,
     _activity: Option<Task<()>>,
     _sessions: Vec<Subscription>,
 }
@@ -178,6 +185,7 @@ impl TerminalDock {
             renaming: None,
             closing: None,
             _stream: None,
+            _machine_streams: HashMap::new(),
             _activity: None,
             _sessions: Vec::new(),
         }
@@ -310,14 +318,29 @@ impl TerminalDock {
         }
         let scope = self.scope()?;
         let cwd = scope.cwd?;
-        self.ensure_stream(cx);
+        // A task on another machine: its shell opens there, in its folder
+        // there, with that machine's own shell.
+        let machine = crate::data::machines::machine_of_path(&cwd);
+        let (cwd, shell, api) = match &machine {
+            Some(id) => {
+                self.ensure_machine_stream(id, cx);
+                (
+                    crate::data::machines::remote_path(&cwd)?,
+                    None::<String>,
+                    self.api.as_ref().map(|api| api.on_machine(id)),
+                )
+            }
+            None => {
+                self.ensure_stream(cx);
+                (cwd, std::env::var("SHELL").ok(), self.api.clone())
+            }
+        };
         let context = self
             .place
             .as_ref()
             .map(|place| place.context.clone())
             .unwrap_or_default();
-        let spec = ShellSpec::login(cwd, std::env::var("SHELL").ok(), FIRST_COLS, FIRST_ROWS);
-        let api = self.api.clone();
+        let spec = ShellSpec::login(cwd, shell, FIRST_COLS, FIRST_ROWS);
         let session = cx.new(|cx| TerminalSession::new(owner.clone(), spec, context, api, cx));
         self._sessions.push(
             cx.subscribe(&session, |dock, session, event, cx| match event {
@@ -387,11 +410,34 @@ impl TerminalDock {
         let Some(api) = self.api.clone() else {
             return;
         };
+        self._stream = Some(Self::read_stream(api, false, cx));
+        self.follow_activity(cx);
+    }
+
+    /// The same for a machine's terminals, one connection per machine. A
+    /// machine that is off is asked again less and less often (it goes
+    /// through the relay), never every two seconds.
+    fn ensure_machine_stream(&mut self, machine: &str, cx: &mut Context<Self>) {
+        if self._machine_streams.contains_key(machine) {
+            return;
+        }
+        let Some(api) = self.api.clone() else {
+            return;
+        };
+        let stream = Self::read_stream(api.on_machine(machine), true, cx);
+        self._machine_streams.insert(machine.to_string(), stream);
+    }
+
+    /// Reads `api`'s terminal stream on a thread and hands each event to
+    /// the dock, opening it again when it ends.
+    fn read_stream(api: DesktopApi, patient: bool, cx: &mut Context<Self>) -> Task<()> {
         let (sender, mut receiver) = futures::channel::mpsc::unbounded::<TerminalEvent>();
         std::thread::spawn(move || {
             let mut first = true;
+            let mut wait = STREAM_RETRY;
             while !sender.is_closed() {
                 if let Ok(events) = api.terminal_events() {
+                    wait = STREAM_RETRY;
                     if !first && sender.unbounded_send(TerminalEvent::Lagged).is_err() {
                         return;
                     }
@@ -401,11 +447,13 @@ impl TerminalDock {
                             return;
                         }
                     }
+                } else if patient {
+                    wait = (wait * 2).min(STREAM_RETRY_MAX);
                 }
-                std::thread::sleep(Duration::from_secs(2));
+                std::thread::sleep(wait);
             }
         });
-        self._stream = Some(cx.spawn(async move |this, cx| {
+        cx.spawn(async move |this, cx| {
             while let Some(event) = receiver.next().await {
                 if this
                     .update(cx, |dock, cx| dock.dispatch(event, cx))
@@ -414,8 +462,7 @@ impl TerminalDock {
                     break;
                 }
             }
-        }));
-        self.follow_activity(cx);
+        })
     }
 
     pub(super) fn dispatch(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
