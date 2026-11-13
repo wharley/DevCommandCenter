@@ -9,7 +9,7 @@
 
 mod agent;
 mod agent_view;
-mod blocks_view;
+mod blocks_inline;
 mod completion_view;
 mod confirm;
 mod files_view;
@@ -158,6 +158,7 @@ pub struct MergeResolver {
     /// The request asked for the base to be brought in at once: done at
     /// the first read that finds no merge here, and only then.
     pub(crate) start_pending: bool,
+    _compare: Option<gpui::Task<()>>,
     /// The result area's width last frame (side by side from 1000px).
     pub(crate) width: Rc<Cell<f32>>,
     /// The agent's run on the open file, and the answer it left there.
@@ -176,6 +177,7 @@ impl MergeResolver {
     pub fn new(request: MergeResolverRequest, cx: &mut Context<Self>) -> Self {
         let mut resolver = Self {
             start_pending: request.start,
+            _compare: None,
             request,
             endpoint: None,
             state: Load::Pending,
@@ -272,6 +274,9 @@ impl MergeResolver {
                 && let Some(open) = resolver.open.as_mut()
             {
                 open.buffer = editor.read(cx).text().to_string();
+                // The blocks moved with the text: paint them where they are.
+                resolver.decorate(cx);
+                resolver.refresh_compare(cx);
                 cx.notify();
             }
         });
@@ -288,6 +293,7 @@ impl MergeResolver {
             active_hunk: 0,
             _edits: edits,
         });
+        self.decorate(cx);
         cx.notify();
     }
 
@@ -353,6 +359,7 @@ impl MergeResolver {
         let editor = open.editor.clone();
         self.suggestion = None;
         editor.update(cx, |editor, cx| editor.replace_text(&text, cx));
+        self.decorate(cx);
         cx.notify();
     }
 
@@ -366,6 +373,8 @@ impl MergeResolver {
         } else {
             open.active_hunk.saturating_sub(1)
         };
+        // The block comes into view in the file.
+        self.reveal_hunk(cx);
         cx.notify();
     }
 
@@ -411,6 +420,29 @@ impl MergeResolver {
             }
         };
         cx.notify();
+    }
+
+    /// The comparison beside the editor follows what is typed, a moment
+    /// after the text settles.
+    pub(crate) fn refresh_compare(&mut self, cx: &mut Context<Self>) {
+        let Some(view) = self
+            .open
+            .as_ref()
+            .filter(|open| open.compare.is_some())
+            .map(|open| open.view)
+        else {
+            return;
+        };
+        self._compare = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(300))
+                .await;
+            let _ = this.update(cx, |resolver, cx| {
+                if resolver.open.as_ref().is_some_and(|open| open.view == view) {
+                    resolver.set_view(view, cx);
+                }
+            });
+        }));
     }
 
     /// `requestClose`: not while something runs; an unsaved edit asks.

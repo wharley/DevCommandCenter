@@ -124,6 +124,12 @@ fn row(view: &FileView, index: usize, style: &RowStyle, cx: &mut Context<FileVie
     let (picked_line, picked_number, picked_fg) =
         selected_colors(palette, palette.background, palette.background);
     let plus = view.line_plus(index, GROUP, style.number_width, cell, cx);
+    let band = super::bands::band_at(&view.bands, index);
+    // What the owner pins to the right of this line.
+    let pinned = view
+        .line_actions
+        .clone()
+        .and_then(|actions| actions(index, cx));
     let brackets: Vec<f32> = style
         .brackets
         .into_iter()
@@ -177,6 +183,8 @@ fn row(view: &FileView, index: usize, style: &RowStyle, cx: &mut Context<FileVie
                     line.bg(picked_line)
                         .group_hover(GROUP, move |row| row.bg(picked_line))
                 })
+                // The owner's tint, under everything of the line.
+                .children(band.map(|color| div().absolute().inset_0().bg(color)))
                 .children(matches.into_iter().map(|(from, to)| {
                     div()
                         .absolute()
@@ -227,6 +235,19 @@ fn row(view: &FileView, index: usize, style: &RowStyle, cx: &mut Context<FileVie
                 })),
         )
         .children(plus)
+        // Over the line's right end, and not a click on the text under it.
+        .children(pinned.map(|pinned| {
+            div()
+                .occlude()
+                .absolute()
+                .top_0()
+                .right(px(10.0))
+                .h_full()
+                .flex()
+                .items_center()
+                .cursor_default()
+                .child(pinned)
+        }))
         .into_any_element()
 }
 

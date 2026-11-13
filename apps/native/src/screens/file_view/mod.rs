@@ -7,6 +7,7 @@
 //! project's indent. Tabs are drawn to their stop. A file opened at a line
 //! shows that line.
 
+pub mod bands;
 mod buffer;
 mod commands;
 mod comments;
@@ -93,6 +94,10 @@ pub struct FileView {
     pub(crate) annotating: Option<pick::Annotating>,
     /// Typing does nothing (`readOnly`, while the merge's agent works).
     pub(crate) read_only: bool,
+    /// Tints behind runs of lines, set by the view that owns the file.
+    pub(crate) bands: Vec<bands::LineBand>,
+    /// What sits at the right of a line.
+    pub(crate) line_actions: Option<bands::LineActions>,
     _colors: Option<Task<()>>,
     _blink: Option<Task<()>>,
 }
@@ -133,6 +138,8 @@ impl FileView {
             search: None,
             annotating: None,
             read_only: false,
+            bands: Vec::new(),
+            line_actions: None,
             _colors: None,
             _blink: None,
         };

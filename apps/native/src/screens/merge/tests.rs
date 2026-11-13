@@ -202,7 +202,8 @@ fn blocks_files_and_the_merge_get_resolved(cx: &mut TestAppContext) {
         assert_eq!(incoming, "origin/main · branch base");
     });
     assert!(cx.debug_bounds("merge-hunk-position").is_some());
-    click(cx, "merge-accept-both");
+    // The block's choices sit on its own first line, in the file.
+    click(cx, "merge-accept-both-0");
     resolver.read_with(cx, |resolver, cx| {
         let open = resolver.open.as_ref().unwrap();
         assert_eq!(open.buffer, "before\nmine\ntheirs\nafter\n");
@@ -213,14 +214,26 @@ fn blocks_files_and_the_merge_get_resolved(cx: &mut TestAppContext) {
         );
         assert!(open.hunks().is_empty());
     });
-    assert!(cx.debug_bounds("merge-hunks-done").is_some());
+    assert!(
+        cx.debug_bounds("merge-hunk-position").is_none(),
+        "no block left"
+    );
+    assert!(cx.debug_bounds("merge-accept-both-0").is_none());
     click(cx, "merge-save");
     // The binary file is next: only whole sides can resolve it.
     resolver.read_with(cx, |resolver, _| {
         assert_eq!(resolver.open.as_ref().unwrap().entry.path, "logo.png");
         assert_eq!(resolver.resolved(), (1, 2));
     });
-    click(cx, "merge-use-current");
+    // "Usar arquivo …" lives in the file's "⋯" menu.
+    assert!(cx.debug_bounds("merge-more").is_some());
+    resolver.update(cx, |resolver, cx| {
+        resolver.use_whole_side(
+            dcc_core::domain::merge_conflict::WorkspaceGitConflictSide::Current,
+            cx,
+        )
+    });
+    cx.run_until_parked();
     // Every file resolved: the checks are asked about, then the merge goes.
     assert!(cx.debug_bounds("merge-validation-commands").is_some());
     click(cx, "merge-complete");
@@ -284,7 +297,12 @@ fn a_doubtful_result_or_a_lost_edit_asks_first(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("merge-confirm-text").is_none(), "answered");
     // The edit is unsaved: another file, or closing, asks.
-    click(cx, "merge-file-src/b.rs");
+    // Another file, from the bar's "arquivo 1 de 2".
+    assert!(cx.debug_bounds("merge-files").is_some());
+    resolver.update(cx, |resolver, cx| {
+        resolver.request_open("src/b.rs".into(), cx)
+    });
+    cx.run_until_parked();
     resolver.read_with(cx, |resolver, _| {
         assert_eq!(
             resolver.pending,
@@ -465,8 +483,8 @@ fn another_operation_is_left_to_the_terminal(cx: &mut TestAppContext) {
     );
     resolver.read_with(cx, |resolver, _| assert!(resolver.open.is_some()));
     assert!(
-        cx.debug_bounds("merge-file-src/a.rs").is_none(),
-        "not the files"
+        cx.debug_bounds("merge-bar").is_none(),
+        "not the file's editor"
     );
     assert!(cx.debug_bounds("merge-resolver").is_some());
 }

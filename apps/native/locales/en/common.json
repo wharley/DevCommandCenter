@@ -5530,13 +5530,18 @@
       "unsupported": "The file is binary, non-UTF-8, or exists only as a special Git object.",
       "instruction": "Choose one of the complete versions or delete the result."
     },
+    "bar": {
+      "file": "file {{current}} of {{total}}",
+      "compare": "Compare",
+      "compareOff": "Close the comparison",
+      "comparing": "What changes against: {{side}}"
+    },
     "hunk": {
       "position": "Hunk {{current}} of {{total}}",
-      "manualHint": "Resolve this hunk manually or use the agent for the whole file.",
-      "accept": "Accept {{branch}}",
+      "acceptMine": "Accept yours",
+      "acceptIncoming": "Accept the base",
       "acceptBoth": "Accept both",
       "resolveWithAgent": "Resolve this hunk with agent",
-      "nonePending": "No hunks pending. Review the result and mark the file as resolved.",
       "pending_one": "{{count}} hunk still pending",
       "pending_other": "{{count}} hunks still pending"
     },
@@ -5577,12 +5582,9 @@
       }
     },
     "result": {
-      "title": "Editable result",
-      "finalLabel": "Final result",
       "restore": "Restore",
       "resolveHint": "Conflict markers remain in the result. Resolve them manually or ask the agent to resolve the whole file.",
       "views": {
-        "edit": "Final code",
         "compareCurrent": "Compare with my code",
         "compareIncoming": "Compare with base"
       },

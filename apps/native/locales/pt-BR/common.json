@@ -5530,13 +5530,18 @@
       "unsupported": "O arquivo é binário, não UTF-8 ou existe somente como objeto especial do Git.",
       "instruction": "Escolha uma das versões completas ou a exclusão."
     },
+    "bar": {
+      "file": "arquivo {{current}} de {{total}}",
+      "compare": "Comparar",
+      "compareOff": "Fechar a comparação",
+      "comparing": "O que muda em relação a: {{side}}"
+    },
     "hunk": {
       "position": "Bloco {{current}} de {{total}}",
-      "manualHint": "Resolva manualmente este bloco ou use o agente para o arquivo inteiro.",
-      "accept": "Aceitar {{branch}}",
+      "acceptMine": "Aceitar o seu",
+      "acceptIncoming": "Aceitar a base",
       "acceptBoth": "Aceitar ambos",
       "resolveWithAgent": "Resolver este bloco com agente",
-      "nonePending": "Sem blocos pendentes. Revise o resultado e marque o arquivo como resolvido.",
       "pending_one": "{{count}} bloco ainda pendente",
       "pending_other": "{{count}} blocos ainda pendentes"
     },
@@ -5577,12 +5582,9 @@
       }
     },
     "result": {
-      "title": "Resultado editável",
-      "finalLabel": "Resultado final",
       "restore": "Restaurar",
       "resolveHint": "Ainda há marcadores no resultado. Resolva manualmente ou peça ao agente para resolver o arquivo inteiro.",
       "views": {
-        "edit": "Código final",
         "compareCurrent": "Comparar com meu código",
         "compareIncoming": "Comparar com a base"
       },
