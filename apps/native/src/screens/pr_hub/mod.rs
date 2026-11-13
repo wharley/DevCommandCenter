@@ -12,6 +12,7 @@ mod detail;
 mod journey;
 mod list;
 mod actions;
+mod checks;
 mod merge;
 mod merge_options;
 #[cfg(test)]
@@ -79,6 +80,8 @@ pub struct PrHub {
     pub(crate) merge_error: Option<String>,
     /// Update, close, reopen and delete the branch; and the closed ones.
     pub(crate) actions: actions::PrActions,
+    /// The checks' logs asked for, and a re-run in flight.
+    pub(crate) checks: checks::CheckLogs,
     pub(crate) tab: code::Tab,
     /// The code tab's read, with the patches.
     pub(crate) code_detail: Option<DetailRead>,
@@ -163,6 +166,7 @@ impl PrHub {
             merge_delete_branch: false,
             merge_error: None,
             actions: actions::PrActions::new(window, cx),
+            checks: checks::CheckLogs::default(),
             tab: code::Tab::Summary,
             code_detail: None,
             review,

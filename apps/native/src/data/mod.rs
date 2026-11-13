@@ -82,6 +82,7 @@ pub mod pr_rail;
 pub mod pr_row_state;
 pub mod pr_sections;
 pub mod pr_warnings;
+pub mod pr_checks;
 pub mod pr_merge_readiness;
 pub mod pr_news;
 pub mod pr_review;

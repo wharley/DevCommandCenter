@@ -348,6 +348,7 @@ mod tests {
         let check = |name: &str, state: &str| Check {
             name: name.into(),
             state: state.into(),
+            details_url: None,
         };
         let checks = [
             check("lint", "success"),

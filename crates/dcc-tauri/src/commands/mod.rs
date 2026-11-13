@@ -13,6 +13,7 @@ pub mod forge_commands;
 pub mod mcp_commands;
 pub mod permission_always;
 pub mod pr_hub_checkin;
+pub mod pr_hub_checks;
 pub mod pr_hub_failing;
 pub mod pr_hub_merge_extras;
 pub mod pr_hub_received;

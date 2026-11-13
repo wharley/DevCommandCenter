@@ -32,7 +32,14 @@ pub fn branch_ref_endpoint(namespace: &str, repo: &str, branch: &str) -> Option<
     plain.then(|| format!("/repos/{namespace}/{repo}/git/refs/heads/{branch}"))
 }
 
-fn run(root: &str, host: &str, login: Option<&str>, args: &[&str]) -> Result<(), String> {
+/// One `gh` call with the account picked for the host; its refusal comes
+/// back as GitHub wrote it.
+pub(super) fn run(
+    root: &str,
+    host: &str,
+    login: Option<&str>,
+    args: &[&str],
+) -> Result<(), String> {
     let gh = resolve_cli_binary("gh")?;
     let auth = resolve_auth_context(host, login)?;
     let mut command = Command::new(gh);

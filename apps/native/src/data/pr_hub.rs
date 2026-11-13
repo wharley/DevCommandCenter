@@ -163,6 +163,8 @@ pub struct List {
 pub struct Check {
     pub name: String,
     pub state: String,
+    /// Its page on the forge or the CI.
+    pub details_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]

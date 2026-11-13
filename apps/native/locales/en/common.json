@@ -1283,6 +1283,13 @@
       "mine": "Created by you",
       "closed": "Closed"
     },
+    "checkActions": {
+      "log": "See what failed",
+      "rerun": "Run again",
+      "open": "Open the check's page",
+      "noLog": "The job left no log of the failure.",
+      "rerunDone": "Job sent to run again."
+    },
     "actions": {
       "updateBranch": {
         "label": "Update with the base",

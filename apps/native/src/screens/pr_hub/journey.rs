@@ -199,7 +199,8 @@ impl PrHub {
         let (open, passed) = split_checks(checks);
         let mut rows: Vec<AnyElement> = open
             .into_iter()
-            .map(|check| {
+            .enumerate()
+            .map(|(index, check)| {
                 let failed = check.state == "failure";
                 let (icon, tone, key) = if failed {
                     ("x", StateTone::Failed, "commit.rail.checks.failure")
@@ -207,7 +208,7 @@ impl PrHub {
                     ("clock-3", StateTone::NeedsYou, "commit.rail.checks.pending")
                 };
                 let tone = tone.text(&theme);
-                div()
+                let row = div()
                     .flex()
                     .items_center()
                     .gap(px(8.0))
@@ -227,6 +228,14 @@ impl PrHub {
                             .text_color(tone)
                             .child(cx.t(key)),
                     )
+                    .children(self.check_buttons(index, check, cx));
+                // The failing step's log opens under its check.
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
+                    .child(row)
+                    .children(self.check_log(check, cx))
                     .into_any_element()
             })
             .collect();

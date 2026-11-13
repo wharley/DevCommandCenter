@@ -1283,6 +1283,13 @@
       "mine": "Criados por você",
       "closed": "Fechados"
     },
+    "checkActions": {
+      "log": "Ver o que falhou",
+      "rerun": "Rodar de novo",
+      "open": "Abrir a página do check",
+      "noLog": "O job não deixou log da falha.",
+      "rerunDone": "Job enviado para rodar de novo."
+    },
     "actions": {
       "updateBranch": {
         "label": "Atualizar com a base",

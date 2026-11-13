@@ -445,6 +445,93 @@ fn a_pull_request_is_closed_after_its_confirmation_and_found_under_closed(cx: &m
 }
 
 #[gpui::test]
+fn a_failed_actions_check_shows_what_failed_and_runs_again(cx: &mut TestAppContext) {
+    use crate::screens::pr_hub::checks::Log;
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+    });
+    const JOB: &str = "https://github.com/acme/shop/actions/runs/11/job/22";
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", true, false)], "warnings": [] }).to_string();
+    let detail = json!({
+        "body": null, "comments": [], "files": [], "inlineComments": [],
+        "reviewCapabilities": null, "mergeCapabilities": null,
+        "checks": [
+            { "name": "test", "state": "failure", "detailsUrl": JOB },
+            { "name": "sonar", "state": "failure", "detailsUrl": "https://sonar.example.com/x" },
+        ],
+    })
+    .to_string();
+    let (port, desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list),
+        ("/api/v1/pull-request-hub/detail", 200, detail.clone()),
+        (
+            "/api/v1/pull-request-hub/check-log",
+            200,
+            json!({ "excerpt": "Run cargo test\nerror: test failed" }).to_string(),
+        ),
+        (
+            "/api/v1/pull-request-hub/check-rerun",
+            200,
+            r#"{"ok":true}"#.into(),
+        ),
+        ("/api/v1/pull-request-hub/detail", 200, detail),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1200.0), px(800.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    // The Actions job has its log and its re-run; the other system only its page.
+    assert!(cx.debug_bounds("pr-check-log-0").is_some());
+    assert!(cx.debug_bounds("pr-check-rerun-0").is_some());
+    assert!(cx.debug_bounds("pr-check-open-1").is_some());
+    assert!(cx.debug_bounds("pr-check-log-1").is_none());
+    assert!(
+        cx.debug_bounds("pr-check-log").is_none(),
+        "nothing read ahead"
+    );
+    let log = cx.debug_bounds("pr-check-log-0").unwrap();
+    cx.simulate_click(log.center(), Modifiers::none());
+    cx.run_until_parked();
+    cx.background_executor
+        .advance_clock(std::time::Duration::from_millis(50));
+    for _ in 0..200 {
+        cx.run_until_parked();
+        if hub.read_with(cx, |hub, _| {
+            matches!(hub.checks.logs.get(JOB), Some(Log::Read(_)))
+        }) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    hub.read_with(cx, |hub, _| {
+        assert_eq!(
+            hub.checks.logs.get(JOB),
+            Some(&Log::Read("Run cargo test\nerror: test failed".into()))
+        );
+    });
+    assert!(cx.debug_bounds("pr-check-log").is_some());
+    hub.update(cx, |hub, cx| hub.rerun_check(JOB.into(), cx));
+    cx.run_until_parked();
+    let seen = desktop.join().unwrap();
+    cx.run_until_parked();
+    let sent = |route: &str| -> serde_json::Value {
+        let (_, body) = seen.iter().find(|(path, _)| path.ends_with(route)).unwrap();
+        serde_json::from_str(body).unwrap()
+    };
+    assert_eq!(sent("/check-log")["detailsUrl"], JOB);
+    assert_eq!(sent("/check-rerun")["detailsUrl"], JOB);
+    // The log was of the run that failed: gone with the re-run.
+    hub.read_with(cx, |hub, _| assert!(hub.checks.logs.is_empty()));
+}
+
+#[gpui::test]
 fn the_summary_approves_with_its_text_without_opening_the_code(cx: &mut TestAppContext) {
     use crate::data::pr_review::ReviewEvent;
     use crate::test_support::fake_desktop_routes;

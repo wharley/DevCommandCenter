@@ -21,6 +21,8 @@ pub(super) fn routes() -> Router<HttpState> {
         .route("/api/v1/pull-request-hub/comment", post(comment))
         .route("/api/v1/pull-request-hub/merge", post(merge))
         .route("/api/v1/pull-request-hub/action", post(action))
+        .route("/api/v1/pull-request-hub/check-log", post(check_log))
+        .route("/api/v1/pull-request-hub/check-rerun", post(check_rerun))
         .route(
             "/api/v1/pull-request-hub/submit-review",
             post(submit_review),
@@ -90,6 +92,35 @@ async fn comment(
 ) -> Result<Json<Value>, HttpApiError> {
     known_repository(&backend, &input.repository_root).await?;
     reply(forge_commands::pull_request_hub_comment_with_state(&backend.workspace, input).await)
+}
+
+async fn check_log(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::pr_hub_checks::PullRequestHubCheckInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    known_repository(&backend, &input.repository_root).await?;
+    reply(
+        dcc_tauri::commands::pr_hub_checks::pull_request_hub_check_log_with_state(
+            &backend.workspace,
+            input,
+        )
+        .await,
+    )
+}
+
+async fn check_rerun(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::pr_hub_checks::PullRequestHubCheckInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    known_repository(&backend, &input.repository_root).await?;
+    reply(
+        dcc_tauri::commands::pr_hub_checks::pull_request_hub_check_rerun_with_state(
+            &backend.workspace,
+            input,
+        )
+        .await
+        .map(|()| json!({ "ok": true })),
+    )
 }
 
 async fn action(
