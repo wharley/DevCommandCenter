@@ -5,6 +5,7 @@
 //! phones waiting are read every 2s (the desktop hears them as events).
 //! The desktop writes this screen's text in Portuguese, so does this.
 
+mod machines;
 mod relay;
 mod view;
 
@@ -42,6 +43,10 @@ pub(super) struct Connections {
     pub(super) answering: bool,
     /// The log, when open: its entries and whether it is reading.
     pub(super) audit: Option<(Vec<AuditEntry>, bool)>,
+    /// The other DCCs this one runs tasks on.
+    pub(super) machines: machines::Machines,
+    /// A machine's pairing link, pasted.
+    pub(super) machine_link: Entity<TextInput>,
     started: bool,
     poll: Option<Task<()>>,
     _input: Subscription,
@@ -74,7 +79,11 @@ impl Connections {
             TextInputEvent::Submitted => settings.save_relay(cx),
             _ => {}
         });
+        let machine_link =
+            cx.new(|cx| TextInput::new(window, cx).with_placeholder("dcc://pair#…"));
         Self {
+            machines: machines::Machines::default(),
+            machine_link,
             devices: Vec::new(),
             loading: false,
             revoking: None,
@@ -113,6 +122,7 @@ impl Settings {
             self.load_devices(cx);
             self.load_relay(true, cx);
             self.load_approvals(cx);
+            self.load_machines(cx);
         }
         if self.connections.poll.is_some() {
             return;

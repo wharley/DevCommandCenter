@@ -82,6 +82,7 @@ mod git_changes;
 mod git_conflicts;
 mod keep_awake;
 mod local_branches;
+mod machines;
 mod mcp;
 mod menu_bar;
 mod mobile;
@@ -288,6 +289,8 @@ pub struct HttpBackend {
     /// The relay connector serving this router, for the operator routes and
     /// to drop a revoked phone at once. Weak: the hub holds the router.
     remote: OnceLock<std::sync::Weak<RemoteHub>>,
+    /// The machines this DCC runs tasks on, and their channels.
+    machines: OnceLock<Arc<crate::machines::MachineRegistry>>,
     /// The app the server runs in: a task's events, the connectors, the
     /// ai-memory sidecar and restarting (`DesktopApp`).
     app: OnceLock<Arc<dyn DesktopApp>>,
@@ -321,6 +324,7 @@ impl HttpBackend {
             desktop_menu_bar: OnceLock::new(),
             desktop_shortcuts: OnceLock::new(),
             remote: OnceLock::new(),
+            machines: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
             app: OnceLock::new(),
@@ -350,6 +354,7 @@ impl HttpBackend {
             desktop_menu_bar: OnceLock::new(),
             desktop_shortcuts: OnceLock::new(),
             remote: OnceLock::new(),
+            machines: OnceLock::new(),
             agent_requests: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
             app: OnceLock::new(),
@@ -424,6 +429,17 @@ impl HttpBackend {
 
     fn remote(&self) -> Option<Arc<RemoteHub>> {
         self.remote.get().and_then(std::sync::Weak::upgrade)
+    }
+
+    /// The paired machines, kept in the app's database.
+    fn machines(&self) -> Arc<crate::machines::MachineRegistry> {
+        self.machines
+            .get_or_init(|| {
+                Arc::new(crate::machines::MachineRegistry::new(
+                    self.workspace.db_path.clone(),
+                ))
+            })
+            .clone()
     }
 }
 
@@ -1222,6 +1238,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(remote_respond_approval_handler),
         )
         .merge(remote_devices::routes())
+        .merge(machines::routes())
         .merge(pull_request_hub::routes());
     let protected_routes = if backend.terminals {
         protected_routes.merge(terminal_routes)

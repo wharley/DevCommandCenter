@@ -162,9 +162,10 @@ impl TurnOptions {
 pub struct DesktopApi {
     port: u16,
     api_key: String,
-    /// Another machine's API through the relay, instead of this computer's
-    /// loopback (`machine_route`).
-    machine: Option<super::machine_route::MachineRoute>,
+    /// The machine whose API this is, when it is not this computer's: its
+    /// calls go to `/api/v1/machines/<id>/proxy<path>`, which this
+    /// computer's server sends through the machine's channel.
+    machine: Option<String>,
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -214,18 +215,25 @@ impl DesktopApi {
         }
     }
 
-    /// The API of another machine, through the relay.
-    pub fn on_machine(route: super::machine_route::MachineRoute) -> Self {
+    /// The same API, of a paired machine instead of this computer.
+    pub fn on_machine(&self, machine_id: &str) -> Self {
         Self {
-            port: 0,
-            api_key: String::new(),
-            machine: Some(route),
+            machine: Some(machine_id.to_string()),
+            ..self.clone()
         }
     }
 
     /// The machine this API is of; none for this computer.
-    pub fn machine(&self) -> Option<&super::machine_route::MachineRoute> {
-        self.machine.as_ref()
+    pub fn machine(&self) -> Option<&str> {
+        self.machine.as_deref()
+    }
+
+    /// Where a call goes: the path itself, or through the machine's proxy.
+    fn routed(&self, path: &str) -> String {
+        match &self.machine {
+            Some(id) => format!("/api/v1/machines/{}/proxy{path}", encode(id)),
+            None => path.to_string(),
+        }
     }
 
     pub(crate) fn post(&self, path: &str, body: &Value) -> Result<Value, ApiError> {
@@ -254,7 +262,8 @@ impl DesktopApi {
     ) -> Result<(std::io::BufReader<TcpStream>, bool), ApiError> {
         use std::io::BufRead;
         if self.machine.is_some() {
-            // A machine's streams come as subscriptions on its channel.
+            // A machine's streams come as subscriptions on its channel,
+            // which the proxy does not carry yet.
             return Err(ApiError::Failed(
                 "streams of a remote machine are not read here".into(),
             ));
@@ -321,10 +330,7 @@ impl DesktopApi {
         body: Option<&Value>,
         wait: Duration,
     ) -> Result<Value, ApiError> {
-        if let Some(machine) = &self.machine {
-            let (status, body) = machine.request(method, path, body, wait)?;
-            return answer(status, &body);
-        }
+        let path = &self.routed(path);
         let address = SocketAddr::from(([127, 0, 0, 1], self.port));
         let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
             .map_err(|_| ApiError::DesktopClosed)?;

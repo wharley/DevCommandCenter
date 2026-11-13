@@ -48,7 +48,6 @@ pub mod delegation_record;
 pub mod deletion;
 pub mod delivery_rail;
 pub mod desktop_api;
-pub mod machine_route;
 #[cfg(target_os = "macos")]
 pub mod device;
 pub mod diagnostics;
@@ -66,6 +65,7 @@ pub mod host;
 pub mod host_shortcuts;
 pub mod keep_awake;
 pub mod loader;
+pub mod machines;
 pub mod local_branches;
 pub mod mcp_advanced;
 pub mod menu_bar;

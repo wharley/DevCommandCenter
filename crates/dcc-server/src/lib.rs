@@ -32,6 +32,7 @@ pub mod http_config;
 pub mod http_rpc_handler;
 pub mod keep_awake;
 pub mod machine_link;
+pub mod machines;
 pub mod menu_bar_snapshot;
 pub mod named_events;
 pub mod open_task_tool;

@@ -136,6 +136,7 @@ impl Settings {
             .child(header)
             .children(self.relay_card(cx))
             .child(devices)
+            .child(self.machines_card(cx))
             .child(self.audit_section(cx))
             .into_any_element()
     }

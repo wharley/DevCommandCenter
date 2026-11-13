@@ -1290,6 +1290,8 @@ pub fn path_allowed_for(path: &str, client: ClientKind) -> bool {
         && !route.contains("//")
         && !route.starts_with("/api/v1/auth/")
         && !route.starts_with("/api/v1/remote/")
+        // Never a hop to another machine.
+        && !route.starts_with("/api/v1/machines")
         && (client == ClientKind::Desktop || !route.starts_with("/api/v1/terminals/"))
         && !route.starts_with("/api/v1/browser/bridge/")
         && !route.starts_with("/api/v1/computer/bridge/")
@@ -1795,6 +1797,13 @@ mod tests {
         ));
         assert!(!path_allowed_for(
             "/api/v1/auth/bearer/rotate",
+            ClientKind::Desktop
+        ));
+        // A paired device reads this machine's card, never its machines.
+        assert!(path_allowed_for("/api/v1/machine", ClientKind::Desktop));
+        assert!(!path_allowed_for("/api/v1/machines", ClientKind::Desktop));
+        assert!(!path_allowed_for(
+            "/api/v1/machines/m/proxy/api/v1/sessions",
             ClientKind::Desktop
         ));
         assert!(remote_path_allowed("/api/v1/sessions"));

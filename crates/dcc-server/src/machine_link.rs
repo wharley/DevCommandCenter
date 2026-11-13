@@ -31,6 +31,12 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// The relay connection and the handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
+/// The relay's own close when the machine's side is not connected to it.
+/// Right after a machine opens a pairing link (or restarts) it is still
+/// connecting, so this is tried again a few times before giving up.
+const RELAY_MACHINE_OFFLINE: u16 = 4603;
+const OFFLINE_ATTEMPTS: usize = 6;
+const OFFLINE_WAIT: Duration = Duration::from_secs(1);
 /// The person on the machine has this long to approve a pairing.
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -84,6 +90,10 @@ pub enum LinkError {
     Relay(String),
     #[error("timed out")]
     Timeout,
+    /// The machine is not connected to the relay: it is off, asleep or
+    /// without network.
+    #[error("the machine is offline")]
+    Offline,
     /// The machine closed the channel with one of `wire::close`'s codes.
     #[error("the machine refused the connection ({0})")]
     Refused(u16),
@@ -151,6 +161,7 @@ async fn next_wire(socket: &mut Socket) -> Result<Vec<u8>, LinkError> {
             Some(Ok(Message::Close(frame))) => {
                 return Err(match frame.map(|frame| u16::from(frame.code)) {
                     Some(close::PAIRING_DENIED) => LinkError::Denied,
+                    Some(RELAY_MACHINE_OFFLINE) => LinkError::Offline,
                     Some(code) if code >= 4000 => LinkError::Refused(code),
                     _ => LinkError::Closed,
                 });
@@ -161,7 +172,26 @@ async fn next_wire(socket: &mut Socket) -> Result<Vec<u8>, LinkError> {
     }
 }
 
+/// The socket and the handshake, tried again while the relay says the
+/// machine is not there yet. `start` writes a fresh first message each time.
 async fn open(
+    target: &MachineTarget,
+    start: impl Fn() -> Result<(Connecting, Vec<u8>), RemoteError>,
+) -> Result<(Socket, Option<String>, ClientSession), LinkError> {
+    let mut attempt = 1;
+    loop {
+        let (connecting, hello) = start()?;
+        match open_once(target, connecting, hello).await {
+            Err(LinkError::Offline) if attempt < OFFLINE_ATTEMPTS => {
+                attempt += 1;
+                tokio::time::sleep(OFFLINE_WAIT).await;
+            }
+            other => return other,
+        }
+    }
+}
+
+async fn open_once(
     target: &MachineTarget,
     connecting: Connecting,
     hello: Vec<u8>,
@@ -186,9 +216,10 @@ impl MachineLink {
         target: &MachineTarget,
         identity: &LinkIdentity,
     ) -> Result<Self, LinkError> {
-        let (connecting, hello) =
-            Connecting::resume(&identity.keys, &target.public_key, identity.device())?;
-        let (socket, device_id, session) = open(target, connecting, hello).await?;
+        let (socket, device_id, session) = open(target, || {
+            Connecting::resume(&identity.keys, &target.public_key, identity.device())
+        })
+        .await?;
         let device_id = device_id.ok_or(LinkError::Refused(close::UNKNOWN_DEVICE))?;
         Ok(Self::drive(socket, session, device_id))
     }
@@ -201,8 +232,10 @@ impl MachineLink {
         on_pending: impl FnOnce() + Send,
     ) -> Result<Self, LinkError> {
         let target = MachineTarget::of(offer);
-        let (connecting, hello) = Connecting::pair(offer, &identity.keys, identity.device())?;
-        let (mut socket, _, mut session) = open(&target, connecting, hello).await?;
+        let (mut socket, _, mut session) = open(&target, || {
+            Connecting::pair(offer, &identity.keys, identity.device())
+        })
+        .await?;
         // Proves to the machine that this side holds the link's secret.
         send_all(&mut socket, session.ping(None)?).await?;
         let mut on_pending = Some(on_pending);

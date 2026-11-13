@@ -55,6 +55,22 @@ fn qr(value: &str) -> AnyElement {
         .into_any_element()
 }
 
+/// What approving means: a phone drives sessions; another DCC also runs
+/// tasks and opens terminals here, as the person of this computer.
+pub(super) fn approval_text(platform: Option<&str>) -> &'static str {
+    match platform {
+        Some("macos" | "linux" | "windows") => {
+            "Outro computador com o DCC pediu acesso a este. Ele vai poder criar tarefas, rodar \
+             agentes e abrir terminais aqui, com as suas contas e os seus projetos. Aprove só se \
+             for alguém em quem você confia e o código abaixo for o mesmo que ele mostra."
+        }
+        _ => {
+            "Um celular escaneou o QR deste desktop. Aprove só se o código abaixo for o mesmo \
+             que ele mostra."
+        }
+    }
+}
+
 impl Settings {
     pub(super) fn relay_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let status = self.connections.relay.clone()?;
@@ -317,6 +333,27 @@ impl Settings {
                                 .text_color(colors.muted_foreground)
                                 .child(format!("este desktop: {}", offer.desktop_fingerprint)),
                         )
+                        // Another DCC has no camera: it takes the link.
+                        .child({
+                            let link = offer.url.clone();
+                            Button::new("settings-relay-copy-link")
+                                .variant(ButtonVariant::Outline)
+                                .size(ButtonSize::Sm)
+                                .text_size(12.0)
+                                .on_click(move |_, _, cx| {
+                                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                        link.clone(),
+                                    ));
+                                    crate::ui::Toaster::success(
+                                        "Link copiado: cole em Conexões › Máquinas do outro DCC",
+                                        cx,
+                                    );
+                                })
+                                .child(icon_label(
+                                    Icon::new("copy").size(14.0).into_any_element(),
+                                    "Copiar link para outro DCC",
+                                ))
+                        })
                         .into_any_element()
                 }
             }
@@ -386,11 +423,7 @@ impl Settings {
                     .gap(px(16.0))
                     .child(dialog_header(
                         format!("Aprovar {}?", current.device_name),
-                        Some(
-                            "Um celular escaneou o QR deste desktop. Aprove só se o código abaixo for o \
-                             mesmo que ele mostra."
-                                .into(),
-                        ),
+                        Some(approval_text(current.platform.as_deref()).into()),
                         cx,
                     ))
                     .child(
@@ -412,7 +445,11 @@ impl Settings {
                                     .text_size(px(22.0))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(colors.foreground)
-                                    .child(crate::ui::Tracked::new(current.fingerprint.clone(), 22.0, 0.12)),
+                                    .child(crate::ui::Tracked::new(
+                                        current.fingerprint.clone(),
+                                        22.0,
+                                        0.12,
+                                    )),
                             )
                             .children(current.platform.clone().map(|platform| {
                                 div()
@@ -428,14 +465,18 @@ impl Settings {
                                 .size(ButtonSize::Default)
                                 .text_size(14.0)
                                 .disabled(answering)
-                                .on_click(cx.listener(|settings, _, _, cx| settings.answer_pairing(false, cx)))
+                                .on_click(cx.listener(|settings, _, _, cx| {
+                                    settings.answer_pairing(false, cx)
+                                }))
                                 .child("Recusar")
                                 .into_any_element(),
                             Button::new("settings-relay-approve")
                                 .size(ButtonSize::Default)
                                 .text_size(14.0)
                                 .disabled(answering)
-                                .on_click(cx.listener(|settings, _, _, cx| settings.answer_pairing(true, cx)))
+                                .on_click(cx.listener(|settings, _, _, cx| {
+                                    settings.answer_pairing(true, cx)
+                                }))
                                 .child("Aprovar")
                                 .into_any_element(),
                         ],
