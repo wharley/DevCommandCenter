@@ -421,6 +421,7 @@ fn the_merge_resolver_takes_the_conversations_place_until_closed(cx: &mut TestAp
     let (shell, cx, _dir) = open_shell(cx, Prefs::default());
     shell.update(cx, |shell, cx| {
         let request = crate::screens::merge::MergeResolverRequest {
+            start: false,
             root: "/tmp/checkout".into(),
             task_id: Some("w-1".into()),
             base_branch: None,

@@ -94,6 +94,21 @@ fn open<'a>(
     Events,
     std::thread::JoinHandle<Vec<(String, String)>>,
 ) {
+    open_asked(cx, routes, false)
+}
+
+/// `start`: opened on a conflict the forge reports, to bring the base in.
+#[allow(clippy::type_complexity)]
+fn open_asked<'a>(
+    cx: &'a mut TestAppContext,
+    routes: Vec<(&'static str, u16, String)>,
+    start: bool,
+) -> (
+    gpui::Entity<MergeResolver>,
+    &'a mut gpui::VisualTestContext,
+    Events,
+    std::thread::JoinHandle<Vec<(String, String)>>,
+) {
     cx.update(|cx| {
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
         crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
@@ -102,6 +117,7 @@ fn open<'a>(
     });
     let (port, server) = fake_desktop_routes(routes);
     let request = MergeResolverRequest {
+        start,
         root: "/tmp/checkout".into(),
         task_id: Some("w-1".into()),
         base_branch: Some("main".into()),
@@ -339,6 +355,102 @@ fn with_no_merge_it_starts_one(cx: &mut TestAppContext) {
         serde_json::from_str::<serde_json::Value>(&sync.1).unwrap()["baseBranch"],
         "main"
     );
+}
+
+fn synced() -> (&'static str, u16, String) {
+    (
+        "/api/v1/workspaces/w-1/delivery/sync-base",
+        200,
+        json!({
+            "branch": "feature", "baseBranch": "main", "remote": "origin",
+            "updated": false, "conflictCount": 1,
+        })
+        .to_string(),
+    )
+}
+
+#[gpui::test]
+fn asked_to_resolve_with_no_merge_here_it_brings_the_base_in(cx: &mut TestAppContext) {
+    let none = WorkspaceGitConflictOperation::None;
+    let merge = WorkspaceGitConflictOperation::Merge;
+    let conflicts = || {
+        (
+            "/api/v1/git/conflict-state",
+            200,
+            state(merge, vec![source()]),
+        )
+    };
+    let (resolver, cx, _, server) = open_asked(
+        cx,
+        vec![
+            ("/api/v1/git/conflict-state", 200, state(none, vec![])),
+            synced(),
+            conflicts(),
+            conflicts(),
+            ("/api/v1/git/validation-config", 200, checks(&[])),
+        ],
+        true,
+    );
+    let calls = server.join().unwrap();
+    cx.run_until_parked();
+    // No screen to start it from: the conflicts are what shows.
+    assert!(cx.debug_bounds("merge-start").is_none());
+    resolver.read_with(cx, |resolver, _| {
+        assert_eq!(resolver.open.as_ref().unwrap().entry.path, "src/a.rs");
+        assert!(!resolver.start_pending, "only once");
+    });
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|(line, _)| line.contains("sync-base"))
+            .count(),
+        1
+    );
+}
+
+#[gpui::test]
+fn a_merge_under_way_can_be_dropped_for_the_current_base(cx: &mut TestAppContext) {
+    let merge = WorkspaceGitConflictOperation::Merge;
+    let conflicts = || {
+        (
+            "/api/v1/git/conflict-state",
+            200,
+            state(merge, vec![source()]),
+        )
+    };
+    let (resolver, cx, events, server) = open(
+        cx,
+        vec![
+            conflicts(),
+            ("/api/v1/git/validation-config", 200, checks(&[])),
+            ("/api/v1/git/abort-merge", 200, r#"{"ok":true}"#.into()),
+            synced(),
+            conflicts(),
+            conflicts(),
+            ("/api/v1/git/validation-config", 200, checks(&[])),
+        ],
+    );
+    // The abort's question has a second answer.
+    click(cx, "merge-abort");
+    assert!(cx.debug_bounds("merge-confirm-restart").is_some());
+    resolver.update(cx, |resolver, cx| resolver.confirm_restart(cx));
+    cx.run_until_parked();
+    let calls = server.join().unwrap();
+    cx.run_until_parked();
+    let order: Vec<&str> = calls
+        .iter()
+        .filter_map(|(line, _)| {
+            ["abort-merge", "sync-base"]
+                .into_iter()
+                .find(|route| line.contains(route))
+        })
+        .collect();
+    assert_eq!(order, ["abort-merge", "sync-base"]);
+    // It stays open, on what the current base left.
+    assert!(!events.borrow().contains(&MergeResolverEvent::Closed));
+    resolver.read_with(cx, |resolver, _| {
+        assert_eq!(resolver.open.as_ref().unwrap().entry.path, "src/a.rs");
+    });
 }
 
 #[gpui::test]

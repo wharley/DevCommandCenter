@@ -1531,6 +1531,9 @@ pub async fn workspace_git_abort_merge_with_state(
         })
         .await
         .map_err(workspace_mutation_error)?;
+    // The merge that left the conflicts is gone, and with it the delivery
+    // problem the update with the base captured.
+    clear_workspace_delivery_failure(state, root, WorkspaceDeliveryFailureOperation::Pull);
     Ok(())
 }
 

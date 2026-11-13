@@ -61,6 +61,7 @@ fn open<'a>(cx: &'a mut TestAppContext, extra: Vec<(&'static str, u16, String)>)
     routes.extend(extra);
     let (port, server) = fake_desktop_routes(routes);
     let request = MergeResolverRequest {
+        start: false,
         root: "/tmp/checkout".into(),
         task_id: Some("w-1".into()),
         base_branch: Some("main".into()),

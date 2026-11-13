@@ -106,6 +106,11 @@ impl CodeColumn {
             forge_login: self.review.login(),
             workspace_label,
             agent: None,
+            // Nothing to resolve here yet: the conflict is the forge's word.
+            start: self
+                .status
+                .as_ref()
+                .is_some_and(|status| !status.merge_in_progress && status.conflict_count == 0),
         }));
     }
 

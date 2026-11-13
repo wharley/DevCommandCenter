@@ -11,6 +11,9 @@ pub struct MergeResolverRequest {
     /// How "Resolver arquivo com agente" starts its conversation: the task
     /// and the composer's pick (none: the button explains why).
     pub agent: Option<AgentPick>,
+    /// Opened on a conflict the forge reports with no merge here yet: the
+    /// base is brought in at once, so its conflicts are what shows.
+    pub start: bool,
 }
 
 /// The task's thread start and the provider and model the composer picks.

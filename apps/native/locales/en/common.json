@@ -5464,7 +5464,8 @@
       "emptyResult": "The result is empty, but one of the conflicting versions has content. Save an empty file and mark it as resolved anyway?",
       "openAgentSession": "Opening the session will discard the unsaved suggestion shown in this resolver. Continue?",
       "deleteResult": "Delete {{path}} from the merge result?",
-      "abort": "Abort the merge and discard all completed resolutions?",
+      "abort": "Abort the merge and discard every resolution made?\nIf this merge is not with the pull request's current base, it can be restarted with it: the resolutions made so far are discarded too.",
+      "restart": "Abort and restart with the current base",
       "validationCommands": "DCC will run these project-defined commands before committing:\n\n{{commands}}\n\nContinue?"
     },
     "toast": {

@@ -155,6 +155,9 @@ pub struct MergeResolver {
     pub(crate) busy: Option<Busy>,
     pub(crate) report: Option<WorkspaceGitValidationReport>,
     pub(crate) pending: Option<Pending>,
+    /// The request asked for the base to be brought in at once: done at
+    /// the first read that finds no merge here, and only then.
+    pub(crate) start_pending: bool,
     /// The result area's width last frame (side by side from 1000px).
     pub(crate) width: Rc<Cell<f32>>,
     /// The agent's run on the open file, and the answer it left there.
@@ -172,6 +175,7 @@ impl EventEmitter<MergeResolverEvent> for MergeResolver {}
 impl MergeResolver {
     pub fn new(request: MergeResolverRequest, cx: &mut Context<Self>) -> Self {
         let mut resolver = Self {
+            start_pending: request.start,
             request,
             endpoint: None,
             state: Load::Pending,

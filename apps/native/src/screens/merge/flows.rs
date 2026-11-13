@@ -38,12 +38,22 @@ impl MergeResolver {
             let _ = this.update(cx, |resolver, cx| {
                 match read {
                     Ok((state, validation)) => {
+                        // Asked to resolve with no merge under way: the base
+                        // comes in now (once), instead of a screen to start it.
+                        let idle = state.operation == WorkspaceGitConflictOperation::None
+                            && state.conflicts.is_empty();
+                        let start = idle
+                            && std::mem::take(&mut resolver.start_pending)
+                            && resolver.request.task_id.is_some();
                         resolver.state = Load::Ready(state);
                         resolver.validation = validation.map(|config| match config {
                             Ok(config) => Load::Ready(config),
                             Err(error) => Load::Failed(message(error, cx)),
                         });
                         resolver.follow_conflicts(cx);
+                        if start {
+                            resolver.start_merge(cx);
+                        }
                     }
                     Err(error) => resolver.state = Load::Failed(message(error, cx)),
                 }
@@ -279,8 +289,17 @@ impl MergeResolver {
         }));
     }
 
-    /// `abortMerge`, once confirmed: the resolver closes.
-    fn abort(&mut self, cx: &mut Context<Self>) {
+    /// The abort's other answer: the merge under way dropped and the
+    /// current base brought in, for a merge that is not with it.
+    pub(crate) fn confirm_restart(&mut self, cx: &mut Context<Self>) {
+        if self.pending.take() == Some(Pending::Abort) {
+            self.abort(true, cx);
+        }
+    }
+
+    /// `abortMerge`, once confirmed: the resolver closes, or with `restart`
+    /// merges the current base in and stays on what that leaves.
+    fn abort(&mut self, restart: bool, cx: &mut Context<Self>) {
         let root = self.request.root.clone();
         let api = self.api();
         self.busy = Some(Busy::Abort);
@@ -293,6 +312,11 @@ impl MergeResolver {
             let _ = this.update(cx, |resolver, cx| {
                 resolver.busy = None;
                 match result {
+                    Ok(()) if restart => {
+                        cx.emit(MergeResolverEvent::StateChanged);
+                        resolver.open = None;
+                        resolver.start_merge(cx);
+                    }
                     Ok(()) => {
                         cx.emit(MergeResolverEvent::StateChanged);
                         Toaster::success(cx.t("mergeConflict.toast.mergeAborted"), cx);
@@ -372,7 +396,7 @@ impl MergeResolver {
             Some(Pending::RemainingMarkers) => self.save(true, false, cx),
             Some(Pending::EmptyResult) => self.save(true, true, cx),
             Some(Pending::DeleteResult) => self.delete_result(cx),
-            Some(Pending::Abort) => self.abort(cx),
+            Some(Pending::Abort) => self.abort(false, cx),
             Some(Pending::ValidationCommands) => self.complete(cx),
             Some(Pending::OpenAgentSession(session)) => {
                 cx.emit(MergeResolverEvent::OpenSession(session))

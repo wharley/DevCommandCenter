@@ -49,21 +49,42 @@ pub(crate) fn confirm_dialog(
         }
     };
     let colors = cx.theme().colors.clone();
+    // Aborting has a second answer: drop this merge and bring the current
+    // base in, when the merge under way is not the one to resolve.
+    let restart = (pending == Pending::Abort && resolver.request.task_id.is_some()).then(|| {
+        Button::new("merge-confirm-restart")
+            .variant(ButtonVariant::Outline)
+            .size(ButtonSize::Default)
+            .on_click(cx.listener(|resolver, _, _, cx| resolver.confirm_restart(cx)))
+            .child(cx.t("mergeConflict.confirm.restart"))
+            .into_any_element()
+    });
     let footer = dialog_footer(
         [
-            Button::new("merge-confirm-cancel")
-                .variant(ButtonVariant::Outline)
-                .size(ButtonSize::Default)
-                .on_click(cx.listener(|resolver, _, _, cx| resolver.cancel_pending(cx)))
-                .child(cx.t("inspector.gitConfirmation.cancel"))
-                .into_any_element(),
-            Button::new("merge-confirm-ok")
-                .variant(ButtonVariant::Default)
-                .size(ButtonSize::Default)
-                .on_click(cx.listener(|resolver, _, _, cx| resolver.confirm(cx)))
-                .child("OK")
-                .into_any_element(),
-        ],
+            Some(
+                Button::new("merge-confirm-cancel")
+                    .variant(ButtonVariant::Outline)
+                    .size(ButtonSize::Default)
+                    .on_click(cx.listener(|resolver, _, _, cx| resolver.cancel_pending(cx)))
+                    .child(cx.t("inspector.gitConfirmation.cancel"))
+                    .into_any_element(),
+            ),
+            restart,
+            Some(
+                Button::new("merge-confirm-ok")
+                    .variant(ButtonVariant::Default)
+                    .size(ButtonSize::Default)
+                    .on_click(cx.listener(|resolver, _, _, cx| resolver.confirm(cx)))
+                    .child(if pending == Pending::Abort {
+                        cx.t("mergeConflict.abort").to_string()
+                    } else {
+                        "OK".to_string()
+                    })
+                    .into_any_element(),
+            ),
+        ]
+        .into_iter()
+        .flatten(),
         cx,
     );
     let close = cx.entity().downgrade();

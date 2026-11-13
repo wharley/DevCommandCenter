@@ -5464,7 +5464,8 @@
       "emptyResult": "O resultado está vazio, mas uma das versões do arquivo possui conteúdo. Salvar um arquivo vazio e marcá-lo como resolvido mesmo assim?",
       "openAgentSession": "Abrir a sessão descartará a sugestão ainda não salva exibida neste resolvedor. Continuar?",
       "deleteResult": "Excluir {{path}} como resultado deste merge?",
-      "abort": "Abortar o merge e descartar todas as resoluções realizadas?",
+      "abort": "Abortar o merge e descartar todas as resoluções realizadas?\nSe este merge não é com a base atual do pull request, dá para recomeçar com ela: as resoluções feitas até aqui também são descartadas.",
+      "restart": "Abortar e recomeçar com a base atual",
       "validationCommands": "O DCC executará estes comandos definidos pelo projeto antes do commit:\n\n{{commands}}\n\nContinuar?"
     },
     "toast": {
