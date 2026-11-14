@@ -38,8 +38,17 @@ impl TeamRoom {
                     cx,
                 ))
         });
+        // Its own copy button, while the pointer is over the message.
+        let group = SharedString::from(format!("{key}-row"));
+        let copy = (!said.words.is_empty()).then(|| {
+            div()
+                .opacity(0.0)
+                .group_hover(group.clone(), |style| style.opacity(1.0))
+                .child(self.copy_button(&key, &said.words, cx))
+        });
         div()
             .debug_selector(move || key.clone())
+            .group(group.clone())
             .flex()
             .flex_col()
             .items_end()
@@ -48,8 +57,12 @@ impl TeamRoom {
             .children(thumbs)
             .child(
                 div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
                     .text_size(px(11.0))
                     .text_color(colors.muted_foreground)
+                    .children(copy)
                     .child(note),
             )
             .into_any_element()

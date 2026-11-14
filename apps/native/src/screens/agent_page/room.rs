@@ -98,6 +98,8 @@ pub struct TeamRoom {
     /// (none in tests).
     pub(crate) cleanup: crate::data::cleanup_alert::CleanupAlert,
     pub(crate) cleanup_path: Option<PathBuf>,
+    /// Selecting and copying the lines' text (`room_copy`).
+    pub(crate) copy: super::room_copy::RoomCopy,
     /// The one agent shown, on its page's "Conversa" (`room_focus`).
     pub(crate) focus: Option<String>,
     /// The project whose room this is; none: the Geral room.
@@ -236,6 +238,7 @@ impl TeamRoom {
             bulletin_open: false,
             cleanup: Default::default(),
             cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
+            copy: super::room_copy::RoomCopy::new(cx),
             focus: None,
             room: None,
             room_generation: 0,

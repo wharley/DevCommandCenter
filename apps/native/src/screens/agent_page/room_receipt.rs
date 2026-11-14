@@ -66,6 +66,7 @@ impl TeamRoom {
                     .opacity(0.0)
                     .group_hover(group.clone(), |style| style.opacity(1.0))
                     .children(receipt)
+                    .child(self.copy_button(&index.to_string(), &line.text, cx))
                     .child(
                         div()
                             .id(SharedString::from(format!("room-open-{index}")))

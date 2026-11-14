@@ -8,6 +8,7 @@ mod button;
 pub mod changed_files;
 pub mod verdict_chip;
 pub mod command;
+mod copy_popup;
 pub mod delivery_rail;
 pub mod dialog;
 pub mod diff_squares;
@@ -38,6 +39,7 @@ pub mod trail;
 pub use badge::{Badge, BadgeVariant};
 pub use branch_context::branch_context;
 pub use button::{Button, Size as ButtonSize, Variant as ButtonVariant};
+pub use copy_popup::copy_popup;
 pub use dialog::{Dialog, dialog_footer, dialog_footer_split, dialog_header, inner_radius};
 pub use feedback::{
     Checkbox, LOOP_FRAME, Spinner, ThinkingIndicator, animated, looping, spinner,

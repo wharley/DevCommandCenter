@@ -25,7 +25,7 @@ pub(super) fn actions(children: impl IntoIterator<Item = AnyElement>) -> AnyElem
         .into_any_element()
 }
 
-pub(super) fn action(
+pub(crate) fn action(
     id: SharedString,
     icon: &'static str,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -47,7 +47,7 @@ pub(super) fn action(
         .into_any_element()
 }
 
-pub(super) fn copy(id: SharedString, content: String, cx: &App) -> AnyElement {
+pub(crate) fn copy(id: SharedString, content: String, cx: &App) -> AnyElement {
     action(
         id,
         "copy",

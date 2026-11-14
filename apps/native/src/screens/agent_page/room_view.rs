@@ -235,8 +235,15 @@ impl Render for TeamRoom {
         let trail = self.room_trail(cx);
         let width = self.width.clone();
         let room = cx.entity();
+        // The lines' text is selectable, and ⌘C copies it.
+        self.copy.selection.begin_frame();
+        let selection = self.copy.selection.clone();
         div()
             .debug_selector(|| "team-room".into())
+            .track_focus(&self.copy.keys)
+            .on_action(
+                cx.listener(|room, _: &crate::app::menus::EditCopy, _, cx| room.copy_selection(cx)),
+            )
             .flex()
             .flex_col()
             .size_full()
@@ -250,12 +257,20 @@ impl Render for TeamRoom {
                     .relative()
                     .flex_1()
                     .min_h_0()
+                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::select_press))
+                    .on_mouse_down(gpui::MouseButton::Right, cx.listener(Self::select_menu))
+                    .on_mouse_move(cx.listener(Self::select_drag))
+                    .on_mouse_up(gpui::MouseButton::Left, cx.listener(Self::select_release))
+                    .on_mouse_up_out(gpui::MouseButton::Left, cx.listener(Self::select_release))
                     .child(
                         list(self.list.state.clone(), move |index, window, cx| {
-                            room.update(cx, |room, cx| room.render_item(index, window, cx))
+                            crate::markdown::selection::within(&selection, || {
+                                room.update(cx, |room, cx| room.render_item(index, window, cx))
+                            })
                         })
                         .size_full(),
                     )
+                    .children(self.copy_menu(cx))
                     .children(trail)
                     .child(
                         gpui::canvas(

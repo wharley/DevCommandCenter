@@ -18,7 +18,7 @@ pub(crate) use find_bar::bind_keys;
 pub(crate) mod header;
 #[cfg(test)]
 mod header_tests;
-mod hover_actions;
+pub(crate) mod hover_actions;
 pub(crate) mod image;
 pub(crate) mod paced;
 mod permission_panel;
