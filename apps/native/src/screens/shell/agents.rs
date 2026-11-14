@@ -52,6 +52,9 @@ impl Shell {
                         AgentPageEvent::DeliverTask { task_id, step } => {
                             shell.deliver_task(task_id, *step, cx)
                         }
+                        AgentPageEvent::ReadSource(source) => {
+                            shell.sources_due(std::slice::from_ref(source.as_ref()), cx)
+                        }
                         // `requestOpenPullRequest`
                         AgentPageEvent::OpenPullRequest(pr_id) => {
                             PrReviewJobs::request_open(cx, pr_id);

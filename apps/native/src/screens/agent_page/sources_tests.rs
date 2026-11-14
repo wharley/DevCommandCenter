@@ -127,3 +127,110 @@ fn sources_show_as_cards_lines_and_on_the_page(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("agent-source-0").is_some());
     assert!(cx.debug_bounds("agent-source-1").is_none());
 }
+
+#[gpui::test]
+fn the_new_source_form_draws_the_tools_arguments_as_fields(cx: &mut TestAppContext) {
+    use crate::data::agent_source_form::FormTool;
+    use gpui::Modifiers;
+    use serde_json::json;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+        cx.set_global(Sources {
+            list: vec![source("s-1", "menções a mim", false)],
+        });
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("sup".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(2400.0)));
+    let mut suporte = super::editor_role::blank_agent();
+    suporte.id = "sup".into();
+    suporte.name = "Suporte".into();
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![suporte],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.show("sup".into(), cx);
+    });
+    cx.run_until_parked();
+    // The source it has can be read now; "Nova fonte" opens the form.
+    assert!(cx.debug_bounds("agent-source-read-0").is_some());
+    let new = cx.debug_bounds("agent-source-new").unwrap();
+    cx.simulate_click(new.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-source-form").is_some());
+    assert!(
+        cx.debug_bounds("agent-source-new").is_none(),
+        "one form at a time"
+    );
+
+    // The connectors and the first one's read-only tools, as the desktop
+    // answers them (a test has no desktop).
+    let tools = vec![
+        FormTool {
+            name: "slack_read_channel".into(),
+            description: "Reads a channel".into(),
+            input_schema: json!({"type": "object", "properties": {"channel": {"type": "string"}},
+                "required": ["channel"]}),
+        },
+        FormTool {
+            name: "slack_search_public".into(),
+            description: "Finds messages".into(),
+            input_schema: json!({"type": "object", "properties": {
+                "query": {"type": "string", "description": "Search text."},
+                "limit": {"type": "integer"},
+                "include_bots": {"type": "boolean"}
+            }, "required": ["query"]}),
+        },
+    ];
+    page.update_in(cx, |page, window, cx| {
+        page.take_source_connectors(vec![("slack".into(), "Slack".into())], window, cx);
+        page.take_source_tools(Ok(tools), window, cx);
+    });
+    cx.run_until_parked();
+    // It opens on the tool that searches, its required argument showing and
+    // the optional ones under "Mais opções".
+    assert_eq!(
+        page.read_with(cx, |page, _| page.source_form.as_ref().unwrap().tool),
+        1
+    );
+    assert!(cx.debug_bounds("source-field-query").is_some());
+    assert!(cx.debug_bounds("source-field-limit").is_none());
+    let more = cx.debug_bounds("source-form-more").unwrap();
+    cx.simulate_click(more.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("source-field-limit").is_some());
+    assert!(cx.debug_bounds("source-field-include_bots").is_some());
+
+    // Another tool, other fields.
+    let other = cx.debug_bounds("source-tool-0").unwrap();
+    cx.simulate_click(other.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("source-field-channel").is_some());
+    assert!(cx.debug_bounds("source-field-query").is_none());
+
+    // The tools failing to read says why, in the form.
+    page.update_in(cx, |page, window, cx| {
+        page.take_source_tools(Err("the connector refused the call".into()), window, cx)
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("source-form-tools-failed").is_some());
+
+    // "Cancelar" closes it.
+    let cancel = cx.debug_bounds("agent-source-cancel").unwrap();
+    cx.simulate_click(cancel.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-source-form").is_none());
+}

@@ -56,6 +56,25 @@ pub(crate) async fn call_once(
     arguments: Value,
     access: dcc_core::domain::agent_access::AccessLevel,
 ) -> Result<Value, String> {
+    request_once(
+        gateway,
+        connector,
+        "tools/call",
+        json!({ "name": tool, "arguments": arguments }),
+        access,
+    )
+    .await
+}
+
+/// One request of the connector (`tools/call`, `tools/list`), in a session
+/// of its own: initialize, ask, close. Its result comes back.
+pub(crate) async fn request_once(
+    gateway: &ConnectorGateway,
+    connector: &McpDefinitionId,
+    method: &str,
+    params: Value,
+    access: dcc_core::domain::agent_access::AccessLevel,
+) -> Result<Value, String> {
     let call = |session_id: Option<String>, protocol: Option<String>, body: Value| ConnectorCall {
         session_id,
         protocol_version: protocol,
@@ -91,8 +110,7 @@ pub(crate) async fn call_once(
         )
         .await;
     let request = json!({
-        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": { "name": tool, "arguments": arguments }
+        "jsonrpc": "2.0", "id": 2, "method": method, "params": params
     });
     let answer = json_body(
         gateway

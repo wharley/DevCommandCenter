@@ -1129,6 +1129,26 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(agent_routines::ran),
         )
         .route(
+            "/api/v1/agents/:agent_id/sources",
+            post(agent_sources::create),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/source-form/connectors",
+            get(agent_sources::form_connectors),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/source-form/tools",
+            post(agent_sources::form_tools),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/source-form/suggest",
+            post(agent_sources::form_suggest),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/source-form/test",
+            post(agent_sources::form_test),
+        )
+        .route(
             "/api/v1/agents/:agent_id/sources/:source_id/switch",
             post(agent_sources::switch),
         )

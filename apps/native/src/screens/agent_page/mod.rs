@@ -156,6 +156,7 @@ mod routines;
 mod runs_on;
 #[cfg(test)]
 mod runs_on_tests;
+mod source_form;
 mod sources;
 #[cfg(test)]
 mod sources_tests;
@@ -189,6 +190,9 @@ pub enum AgentPageEvent {
         task_id: String,
         step: crate::data::task_delivery::DeliveryStep,
     },
+    /// "Ler agora" on a source: read by the sources' clock's own path, so
+    /// its news wakes the agent and the holds apply (`shell::sources`).
+    ReadSource(Box<dcc_core::domain::agent_source::AgentSource>),
 }
 
 pub struct AgentPage {
@@ -202,6 +206,8 @@ pub struct AgentPage {
     pub(crate) spend: spend::SpendRead,
     /// "Nova rotina", while open (`routines`).
     pub(crate) routine_form: Option<routines::RoutineForm>,
+    /// "Nova fonte", while open (`source_form`).
+    pub(crate) source_form: Option<source_form::SourceForm>,
     /// The desktop the memory goes through (tests point it elsewhere).
     pub(crate) api: Option<crate::data::desktop_api::DesktopApi>,
     /// "Memória", made on the first render (its fields need the window).
@@ -292,6 +298,7 @@ impl AgentPage {
             },
             spend: Default::default(),
             routine_form: None,
+            source_form: None,
             memory: None,
             room: None,
             room_open: false,
@@ -321,6 +328,7 @@ impl AgentPage {
         // Read again: the month moves while the page is away.
         self.spend = Default::default();
         self.routine_form = None;
+        self.source_form = None;
         if self.agent_id != agent_id {
             self.agent_id = agent_id;
             self.role_open = false;

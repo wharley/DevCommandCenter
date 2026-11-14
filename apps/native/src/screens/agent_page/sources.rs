@@ -1,7 +1,8 @@
 //! "Fontes" on an agent's page (`dcc_core::domain::agent_source`): what it
 //! watches in the person's connectors — one row each, with how often it is
-//! read and when it last was, a switch and "Remover". A source is made by
-//! asking the agent in its conversation; it proposes, the person creates.
+//! read and when it last was, a switch and "Remover". A source is made
+//! with "Nova fonte" (`source_form`) or by asking the agent in its
+//! conversation: it proposes, the person creates.
 
 use dcc_core::domain::agent_source::AgentSource;
 use gpui::{AnyElement, BorrowAppContext, Context, FontWeight, SharedString, div, prelude::*, px};
@@ -87,7 +88,7 @@ impl AgentPage {
             None => every.to_string(),
         };
         let page = cx.entity().downgrade();
-        let (toggled, removed) = (source.clone(), source.clone());
+        let (toggled, removed, read_now) = (source.clone(), source.clone(), source.clone());
         div()
             .debug_selector(move || format!("agent-source-{index}"))
             .flex()
@@ -135,6 +136,20 @@ impl AgentPage {
                     });
                 }),
             )
+            .when(source.enabled, |row| {
+                row.child(
+                    Button::new(SharedString::from(format!("agent-source-read-{index}")))
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::Sm)
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            cx.emit(super::AgentPageEvent::ReadSource(Box::new(
+                                read_now.clone(),
+                            )));
+                            Toaster::info(cx.t("agents.sources.reading"), cx);
+                        }))
+                        .child(cx.t("agents.sources.readNow")),
+                )
+            })
             .child(
                 Button::new(SharedString::from(format!("agent-source-delete-{index}")))
                     .variant(ButtonVariant::Ghost)
@@ -154,6 +169,15 @@ impl AgentPage {
     pub(super) fn sources_card(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let sources = self.sources(cx);
+        let full = sources.len() >= dcc_core::domain::agent_source::MAX_SOURCES_PER_AGENT;
+        let add = (self.source_form.is_none() && !full).then(|| {
+            Button::new("agent-source-new")
+                .variant(ButtonVariant::Outline)
+                .size(ButtonSize::Sm)
+                .on_click(cx.listener(|page, _, window, cx| page.open_source_form(window, cx)))
+                .child(cx.t("agents.sources.form.new"))
+        });
+        let form = self.source_form_element(cx);
         let rows: Vec<AnyElement> = sources
             .iter()
             .enumerate()
@@ -167,9 +191,16 @@ impl AgentPage {
             .p(px(20.0))
             .child(
                 div()
-                    .text_size(px(14.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(cx.t("agents.sources.title")),
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(cx.t("agents.sources.title")),
+                    )
+                    .children(add),
             )
             .child(
                 div()
@@ -179,6 +210,7 @@ impl AgentPage {
                     .child(cx.t("agents.sources.hint")),
             )
             .children(rows)
+            .children(form)
             .into_any_element()
     }
 }

@@ -9,12 +9,14 @@ mod agent_reactions;
 mod agent_reads;
 mod agent_rooms;
 mod agent_routines;
+mod agent_source_form;
 mod agent_sources;
 mod agent_replies;
 mod agent_tools_refresh;
 mod claude_turn_usage;
 mod pr_review_requests;
 pub use agent_proposals::ProposedAgent;
+pub use agent_source_form::SourceInput;
 pub use agent_sources::ProposedSource;
 pub use agent_replies::ProposedReply;
 use std::{

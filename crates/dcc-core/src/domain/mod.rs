@@ -13,6 +13,7 @@ pub mod agent_reaction;
 pub mod agent_routine;
 pub mod agent_run;
 pub mod agent_source;
+pub mod agent_source_suggest;
 pub mod claude_usage;
 pub mod room_context;
 pub mod agent_templates;

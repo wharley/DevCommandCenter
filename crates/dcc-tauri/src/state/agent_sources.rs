@@ -6,8 +6,6 @@
 use dcc_core::domain::agent_source::{
     AgentSource, DEFAULT_EVERY, EVERY_CHOICES, MAX_ARGUMENTS_CHARS,
 };
-use dcc_core::ports::McpRepo as _;
-use dcc_infra::mcp_db::SqliteMcpRepo;
 
 use super::*;
 
@@ -72,21 +70,7 @@ impl SessionCommandState {
                 "the person turned {connector} off for you; ask them to allow reading it under Access"
             )));
         }
-        let repo = SqliteMcpRepo::open(&self.db_path)?;
-        let read_only: Vec<String> = repo
-            .list_mcp_connection_checks()
-            .await?
-            .into_iter()
-            .find(|check| check.definition_id.0 == connector_id)
-            .map(|check| {
-                check
-                    .tools
-                    .into_iter()
-                    .filter(|tool| tool.annotations.read_only_hint == Some(true))
-                    .map(|tool| tool.name)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let read_only = self.read_only_connector_tools(&connector_id).await?;
         if !read_only.iter().any(|tool| tool == proposed.tool.trim()) {
             return Err(invalid(format!(
                 "\"{}\" is not one of {connector}'s read-only tools; pick one of: {}",

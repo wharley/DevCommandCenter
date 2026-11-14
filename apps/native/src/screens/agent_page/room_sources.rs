@@ -156,6 +156,17 @@ impl TeamRoom {
                                                 .with("every", source.every_minutes.to_string()),
                                         ),
                                     ),
+                            )
+                            // What DCC will call, so the person sees it
+                            // before creating.
+                            .child(
+                                div()
+                                    .debug_selector(move || format!("room-source-call-{index}"))
+                                    .truncate()
+                                    .text_size(px(11.0))
+                                    .font_family(crate::theme::fonts::MONO)
+                                    .text_color(colors.muted_foreground)
+                                    .child(format!("{} {}", source.tool, source.arguments)),
                             ),
                     )
                     .child(
