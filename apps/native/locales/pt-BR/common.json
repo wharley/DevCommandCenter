@@ -541,6 +541,11 @@
         "autoOption": "Automático",
         "hint": "Quem responde quando você não cita ninguém. Assunto de revisão ainda vai para o Revisor, e quem estava falando continua."
       },
+      "reply": {
+        "reason": "resposta",
+        "action": "Responder",
+        "to": "Respondendo a {{agent}}:"
+      },
       "handoff": {
         "suggests": "{{agent}} sugere passar a vez para {{teammate}}",
         "autoPassed": "Passado automaticamente para {{teammate}}",

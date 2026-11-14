@@ -541,6 +541,11 @@
         "autoOption": "Automatic",
         "hint": "Who answers when you name nobody. A review still goes to the Reviewer, and whoever was talking goes on."
       },
+      "reply": {
+        "reason": "reply",
+        "action": "Reply",
+        "to": "Replying to {{agent}}:"
+      },
       "handoff": {
         "suggests": "{{agent}} suggests passing to {{teammate}}",
         "autoPassed": "Passed on to {{teammate}} automatically",

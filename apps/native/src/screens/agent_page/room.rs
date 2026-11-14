@@ -106,6 +106,8 @@ pub struct TeamRoom {
     pub(crate) find: Option<super::room_find::RoomFind>,
     /// Who answers here by default, as the person set it (`room_lead`).
     pub(crate) lead: super::room_lead::RoomLead,
+    /// The answer the next message replies to (`room_reply`).
+    pub(crate) reply: Option<super::room_reply::ReplyTo>,
     /// The one agent shown, on its page's "Conversa" (`room_focus`).
     pub(crate) focus: Option<String>,
     /// The project whose room this is; none: the Geral room.
@@ -247,6 +249,7 @@ impl TeamRoom {
             copy: super::room_copy::RoomCopy::new(cx),
             find: None,
             lead: Default::default(),
+            reply: None,
             focus: None,
             room: None,
             room_generation: 0,
@@ -446,10 +449,21 @@ impl TeamRoom {
         if text.is_empty() || self.sending {
             return;
         }
+        // A reply goes to the agent whose answer it replies to, opening
+        // with the quote (`room_reply`).
+        let reply = self.current_reply();
+        let replied = reply.as_ref().and_then(|reply| {
+            super::agent_card::agent_of(&self.sidebar, &reply.agent_id, cx)
+        });
+        let text = match (&reply, &replied) {
+            (Some(reply), Some(_)) => super::room_reply::quoted_message(&reply.quote, &text),
+            _ => text,
+        };
         // On an agent's own "Conversa", it goes straight to that agent.
-        let picked = match self.focused(cx) {
-            Some(agent) => Some((agent, None)),
-            None => self
+        let picked = match (self.focused(cx), replied) {
+            (Some(agent), _) => Some((agent, None)),
+            (None, Some(agent)) => Some((agent, Some(RouteReason::Mention))),
+            (None, None) => self
                 .pick(&text, cx)
                 .map(|(agent, reason)| (agent, Some(reason))),
         };
@@ -459,6 +473,7 @@ impl TeamRoom {
         };
         if self.deliver(agent, text, reason, cx) {
             self.input.update(cx, |area, cx| area.set_text("", cx));
+            self.reply = None;
         }
     }
 

@@ -55,6 +55,15 @@ impl TeamRoom {
 
     /// Who would answer what is written, else how the room picks.
     fn next_hint(&self, text: &str, cx: &gpui::App) -> gpui::SharedString {
+        // A reply goes to whose answer it replies to, whatever is typed.
+        if let Some(reply) = &self.reply {
+            return cx.t_with(
+                "agents.room.next",
+                &Args::default()
+                    .with("agent", reply.agent_name.clone())
+                    .with("reason", cx.t("agents.room.reply.reason").to_string()),
+            );
+        }
         (!text.is_empty())
             .then(|| self.pick(text, cx))
             .flatten()
@@ -91,12 +100,13 @@ impl TeamRoom {
     }
 
     pub(super) fn composer(
-        &self,
+        &mut self,
         dock: Option<AnyElement>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors.clone();
+        let reply_chip = self.reply_chip(cx);
         let drop_border = mix_oklab(colors.accent_calm, 0.7, colors.border);
         let text = self.input.read(cx).text().trim().to_string();
         let blank = text.is_empty();
@@ -191,6 +201,7 @@ impl TeamRoom {
             .border_color(border)
             .bg(colors.sidebar)
             .shadow(shadows)
+            .children(reply_chip)
             .child(
                 div()
                     .id("room-field")

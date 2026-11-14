@@ -134,6 +134,7 @@ mod room_rows;
 mod room_running;
 #[cfg(test)]
 mod room_running_tests;
+mod room_reply;
 mod room_said;
 mod room_shipped;
 mod room_source_group;
