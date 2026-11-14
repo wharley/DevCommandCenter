@@ -123,6 +123,17 @@ fn a_turn_at_work_shows_live_and_its_answer_takes_its_place(cx: &mut TestAppCont
         let turn = room.feeds[0].now.live().unwrap().clone();
         // The answer is coming in: it writes.
         assert_eq!(room.doing_label(&turn, 5, cx).to_string(), "Escrevendo…");
+        // Before anything came from the agent: it reads the request, and
+        // after a few seconds the row says it is still coming up.
+        let mut waiting = turn.clone();
+        waiting.text.clear();
+        waiting.steps.clear();
+        waiting.doing = dcc_core::domain::team_room_live::Doing::Reading;
+        assert_eq!(room.doing_label(&waiting, 1, cx).to_string(), "Lendo o pedido…");
+        assert_eq!(
+            room.doing_label(&waiting, 6, cx).to_string(),
+            "Abrindo o agente e conectando as ferramentas…"
+        );
     });
     cx.run_until_parked();
     // Time for the paced reveal to show what came.

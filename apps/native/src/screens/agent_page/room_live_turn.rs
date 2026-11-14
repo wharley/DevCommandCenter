@@ -34,6 +34,9 @@ use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, pulse_loop, pulse_spinn
 const STEPS_SHOWN: usize = 6;
 /// With no answer yet after this long, the label says it takes a while.
 const LONG_SECONDS: i64 = 60;
+/// Nothing came from the agent for this long after the turn started: it
+/// is still coming up (its process, its tools), which the row then says.
+const STARTING_SECONDS: i64 = 4;
 /// A stop older than this no longer asks to be tried again.
 const STOPPED_HOURS: i64 = 24;
 
@@ -226,6 +229,7 @@ impl TeamRoom {
             return cx.t("agents.room.live.writing");
         }
         cx.t(match turn.doing {
+            Doing::Reading if seconds >= STARTING_SECONDS => "agents.room.live.starting",
             Doing::Reading => "agents.room.live.reading",
             _ => "agents.room.live.thinking",
         })

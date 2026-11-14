@@ -643,6 +643,7 @@
         "stopping": "Stopping…",
         "stopFailed": "Couldn't stop: {{error}}",
         "reading": "Reading the request…",
+        "starting": "Starting the agent and connecting its tools…",
         "thinking": "Thinking…",
         "writing": "Writing…",
         "long": "Still working: long tasks take a while",

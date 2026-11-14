@@ -643,6 +643,7 @@
         "stopping": "Parando…",
         "stopFailed": "Não deu para parar: {{error}}",
         "reading": "Lendo o pedido…",
+        "starting": "Abrindo o agente e conectando as ferramentas…",
         "thinking": "Pensando…",
         "writing": "Escrevendo…",
         "long": "Ainda trabalhando: tarefas longas levam um tempo",
