@@ -73,6 +73,9 @@ impl AgentPage {
                             })
                         }
                         room::RoomEvent::OpenAgent(agent_id) => page.show(agent_id.clone(), cx),
+                        room::RoomEvent::OpenAgentConversation(agent_id) => {
+                            page.show_conversation(agent_id.clone(), cx)
+                        }
                         room::RoomEvent::AgentCreated {
                             agent_id,
                             first_request,

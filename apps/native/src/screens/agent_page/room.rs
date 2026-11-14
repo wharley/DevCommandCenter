@@ -40,6 +40,8 @@ pub enum RoomEvent {
         task_id: String,
         step: crate::data::task_delivery::DeliveryStep,
     },
+    /// The page of an agent on its conversation (a click on its face).
+    OpenAgentConversation(String),
     /// An agent's page ("Ajustar" on its limit card).
     OpenAgent(String),
     /// "Criar" on an agent proposed: its conversation, the first request

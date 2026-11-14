@@ -1,4 +1,4 @@
-//! The agent card, headlessly: a click on an answer's face opens it with the
+//! The agent card, headlessly: a hover on an answer's face opens it with the
 //! agent's name, its state and both actions; "Mensagem" addresses it in the
 //! field; Esc closes it; a hover opens it after half a second and not
 //! before, and a hover that leaves earlier opens nothing.
@@ -32,26 +32,63 @@ fn line(index: usize) -> RoomLine {
     }
 }
 
-#[gpui::test]
-fn a_face_opens_the_agents_card_and_its_actions_work(cx: &mut TestAppContext) {
+type Room = gpui::Entity<super::room::TeamRoom>;
+
+/// Somewhere with no agent under it.
+fn away() -> gpui::Point<gpui::Pixels> {
+    point(px(1100.0), px(40.0))
+}
+
+/// The pointer resting `at` (a face's centre) long enough for its card to
+/// open. Each test hovers little: the lines these rooms are given are not
+/// in a database, so they do not outlive the room reading it again.
+fn hover(cx: &mut gpui::VisualTestContext, at: gpui::Point<gpui::Pixels>) {
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(550));
+    cx.run_until_parked();
+}
+
+fn open_on(room: &Room, cx: &mut gpui::VisualTestContext) -> Option<String> {
+    room.read_with(cx, |room, _| {
+        room.card.open.as_ref().map(|open| open.agent_id.clone())
+    })
+}
+
+/// A room with one answer, and where its face is.
+fn room_and_face(
+    cx: &mut TestAppContext,
+) -> (
+    gpui::Entity<super::AgentPage>,
+    Room,
+    &mut gpui::VisualTestContext,
+    gpui::Point<gpui::Pixels>,
+) {
     let (page, room, cx) = room_with_lines(cx, (0..2).map(line).collect(), AgentState::Idle);
-    let open_on = |room: &gpui::Entity<super::room::TeamRoom>, cx: &mut gpui::VisualTestContext| {
-        room.read_with(cx, |room, _| {
-            room.card.open.as_ref().map(|open| open.agent_id.clone())
-        })
-    };
+    let face = cx.debug_bounds("room-face-1").unwrap().center();
+    (page, room, cx, face)
+}
+
+#[gpui::test]
+fn a_face_shows_the_agents_card_after_half_a_second_of_hover(cx: &mut TestAppContext) {
+    let (_page, room, cx, face) = room_and_face(cx);
     assert!(cx.debug_bounds("agent-card").is_none());
 
-    // A click on the face: the card, with what the team column says.
-    let face = cx.debug_bounds("room-face-1").unwrap();
-    cx.simulate_click(face.center(), Modifiers::none());
+    // Nothing before 500 ms.
+    cx.simulate_mouse_move(face, None, Modifiers::none());
     cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(400));
+    cx.run_until_parked();
+    assert_eq!(open_on(&room, cx), None, "not yet");
+    cx.executor().advance_clock(Duration::from_millis(150));
+    cx.run_until_parked();
+    assert_eq!(open_on(&room, cx).as_deref(), Some("dev"), "after 500 ms");
+
+    // The card, with what the team column says.
     assert!(cx.debug_bounds("agent-card").is_some());
-    assert_eq!(open_on(&room, cx).as_deref(), Some("dev"));
     assert!(cx.debug_bounds("agent-card-name").is_some());
     assert!(cx.debug_bounds("agent-card-status").is_some());
     assert!(cx.debug_bounds("agent-card-rooms").is_some());
-    assert!(cx.debug_bounds("agent-card-message").is_some());
     assert!(cx.debug_bounds("agent-card-profile").is_some());
     cx.update(|_, cx| {
         assert_eq!(cx.t("agents.team.line.idle"), "Disponível");
@@ -67,53 +104,47 @@ fn a_face_opens_the_agents_card_and_its_actions_work(cx: &mut TestAppContext) {
         room.read_with(cx, |room, cx| room.input.read(cx).text().to_string()),
         "@Dev "
     );
-    assert!(cx.debug_bounds("agent-card").is_none());
+    assert_eq!(open_on(&room, cx), None);
+}
 
-    // Esc closes it.
-    let face = cx.debug_bounds("room-face-1").unwrap();
-    cx.simulate_click(face.center(), Modifiers::none());
-    cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-card").is_some());
+#[gpui::test]
+fn esc_or_the_pointer_away_closes_the_card(cx: &mut TestAppContext) {
+    let (_page, room, cx, face) = room_and_face(cx);
+    hover(cx, face);
+    assert_eq!(open_on(&room, cx).as_deref(), Some("dev"));
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-card").is_none());
     assert_eq!(open_on(&room, cx), None);
 
-    // Away from the face, then a hover on the name: nothing before 500 ms.
-    let away = point(px(1100.0), px(40.0));
-    cx.simulate_mouse_move(away, None, Modifiers::none());
+    // Open again; the pointer away from the card and the face closes it.
+    cx.simulate_mouse_move(away(), None, Modifiers::none());
     cx.run_until_parked();
-    let name = cx.debug_bounds("room-face-1").unwrap();
-    cx.simulate_mouse_move(name.center(), None, Modifiers::none());
-    cx.run_until_parked();
-    cx.executor().advance_clock(Duration::from_millis(400));
-    cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-card").is_none(), "not yet");
-    cx.executor().advance_clock(Duration::from_millis(150));
-    cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-card").is_some(), "after 500 ms");
-
-    // The pointer away from the card and the face: it closes.
-    cx.simulate_mouse_move(away, None, Modifiers::none());
+    hover(cx, face);
+    assert_eq!(open_on(&room, cx).as_deref(), Some("dev"));
+    cx.simulate_mouse_move(away(), None, Modifiers::none());
     cx.run_until_parked();
     cx.executor().advance_clock(Duration::from_millis(350));
     cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-card").is_none());
+    assert_eq!(open_on(&room, cx), None);
+}
 
-    // A hover that leaves before 500 ms opens nothing, and no timer is left.
-    cx.simulate_mouse_move(name.center(), None, Modifiers::none());
+#[gpui::test]
+fn a_hover_that_leaves_early_opens_nothing(cx: &mut TestAppContext) {
+    let (_page, room, cx, face) = room_and_face(cx);
+    cx.simulate_mouse_move(face, None, Modifiers::none());
     cx.run_until_parked();
     cx.executor().advance_clock(Duration::from_millis(300));
-    cx.simulate_mouse_move(away, None, Modifiers::none());
+    cx.simulate_mouse_move(away(), None, Modifiers::none());
     cx.run_until_parked();
     cx.executor().advance_clock(Duration::from_millis(600));
     cx.run_until_parked();
-    assert!(cx.debug_bounds("agent-card").is_none());
+    assert_eq!(open_on(&room, cx), None);
+}
 
-    // "Ver perfil": the agent's page on "Configuração".
-    let face = cx.debug_bounds("room-face-1").unwrap();
-    cx.simulate_click(face.center(), Modifiers::none());
-    cx.run_until_parked();
+#[gpui::test]
+fn the_cards_profile_button_opens_the_agents_configuration(cx: &mut TestAppContext) {
+    let (page, _room, cx, face) = room_and_face(cx);
+    hover(cx, face);
     let profile = cx.debug_bounds("agent-card-profile").unwrap();
     cx.simulate_click(profile.center(), Modifiers::none());
     cx.run_until_parked();
@@ -125,13 +156,28 @@ fn a_face_opens_the_agents_card_and_its_actions_work(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn the_team_columns_face_opens_the_card_too(cx: &mut TestAppContext) {
+fn a_click_on_an_agents_face_goes_to_its_conversation(cx: &mut TestAppContext) {
     let (page, _room, cx) = room_with_lines(cx, (0..2).map(line).collect(), AgentState::Idle);
-    let face = cx.debug_bounds("team-face-0").unwrap();
+    assert!(page.read_with(cx, |page, _| page.room_open));
+    // In the room: the click is for talking to it, not for its card.
+    let face = cx.debug_bounds("room-face-1").unwrap();
     cx.simulate_click(face.center(), Modifiers::none());
     cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-card").is_none());
+    page.read_with(cx, |page, _| {
+        assert_eq!(page.agent_id, "dev");
+        assert_eq!(page.tab, AgentTab::Conversation);
+        assert!(!page.room_open);
+    });
+}
+
+#[gpui::test]
+fn the_team_columns_face_shows_the_card_on_hover_too(cx: &mut TestAppContext) {
+    let (page, _room, cx) = room_with_lines(cx, (0..2).map(line).collect(), AgentState::Idle);
+    let face = cx.debug_bounds("team-face-0").unwrap().center();
+    hover(cx, face);
     assert!(cx.debug_bounds("agent-card").is_some());
-    // The face opens the card, not the agent's conversation.
+    // A hover alone goes nowhere.
     assert!(page.read_with(cx, |page, _| page.room_open));
     let message = cx.debug_bounds("agent-card-message").unwrap();
     cx.simulate_click(message.center(), Modifiers::none());

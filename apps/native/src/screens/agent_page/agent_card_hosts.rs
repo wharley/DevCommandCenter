@@ -44,6 +44,13 @@ impl CardHost for TeamRoom {
         cx.emit(RoomEvent::OpenAgent(agent_id.to_string()));
     }
 
+    /// Already on that agent alone: there is nowhere to go.
+    fn card_conversation(&mut self, agent_id: &str, cx: &mut Context<Self>) {
+        if self.focus.as_deref() != Some(agent_id) {
+            cx.emit(RoomEvent::OpenAgentConversation(agent_id.to_string()));
+        }
+    }
+
     /// The card alone moved: the rows are kept, as the live poll does.
     fn card_redraw(&mut self, cx: &mut Context<Self>) {
         self.live.quiet = true;
@@ -83,5 +90,9 @@ impl CardHost for AgentPage {
 
     fn card_profile(&mut self, agent_id: &str, cx: &mut Context<Self>) {
         self.show(agent_id.to_string(), cx);
+    }
+
+    fn card_conversation(&mut self, agent_id: &str, cx: &mut Context<Self>) {
+        self.show_conversation(agent_id.to_string(), cx);
     }
 }

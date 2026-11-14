@@ -1,6 +1,7 @@
 //! A small card about an agent (Tucano's `AgentCard`): its face or name in
 //! the room's answers, the live rows, the `@` list and the team's column
-//! open it on a click, or after half a second of hover, so the person sees
+//! show it after half a second of hover (a click goes to the agent's
+//! conversation), so the person sees
 //! who it is, where it runs and what it does now without leaving the room.
 //! One card per host at a time; Esc, a click outside, or the pointer away
 //! from the card and its face for a moment close it. A hover starts one
@@ -59,6 +60,8 @@ pub(crate) trait CardHost: Sized + 'static {
     fn card_message(&mut self, agent_id: &str, window: &mut Window, cx: &mut Context<Self>);
     /// "Ver perfil": the agent's page on "Configuração".
     fn card_profile(&mut self, agent_id: &str, cx: &mut Context<Self>);
+    /// A click on the agent's face or name: its conversation.
+    fn card_conversation(&mut self, agent_id: &str, cx: &mut Context<Self>);
     /// Draws again for the card alone (the room keeps its rows).
     fn card_redraw(&mut self, cx: &mut Context<Self>) {
         cx.notify();
@@ -145,9 +148,10 @@ fn hover_trigger<T: CardHost>(
     cards.hover = Some((trigger, task));
 }
 
-/// Wraps `child` (a face, a name, a row) as what opens `agent_id`'s card:
-/// on hover always, on a click when `click` (the `@` list keeps its click
-/// for picking). The card, when it is this one's, floats beside it.
+/// Wraps `child` (a face, a name, a row) as what shows `agent_id`'s card
+/// on hover; a click, when `click`, goes to the agent's conversation (the
+/// `@` list keeps its click for picking). The card, when it is this one's,
+/// floats beside it: it is where "Ver perfil" leads to the configuration.
 pub(crate) fn card_trigger<T: CardHost>(
     host: &T,
     trigger: impl Into<SharedString>,
@@ -168,17 +172,14 @@ pub(crate) fn card_trigger<T: CardHost>(
             hover_trigger(host, key.clone(), agent.clone(), *hovered, cx)
         }))
         .when(click, |wrapper| {
-            let (key, agent) = (trigger.clone(), agent_id.to_string());
+            let agent = agent_id.to_string();
             wrapper
                 .cursor_pointer()
                 .on_click(cx.listener(move |host, _, _, cx| {
                     cx.stop_propagation();
-                    // As drawn: the press outside the card closed it already.
-                    if shown {
-                        close(host, cx);
-                    } else {
-                        open(host, key.clone(), agent.clone(), cx);
-                    }
+                    // Talking to the agent is what a click on it is for.
+                    close(host, cx);
+                    host.card_conversation(&agent, cx);
                 }))
         })
         .child(child)
