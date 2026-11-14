@@ -398,9 +398,6 @@ impl MergeResolver {
             Some(Pending::DeleteResult) => self.delete_result(cx),
             Some(Pending::Abort) => self.abort(false, cx),
             Some(Pending::ValidationCommands) => self.complete(cx),
-            Some(Pending::OpenAgentSession(session)) => {
-                cx.emit(MergeResolverEvent::OpenSession(session))
-            }
             None => {}
         }
         cx.notify();

@@ -5462,7 +5462,6 @@
       "discardEdit": "Descartar a edição ainda não salva deste conflito?",
       "remainingMarkers": "Ainda existem linhas parecidas com marcadores de conflito. Marcar como resolvido mesmo assim?",
       "emptyResult": "O resultado está vazio, mas uma das versões do arquivo possui conteúdo. Salvar um arquivo vazio e marcá-lo como resolvido mesmo assim?",
-      "openAgentSession": "Abrir a sessão descartará a sugestão ainda não salva exibida neste resolvedor. Continuar?",
       "deleteResult": "Excluir {{path}} como resultado deste merge?",
       "abort": "Abortar o merge e descartar todas as resoluções realizadas?\nSe este merge não é com a base atual do pull request, dá para recomeçar com ela: as resoluções feitas até aqui também são descartadas.",
       "restart": "Abortar e recomeçar com a base atual",
@@ -5545,41 +5544,32 @@
       "pending_one": "{{count}} bloco ainda pendente",
       "pending_other": "{{count}} blocos ainda pendentes"
     },
+    "proposal": {
+      "title": "Proposta do agente",
+      "blocks_one": "{{count}} bloco para revisar",
+      "blocks_other": "{{count}} blocos para revisar",
+      "wholeFile": "o arquivo inteiro",
+      "block": "Bloco {{number}}:",
+      "accept": "Aceitar",
+      "refuse": "Recusar",
+      "acceptAll": "Aceitar todos",
+      "keep": "Manter",
+      "discard": "Descartar",
+      "together": "Os blocos foram resolvidos em conjunto: recusar ou editar um pode pedir ajuste nos outros."
+    },
     "agent": {
-      "resolveFile": "Resolver arquivo com agente",
+      "noProvider": "Escolha um provedor disponível no composer para usar o agente.",
+      "cancelled": "Análise cancelada.",
+      "showAnswer": "Ver resposta",
+      "hideAnswer": "Ocultar resposta",
+      "readOnlyRun": "Lê o arquivo e o projeto, sem alterar nada. Nenhuma conversa é criada na tarefa.",
+      "resolveFile": "Resolver com agente",
       "resolveFileTitle": "O agente analisa todos os blocos deste arquivo de uma só vez e propõe o código final",
-      "reviewFile": "Pedir revisão do arquivo ao agente",
-      "sessionTitle": "Resolver conflito: {{path}}",
-      "suggestionAppliedHunk": "Sugestão do agente aplicada ao bloco",
-      "suggestionAppliedFile": "Sugestão do agente aplicada ao arquivo",
-      "sessionLabel": "Sessão {{sessionId}}",
-      "reviewNotice": "Revise o resultado. Nada foi salvo, adicionado ao índice ou commitado; a resposta está registrada no histórico da sessão.",
       "run": {
         "analyzing": "Analisando conflito…",
-        "cancelling": "Cancelando análise…",
-        "completed": "Análise concluída",
-        "failed": "A análise não foi concluída"
+        "cancelling": "Cancelando análise…"
       },
-      "viewSession": "Ver sessão",
-      "cancel": "Cancelar",
-      "expand": "Mostrar atividade do agente",
-      "collapse": "Ocultar atividade do agente",
-      "permissionRequired": "O agente solicitou uma permissão. Abra a sessão para revisar e responder.",
-      "inputRequired": "O agente precisa de uma resposta sua. Abra a sessão para continuar.",
-      "liveOutput": "Resposta em tempo real",
-      "waitingOutput": "Aguardando a resposta do agente…",
-      "activity": {
-        "title": "Atividade",
-        "waiting": "Preparando a sessão do agente…",
-        "started": "Solicitação enviada ao agente",
-        "analyzing": "Analisando as versões do conflito",
-        "tool": "{{action}}{{target}}",
-        "toolFailed": "Uma ação do agente falhou{{reason}}",
-        "permission": "Permissão solicitada",
-        "input": "Interação solicitada",
-        "completed": "Resposta concluída",
-        "aborted": "Execução interrompida"
-      }
+      "cancel": "Cancelar"
     },
     "result": {
       "restore": "Restaurar",

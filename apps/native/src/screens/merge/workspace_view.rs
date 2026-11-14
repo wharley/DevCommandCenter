@@ -217,9 +217,22 @@ fn section(resolver: &MergeResolver, cx: &mut Context<MergeResolver>) -> AnyElem
     let busy_any = busy.is_some();
     let unavailable = conflict_text_unavailable(entry);
     let hunks = open.hunks();
-    let at = open.active_hunk.min(hunks.len().saturating_sub(1));
+    // With no conflict left, the arrows walk what the agent still offers.
+    let proposed = resolver
+        .proposal
+        .as_ref()
+        .filter(|_| hunks.is_empty())
+        .and_then(|proposal| proposal.position(&open.buffer));
+    let (at, total) = match proposed {
+        Some((position, total)) => (position - 1, total),
+        None => (
+            open.active_hunk.min(hunks.len().saturating_sub(1)),
+            hunks.len(),
+        ),
+    };
+    let on_proposal = proposed.is_some();
     // The blocks' position and its arrows, while there are blocks.
-    let position = (!unavailable && !hunks.is_empty()).then(|| {
+    let position = (!unavailable && total > 0).then(|| {
         div()
             .flex()
             .flex_shrink_0()
@@ -236,7 +249,7 @@ fn section(resolver: &MergeResolver, cx: &mut Context<MergeResolver>) -> AnyElem
                             "mergeConflict.hunk.position",
                             &Args::default()
                                 .with("current", (at + 1).to_string())
-                                .with("total", hunks.len().to_string()),
+                                .with("total", total.to_string()),
                         ),
                     ),
             )
@@ -245,15 +258,27 @@ fn section(resolver: &MergeResolver, cx: &mut Context<MergeResolver>) -> AnyElem
                     .variant(ButtonVariant::Ghost)
                     .size(ButtonSize::IconXs)
                     .disabled(at == 0)
-                    .on_click(cx.listener(|resolver, _, _, cx| resolver.step_hunk(false, cx)))
+                    .on_click(cx.listener(move |resolver, _, _, cx| {
+                        if on_proposal {
+                            resolver.step_proposed(false, cx)
+                        } else {
+                            resolver.step_hunk(false, cx)
+                        }
+                    }))
                     .child(Icon::new("chevron-up").size(16.0)),
             )
             .child(
                 Button::new("merge-hunk-next")
                     .variant(ButtonVariant::Ghost)
                     .size(ButtonSize::IconXs)
-                    .disabled(at + 1 >= hunks.len())
-                    .on_click(cx.listener(|resolver, _, _, cx| resolver.step_hunk(true, cx)))
+                    .disabled(at + 1 >= total)
+                    .on_click(cx.listener(move |resolver, _, _, cx| {
+                        if on_proposal {
+                            resolver.step_proposed(true, cx)
+                        } else {
+                            resolver.step_hunk(true, cx)
+                        }
+                    }))
                     .child(Icon::new("chevron-down").size(16.0)),
             )
     });

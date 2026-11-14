@@ -5,7 +5,6 @@ use gpui::SharedString;
 
 use crate::i18n::Translate;
 
-
 pub(crate) fn kind_label(entry: &WorkspaceGitConflictEntry, cx: &gpui::App) -> SharedString {
     cx.t(match entry.kind {
         WorkspaceGitConflictKind::BothModified => "mergeConflict.conflictKind.bothModified",

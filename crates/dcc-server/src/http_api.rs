@@ -974,6 +974,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         )
         .route("/api/v1/git/abort-merge", post(git_conflicts::abort_merge))
         .route(
+            "/api/v1/git/conflict-agent",
+            post(git_conflicts::conflict_agent),
+        )
+        .route(
+            "/api/v1/git/conflict-agent/cancel",
+            post(git_conflicts::cancel_conflict_agent),
+        )
+        .route(
             "/api/v1/git/validation-config",
             post(git_conflicts::validation_config),
         )

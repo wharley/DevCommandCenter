@@ -16,6 +16,25 @@ fn reply<T: Serialize>(result: Result<T, String>) -> Result<Json<Value>, HttpApi
         .map_err(|error| HttpApiError::internal(error.to_string()))
 }
 
+/// The resolver's agent: one read-only run in the task's checkout.
+pub(super) async fn conflict_agent(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::conflict_agent::ConflictAgentInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    git_changes::task_checkout(&backend, &input.workspace_root).await?;
+    reply(
+        dcc_tauri::commands::conflict_agent::conflict_agent_with_state(&backend.sessions, input)
+            .await,
+    )
+}
+
+pub(super) async fn cancel_conflict_agent(
+    Json(input): Json<dcc_tauri::commands::conflict_agent::ConflictAgentCancelInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let stopped = dcc_tauri::commands::conflict_agent::cancel_conflict_agent(input);
+    Ok(Json(json!({ "stopped": stopped })))
+}
+
 pub(super) async fn conflict_state(
     State(backend): State<Arc<HttpBackend>>,
     Json(input): Json<WorkspaceGitConflictStateInput>,

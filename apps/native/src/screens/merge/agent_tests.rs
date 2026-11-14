@@ -1,38 +1,42 @@
-//! "Resolver arquivo com agente" against a fake desktop and events handed
-//! in by the test: the answer put in the editor for review, one left with
-//! markers refused, a cancelled run, the editor read-only meanwhile, closing
-//! held back, and "Ver sessão".
+//! "Resolver com agente" against a fake desktop: the run asked as one
+//! read-only call (no conversation started), an answer out of contract
+//! shown as a failure, the answer put in the editor and offered block by
+//! block (accept, refuse, discard), and a run the person stopped.
 
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-use dcc_core::domain::merge_conflict::WorkspaceGitConflictOperation;
-use dcc_core::domain::session::{SessionEventKind, SessionEventRecord, SessionId, TurnId};
+use dcc_core::domain::merge_conflict::{WorkspaceGitConflictEntry, WorkspaceGitConflictOperation};
 use gpui::{TestAppContext, WindowAppearance, px, size};
 use serde_json::json;
 
-use super::agent::AgentStatus;
-use super::tests::{checks, click, source, state};
-use super::{
-    AgentPick, MergeResolver, MergeResolverEvent, MergeResolverRequest, Pending, ResultView,
-};
+use super::agent::{AgentRun, AgentStatus};
+use super::tests::{checks, click, source, state, text};
+use super::{AgentPick, Busy, MergeResolver, MergeResolverRequest};
 use crate::data::conversation::ThreadStart;
-use crate::data::desktop_api::DesktopApi;
+use crate::data::desktop_api::{ApiError, DesktopApi};
 use crate::test_support::fake_desktop_routes;
 use crate::theme::{Theme, ThemePreference};
 
-type Shared = Arc<Mutex<Vec<SessionEventRecord>>>;
-type Seen = std::rc::Rc<std::cell::RefCell<Vec<MergeResolverEvent>>>;
+const A: &str = "<<<<<<< HEAD\nmine a\n=======\ntheirs a\n>>>>>>> origin/main\n";
+const B: &str = "<<<<<<< HEAD\nmine b\n=======\ntheirs b\n>>>>>>> origin/main\n";
 
-struct Run<'a> {
-    resolver: gpui::Entity<MergeResolver>,
-    cx: &'a mut gpui::VisualTestContext,
-    events: Shared,
-    seen: Seen,
-    server: std::thread::JoinHandle<Vec<(String, String)>>,
+/// A file with two blocks and enough between them to tell them apart.
+fn two_blocks() -> String {
+    format!("top\n{A}fn between() {{ body(); }}\n{B}bottom\n")
 }
 
-fn open<'a>(cx: &'a mut TestAppContext, extra: Vec<(&'static str, u16, String)>) -> Run<'a> {
+fn entry() -> WorkspaceGitConflictEntry {
+    WorkspaceGitConflictEntry {
+        result: text(Some(&two_blocks())),
+        ..source()
+    }
+}
+
+type Opened<'a> = (
+    gpui::Entity<MergeResolver>,
+    &'a mut gpui::VisualTestContext,
+    std::thread::JoinHandle<Vec<(String, String)>>,
+);
+
+fn open<'a>(cx: &'a mut TestAppContext, extra: Vec<(&'static str, u16, String)>) -> Opened<'a> {
     cx.update(|cx| {
         cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
         crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
@@ -44,19 +48,9 @@ fn open<'a>(cx: &'a mut TestAppContext, extra: Vec<(&'static str, u16, String)>)
         (
             "/api/v1/git/conflict-state",
             200,
-            state(merge, vec![source()]),
+            state(merge, vec![entry()]),
         ),
         ("/api/v1/git/validation-config", 200, checks(&[])),
-        (
-            "/api/v1/sessions/start",
-            200,
-            json!({ "session": { "id": "s-1" } }).to_string(),
-        ),
-        (
-            "/api/v1/sessions/s-1/turns",
-            200,
-            json!({ "turn": { "id": "t-1" } }).to_string(),
-        ),
     ];
     routes.extend(extra);
     let (port, server) = fake_desktop_routes(routes);
@@ -79,218 +73,255 @@ fn open<'a>(cx: &'a mut TestAppContext, extra: Vec<(&'static str, u16, String)>)
             model: Some("claude-sonnet-5-5".into()),
         }),
     };
-    let events: Shared = Arc::default();
-    let reader = events.clone();
     let (resolver, cx) = cx.add_window_view(move |_, cx| {
-        let mut resolver =
-            MergeResolver::new(request, cx).with_endpoint(DesktopApi::new(port, "k"), cx);
-        resolver.read_events = Arc::new(move |_| reader.lock().unwrap().clone());
-        resolver
+        MergeResolver::new(request, cx).with_endpoint(DesktopApi::new(port, "k"), cx)
     });
     cx.simulate_resize(size(px(1400.0), px(900.0)));
-    let seen: Seen = Default::default();
-    let sink = seen.clone();
-    cx.update(|_, cx| {
-        cx.subscribe(&resolver, move |_, event: &MergeResolverEvent, _| {
-            sink.borrow_mut().push(event.clone())
-        })
-        .detach();
-    });
     cx.run_until_parked();
-    Run {
-        resolver,
-        cx,
-        events,
-        seen,
-        server,
-    }
+    (resolver, cx, server)
 }
 
-fn record(sequence: u64, kind: SessionEventKind) -> SessionEventRecord {
-    SessionEventRecord {
-        event_id: format!("e{sequence}"),
-        session_id: SessionId("s-1".into()),
-        sequence,
-        occurred_at: "2026-10-25T00:00:00Z".into(),
-        kind,
-    }
-}
-
-fn started() -> SessionEventRecord {
-    record(
-        1,
-        serde_json::from_value(json!({ "type": "turn_started", "turnId": "t-1", "prompt": "x" }))
-            .unwrap(),
+/// The agent's answer for the two-block file, in this token's envelope.
+fn answer(token: &str, resolved: &str) -> String {
+    // The whole file, as answers used to come (still taken).
+    let body = json!({
+        "resolvedContent": resolved,
+        "explanation": "Juntei os dois lados.",
+        "blockNotes": ["Fiquei com os dois em a.", "Fiquei com a base em b."],
+    });
+    format!(
+        "<DCC_MERGE_RESOLUTION token=\"{token}\">{body}</DCC_MERGE_RESOLUTION token=\"{token}\">"
     )
 }
 
-/// The run's turn answering `content`, then done.
-fn answer(run: &mut Run, content: &str) {
-    let token = run.resolver.read_with(run.cx, |resolver, _| {
-        resolver.agent.as_ref().unwrap().token.clone()
+/// A run under way, as `resolve_with_agent` leaves it, without the call.
+fn running(resolver: &gpui::Entity<MergeResolver>, cx: &mut gpui::VisualTestContext) {
+    resolver.update(cx, |resolver, cx| {
+        resolver.busy = Some(Busy::Agent);
+        resolver.agent = Some(AgentRun {
+            status: AgentStatus::Analyzing,
+            error: None,
+            token: "tok".into(),
+            raw: None,
+            raw_open: false,
+        });
+        cx.notify();
     });
-    let envelope = format!(
-        "<DCC_MERGE_RESOLUTION token=\"{token}\">{}</DCC_MERGE_RESOLUTION token=\"{token}\">",
-        json!({ "resolvedContent": content, "explanation": "Mantém os dois lados." })
-    );
-    *run.events.lock().unwrap() = vec![
-        started(),
-        record(
-            2,
-            SessionEventKind::TurnDelta {
-                turn_id: TurnId("t-1".into()),
-                content: envelope,
-            },
-        ),
-        record(
-            3,
-            SessionEventKind::TurnCompleted {
-                turn_id: TurnId("t-1".into()),
-            },
-        ),
-    ];
-    run.cx.executor().advance_clock(Duration::from_millis(300));
-    run.cx.run_until_parked();
+    cx.run_until_parked();
 }
 
+const RESOLVED: &str = "top\nboth a\nfn between() { body(); }\ntheirs b\nbottom\n";
+
 #[gpui::test]
-fn the_agents_answer_goes_to_the_editor_for_review(cx: &mut TestAppContext) {
-    let mut run = open(cx, Vec::new());
-    click(run.cx, "merge-resolve-with-agent");
-    run.resolver.read_with(run.cx, |resolver, cx| {
-        let agent = resolver.agent.as_ref().expect("running");
-        assert_eq!(agent.status, AgentStatus::Analyzing);
-        assert_eq!(agent.session_id.as_deref(), Some("s-1"));
+fn the_run_is_one_read_only_call_and_an_answer_out_of_contract_fails(cx: &mut TestAppContext) {
+    let (resolver, cx, server) = open(
+        cx,
+        vec![(
+            "/api/v1/git/conflict-agent",
+            200,
+            json!({ "response": "I could not do it." }).to_string(),
+        )],
+    );
+    click(cx, "merge-resolve-with-agent");
+    let calls = server.join().unwrap();
+    cx.run_until_parked();
+    // No conversation was started: one call, on the composer's pick.
+    assert!(!calls.iter().any(|(line, _)| line.contains("/sessions")));
+    let (_, sent) = calls
+        .iter()
+        .find(|(line, _)| line.contains("/git/conflict-agent"))
+        .expect("the run was asked");
+    let sent: serde_json::Value = serde_json::from_str(sent).unwrap();
+    assert_eq!(sent["workspaceRoot"], "/tmp/checkout");
+    assert_eq!(sent["providerId"], "claude_code");
+    assert_eq!(sent["model"], "claude-sonnet-5-5");
+    assert!(sent["prompt"].as_str().unwrap().contains("mine a"));
+    assert!(!sent["runId"].as_str().unwrap().is_empty());
+    // Out of contract: said so, nothing put in the file, editing again.
+    assert!(cx.debug_bounds("merge-agent-error").is_some());
+    resolver.read_with(cx, |resolver, cx| {
+        assert_eq!(resolver.agent.as_ref().unwrap().status, AgentStatus::Failed);
+        assert!(resolver.proposal.is_none() && resolver.busy.is_none());
         let open = resolver.open.as_ref().unwrap();
-        assert!(open.editor.read(cx).read_only, "the editor waits");
-    });
-    assert!(run.cx.debug_bounds("merge-agent-run").is_some());
-    // Closing waits for the agent.
-    run.resolver
-        .update(run.cx, |resolver, cx| resolver.request_close(cx));
-    assert!(run.seen.borrow().is_empty());
-    answer(&mut run, "before\nmine\ntheirs\nafter\n");
-    run.resolver.read_with(run.cx, |resolver, cx| {
-        let open = resolver.open.as_ref().unwrap();
-        assert_eq!(open.buffer, "before\nmine\ntheirs\nafter\n");
-        assert_eq!(open.view, ResultView::Edit, "the suggestion stays editable");
+        assert_eq!(open.buffer, two_blocks());
         assert!(!open.editor.read(cx).read_only);
-        assert_eq!(
-            resolver.agent.as_ref().unwrap().status,
-            AgentStatus::Completed
-        );
-        assert_eq!(
-            resolver.suggestion.as_ref().unwrap().explanation,
-            "Mantém os dois lados."
-        );
-        assert_eq!(resolver.busy, None);
     });
-    assert!(run.cx.debug_bounds("merge-agent-suggestion").is_some());
-    // "Ver sessão" over the unsaved answer asks, then opens it.
-    click(run.cx, "merge-agent-session");
-    run.resolver.read_with(run.cx, |resolver, _| {
+    // No conversation to look it up in: the answer itself can be read.
+    assert!(cx.debug_bounds("merge-agent-answer").is_none());
+    click(cx, "merge-agent-show-answer");
+    assert!(cx.debug_bounds("merge-agent-answer").is_some());
+    resolver.read_with(cx, |resolver, _| {
         assert_eq!(
-            resolver.pending,
-            Some(Pending::OpenAgentSession("s-1".into()))
-        )
+            resolver.agent.as_ref().unwrap().raw.as_deref(),
+            Some("I could not do it.")
+        );
     });
-    click(run.cx, "merge-confirm-ok");
+    click(cx, "merge-agent-dismiss");
+    assert!(cx.debug_bounds("merge-agent-run").is_none());
+}
+
+#[gpui::test]
+fn the_agent_answers_the_blocks_and_the_file_is_put_together_here(cx: &mut TestAppContext) {
+    let (resolver, cx, _server) = open(cx, vec![]);
+    running(&resolver, cx);
+    let body = json!({
+        "blocks": [
+            { "resolved": "both a\n", "note": "Fiquei com os dois em a." },
+            { "resolved": "theirs b", "note": "Fiquei com a base em b." },
+        ],
+        "explanation": "Juntei os dois lados.",
+    });
+    let answer =
+        format!("<DCC_MERGE_RESOLUTION token=\"tok\">{body}</DCC_MERGE_RESOLUTION token=\"tok\">");
+    resolver.update(cx, |resolver, cx| {
+        resolver.finish_agent(Ok(answer), &two_blocks(), "tok", cx)
+    });
+    cx.run_until_parked();
+    resolver.read_with(cx, |resolver, _| {
+        let open = resolver.open.as_ref().unwrap();
+        // Only the blocks changed; what is between them is the file's own.
+        assert_eq!(open.buffer, RESOLVED);
+        let proposal = resolver.proposal.as_ref().unwrap();
+        assert_eq!(proposal.blocks.len(), 2);
+        assert_eq!(
+            proposal.blocks[1].note.as_deref(),
+            Some("Fiquei com a base em b.")
+        );
+        assert_eq!(proposal.blocks[1].proposed, "theirs b\n");
+    });
+    assert!(cx.debug_bounds("merge-proposal-accept-1").is_some());
+}
+
+#[gpui::test]
+fn the_answer_is_offered_block_by_block_in_the_file(cx: &mut TestAppContext) {
+    let (resolver, cx, _server) = open(cx, vec![]);
+    running(&resolver, cx);
+    assert!(cx.debug_bounds("merge-agent-cancel").is_some());
+    resolver.update(cx, |resolver, cx| {
+        resolver.finish_agent(Ok(answer("tok", RESOLVED)), &two_blocks(), "tok", cx)
+    });
+    cx.run_until_parked();
+    // The whole answer is in the file, and each block is offered where it is.
+    resolver.read_with(cx, |resolver, _| {
+        let open = resolver.open.as_ref().unwrap();
+        assert_eq!(open.buffer, RESOLVED);
+        let proposal = resolver.proposal.as_ref().unwrap();
+        assert_eq!(proposal.blocks.len(), 2);
+        assert_eq!(
+            proposal.blocks[0].note.as_deref(),
+            Some("Fiquei com os dois em a.")
+        );
+        assert_eq!(proposal.offered(&open.buffer), 2);
+        assert!(resolver.agent.is_none() && resolver.busy.is_none());
+    });
+    assert!(cx.debug_bounds("merge-proposal").is_some());
+    assert!(cx.debug_bounds("merge-proposal-accept-0").is_some());
+    assert!(cx.debug_bounds("merge-proposal-refuse-1").is_some());
+    // The bar's arrows and each block's note take the editor to it.
+    assert!(cx.debug_bounds("merge-hunk-position").is_some());
+    resolver.read_with(cx, |resolver, _| {
+        assert_eq!(resolver.proposal.as_ref().unwrap().at, 0, "on the first");
+    });
+    click(cx, "merge-proposal-note-1");
+    resolver.read_with(cx, |resolver, _| {
+        assert_eq!(resolver.proposal.as_ref().unwrap().at, 1);
+    });
+    click(cx, "merge-hunk-previous");
+    resolver.read_with(cx, |resolver, _| {
+        assert_eq!(resolver.proposal.as_ref().unwrap().at, 0);
+    });
+    // Refusing the second puts its conflict back, to resolve by hand.
+    click(cx, "merge-proposal-refuse-1");
+    resolver.read_with(cx, |resolver, _| {
+        let open = resolver.open.as_ref().unwrap();
+        assert_eq!(
+            open.buffer,
+            format!("top\nboth a\nfn between() {{ body(); }}\n{B}bottom\n")
+        );
+        assert_eq!(open.hunks().len(), 1);
+    });
+    assert!(cx.debug_bounds("merge-accept-both-0").is_some(), "by hand");
+    // Accepting the first leaves nothing to decide: the proposal goes.
+    click(cx, "merge-proposal-accept-0");
+    resolver.read_with(cx, |resolver, _| assert!(resolver.proposal.is_none()));
+    assert!(cx.debug_bounds("merge-proposal").is_none());
+}
+
+#[gpui::test]
+fn a_proposal_is_discarded_whole_or_kept_and_an_edited_block_is_the_persons(
+    cx: &mut TestAppContext,
+) {
+    let (resolver, cx, _server) = open(cx, vec![]);
+    running(&resolver, cx);
+    resolver.update(cx, |resolver, cx| {
+        resolver.finish_agent(Ok(answer("tok", RESOLVED)), &two_blocks(), "tok", cx)
+    });
+    cx.run_until_parked();
+    // "Descartar": every block back to its conflict.
+    click(cx, "merge-proposal-discard");
+    resolver.read_with(cx, |resolver, _| {
+        assert!(resolver.proposal.is_none());
+        assert_eq!(resolver.open.as_ref().unwrap().buffer, two_blocks());
+    });
+    // Asked again; the text outside the blocks changed too: one proposal
+    // for the file, kept or discarded whole.
+    running(&resolver, cx);
+    let rewritten = "TOP\nboth a\nfn other() {}\ntheirs b\nbottom\n";
+    resolver.update(cx, |resolver, cx| {
+        resolver.finish_agent(Ok(answer("tok", rewritten)), &two_blocks(), "tok", cx)
+    });
+    cx.run_until_parked();
+    resolver.read_with(cx, |resolver, _| {
+        let proposal = resolver.proposal.as_ref().unwrap();
+        assert!(proposal.blocks.is_empty());
+        assert_eq!(resolver.open.as_ref().unwrap().buffer, rewritten);
+    });
+    assert!(cx.debug_bounds("merge-proposal-accept-0").is_none());
+    click(cx, "merge-proposal-accept-all");
+    resolver.read_with(cx, |resolver, _| {
+        assert!(resolver.proposal.is_none());
+        assert_eq!(resolver.open.as_ref().unwrap().buffer, rewritten);
+    });
+}
+
+#[gpui::test]
+fn a_stopped_run_leaves_the_file_as_it_was(cx: &mut TestAppContext) {
+    let (resolver, cx, server) = open(
+        cx,
+        vec![(
+            "/api/v1/git/conflict-agent/cancel",
+            200,
+            r#"{"stopped":true}"#.into(),
+        )],
+    );
+    running(&resolver, cx);
+    click(cx, "merge-agent-cancel");
+    let calls = server.join().unwrap();
+    cx.run_until_parked();
+    let (_, sent) = calls
+        .iter()
+        .find(|(line, _)| line.contains("/conflict-agent/cancel"))
+        .expect("the stop was sent");
     assert_eq!(
-        run.seen.borrow().as_slice(),
-        &[MergeResolverEvent::OpenSession("s-1".into())]
+        serde_json::from_str::<serde_json::Value>(sent).unwrap()["runId"],
+        "tok"
     );
-    let calls = run.server.join().unwrap();
-    let body = |path: &str| -> serde_json::Value {
-        serde_json::from_str(
-            &calls
-                .iter()
-                .find(|(line, _)| line.contains(path))
-                .unwrap()
-                .1,
-        )
-        .unwrap()
-    };
-    let start = body("/api/v1/sessions/start");
-    assert_eq!(start["workspaceId"], "w-1");
-    assert_eq!(start["providerId"], "claude_code");
-    assert_eq!(start["title"], "Resolver conflito: src/a.rs");
-    let turn = body("/api/v1/sessions/s-1/turns");
-    assert_eq!(turn["effort"], "medium");
-    assert_eq!(turn["approvalPolicy"], "ask");
-    assert_eq!(turn["planMode"], false);
-    assert!(
-        turn["toolInstructions"]
-            .as_str()
-            .unwrap()
-            .contains("read-only Git conflict")
-    );
-    assert!(turn["prompt"].as_str().unwrap().contains("EDITABLE RESULT"));
-}
-
-#[gpui::test]
-fn an_answer_with_markers_is_not_applied(cx: &mut TestAppContext) {
-    let mut run = open(cx, Vec::new());
-    click(run.cx, "merge-resolve-with-agent");
-    answer(
-        &mut run,
-        "<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> main\n",
-    );
-    run.resolver.read_with(run.cx, |resolver, _| {
-        let agent = resolver.agent.as_ref().unwrap();
-        assert_eq!(agent.status, AgentStatus::Failed);
-        assert!(
-            agent
-                .error
-                .as_deref()
-                .unwrap()
-                .contains("marcadores de conflito")
-        );
-        assert_eq!(
-            resolver.open.as_ref().unwrap().buffer,
-            super::tests::CONFLICTED
-        );
-        assert!(resolver.suggestion.is_none());
-    });
-    assert!(run.cx.debug_bounds("merge-agent-error").is_some());
-}
-
-#[gpui::test]
-fn a_cancelled_run_aborts_the_turn_and_says_so(cx: &mut TestAppContext) {
-    let run = open(cx, vec![("/api/v1/sessions/s-1/abort", 200, "{}".into())]);
-    click(run.cx, "merge-resolve-with-agent");
-    click(run.cx, "merge-agent-cancel");
-    run.resolver.read_with(run.cx, |resolver, _| {
+    resolver.read_with(cx, |resolver, _| {
         assert_eq!(
             resolver.agent.as_ref().unwrap().status,
             AgentStatus::Cancelling
-        )
-    });
-    run.cx.executor().advance_clock(Duration::from_millis(300));
-    run.cx.run_until_parked();
-    *run.events.lock().unwrap() = vec![
-        started(),
-        record(
-            2,
-            SessionEventKind::TurnAborted {
-                turn_id: TurnId("t-1".into()),
-                reason: Some("cancelado".into()),
-            },
-        ),
-    ];
-    run.cx.executor().advance_clock(Duration::from_millis(300));
-    run.cx.run_until_parked();
-    run.resolver.read_with(run.cx, |resolver, _| {
-        let agent = resolver.agent.as_ref().unwrap();
-        assert_eq!(agent.status, AgentStatus::Failed);
-        assert_eq!(
-            agent.error.as_deref(),
-            Some("O agente interrompeu a sugestão de resolução: cancelado")
         );
     });
-    let calls = run.server.join().unwrap();
-    assert!(
-        calls
-            .iter()
-            .any(|(line, _)| line.contains("/api/v1/sessions/s-1/abort"))
-    );
+    // The run comes back stopped: no failure shown, nothing changed.
+    resolver.update(cx, |resolver, cx| {
+        let stopped = Err(ApiError::Failed("The run was cancelled.".into()));
+        resolver.finish_agent(stopped, &two_blocks(), "tok", cx)
+    });
+    cx.run_until_parked();
+    resolver.read_with(cx, |resolver, _| {
+        assert!(resolver.agent.is_none() && resolver.busy.is_none());
+        assert!(resolver.proposal.is_none());
+        assert_eq!(resolver.open.as_ref().unwrap().buffer, two_blocks());
+    });
+    assert!(cx.debug_bounds("merge-agent-run").is_none());
 }

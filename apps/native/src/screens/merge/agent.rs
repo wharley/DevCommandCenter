@@ -1,66 +1,48 @@
-//! "Resolver arquivo com agente" (`resolveWithAgent` and the desktop's
-//! `handleResolveConflictWithAgent`): a conversation of the task on the
-//! composer's pick, one read-only turn (medium effort, approvals asked)
-//! with the file's sides, followed every 250ms for five minutes at most,
-//! cancellable; the answer's envelope checked and put in the editor for
-//! review — nothing is saved. The editor stays read-only while it runs.
-
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+//! "Resolver com agente": one read-only run in the task's checkout, with
+//! no task and no conversation made for it (the run the pull request hub's
+//! Reviewer uses). The agent gets the file's three versions and its result,
+//! resolves every block together and answers the whole file; that answer is
+//! put in the editor and offered back block by block (`proposal`), to
+//! accept, refuse or change like any text. Nothing is saved. The editor is
+//! read-only while it runs, and the run can be stopped.
 
 use dcc_core::domain::merge_conflict::agent::{
-    AGENT_RESOLUTION_TOOL_INSTRUCTIONS, AgentResolutionInput, AgentTurnEnd, agent_aborted_message,
-    agent_turn_end, build_agent_resolution_prompt, new_resolution_token, parse_agent_resolution,
-    validate_agent_resolution,
+    AgentResolutionInput, build_agent_resolution_prompt, new_resolution_token,
+    parse_agent_resolution, validate_agent_resolution,
 };
-use dcc_core::domain::session::SessionEventRecord;
-use dcc_core::domain::timeline::{Role, project_session};
+use dcc_core::domain::merge_conflict::proposal::split_proposal;
 use gpui::Context;
 
-use super::{Busy, MergeResolver, MergeResolverEvent, Pending};
-use crate::data::desktop_api::{ApiError, TurnOptions};
-use crate::i18n::{Args, Locale, Translate};
+use super::proposal::{BlockState, Proposal, ProposalBlock};
+use super::{Busy, MergeResolver};
+use crate::data::desktop_api::ApiError;
+use crate::i18n::{Locale, Translate};
 use crate::ui::Toaster;
-
-/// `AGENT_RESOLUTION_POLL_INTERVAL_MS`
-const POLL: Duration = Duration::from_millis(250);
-/// `AGENT_RESOLUTION_TIMEOUT_MS`
-const TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AgentStatus {
     Analyzing,
     Cancelling,
-    Completed,
     Failed,
 }
 
-/// `AgentRunState`
+/// The run on the open file, while it works or after it failed.
 pub(crate) struct AgentRun {
-    pub session_id: Option<String>,
-    pub turn_id: Option<String>,
-    pub events: Vec<SessionEventRecord>,
     pub status: AgentStatus,
-    pub expanded: bool,
     pub error: Option<String>,
-    /// Fences this run's request and answer.
+    /// Names this run on the desktop (to stop it) and fences its answer.
     pub token: String,
-    cancel: Arc<AtomicBool>,
+    /// What the agent answered, when the answer could not be used: there
+    /// is no conversation to look it up in.
+    pub raw: Option<String>,
+    pub raw_open: bool,
 }
 
-/// `AppliedAgentSuggestion`
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct AppliedSuggestion {
-    pub path: String,
-    pub explanation: String,
-    pub session_id: String,
-}
-
-/// How the run ended, or what stopped it.
-enum Outcome {
-    Answer(String),
-    Failed(String),
+fn reason(error: ApiError, cx: &gpui::App) -> String {
+    match error {
+        ApiError::Failed(message) if !message.trim().is_empty() => message,
+        other => other.text(cx),
+    }
 }
 
 impl MergeResolver {
@@ -73,10 +55,7 @@ impl MergeResolver {
             return;
         };
         let Some(pick) = self.request.agent.clone() else {
-            Toaster::error(
-                "Selecione um workspace local e um provedor disponível para usar o agente.",
-                cx,
-            );
+            Toaster::error(cx.t("mergeConflict.agent.noProvider"), cx);
             return;
         };
         let ((_, current_ref), (_, incoming_ref)) = self.labels(cx);
@@ -102,174 +81,76 @@ impl MergeResolver {
             },
             &token,
         );
-        let title = cx
-            .t_with(
-                "mergeConflict.agent.sessionTitle",
-                &Args::default().with("path", entry.path.clone()),
-            )
-            .to_string();
-        let cancel = Arc::new(AtomicBool::new(false));
         self.busy = Some(Busy::Agent);
-        self.suggestion = None;
+        self.proposal = None;
         self.agent = Some(AgentRun {
-            session_id: None,
-            turn_id: None,
-            events: Vec::new(),
             status: AgentStatus::Analyzing,
-            expanded: true,
             error: None,
             token: token.clone(),
-            cancel: cancel.clone(),
+            raw: None,
+            raw_open: false,
         });
         self.set_editor_read_only(true, cx);
         cx.notify();
         let api = self.api();
-        let read_events = self.read_events.clone();
+        let root = self.request.root.clone();
         self._agent = Some(cx.spawn(async move |this, cx| {
-            // The conversation and its one turn.
-            let started = cx
+            let run = token.clone();
+            let answered = cx
                 .background_executor()
                 .spawn(async move {
-                    let api = api?;
-                    let session = api.start_thread(
-                        &pick.start,
+                    api?.conflict_agent(
+                        &root,
                         &pick.provider_id,
                         pick.model.as_deref(),
-                        Some(&title),
-                    )?;
-                    let options = TurnOptions {
-                        provider_id: None,
-                        model: None,
-                        effort: Some("medium".into()),
-                        approval_policy: Some("ask".into()),
-                        plan_mode: false,
-                        fast_mode: false,
-                        tool_instructions: Some(AGENT_RESOLUTION_TOOL_INSTRUCTIONS.into()),
-                        // The conversation just started with its own.
-                        provider_runtime: None,
-                    };
-                    let turn = api.send_turn_for_id(&session, &prompt, &options)?;
-                    Ok::<_, ApiError>((api, session, turn))
+                        &prompt,
+                        &run,
+                    )
                 })
                 .await;
-            let (api, session, turn) = match started {
-                Ok(started) => started,
-                Err(error) => {
-                    let _ = this.update(cx, |resolver, cx| {
-                        let message = error.text(cx);
-                        resolver.finish_agent(Outcome::Failed(message), &source, cx)
-                    });
-                    return;
-                }
-            };
             let _ = this.update(cx, |resolver, cx| {
-                if let Some(run) = resolver.agent.as_mut() {
-                    run.session_id = Some(session.clone());
-                    run.turn_id = Some(turn.clone());
-                }
-                cx.notify();
-            });
-            // `waitForAgentResolutionTurn`
-            let deadline = Instant::now() + TIMEOUT;
-            let mut abort_sent = false;
-            let outcome = loop {
-                let (read, id) = (read_events.clone(), session.clone());
-                let events = cx
-                    .background_executor()
-                    .spawn(async move { read(&id) })
-                    .await;
-                let end = agent_turn_end(&events, &turn);
-                let answer = matches!(end, Some(AgentTurnEnd::Completed)).then(|| {
-                    project_session(&events, &session)
-                        .into_iter()
-                        .rev()
-                        .find(|message| {
-                            message.role == Role::Assistant && !message.content.trim().is_empty()
-                        })
-                        .map(|message| message.content)
-                });
-                let alive = this.update(cx, |resolver, cx| {
-                    if let Some(run) = resolver.agent.as_mut() {
-                        run.events = events;
-                    }
-                    cx.notify();
-                });
-                if alive.is_err() {
-                    return;
-                }
-                match end {
-                    Some(AgentTurnEnd::Completed) => {
-                        break match answer.flatten() {
-                            Some(content) => Outcome::Answer(content),
-                            None => Outcome::Failed(
-                                "O agente concluiu sem retornar uma sugestão textual.".into(),
-                            ),
-                        };
-                    }
-                    Some(AgentTurnEnd::Aborted(reason)) => {
-                        break Outcome::Failed(agent_aborted_message(reason.as_deref()));
-                    }
-                    None => {}
-                }
-                if Instant::now() >= deadline {
-                    break Outcome::Failed(
-                        "O agente demorou demais para concluir a sugestão de resolução. Tente novamente."
-                            .into(),
-                    );
-                }
-                if cancel.load(Ordering::SeqCst) && !abort_sent {
-                    abort_sent = true;
-                    let (api, id) = (api.clone(), session.clone());
-                    if let Err(error) = cx
-                        .background_executor()
-                        .spawn(async move { api.abort(&id) })
-                        .await
-                    {
-                        break Outcome::Failed(error.to_string());
-                    }
-                }
-                cx.background_executor().timer(POLL).await;
-            };
-            let _ = this.update(cx, |resolver, cx| {
-                resolver.finish_agent(outcome, &source, cx)
+                resolver.finish_agent(answered, &source, &token, cx)
             });
         }));
     }
 
-    /// The answer checked and put in the editor, or the run marked failed.
-    fn finish_agent(&mut self, outcome: Outcome, source: &str, cx: &mut Context<Self>) {
+    /// The run ended: its answer goes to the editor as a proposal, or its
+    /// failure shows; one stopped by the person just leaves.
+    pub(crate) fn finish_agent(
+        &mut self,
+        answered: Result<String, ApiError>,
+        source: &str,
+        token: &str,
+        cx: &mut Context<Self>,
+    ) {
+        // Another run, or another file, took its place meanwhile.
+        if self.agent.as_ref().map(|run| run.token.as_str()) != Some(token) {
+            return;
+        }
         self.busy = None;
         self.set_editor_read_only(false, cx);
-        let (session, token) = self
+        let stopped = self
             .agent
             .as_ref()
-            .map(|run| {
-                (
-                    run.session_id.clone().unwrap_or_default(),
-                    run.token.clone(),
-                )
-            })
-            .unwrap_or_default();
-        let result = match outcome {
-            Outcome::Failed(message) => Err(message),
-            Outcome::Answer(content) => self.apply_answer(&content, source, &token, &session, cx),
-        };
-        match result {
-            Ok(()) => {
-                if let Some(run) = self.agent.as_mut() {
-                    run.status = AgentStatus::Completed;
-                    run.expanded = false;
-                    run.error = None;
-                }
-                Toaster::success(cx.t("mergeConflict.toast.agentApplied"), cx);
-            }
-            Err(message) => {
+            .is_some_and(|run| run.status == AgentStatus::Cancelling);
+        if stopped {
+            self.agent = None;
+            Toaster::info(cx.t("mergeConflict.agent.cancelled"), cx);
+            cx.notify();
+            return;
+        }
+        let raw = answered.as_ref().ok().cloned();
+        let applied = answered
+            .map_err(|error| reason(error, cx))
+            .and_then(|content| self.apply_answer(&content, source, token, cx));
+        match applied {
+            Ok(()) => self.agent = None,
+            Err(error) => {
                 if let Some(run) = self.agent.as_mut() {
                     run.status = AgentStatus::Failed;
-                    run.expanded = true;
-                    run.error = Some(message.clone());
+                    run.error = Some(error);
+                    run.raw = raw.filter(|raw| !raw.trim().is_empty());
                 }
-                Toaster::error(message, cx);
             }
         }
         cx.notify();
@@ -280,7 +161,6 @@ impl MergeResolver {
         content: &str,
         source: &str,
         token: &str,
-        session: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
         let Some(open) = self.open.as_ref() else {
@@ -291,27 +171,60 @@ impl MergeResolver {
             open.entry.incoming.text.clone(),
         );
         let (buffer, path) = (open.buffer.clone(), open.entry.path.clone());
-        let suggestion = parse_agent_resolution(content, token)
+        let suggestion = parse_agent_resolution(content, token, source)
             .and_then(|suggestion| {
                 validate_agent_resolution(suggestion, current.as_deref(), incoming.as_deref())
             })
             .map_err(|error| cx.t(error.message_key()).to_string())?;
-        // The result moved while the agent worked: its answer stays in the session.
+        // The file moved while the agent worked: its answer is for another text.
         if buffer != source {
             return Err(cx.t("mergeConflict.errors.agentResultChanged").to_string());
         }
-        // The suggestion lands in the editor, to be changed like any text;
-        // the comparisons are a click away.
+        // By block where the text between the blocks came back as it was;
+        // else one proposal for the file.
+        let mut notes = suggestion.block_notes.into_iter();
+        let blocks = match split_proposal(source, &suggestion.resolved_content) {
+            Some(blocks) => {
+                let single = blocks.len() == 1;
+                blocks
+                    .into_iter()
+                    .map(|block| ProposalBlock {
+                        original: block.original,
+                        proposed: block.proposed,
+                        // Notes follow the file's blocks; a run of blocks
+                        // proposed as one takes the first of them.
+                        note: notes.next().filter(|note| !note.is_empty() && !single),
+                        state: BlockState::Pending,
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
         self.set_result(suggestion.resolved_content, cx);
-        self.suggestion = Some(AppliedSuggestion {
+        self.proposal = Some(Proposal {
             path,
             explanation: suggestion.explanation,
-            session_id: session.to_string(),
+            before: source.to_string(),
+            blocks,
+            at: 0,
         });
+        self.decorate(cx);
+        // What it wrote comes into view: the first block it proposes.
+        let first = match (&self.proposal, &self.open) {
+            (Some(proposal), Some(open)) => proposal
+                .lines(&open.buffer)
+                .first()
+                .map(|(index, _)| *index),
+            _ => None,
+        };
+        if let Some(first) = first {
+            self.reveal_proposed(first, cx);
+        }
         Ok(())
     }
 
-    /// "Cancelar": the turn aborted on the desktop; the run waits for it.
+    /// "Cancelar": the run is stopped on the desktop, and ends here when
+    /// that comes back.
     pub(crate) fn cancel_agent(&mut self, cx: &mut Context<Self>) {
         let Some(run) = self.agent.as_mut() else {
             return;
@@ -320,28 +233,36 @@ impl MergeResolver {
             return;
         }
         run.status = AgentStatus::Cancelling;
-        run.cancel.store(true, Ordering::SeqCst);
+        let token = run.token.clone();
+        let api = self.api();
+        cx.background_executor()
+            .spawn(async move {
+                if let Ok(api) = api {
+                    let _ = api.cancel_conflict_agent(&token);
+                }
+            })
+            .detach();
         cx.notify();
     }
 
-    pub(crate) fn toggle_agent_details(&mut self, cx: &mut Context<Self>) {
+    /// "Ver resposta": what the agent wrote, under the failure.
+    pub(crate) fn toggle_agent_answer(&mut self, cx: &mut Context<Self>) {
         if let Some(run) = self.agent.as_mut() {
-            run.expanded = !run.expanded;
+            run.raw_open = !run.raw_open;
             cx.notify();
         }
     }
 
-    /// "Ver sessão": an unsaved result asks first; the resolver closes.
-    pub(crate) fn request_agent_session(&mut self, cx: &mut Context<Self>) {
-        let Some(session) = self.agent.as_ref().and_then(|run| run.session_id.clone()) else {
-            return;
-        };
-        if self.open.as_ref().is_some_and(super::Open::dirty) {
-            self.pending = Some(Pending::OpenAgentSession(session));
+    /// The failure read: its strip leaves.
+    pub(crate) fn dismiss_agent_error(&mut self, cx: &mut Context<Self>) {
+        if self
+            .agent
+            .as_ref()
+            .is_some_and(|run| run.status == AgentStatus::Failed)
+        {
+            self.agent = None;
             cx.notify();
-            return;
         }
-        cx.emit(MergeResolverEvent::OpenSession(session));
     }
 
     fn set_editor_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {

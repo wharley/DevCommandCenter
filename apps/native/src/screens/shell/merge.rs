@@ -44,15 +44,6 @@ impl Shell {
                 self.code_column
                     .update(cx, |column, cx| column.refresh_git(cx));
             }
-            // `handleOpenAgentSession`: the conversation, and the resolver closes.
-            MergeResolverEvent::OpenSession(session) => {
-                self.merge = None;
-                let session = session.clone();
-                self.conversation.update(cx, |conversation, cx| {
-                    conversation.open_session(session, cx)
-                });
-                cx.notify();
-            }
         }
     }
 

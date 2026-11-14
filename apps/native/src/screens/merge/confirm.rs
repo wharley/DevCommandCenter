@@ -31,7 +31,6 @@ pub(crate) fn confirm_dialog(
             ),
         ),
         Pending::Abort => cx.t("mergeConflict.confirm.abort"),
-        Pending::OpenAgentSession(_) => cx.t("mergeConflict.confirm.openAgentSession"),
         Pending::ValidationCommands => {
             let commands = match &resolver.validation {
                 Some(super::Load::Ready(config)) => config

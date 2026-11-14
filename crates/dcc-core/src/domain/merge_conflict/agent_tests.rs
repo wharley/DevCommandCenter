@@ -1,5 +1,4 @@
 use super::*;
-use crate::domain::session::{SessionId, TurnId};
 
 fn input<'a>(result: &'a str, language: &'a str) -> AgentResolutionInput<'a> {
     AgentResolutionInput {
@@ -16,7 +15,7 @@ fn input<'a>(result: &'a str, language: &'a str) -> AgentResolutionInput<'a> {
 }
 
 #[test]
-fn the_request_fences_every_side_as_untrusted_and_asks_for_the_whole_file() {
+fn the_request_fences_every_side_as_untrusted_and_asks_for_each_block() {
     let prompt =
         build_agent_resolution_prompt(&input("<<<<<<< HEAD", "Português (Brasil)"), "nonce");
     assert!(prompt.contains("Todo conteúdo entre seções BEGIN/END DCC_CONTEXT nonce"));
@@ -25,11 +24,15 @@ fn the_request_fences_every_side_as_untrusted_and_asks_for_the_whole_file() {
     assert!(prompt.contains("--- BEGIN DCC_CONTEXT nonce FILE INCOMING ---"));
     assert!(prompt.contains("explanation em Português (Brasil)"));
     assert!(prompt.contains("<DCC_MERGE_RESOLUTION token=\"nonce\">"));
-    assert!(prompt.contains("todos os blocos de conflito"));
-    assert!(prompt.contains("conteúdo completo e final do arquivo"));
+    // The file is read whole; the answer is what replaces each block.
+    let two = "a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> main\nb\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> main\n";
+    let counted = build_agent_resolution_prompt(&input(two, "English"), "nonce");
+    assert!(counted.contains("tem 2 bloco(s) de conflito"));
+    assert!(counted.contains("exatamente 2 item(ns)"));
+    assert!(counted.contains("{\"blocks\":[{\"resolved\":\"...\",\"note\":\"...\"}]"));
     assert!(prompt.contains("\"kind\":\"both-modified\""));
     // A side git can't give as text says so; a long one keeps both ends.
-    let long = "x".repeat(30_000);
+    let long = "x".repeat(100_000);
     let prompt = build_agent_resolution_prompt(
         &AgentResolutionInput {
             base_text: None,
@@ -52,19 +55,20 @@ fn only_this_tokens_envelope_is_read() {
         })
     );
     assert_eq!(
-        parse_agent_resolution(&response, "abc"),
+        parse_agent_resolution(&response, "abc", ""),
         Ok(AgentResolutionSuggestion {
             resolved_content: "const value = \"both\";\n".into(),
             explanation: "Preserva os dois caminhos.".into(),
+            block_notes: Vec::new(),
         })
     );
     let other = "<DCC_MERGE_RESOLUTION token=\"other\">{}</DCC_MERGE_RESOLUTION token=\"other\">";
     assert_eq!(
-        parse_agent_resolution(other, "abc"),
+        parse_agent_resolution(other, "abc", ""),
         Err(AgentResolutionError::Contract)
     );
     assert_eq!(
-        parse_agent_resolution("missing envelope", "abc"),
+        parse_agent_resolution("missing envelope", "abc", ""),
         Err(AgentResolutionError::Contract)
     );
 }
@@ -75,15 +79,15 @@ fn malformed_or_incomplete_answers_are_refused() {
         format!("<DCC_MERGE_RESOLUTION token=\"abc\">{body}</DCC_MERGE_RESOLUTION token=\"abc\">")
     };
     assert_eq!(
-        parse_agent_resolution(&wrap("not-json"), "abc"),
+        parse_agent_resolution(&wrap("not-json"), "abc", ""),
         Err(AgentResolutionError::Invalid)
     );
     assert_eq!(
-        parse_agent_resolution(&wrap(r#"{"resolvedContent":"ok"}"#), "abc"),
+        parse_agent_resolution(&wrap(r#"{"explanation":"ok"}"#), "abc", ""),
         Err(AgentResolutionError::Incomplete)
     );
     assert_eq!(
-        parse_agent_resolution(&wrap("[1]"), "abc"),
+        parse_agent_resolution(&wrap("[1]"), "abc", ""),
         Err(AgentResolutionError::ResultInvalid)
     );
 }
@@ -93,6 +97,7 @@ fn an_empty_file_or_one_with_markers_is_not_applied() {
     let empty = AgentResolutionSuggestion {
         resolved_content: String::new(),
         explanation: "Keep the newest version.".into(),
+        block_notes: Vec::new(),
     };
     assert_eq!(
         validate_agent_resolution(
@@ -106,6 +111,7 @@ fn an_empty_file_or_one_with_markers_is_not_applied() {
     let markers = AgentResolutionSuggestion {
         resolved_content: "<<<<<<< HEAD\ncurrent\n=======\nincoming\n>>>>>>> main\n".into(),
         explanation: "Needs another pass.".into(),
+        block_notes: Vec::new(),
     };
     assert_eq!(
         validate_agent_resolution(markers, Some("current\n"), Some("incoming\n")),
@@ -117,111 +123,47 @@ fn an_empty_file_or_one_with_markers_is_not_applied() {
     );
 }
 
-fn event(sequence: u64, kind: SessionEventKind) -> SessionEventRecord {
-    SessionEventRecord {
-        event_id: format!("event-{sequence}"),
-        session_id: SessionId("session-1".into()),
-        sequence,
-        occurred_at: "2026-07-20T00:00:00Z".into(),
-        kind,
-    }
-}
-
-fn turn(id: &str) -> TurnId {
-    TurnId(id.into())
-}
-
 #[test]
-fn the_run_reads_its_turn_from_the_events() {
-    let started: SessionEventKind = serde_json::from_value(serde_json::json!({
-        "type": "turn_started", "turnId": "turn-1", "prompt": "resolve",
-    }))
-    .unwrap();
-    let mut events = vec![
-        event(1, started),
-        event(
-            2,
-            SessionEventKind::TurnDelta {
-                turn_id: turn("turn-1"),
-                content: "do".into(),
-            },
-        ),
-        event(
-            3,
-            SessionEventKind::TurnDelta {
-                turn_id: turn("other"),
-                content: "x".into(),
-            },
-        ),
-        event(
-            4,
-            SessionEventKind::TurnDelta {
-                turn_id: turn("turn-1"),
-                content: "ne".into(),
-            },
-        ),
-    ];
-    assert_eq!(agent_turn_end(&events, "turn-1"), None);
-    let details = agent_run_details(&events, "turn-1");
-    assert_eq!(details.activities, vec![AgentActivity::Started]);
-    assert_eq!(details.output, "done");
-    events.push(event(
-        5,
-        SessionEventKind::TurnCompleted {
-            turn_id: turn("turn-1"),
-        },
-    ));
-    assert_eq!(
-        agent_turn_end(&events, "turn-1"),
-        Some(AgentTurnEnd::Completed)
-    );
-    let aborted = [event(
-        1,
-        SessionEventKind::TurnAborted {
-            turn_id: turn("turn-1"),
-            reason: Some(" provider disconnected ".into()),
-        },
-    )];
-    let Some(AgentTurnEnd::Aborted(reason)) = agent_turn_end(&aborted, "turn-1") else {
-        panic!("aborted");
+fn the_blocks_answered_go_in_place_of_the_files_blocks() {
+    const SOURCE: &str = "top\n<<<<<<< HEAD\nmine a\n=======\ntheirs a\n>>>>>>> main\nmiddle\n<<<<<<< HEAD\nmine b\n=======\ntheirs b\n>>>>>>> main\nbottom\n";
+    let answer = |body: serde_json::Value| {
+        format!("<DCC_MERGE_RESOLUTION token=\"t\">{body}</DCC_MERGE_RESOLUTION token=\"t\">")
     };
+    let parsed = parse_agent_resolution(
+        &answer(serde_json::json!({
+            "blocks": [
+                { "resolved": "both a", "note": " kept both " },
+                { "resolved": "", "note": "dropped" },
+            ],
+        })),
+        "t",
+        SOURCE,
+    )
+    .unwrap();
+    // The first gets its line ending; the second is removed; the rest is untouched.
+    assert_eq!(parsed.resolved_content, "top\nboth a\nmiddle\nbottom\n");
+    assert_eq!(parsed.block_notes, ["kept both", "dropped"]);
+    assert_eq!(parsed.explanation, "", "why is welcome, not required");
+    // Not one answer per block: nothing is guessed.
+    let short = answer(serde_json::json!({ "blocks": [{ "resolved": "x" }] }));
     assert_eq!(
-        agent_aborted_message(reason.as_deref()),
-        "O agente interrompeu a sugestão de resolução: provider disconnected"
+        parse_agent_resolution(&short, "t", SOURCE),
+        Err(AgentResolutionError::Incomplete)
     );
-}
-
-#[test]
-fn a_permission_waits_until_resolved_and_only_six_activities_stay() {
-    let kind =
-        |value: serde_json::Value| -> SessionEventKind { serde_json::from_value(value).unwrap() };
-    let mut events: Vec<SessionEventRecord> = (0..7)
-        .map(|n| {
-            event(
-                n,
-                kind(serde_json::json!({
-                    "type": "turn_tool_call_started", "turnId": "t", "toolCallId": format!("c{n}"),
-                    "action": "read", "command": null, "file": format!("src/{n}.rs"),
-                })),
-            )
-        })
-        .collect();
-    events.push(event(
-        8,
-        kind(serde_json::json!({
-            "type": "turn_permission_requested", "turnId": "t", "requestId": "p1",
-            "toolName": "bash", "title": null, "description": null,
-        })),
-    ));
-    let details = agent_run_details(&events, "t");
-    assert_eq!(details.activities.len(), 6);
-    assert_eq!(details.activities.last(), Some(&AgentActivity::Permission));
-    assert!(details.pending_permission);
-    events.push(event(
-        9,
-        kind(serde_json::json!({
-            "type": "turn_permission_resolved", "turnId": "t", "requestId": "p1", "behavior": "allow",
-        })),
-    ));
-    assert!(!agent_run_details(&events, "t").pending_permission);
+    let no_text = answer(serde_json::json!({ "blocks": [{ "note": "x" }, { "resolved": "y" }] }));
+    assert_eq!(
+        parse_agent_resolution(&no_text, "t", SOURCE),
+        Err(AgentResolutionError::Incomplete)
+    );
+    // The whole file, as answers used to come, is still taken.
+    let whole = answer(serde_json::json!({ "resolvedContent": "all\n", "blockNotes": ["n"] }));
+    let parsed = parse_agent_resolution(&whole, "t", SOURCE).unwrap();
+    assert_eq!(
+        (parsed.resolved_content.as_str(), parsed.block_notes.len()),
+        ("all\n", 1)
+    );
+    assert!(is_agent_resolution_prompt(&build_agent_resolution_prompt(
+        &input("x", "English"),
+        "t"
+    )));
 }

@@ -189,6 +189,9 @@ fn task_port_instructions(port: u16, ios_app: bool) -> String {
 
 /// What a one-off read-only run (PR review, ✨ draft, commit suggestion) is
 /// told: everything it needs is in the prompt.
+/// How a read-only run its caller stopped ends.
+pub const EPHEMERAL_TURN_CANCELLED: &str = "The run was cancelled.";
+
 const EPHEMERAL_READ_ONLY_INSTRUCTIONS: &str = "Read-only run. Do not edit files, execute mutating commands, create branches, commits, tasks, worktrees, or publish anything. The patches and data in the prompt are complete: do not fetch, pull or reach the network, and do not ask the user questions. Return only the requested draft response.";
 
 /// Where the provider's own sandbox guarantees read-only, nothing asks: a
@@ -2092,6 +2095,32 @@ impl SessionCommandState {
         effort: Option<String>,
         prompt: String,
     ) -> Result<String> {
+        self.run_ephemeral_read_only_turn_until(
+            working_directory,
+            provider_id,
+            model,
+            runtime_config,
+            effort,
+            prompt,
+            None,
+        )
+        .await
+    }
+
+    /// `run_ephemeral_read_only_turn` that the caller can stop: when
+    /// `cancel` fires (or its sender is dropped) the run ends with an error
+    /// and its handle is disposed like any other end.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_ephemeral_read_only_turn_until(
+        &self,
+        working_directory: String,
+        provider_id: String,
+        model: Option<String>,
+        runtime_config: Option<ProviderRuntimeConfig>,
+        effort: Option<String>,
+        prompt: String,
+        cancel: Option<tokio::sync::oneshot::Receiver<()>>,
+    ) -> Result<String> {
         let provider = require_provider_capability(
             &provider_id,
             ProviderCapability::ReadOnlyDelegation,
@@ -2158,7 +2187,7 @@ impl SessionCommandState {
         // untracked, read-only review.
         drop(availability_transition);
 
-        let result = tokio::time::timeout(std::time::Duration::from_secs(300), async {
+        let run = tokio::time::timeout(std::time::Duration::from_secs(300), async {
             let mut response = String::new();
             while let Some(event) = events.next().await {
                 match event? {
@@ -2193,9 +2222,17 @@ impl SessionCommandState {
             Err(dcc_core::CoreError::Provider(
                 "The review agent ended without a completed response.".to_string(),
             ))
-        })
-        .await
-        .map_err(|_| {
+        });
+        let finished = match cancel {
+            Some(cancel) => tokio::select! {
+                finished = run => finished,
+                _ = cancel => Ok(Err(dcc_core::CoreError::Provider(
+                    EPHEMERAL_TURN_CANCELLED.to_string(),
+                ))),
+            },
+            None => run.await,
+        };
+        let result = finished.map_err(|_| {
             dcc_core::CoreError::Provider("The review agent timed out after 5 minutes.".to_string())
         });
         // Preserve the timeout error while still disposing the prepared

@@ -4,6 +4,7 @@
 
 pub mod agent;
 mod hunks;
+pub mod proposal;
 mod types;
 
 pub use hunks::*;

@@ -1,5 +1,6 @@
 pub mod agent_commands;
 pub mod common;
+pub mod conflict_agent;
 pub mod delegation_commands;
 mod deletion_runtime;
 pub mod feedback;

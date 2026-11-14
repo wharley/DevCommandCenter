@@ -5462,7 +5462,6 @@
       "discardEdit": "Discard the unsaved edits for this conflict?",
       "remainingMarkers": "Some lines still look like conflict markers. Mark this file as resolved anyway?",
       "emptyResult": "The result is empty, but one of the conflicting versions has content. Save an empty file and mark it as resolved anyway?",
-      "openAgentSession": "Opening the session will discard the unsaved suggestion shown in this resolver. Continue?",
       "deleteResult": "Delete {{path}} from the merge result?",
       "abort": "Abort the merge and discard every resolution made?\nIf this merge is not with the pull request's current base, it can be restarted with it: the resolutions made so far are discarded too.",
       "restart": "Abort and restart with the current base",
@@ -5545,41 +5544,32 @@
       "pending_one": "{{count}} hunk still pending",
       "pending_other": "{{count}} hunks still pending"
     },
+    "proposal": {
+      "title": "The agent's proposal",
+      "blocks_one": "{{count}} block to review",
+      "blocks_other": "{{count}} blocks to review",
+      "wholeFile": "the whole file",
+      "block": "Block {{number}}:",
+      "accept": "Accept",
+      "refuse": "Refuse",
+      "acceptAll": "Accept all",
+      "keep": "Keep",
+      "discard": "Discard",
+      "together": "The blocks were resolved together: refusing or editing one may ask for a change in the others."
+    },
     "agent": {
-      "resolveFile": "Resolve file with agent",
+      "noProvider": "Pick an available provider in the composer to use the agent.",
+      "cancelled": "Analysis cancelled.",
+      "showAnswer": "See the answer",
+      "hideAnswer": "Hide the answer",
+      "readOnlyRun": "Reads the file and the project, changing nothing. No conversation is made in the task.",
+      "resolveFile": "Resolve with agent",
       "resolveFileTitle": "The agent analyzes every hunk in this file together and proposes the final code",
-      "reviewFile": "Ask agent to review file",
-      "sessionTitle": "Resolve conflict: {{path}}",
-      "suggestionAppliedHunk": "Agent suggestion applied to the hunk",
-      "suggestionAppliedFile": "Agent suggestion applied to the file",
-      "sessionLabel": "Session {{sessionId}}",
-      "reviewNotice": "Review the result. Nothing has been saved, staged, or committed; the response is recorded in the session history.",
       "run": {
         "analyzing": "Analyzing conflict…",
-        "cancelling": "Cancelling analysis…",
-        "completed": "Analysis completed",
-        "failed": "Analysis did not complete"
+        "cancelling": "Cancelling analysis…"
       },
-      "viewSession": "View session",
-      "cancel": "Cancel",
-      "expand": "Show agent activity",
-      "collapse": "Hide agent activity",
-      "permissionRequired": "The agent requested permission. Open the session to review and respond.",
-      "inputRequired": "The agent needs your input. Open the session to continue.",
-      "liveOutput": "Live response",
-      "waitingOutput": "Waiting for the agent response…",
-      "activity": {
-        "title": "Activity",
-        "waiting": "Preparing the agent session…",
-        "started": "Request sent to the agent",
-        "analyzing": "Analyzing the conflict versions",
-        "tool": "{{action}}{{target}}",
-        "toolFailed": "An agent action failed{{reason}}",
-        "permission": "Permission requested",
-        "input": "Input requested",
-        "completed": "Response completed",
-        "aborted": "Run stopped"
-      }
+      "cancel": "Cancel"
     },
     "result": {
       "restore": "Restore",

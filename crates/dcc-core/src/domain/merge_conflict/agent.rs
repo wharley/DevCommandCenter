@@ -1,18 +1,21 @@
 //! "Resolver arquivo com agente" (`agent-conflict-resolution.ts`): the
 //! read-only request with the file's sides fenced as untrusted data, the
-//! envelope the answer must come in, what makes an answer unusable, and
-//! what the run shows while it goes (what the agent did, its output, and
-//! whether it waits on a permission or a question).
+//! envelope the answer must come in (what replaces each block, with a note,
+//! and why) and what makes an answer unusable. The agent reads the whole
+//! file and answers only the blocks: a file of a thousand lines comes back
+//! as a few, and nothing outside the blocks can change.
 
 use serde_json::Value;
 
-use super::{has_conflict_marker_fragments, WorkspaceGitConflictKind};
-use crate::domain::session::{SessionEventKind, SessionEventRecord};
+use super::{
+    apply_conflict_replacement, has_conflict_marker_fragments, parse_conflict_hunks,
+    WorkspaceGitConflictKind,
+};
 
-const MAX_CONTEXT_CHARS: usize = 24_000;
-
-/// What the turn is told on top of the prompt (`toolInstructions`).
-pub const AGENT_RESOLUTION_TOOL_INSTRUCTIONS: &str = "This is a read-only Git conflict analysis request.\nDo not edit files or run state-changing commands.\nNever run git add, commit, merge, reset, checkout, clean, or push.\nReturn only the exact response envelope requested by the user prompt.";
+/// A side or the result past this is cut in the middle. Wide enough for a
+/// file of a couple of thousand lines to go whole: the agent answers the
+/// blocks, not the file, so what it reads costs little.
+const MAX_CONTEXT_CHARS: usize = 90_000;
 
 /// `AgentConflictResolutionErrorCode`
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +46,8 @@ impl AgentResolutionError {
 pub struct AgentResolutionSuggestion {
     pub resolved_content: String,
     pub explanation: String,
+    /// What it did to each block, in the file's order, when it says so.
+    pub block_notes: Vec<String>,
 }
 
 /// The file's conflict as the request describes it (the whole file).
@@ -64,7 +69,7 @@ pub fn new_resolution_token() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// Half from the start and half from the end past 24 000 characters.
+/// Half from the start and half from the end past `MAX_CONTEXT_CHARS`.
 fn bounded_context(value: Option<&str>, label: &str) -> String {
     let Some(value) = value else {
         return format!("[{label} indisponível]");
@@ -93,7 +98,6 @@ fn kind_name(kind: WorkspaceGitConflictKind) -> String {
         .unwrap_or_default()
 }
 
-/// `buildAgentConflictResolutionPrompt` with `scope: { type: "file" }`.
 /// How every resolution request opens: what tells its conversation from
 /// the task's own.
 const PROMPT_OPENING: &str =
@@ -105,7 +109,9 @@ pub fn is_agent_resolution_prompt(prompt: &str) -> bool {
     prompt.starts_with(PROMPT_OPENING)
 }
 
+/// `buildAgentConflictResolutionPrompt` with `scope: { type: "file" }`.
 pub fn build_agent_resolution_prompt(input: &AgentResolutionInput, token: &str) -> String {
+    let blocks = parse_conflict_hunks(input.result_text).len();
     let metadata = serde_json::json!({
         "path": input.path,
         "kind": kind_name(input.kind),
@@ -123,26 +129,61 @@ pub fn build_agent_resolution_prompt(input: &AgentResolutionInput, token: &str) 
         section(token, "CONFLICT METADATA", &metadata.to_string()),
         "Escopo: arquivo completo".to_string(),
         String::new(),
-        "Resolva em conjunto todos os blocos de conflito presentes em EDITABLE RESULT. Proponha o conteúdo completo e final do arquivo no campo resolvedContent, sem nenhum marcador Git; preserve também todo o código que não faz parte dos conflitos.".to_string(),
-        "Explique de forma curta por que a combinação mantém a intenção de cada lado e cite qualquer risco que ainda deva ser validado.".to_string(),
+        format!("EDITABLE RESULT tem {blocks} bloco(s) de conflito, cada um da linha `<<<<<<<` até a linha `>>>>>>>`. Resolva todos em conjunto, considerando o arquivo inteiro."),
+        format!("Responda apenas o que substitui cada bloco, não o arquivo: em blocks, exatamente {blocks} item(ns), na ordem em que os blocos aparecem. Em cada item, resolved é o código que fica no lugar do bloco inteiro (das linhas de marcador, inclusive), sem nenhum marcador Git, com a mesma indentação do arquivo e terminando com quebra de linha; use \"\" para remover o bloco. note é uma frase dizendo o que você fez naquele bloco."),
+        "O código fora dos blocos não é alterado por esta resposta. Em explanation, explique de forma curta por que a combinação mantém a intenção de cada lado e cite qualquer risco que ainda deva ser validado.".to_string(),
         String::new(),
         section(token, "FILE BASE", &bounded_context(input.base_text, "base")),
         section(token, "FILE CURRENT", &bounded_context(input.current_text, "atual")),
         section(token, "FILE INCOMING", &bounded_context(input.incoming_text, "recebida")),
         section(token, "EDITABLE RESULT", &bounded_context(Some(input.result_text), "resultado")),
         String::new(),
-        "Responda exatamente com o envelope abaixo. O interior deve ser JSON válido; escape quebras de linha e aspas de resolvedContent como exige JSON. Não use Markdown nem texto fora do envelope.".to_string(),
+        "Responda exatamente com o envelope abaixo. O interior deve ser JSON válido; escape quebras de linha e aspas de resolved como exige JSON. Não use Markdown nem texto fora do envelope.".to_string(),
         format!("<DCC_MERGE_RESOLUTION token=\"{token}\">"),
-        "{\"resolvedContent\":\"...\",\"explanation\":\"...\"}".to_string(),
+        "{\"blocks\":[{\"resolved\":\"...\",\"note\":\"...\"}],\"explanation\":\"...\"}".to_string(),
         format!("</DCC_MERGE_RESOLUTION token=\"{token}\">"),
     ]
     .join("\n")
 }
 
-/// `parseAgentConflictResolution`: the JSON inside this token's envelope.
+/// The answer's `blocks` put in place of `source`'s blocks, in order:
+/// the resolved file and each block's note. `None` when they are not one
+/// per block.
+fn resolved_from_blocks(source: &str, blocks: &[Value]) -> Option<(String, Vec<String>)> {
+    let hunks = parse_conflict_hunks(source);
+    if hunks.is_empty() || blocks.len() != hunks.len() {
+        return None;
+    }
+    let mut resolved = source.to_string();
+    let mut notes = vec![String::new(); hunks.len()];
+    // From the last, so the places of the ones before stay as parsed.
+    for (index, hunk) in hunks.iter().enumerate().rev() {
+        let block = blocks.get(index)?;
+        let mut text = block.get("resolved").and_then(Value::as_str)?.to_string();
+        // A block ends its line: so does what replaces it.
+        let ended = source[..hunk.end_offset].ends_with('\n');
+        if ended && !text.is_empty() && !text.ends_with('\n') {
+            text.push_str(&hunk.line_ending);
+        }
+        notes[index] = block
+            .get("note")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        resolved = apply_conflict_replacement(&resolved, hunk, &text);
+    }
+    Some((resolved, notes))
+}
+
+/// `parseAgentConflictResolution`: the JSON inside this token's envelope,
+/// for the file `source`. The answer names what replaces each block
+/// (`blocks`, one per block of `source`); one that brings the whole file
+/// instead (`resolvedContent`) is taken too.
 pub fn parse_agent_resolution(
     response: &str,
     token: &str,
+    source: &str,
 ) -> Result<AgentResolutionSuggestion, AgentResolutionError> {
     let open = format!("<DCC_MERGE_RESOLUTION token=\"{token}\">");
     let close = format!("</DCC_MERGE_RESOLUTION token=\"{token}\">");
@@ -157,18 +198,38 @@ pub fn parse_agent_resolution(
     let Value::Object(candidate) = parsed else {
         return Err(AgentResolutionError::ResultInvalid);
     };
-    match (
-        candidate.get("resolvedContent").and_then(Value::as_str),
-        candidate.get("explanation").and_then(Value::as_str),
-    ) {
-        (Some(content), Some(explanation)) if !explanation.trim().is_empty() => {
-            Ok(AgentResolutionSuggestion {
-                resolved_content: content.to_string(),
-                explanation: explanation.trim().to_string(),
-            })
-        }
-        _ => Err(AgentResolutionError::Incomplete),
+    // Why is welcome, not required: the blocks' notes say it too.
+    let explanation = candidate
+        .get("explanation")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if let Some(blocks) = candidate.get("blocks").and_then(Value::as_array) {
+        let (resolved_content, block_notes) =
+            resolved_from_blocks(source, blocks).ok_or(AgentResolutionError::Incomplete)?;
+        return Ok(AgentResolutionSuggestion {
+            resolved_content,
+            explanation,
+            block_notes,
+        });
     }
+    let content = candidate
+        .get("resolvedContent")
+        .and_then(Value::as_str)
+        .ok_or(AgentResolutionError::Incomplete)?;
+    Ok(AgentResolutionSuggestion {
+        resolved_content: content.to_string(),
+        explanation,
+        block_notes: candidate
+            .get("blockNotes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(|note| note.trim().to_string())
+            .collect(),
+    })
 }
 
 /// `validateAgentConflictResolutionSuggestion` for a whole file: not empty
@@ -188,164 +249,6 @@ pub fn validate_agent_resolution(
         return Err(AgentResolutionError::UnresolvedResult);
     }
     Ok(suggestion)
-}
-
-/// How the run's turn ended, once it did.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AgentTurnEnd {
-    Completed,
-    Aborted(Option<String>),
-}
-
-/// `waitForAgentResolutionTurn`'s check of the events read so far.
-pub fn agent_turn_end(events: &[SessionEventRecord], turn_id: &str) -> Option<AgentTurnEnd> {
-    events.iter().find_map(|event| match &event.kind {
-        SessionEventKind::TurnCompleted { turn_id: id } if id.0 == turn_id => {
-            Some(AgentTurnEnd::Completed)
-        }
-        SessionEventKind::TurnAborted {
-            turn_id: id,
-            reason,
-        } if id.0 == turn_id => Some(AgentTurnEnd::Aborted(
-            reason.as_deref().map(str::trim).map(str::to_string),
-        )),
-        _ => None,
-    })
-}
-
-/// The desktop's message when the turn stops without an answer.
-pub fn agent_aborted_message(reason: Option<&str>) -> String {
-    match reason.filter(|reason| !reason.is_empty()) {
-        Some(reason) => format!("O agente interrompeu a sugestão de resolução: {reason}"),
-        None => "O agente interrompeu a sugestão de resolução.".to_string(),
-    }
-}
-
-/// One line of what the agent did (`agentRunDetails.activities`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AgentActivity {
-    Started,
-    /// Its own label, or "Analisando…".
-    Analyzing(Option<String>),
-    Tool {
-        action: String,
-        target: Option<String>,
-    },
-    ToolFailed(Option<String>),
-    Permission,
-    Input,
-    Completed,
-    Aborted,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct AgentRunDetails {
-    /// The last six.
-    pub activities: Vec<AgentActivity>,
-    pub output: String,
-    pub pending_permission: bool,
-    pub pending_input: bool,
-}
-
-/// `compactActivityTarget`: one line, 96 characters at most.
-fn compact_target(value: Option<&str>) -> Option<String> {
-    let single = value?.split_whitespace().collect::<Vec<_>>().join(" ");
-    if single.is_empty() {
-        return None;
-    }
-    if single.chars().count() <= 96 {
-        return Some(single);
-    }
-    let kept: String = single.chars().take(95).collect();
-    Some(format!("{kept}…"))
-}
-
-/// `agentRunDetails`: the run's turn read from its events.
-pub fn agent_run_details(events: &[SessionEventRecord], turn_id: &str) -> AgentRunDetails {
-    let mut details = AgentRunDetails::default();
-    let mut permissions = std::collections::HashSet::new();
-    let mut inputs = std::collections::HashSet::new();
-    for event in events {
-        let kind = &event.kind;
-        match kind {
-            SessionEventKind::TurnStarted { turn_id: id, .. } if id.0 == turn_id => {
-                details.activities.push(AgentActivity::Started)
-            }
-            SessionEventKind::TurnReasoningStarted {
-                turn_id: id, label, ..
-            } if id.0 == turn_id => {
-                let label = label
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|label| !label.is_empty())
-                    .map(str::to_string);
-                details.activities.push(AgentActivity::Analyzing(label));
-            }
-            SessionEventKind::TurnToolCallStarted {
-                turn_id: id,
-                action,
-                command,
-                file,
-                ..
-            } if id.0 == turn_id => details.activities.push(AgentActivity::Tool {
-                action: action.clone(),
-                target: compact_target(file.as_deref().or(command.as_deref())),
-            }),
-            SessionEventKind::TurnToolCallFailed {
-                turn_id: id,
-                reason,
-                ..
-            } if id.0 == turn_id => details
-                .activities
-                .push(AgentActivity::ToolFailed(reason.clone())),
-            SessionEventKind::TurnPermissionRequested {
-                turn_id: id,
-                request_id,
-                ..
-            } if id.0 == turn_id => {
-                permissions.insert(request_id.clone());
-                details.activities.push(AgentActivity::Permission);
-            }
-            SessionEventKind::TurnPermissionResolved {
-                turn_id: id,
-                request_id,
-                ..
-            } if id.0 == turn_id => {
-                permissions.remove(request_id);
-            }
-            SessionEventKind::TurnUserInputRequested {
-                turn_id: id,
-                request_id,
-                ..
-            } if id.0 == turn_id => {
-                inputs.insert(request_id.clone());
-                details.activities.push(AgentActivity::Input);
-            }
-            SessionEventKind::TurnUserInputResolved {
-                turn_id: id,
-                request_id,
-                ..
-            } if id.0 == turn_id => {
-                inputs.remove(request_id);
-            }
-            SessionEventKind::TurnDelta {
-                turn_id: id,
-                content,
-            } if id.0 == turn_id => details.output.push_str(content),
-            SessionEventKind::TurnCompleted { turn_id: id } if id.0 == turn_id => {
-                details.activities.push(AgentActivity::Completed)
-            }
-            SessionEventKind::TurnAborted { turn_id: id, .. } if id.0 == turn_id => {
-                details.activities.push(AgentActivity::Aborted)
-            }
-            _ => {}
-        }
-    }
-    let keep = details.activities.len().saturating_sub(6);
-    details.activities.drain(..keep);
-    details.pending_permission = !permissions.is_empty();
-    details.pending_input = !inputs.is_empty();
-    details
 }
 
 #[cfg(test)]

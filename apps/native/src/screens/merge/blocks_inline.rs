@@ -125,10 +125,27 @@ impl MergeResolver {
             return;
         };
         let blocks = block_lines(&open.buffer);
-        let bands = bands(&blocks, tw::SKY_500.alpha(0.14), tw::AMBER_500.alpha(0.14));
+        let mut bands = bands(&blocks, tw::SKY_500.alpha(0.14), tw::AMBER_500.alpha(0.14));
+        // What the agent wrote and is still offered, block by block.
+        let proposed = self
+            .proposal
+            .as_ref()
+            .map(|proposal| proposal.lines(&open.buffer))
+            .unwrap_or_default();
+        bands.extend(proposed.iter().map(|(_, lines)| LineBand {
+            lines: lines.clone(),
+            color: tw::EMERALD_500.alpha(0.14),
+        }));
+        let offered: Vec<(usize, usize)> = proposed
+            .iter()
+            .map(|(index, lines)| (lines.start, *index))
+            .collect();
         let starts: Vec<usize> = blocks.iter().map(|block| block.start).collect();
         let resolver = cx.entity().downgrade();
         let actions: LineActions = Rc::new(move |line, cx| {
+            if let Some((_, index)) = offered.iter().find(|(start, _)| *start == line) {
+                return Some(super::proposal::choices(resolver.clone(), *index, cx));
+            }
             let index = starts.iter().position(|start| *start == line)?;
             let busy = resolver
                 .read_with(cx, |resolver, _| resolver.busy.is_some())

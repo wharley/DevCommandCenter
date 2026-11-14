@@ -14,6 +14,7 @@ mod completion_view;
 mod confirm;
 mod files_view;
 mod flows;
+mod proposal;
 mod request;
 mod view;
 mod workspace_view;
@@ -45,27 +46,12 @@ use crate::theme::ActiveTheme;
 /// `MERGE_DIFF_SIDE_BY_SIDE_MIN_WIDTH`
 const SIDE_BY_SIDE_MIN_WIDTH: f32 = 1_000.0;
 
-/// A session's events, by id.
-pub(crate) type EventsReader = std::sync::Arc<
-    dyn Fn(&str) -> Vec<dcc_core::domain::session::SessionEventRecord> + Send + Sync,
->;
-
-/// The desktop's database, read directly.
-fn database_events() -> EventsReader {
-    let path = crate::data::loader::database_path();
-    std::sync::Arc::new(move |session| {
-        crate::data::conversation::session_events(&path, session).unwrap_or_default()
-    })
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum MergeResolverEvent {
     /// The resolver closed (`onClose`).
     Closed,
     /// Git moved: the code column reads its status again (`onStateChanged`).
     StateChanged,
-    /// "Ver sessão": the agent's conversation on screen (`onOpenAgentSession`).
-    OpenSession(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -108,8 +94,6 @@ pub(crate) enum Pending {
     DeleteResult,
     Abort,
     ValidationCommands,
-    /// "Ver sessão" over an unsaved result.
-    OpenAgentSession(String),
 }
 
 /// The open file: its entry, the result as edited, and how it is shown.
@@ -163,9 +147,7 @@ pub struct MergeResolver {
     pub(crate) width: Rc<Cell<f32>>,
     /// The agent's run on the open file, and the answer it left there.
     pub(crate) agent: Option<agent::AgentRun>,
-    pub(crate) suggestion: Option<agent::AppliedSuggestion>,
-    /// How the agent's session events are read (the database; tests their own).
-    pub(crate) read_events: EventsReader,
+    pub(crate) proposal: Option<proposal::Proposal>,
     pub(crate) _agent: Option<Task<()>>,
     pub(crate) _read: Option<Task<()>>,
     pub(crate) _action: Option<Task<()>>,
@@ -189,8 +171,7 @@ impl MergeResolver {
             pending: None,
             width: Rc::new(Cell::new(0.0)),
             agent: None,
-            suggestion: None,
-            read_events: database_events(),
+            proposal: None,
             _agent: None,
             _read: None,
             _action: None,
@@ -274,14 +255,15 @@ impl MergeResolver {
                 && let Some(open) = resolver.open.as_mut()
             {
                 open.buffer = editor.read(cx).text().to_string();
-                // The blocks moved with the text: paint them where they are.
-                resolver.decorate(cx);
+                // The blocks moved with the text: paint them where they
+                // are, and a proposed block the person edited is theirs.
+                resolver.settle_proposal(cx);
                 resolver.refresh_compare(cx);
                 cx.notify();
             }
         });
         self.agent = None;
-        self.suggestion = None;
+        self.proposal = None;
         self.open = Some(Open {
             initial_result: entry.result.text.clone(),
             initial_buffer: result.clone(),
@@ -357,7 +339,6 @@ impl MergeResolver {
         open.view = ResultView::Edit;
         open.compare = None;
         let editor = open.editor.clone();
-        self.suggestion = None;
         editor.update(cx, |editor, cx| editor.replace_text(&text, cx));
         self.decorate(cx);
         cx.notify();
@@ -383,6 +364,7 @@ impl MergeResolver {
         let Some(original) = self.open.as_ref().map(|open| open.initial_buffer.clone()) else {
             return;
         };
+        self.proposal = None;
         self.set_result(original, cx);
         if let Some(open) = self.open.as_mut() {
             open.active_hunk = 0;

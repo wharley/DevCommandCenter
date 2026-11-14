@@ -52,6 +52,48 @@ impl DesktopApi {
             .map(|_| ())
     }
 
+    /// The resolver's agent: one read-only run in the checkout, with no
+    /// task and no conversation; its final text. Waits as long as the run
+    /// may take (five minutes there).
+    pub fn conflict_agent(
+        &self,
+        root: &str,
+        provider_id: &str,
+        model: Option<&str>,
+        prompt: &str,
+        run_id: &str,
+    ) -> Result<String, ApiError> {
+        let runtime = crate::data::provider_runtime::for_provider(provider_id);
+        let value = self.request_waiting(
+            "POST",
+            "/api/v1/git/conflict-agent",
+            Some(&json!({
+                "workspaceRoot": root,
+                "providerId": provider_id,
+                "model": model,
+                "providerRuntime": runtime,
+                "effort": "medium",
+                "prompt": prompt,
+                "runId": run_id,
+            })),
+            std::time::Duration::from_secs(330),
+        )?;
+        Ok(value
+            .get("response")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string())
+    }
+
+    /// Stops that run by the name it was started with.
+    pub fn cancel_conflict_agent(&self, run_id: &str) -> Result<(), ApiError> {
+        self.post(
+            "/api/v1/git/conflict-agent/cancel",
+            &json!({ "runId": run_id }),
+        )
+        .map(|_| ())
+    }
+
     /// The project's `before_merge` commands (`workspaceGitValidationConfig`).
     pub fn validation_config(
         &self,
