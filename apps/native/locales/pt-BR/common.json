@@ -5134,6 +5134,7 @@
     "newSessionAria": "Novo chat",
     "newSessionTooltip": "Criar um novo chat",
     "sessionSearch": {
+      "roomLabel": "Sala · {{agent}}",
       "title": "Sessões passadas",
       "description": "Busque em conversas anteriores e reabra qualquer thread.",
       "recentDescription": "Sessões recentes em todos os workspaces.",

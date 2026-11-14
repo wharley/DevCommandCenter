@@ -20,23 +20,41 @@ impl Shell {
             .data()
             .map(|data| data.task_id.clone());
         let db_path = crate::data::loader::database_path();
-        let search = cx.new(|cx| SessionSearch::new(task, db_path, window, cx));
-        let events = cx.subscribe_in(&search, window, |shell, _, event, _, cx| match event {
+        let agents = self.sidebar.read(cx).agents().to_vec();
+        let search = cx.new(|cx| SessionSearch::new(task, db_path, window, cx).with_agents(agents));
+        let events = cx.subscribe_in(&search, window, |shell, _, event, window, cx| match event {
             SessionSearchEvent::Closed => {
                 shell.session_search = None;
                 cx.notify();
             }
-            SessionSearchEvent::Picked(result) => {
-                shell.open_search_result(result.as_ref().clone(), cx)
+            SessionSearchEvent::Picked(result, query) => {
+                shell.open_search_result(result.as_ref().clone(), query, window, cx)
             }
         });
         self.session_search = Some((search, events));
         cx.notify();
     }
 
-    fn open_search_result(&mut self, result: SessionSearchResult, cx: &mut Context<Self>) {
+    fn open_search_result(
+        &mut self,
+        result: SessionSearchResult,
+        query: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.session_search = None;
         cx.notify();
+        // The conversation a room shows opens in the room, on what was
+        // searched (`session_search_rooms`).
+        let room =
+            crate::data::session_search_rooms::room_hit(&result, self.sidebar.read(cx).agents());
+        if let Some(room) = room.filter(|room| room.shown && result.archived_at.is_none()) {
+            self.open_agent(room.agent_id, window, cx);
+            if let Some((page, _)) = &self.agent_page {
+                page.update(cx, |page, cx| page.find_in_room(room.room, query, cx));
+            }
+            return;
+        }
         let archived = result.archived_at.is_some();
         self.open_session(result.workspace_id.0, result.session_id.0, archived, cx);
     }

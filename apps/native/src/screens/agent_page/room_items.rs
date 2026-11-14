@@ -80,7 +80,10 @@ impl TeamRoom {
         self.list.rows_built.set(self.list.rows_built.get() + 1);
         let model = self.list.model();
         let content = match model.rows.get(index) {
-            Some(row) => self.row(row, &model, window, cx),
+            Some(row) => {
+                let content = self.row(row, &model, window, cx);
+                self.find_ring(row, content, GAP, cx)
+            }
             None => self.tail(&model, window, cx),
         };
         let tight = matches!(model.rows.get(index), Some(Row::Line { first: false, .. }));
@@ -119,17 +122,14 @@ impl TeamRoom {
                 said,
                 steps,
             } => match model.agent(&line.agent_id) {
-                Some(agent) => {
-                    let rows = self.line_rows(
-                        (*index, *first, said.as_ref(), steps.as_ref()),
-                        line,
-                        agent,
-                        model,
-                        window,
-                        cx,
-                    );
-                    self.find_ring(&line.key, rows, GAP, cx)
-                }
+                Some(agent) => self.line_rows(
+                    (*index, *first, said.as_ref(), steps.as_ref()),
+                    line,
+                    agent,
+                    model,
+                    window,
+                    cx,
+                ),
                 None => Vec::new(),
             },
         }

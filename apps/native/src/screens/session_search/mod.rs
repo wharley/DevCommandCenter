@@ -19,7 +19,8 @@ use crate::ui::text_input::{TextInput, TextInputEvent};
 const SETTLE: Duration = Duration::from_millis(120);
 
 pub enum SessionSearchEvent {
-    Picked(Box<SessionSearchResult>),
+    /// The result and the query that found it.
+    Picked(Box<SessionSearchResult>, String),
     Closed,
 }
 
@@ -32,6 +33,8 @@ pub struct SessionSearch {
     /// The query the results answer.
     pub(super) answered: String,
     pub(super) highlighted: usize,
+    /// The team, to name the results that are a room's conversation.
+    pub(super) agents: Vec<crate::data::agents::AgentRecord>,
     db_path: PathBuf,
     _input_events: Subscription,
     _search: Option<Task<()>>,
@@ -61,12 +64,19 @@ impl SessionSearch {
             loading: false,
             answered: String::new(),
             highlighted: 0,
+            agents: Vec::new(),
             db_path,
             _input_events: events,
             _search: None,
         };
         search.run(cx);
         search
+    }
+
+    /// The team as the sidebar read it (`session_search_rooms`).
+    pub fn with_agents(mut self, agents: Vec<crate::data::agents::AgentRecord>) -> Self {
+        self.agents = agents;
+        self
     }
 
     pub fn input(&self) -> Entity<TextInput> {
@@ -139,7 +149,8 @@ impl SessionSearch {
 
     pub(super) fn pick(&mut self, index: usize, cx: &mut Context<Self>) {
         if let Some(result) = self.results.get(index).cloned() {
-            cx.emit(SessionSearchEvent::Picked(Box::new(result)));
+            let query = self.input.read(cx).text().trim().to_string();
+            cx.emit(SessionSearchEvent::Picked(Box::new(result), query));
         }
     }
 

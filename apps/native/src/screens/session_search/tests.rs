@@ -51,7 +51,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<SessionSearch>, &mut VisualTestConte
     cx.update(|_, cx| {
         cx.subscribe(&search, move |_, event: &SessionSearchEvent, _| {
             sink.borrow_mut().push(match event {
-                SessionSearchEvent::Picked(result) => result.session_id.0.clone(),
+                SessionSearchEvent::Picked(result, _) => result.session_id.0.clone(),
                 SessionSearchEvent::Closed => "closed".into(),
             })
         })

@@ -115,6 +115,9 @@ impl AgentPage {
             room.set_room(project, cx);
             room.set_focus(focus, cx);
         });
+        if let Some(query) = self.room_find.take() {
+            room.update(cx, |room, cx| room.open_find_on(&query, window, cx));
+        }
         if let Some(draft) = self.room_draft.take() {
             let input = room.read(cx).input.clone();
             input.update(cx, |area, cx| area.set_text(&draft, cx));

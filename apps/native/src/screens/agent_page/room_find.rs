@@ -1,7 +1,8 @@
 //! "Buscar na sala": ⌘F (or the magnifier in the room's head) opens the
 //! find bar a task's conversation has (`ui::find_strip`), over the room's
-//! lines — what the person wrote and what the agents answered, in the room
-//! or on one agent's "Conversa". The current hit's line scrolls into view
+//! rows — what the person wrote, what the agents answered, the turns
+//! passed, the routines' and sources' lines, and the cards by their task or
+//! pull request — in the room or on one agent's "Conversa". The current hit's line scrolls into view
 //! with the ring around it; Enter and Shift+Enter step, Esc closes and gives
 //! the field back. It searches what the room has read, nothing is asked of
 //! the database, and it closes with another room or agent.
@@ -11,13 +12,17 @@ use gpui::{div, prelude::*, px};
 
 use super::room::TeamRoom;
 use super::room_rows::{RoomModel, Row};
-use crate::data::team_room::Speaker;
+use super::room_said::Said;
+use crate::data::team_room::{RoomLine, Speaker};
 use crate::i18n::Translate;
-use crate::screens::conversation::find::{FindMatch, find_in_texts, step};
+use crate::screens::conversation::find::{FindMatch, MIN_QUERY_CHARS, find_in_texts, step};
 use crate::theme::ActiveTheme;
 use crate::ui::find_strip::{FindIds, FindStrip, find_strip};
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip};
+use dcc_core::domain::agent_routine::routine_request;
+use dcc_core::domain::agent_source::source_request;
+use dcc_core::domain::team_room::handoff_heading;
 
 const IDS: FindIds = FindIds {
     bar: "room-find-bar",
@@ -37,20 +42,67 @@ pub(crate) struct RoomFind {
     _events: Subscription,
 }
 
-/// The lines that are someone's words, each with its key: the person's
-/// messages as written and the agents' answers. Cards, turns passed and
-/// the routines' and sources' own lines are not searched.
-pub(crate) fn texts(model: &RoomModel) -> impl Iterator<Item = (&str, &str)> {
-    model.rows.iter().filter_map(|row| match row {
-        Row::Line { line, said, .. } => match said {
-            Some(said) => Some((line.key.as_str(), said.words.as_str())),
-            None if line.speaker == Speaker::Agent && model.agent(&line.agent_id).is_some() => {
-                Some((line.key.as_str(), line.text.as_str()))
+/// What a row is named by in the search: a line's key, a card's, a
+/// check-in's place.
+fn row_has(row: &Row, id: &str) -> bool {
+    match row {
+        Row::Line { line, .. } => line.key == id,
+        Row::Sources { lines, .. } => lines.iter().any(|(_, line)| line.key == id),
+        Row::Card { card, .. } => card.key == id,
+        Row::CheckIn { index, .. } => check_in_id(*index) == id,
+        Row::Recap | Row::Bulletin | Row::Day { .. } => false,
+    }
+}
+
+fn check_in_id(index: usize) -> String {
+    format!("check-in-{index}")
+}
+
+/// A line's words as the room shows them: the person's message as written,
+/// an agent's answer, and for the lines DCC wrote (a turn passed, a
+/// routine's, a source's) what their row says.
+fn line_text(line: &RoomLine, said: Option<&Said>) -> Option<String> {
+    if let Some(said) = said {
+        return Some(said.words.clone());
+    }
+    if line.speaker == Speaker::Agent {
+        return Some(line.text.clone());
+    }
+    if let Some(heading) = handoff_heading(&line.text) {
+        return Some(heading.to_string());
+    }
+    if let Some(request) = routine_request(&line.text) {
+        return Some(request.to_string());
+    }
+    source_request(&line.text).map(|(watch, connector)| format!("{watch} ({connector})"))
+}
+
+/// Everything in the room that can be found, in order, each with what
+/// names its row: the lines, the cards by their task or pull request, the
+/// check-ins by their title. The room's own cards (the recap, the bulletin)
+/// are not searched.
+pub(crate) fn texts(model: &RoomModel) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    for row in &model.rows {
+        match row {
+            Row::Line { line, said, .. } if model.agent(&line.agent_id).is_some() => {
+                if let Some(text) = line_text(line, said.as_deref()) {
+                    found.push((line.key.clone(), text));
+                }
             }
-            None => None,
-        },
-        _ => None,
-    })
+            Row::Sources { lines, .. } => {
+                for (_, line) in lines {
+                    if let Some(text) = line_text(line, None) {
+                        found.push((line.key.clone(), text));
+                    }
+                }
+            }
+            Row::Card { card, .. } => found.push((card.key.clone(), card.title.clone())),
+            Row::CheckIn { index, check } => found.push((check_in_id(*index), check.title.clone())),
+            _ => {}
+        }
+    }
+    found
 }
 
 impl TeamRoom {
@@ -80,6 +132,22 @@ impl TeamRoom {
         self.keep_rows(cx);
     }
 
+    /// Opens on `query`, as "Sessões passadas" found it.
+    pub(crate) fn open_find_on(
+        &mut self,
+        query: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_find(window, cx);
+        if let Some(find) = &self.find {
+            let input = find.input.clone();
+            input.update(cx, |input, cx| input.set_text(query.to_string(), cx));
+        }
+        self.search(true, cx);
+    }
+
+    #[cfg(test)]
     pub(crate) fn find_open(&self) -> bool {
         self.find.is_some()
     }
@@ -115,7 +183,11 @@ impl TeamRoom {
             return;
         };
         let query = find.input.read(cx).text().to_string();
-        find.matches = find_in_texts(texts(&model), &query);
+        let texts = texts(&model);
+        find.matches = find_in_texts(
+            texts.iter().map(|(id, text)| (id.as_str(), text.as_str())),
+            &query,
+        );
         find.active = if restart || find.matches.is_empty() {
             0
         } else {
@@ -130,7 +202,13 @@ impl TeamRoom {
         if self.find.as_ref().is_some_and(|find| find.place != here) {
             self.find = None;
         } else if rebuilt {
+            // Opened before the room had read its lines: the first hit
+            // shows once they are there.
+            let waiting = self.find_focus().is_none();
             self.read_hits(false, cx);
+            if waiting {
+                self.reveal_find();
+            }
         }
     }
 
@@ -156,10 +234,7 @@ impl TeamRoom {
             return;
         };
         let model = self.list.model();
-        let index = model
-            .rows
-            .iter()
-            .position(|row| matches!(row, Row::Line { line, .. } if line.key == key));
+        let index = model.rows.iter().position(|row| row_has(row, key));
         if let Some(index) = index {
             // Following the end would pull the view back from the hit.
             self.list.state.pause_following_tail();
@@ -220,15 +295,15 @@ impl TeamRoom {
         }
     }
 
-    /// The ring 4px out around the current hit's line.
+    /// The ring 4px out around the current hit's row.
     pub(super) fn find_ring(
         &self,
-        key: &str,
+        row: &Row,
         content: Vec<AnyElement>,
         gap: f32,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        if self.find_focus() != Some(key) || content.is_empty() {
+        if content.is_empty() || !self.find_focus().is_some_and(|key| row_has(row, key)) {
             return content;
         }
         let ring = cx.theme().colors.ring.opacity(0.55);
@@ -265,6 +340,35 @@ impl super::AgentPage {
         if let Some((room, _)) = self.room.as_ref().filter(|_| on_screen) {
             room.update(cx, |room, cx| room.open_find(window, cx));
         }
+    }
+}
+
+impl super::AgentPage {
+    /// The agent's "Conversa" in `room`, with `query` in its find bar (a
+    /// result of "Sessões passadas"). The page is on the agent already.
+    pub(crate) fn find_in_room(
+        &mut self,
+        room: Option<String>,
+        query: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.agent_room = Some(room);
+        self.room_find = (query.chars().count() >= MIN_QUERY_CHARS).then(|| query.to_string());
+        cx.notify();
+    }
+
+    /// The magnifier in the head of the agent's "Conversa".
+    pub(super) fn conversation_find_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        Tooltip::text(
+            "agent-find-open-tip",
+            Button::new("agent-find-open")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::IconSm)
+                .on_click(cx.listener(|page, _, window, cx| page.open_room_find(window, cx)))
+                .child(Icon::new("search").size(14.0)),
+            cx.t("agents.room.find.open"),
+        )
+        .into_any_element()
     }
 }
 
@@ -348,9 +452,87 @@ mod tests {
         cx.run_until_parked();
         assert!(room.read_with(cx, |room, _| room.find_open()));
 
-        // On one agent it is another conversation: the bar goes away.
+        // On one agent it is another conversation: the bar goes away, and
+        // the magnifier in that page's head opens its own.
         page.update(cx, |page, cx| page.show_conversation("dev".into(), cx));
         cx.run_until_parked();
         assert!(!room.read_with(cx, |room, _| room.find_open()));
+        let open = cx.debug_bounds("agent-find-open").unwrap();
+        cx.simulate_click(open.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert!(room.read_with(cx, |room, _| room.find_open()));
+    }
+
+    #[gpui::test]
+    fn a_rooms_result_of_the_sessions_search_opens_in_the_room(cx: &mut TestAppContext) {
+        use crate::data::session_search_rooms::room_hit;
+        use dcc_core::domain::agent_conversation::home_project_id;
+        use dcc_core::domain::session::SessionSearchResult;
+        let result = |session: &str, project: String| SessionSearchResult {
+            session_id: dcc_core::domain::session::SessionId(session.into()),
+            workspace_id: dcc_core::domain::workspace::WorkspaceId("w".into()),
+            project_id: dcc_core::domain::project::ProjectId(project),
+            thread_title: "Conversa".into(),
+            workspace_name: None,
+            workspace_branch: None,
+            workspace_root_path: None,
+            provider_id: "codex".into(),
+            model: None,
+            archived_at: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+            snippet: String::new(),
+        };
+        let agents = [super::super::room_list_tests::dev(AgentState::Idle)];
+        let hit = room_hit(&result("s-geral", home_project_id("dev")), &agents).unwrap();
+        assert_eq!((hit.agent_name.as_str(), &hit.room), ("Dev", &None));
+        assert!(hit.shown);
+        let checkout = room_hit(&result("s-checkout", home_project_id("dev")), &agents).unwrap();
+        assert_eq!(checkout.room.as_deref(), Some("checkout"));
+        // A task's session, and a room session the team does not have.
+        assert_eq!(room_hit(&result("s-geral", "p-app".into()), &agents), None);
+        assert_eq!(
+            room_hit(&result("gone", home_project_id("dev")), &agents),
+            None
+        );
+
+        // Picked: the agent's "Conversa" with the query in its find bar.
+        let (page, room, cx) = room_with_lines(cx, lines(), AgentState::Idle);
+        page.update(cx, |page, cx| {
+            page.show_conversation("dev".into(), cx);
+            page.find_in_room(None, "slack", cx);
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("room-find-bar").is_some());
+        assert_eq!(
+            room.read_with(cx, |room, _| room.find_focus().map(str::to_string))
+                .as_deref(),
+            Some("l-0")
+        );
+        // One letter is no search: the room opens with no bar.
+        page.update(cx, |page, cx| page.find_in_room(None, "s", cx));
+        assert!(page.read_with(cx, |page, _| page.room_find.is_none()));
+    }
+
+    #[gpui::test]
+    fn the_lines_dcc_wrote_are_found_by_what_their_row_says(cx: &mut TestAppContext) {
+        use dcc_core::domain::agent_routine::ROUTINE_MARK;
+        let routine = format!("{ROUTINE_MARK} (diária): resumo dos PRs abertos");
+        assert!(dcc_core::domain::agent_routine::routine_request(&routine).is_some());
+        let mut all = lines();
+        all.push(line(4, Speaker::Person, &routine));
+        let (_page, room, cx) = room_with_lines(cx, all, AgentState::Idle);
+        let model = room.read_with(cx, |room, _| room.list.model());
+        let texts = super::texts(&model);
+        let of = |key: &str| {
+            texts
+                .iter()
+                .find(|(id, _)| id == key)
+                .map(|(_, text)| text.as_str())
+        };
+        assert_eq!(of("l-0"), Some("vigia minhas menções no Slack"));
+        assert_eq!(of("l-3"), Some("Feito."));
+        // The routine's line by its request, not by the mark DCC wrote.
+        assert_eq!(of("l-4"), Some("resumo dos PRs abertos"));
     }
 }

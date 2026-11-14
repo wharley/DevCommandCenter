@@ -66,6 +66,8 @@ impl AgentPage {
             };
             let _ = page.update(cx, |page, cx| page.set_tab(tab, cx));
         });
+        // "Buscar" in the agent's conversation (`room_find`).
+        let find = (self.tab == AgentTab::Conversation).then(|| self.conversation_find_button(cx));
         let room = self.agent_room(cx);
         let whole = (self.tab == AgentTab::Conversation
             && room_session(&agent, room.as_deref()).is_some())
@@ -102,6 +104,7 @@ impl AgentPage {
                         .text_color(colors.foreground)
                         .child(agent.name),
                 )
+                .children(find)
                 .children(whole)
                 .child(div().flex_none().w(px(240.0)).child(tabs))
                 .into_any_element(),

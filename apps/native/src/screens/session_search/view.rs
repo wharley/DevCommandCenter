@@ -28,6 +28,16 @@ impl SessionSearch {
             .text_size(10.0)
         });
         let snippet = result.snippet.trim().to_string();
+        // A room's conversation says whose, not a task's name.
+        let place = match crate::data::session_search_rooms::room_hit(result, &self.agents) {
+            Some(room) => cx
+                .t_with(
+                    "workbench.sessionSearch.roomLabel",
+                    &crate::i18n::Args::default().with("agent", room.agent_name),
+                )
+                .to_string(),
+            None => workspace_label(result),
+        };
         div()
             .id(("session-result", index))
             .debug_selector(move || format!("session-result-{index}"))
@@ -82,7 +92,7 @@ impl SessionSearch {
                             .text_size(px(12.0))
                             .line_height(px(16.0))
                             .text_color(colors.muted_foreground)
-                            .child(workspace_label(result)),
+                            .child(place),
                     )
                     .when(!snippet.is_empty(), |column| {
                         column.child(

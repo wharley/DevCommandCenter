@@ -128,6 +128,7 @@ pub mod seen;
 pub mod session_activity;
 pub mod session_list;
 pub mod session_search;
+pub mod session_search_rooms;
 pub mod setup_report;
 pub mod shortcuts;
 pub mod skills;

@@ -219,6 +219,8 @@ pub struct AgentPage {
     /// The room the agent's "Conversa" tab shows when the person picked
     /// one; none: the room it talked in last (`agent_room_switch`).
     pub(crate) agent_room: Option<Option<String>>,
+    /// What the room's find bar opens on, once the room draws (`room_find`).
+    pub(crate) room_find: Option<String>,
     /// The agent's page on its conversation or its settings (`page_tabs`).
     pub(crate) tab: page_tabs::AgentTab,
     /// The agent proposed the editor holds ("Editar antes").
@@ -297,6 +299,7 @@ impl AgentPage {
             rooms: crate::data::agent_rooms::load(),
             room_picker: false,
             agent_room: None,
+            room_find: None,
             tab: Default::default(),
             editing_proposal: None,
             room_draft: None,
