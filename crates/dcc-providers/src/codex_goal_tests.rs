@@ -36,6 +36,7 @@ fn turn(prompt: &str) -> Input {
         fast_mode: None,
         approval_policy: None,
         resume_fallback_context: None,
+        keep_warm: false,
     })
 }
 

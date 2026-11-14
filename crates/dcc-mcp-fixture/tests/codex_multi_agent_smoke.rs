@@ -443,6 +443,7 @@ async fn authenticated_codex_sol_delegates_to_terra_and_integrates_result() {
                 fast_mode: Some(true),
                 approval_policy: None,
                 resume_fallback_context: None,
+                keep_warm: false,
             }),
         )
         .await;
@@ -562,6 +563,7 @@ async fn authenticated_codex_can_steer_a_running_terra_child_directly() {
                 fast_mode: Some(true),
                 approval_policy: None,
                 resume_fallback_context: None,
+                keep_warm: false,
             }),
         )
         .await;
@@ -690,6 +692,7 @@ async fn authenticated_codex_can_interrupt_terra_without_stopping_sol() {
                 fast_mode: Some(true),
                 approval_policy: None,
                 resume_fallback_context: None,
+                keep_warm: false,
             }),
         )
         .await;

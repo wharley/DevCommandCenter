@@ -2173,6 +2173,7 @@ impl SessionCommandState {
                     fast_mode: None,
                     approval_policy,
                     resume_fallback_context: None,
+                    keep_warm: false,
                 }),
             )
             .await
@@ -7423,6 +7424,9 @@ impl SessionCommandState {
                     .is_some_and(crate::device_routing::is_ios_app_project);
                 turn.tool_instructions =
                     append_task_port_instructions(turn.tool_instructions, port, ios_app);
+                // An agent's own conversation: the room's turns come one
+                // after the other, so its runtime may stay up between them.
+                turn.keep_warm = self.is_agent_conversation(session_id).unwrap_or(false);
                 Input::Turn(turn)
             }
             other => other,
@@ -7528,6 +7532,7 @@ impl SessionCommandState {
             fast_mode: input.fast_mode,
             approval_policy: input.approval_policy,
             resume_fallback_context: None,
+            keep_warm: false,
         };
         let output = run_send_turn(self, self, self, input).await?;
         let turn_id = output.turn.id.clone();
@@ -9788,6 +9793,7 @@ mod tests {
             fast_mode: None,
             approval_policy: None,
             resume_fallback_context: None,
+            keep_warm: false,
         }
     }
 

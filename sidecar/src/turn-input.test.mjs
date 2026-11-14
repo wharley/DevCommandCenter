@@ -169,3 +169,28 @@ test("closing refuses further guidance", () => {
 	input.close();
 	assert.equal(input.steer("after close"), false);
 });
+
+test("on a kept query's channel the turn ends without ending the prompt", async () => {
+	const { createInputChannel } = await import("./warm-query.mjs");
+	const channel = createInputChannel();
+	const iterator = channel.stream[Symbol.asyncIterator]();
+
+	const first = createTurnInput({ channel });
+	let over = false;
+	void first.over.then(() => {
+		over = true;
+	});
+	first.start("one");
+	assert.equal(text((await iterator.next()).value), "one");
+	first.observe(RUNNING);
+	assert.equal(first.observe(RESULT), false);
+	await Promise.resolve();
+	assert.equal(over, true, "the turn is over");
+
+	// The same prompt takes the next turn's message.
+	const second = createTurnInput({ channel });
+	second.start("two");
+	assert.equal(text((await iterator.next()).value), "two");
+	second.close();
+	assert.equal(channel.push("still open"), true);
+});

@@ -1151,6 +1151,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
                     "fastMode": turn.fast_mode,
                     "approvalPolicy": turn.approval_policy,
                     "resumeFallbackContext": turn.resume_fallback_context,
+                    "keepWarm": turn.keep_warm,
                 });
                 let serialized = serde_json::to_string(&payload).map_err(|error| {
                     CoreError::Provider(format!("failed to encode Claude sidecar input: {error}"))
@@ -1689,6 +1690,7 @@ exit 43
                         resume_fallback_context: Some(
                             "<dcc_reanchor>snap</dcc_reanchor>".to_string(),
                         ),
+                        keep_warm: false,
                     }),
                 )
                 .await

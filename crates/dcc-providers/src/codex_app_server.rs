@@ -5076,6 +5076,7 @@ unified_exec                         stable             true
             fast_mode: Some(true),
             approval_policy: None,
             resume_fallback_context: None,
+            keep_warm: false,
         }
     }
 

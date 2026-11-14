@@ -917,6 +917,7 @@ mod tests {
             fast_mode: None,
             approval_policy: None,
             resume_fallback_context: None,
+            keep_warm: false,
         });
         assert!(prompt.contains("Continue the task"));
         assert!(prompt.contains("DCC handoff context"));
@@ -1119,6 +1120,7 @@ mod tests {
                     fast_mode: None,
                     approval_policy: None,
                     resume_fallback_context: None,
+                    keep_warm: false,
                 }),
             )
             .await

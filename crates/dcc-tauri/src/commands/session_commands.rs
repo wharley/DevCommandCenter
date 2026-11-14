@@ -2244,6 +2244,7 @@ pub async fn send_turn_with_state(
         fast_mode: input.fast_mode,
         approval_policy: input.approval_policy,
         resume_fallback_context: None,
+        keep_warm: false,
     };
     let output = run_send_turn(&*state, &*state, &*state, input)
         .await

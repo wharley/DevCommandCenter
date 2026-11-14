@@ -209,6 +209,7 @@ async fn native_thread_resumes_and_falls_back_to_a_fresh_thread_with_the_snapsho
                     approval_policy: None,
                     resume_fallback_context: native_id
                         .map(|_| "<dcc_reanchor>snapshot</dcc_reanchor>".to_string()),
+                    keep_warm: false,
                 }),
             )
             .await

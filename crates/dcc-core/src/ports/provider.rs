@@ -208,6 +208,13 @@ pub struct ProviderTurnInput {
     #[serde(skip)]
     #[specta(skip)]
     pub resume_fallback_context: Option<String>,
+    /// The conversation is one the person talks in turn after turn (an
+    /// agent's own, in the team room): an adapter that otherwise starts its
+    /// runtime again for every turn may keep it between them.
+    /// Backend-only: the renderer contract never carries it.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub keep_warm: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]

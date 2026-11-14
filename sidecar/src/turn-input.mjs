@@ -1,4 +1,5 @@
 import { userMessage } from "./mcp-readiness.mjs";
+import { createInputChannel } from "./warm-query.mjs";
 
 // Asks Claude Code to report `system/session_state_changed`. Its `idle` is the
 // authoritative turn-over signal: it fires only after queued messages ran.
@@ -18,15 +19,24 @@ const IDLE_FALLBACK_MS = 15_000;
  * Steering is offered only once Claude has reported that it is running, which
  * proves it will report `idle` and keeps a refused native resume (which fails
  * before that) from swallowing guidance.
+ *
+ * With a `channel` the prompt belongs to a query kept between turns
+ * (`warm-query.mjs`): the turn writes to it and leaves it open at its end,
+ * and `over` says when the turn is over instead of the prompt ending.
  */
 export function createTurnInput({
 	settleMs = STEER_SETTLE_MS,
 	idleFallbackMs = IDLE_FALLBACK_MS,
 	setTimer = setTimeout,
 	clearTimer = clearTimeout,
+	channel = null,
 } = {}) {
-	const pending = [];
-	let wake = null;
+	// The turn's own prompt, ended with it, unless a kept query's was given.
+	const sink = channel ?? createInputChannel();
+	let turnOver;
+	const over = new Promise((resolve) => {
+		turnOver = resolve;
+	});
 	let started = false;
 	let closed = false;
 	let running = false;
@@ -34,11 +44,6 @@ export function createTurnInput({
 	let steers = 0;
 	let endTimer = null;
 
-	const notify = () => {
-		const resolve = wake;
-		wake = null;
-		resolve?.();
-	};
 	const cancelEnd = () => {
 		if (endTimer !== null) {
 			clearTimer(endTimer);
@@ -49,7 +54,10 @@ export function createTurnInput({
 		cancelEnd();
 		if (!closed) {
 			closed = true;
-			notify();
+			if (!channel) {
+				sink.end();
+			}
+			turnOver();
 		}
 	};
 	const endAfter = (milliseconds) => {
@@ -57,30 +65,16 @@ export function createTurnInput({
 		endTimer = setTimer(close, milliseconds);
 	};
 
-	async function* drain() {
-		while (true) {
-			if (pending.length > 0) {
-				yield pending.shift();
-				continue;
-			}
-			if (closed) {
-				return;
-			}
-			await new Promise((resolve) => {
-				wake = resolve;
-			});
-		}
-	}
-
 	return {
-		stream: drain(),
+		stream: sink.stream,
+		/** Resolves when the turn is over (the prompt's end, without a channel). */
+		over,
 		start(prompt, imageBlocks = []) {
 			if (started || closed) {
 				return;
 			}
 			started = true;
-			pending.push(userMessage(prompt, imageBlocks));
-			notify();
+			sink.push(userMessage(prompt, imageBlocks));
 		},
 		canSteer() {
 			return started && !closed && running && !resultSinceRunning;
@@ -92,8 +86,7 @@ export function createTurnInput({
 			}
 			steers += 1;
 			// `next` folds it in at Claude's next tool boundary; `now` would abort.
-			pending.push({ ...userMessage(prompt, imageBlocks), priority: "next" });
-			notify();
+			sink.push({ ...userMessage(prompt, imageBlocks), priority: "next" });
 			return true;
 		},
 		/** Tracks the turn from Claude's output; true for messages only DCC's sidecar reads. */

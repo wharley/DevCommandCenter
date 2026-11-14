@@ -11,6 +11,15 @@ import {
 	normalizeDccMcpServers,
 } from "./mcp-config.mjs";
 import { waitForDccMcpReadiness } from "./mcp-readiness.mjs";
+import {
+	closeWarmEntry,
+	createInputChannel,
+	createQueryReader,
+	createWarmSlot,
+	discardBuffered,
+	readTurn,
+	warmKey,
+} from "./warm-query.mjs";
 import { promptImageBlocks } from "./prompt-images.mjs";
 import { handlePermissionRequest } from "./permission-bridge.mjs";
 import {
@@ -289,9 +298,27 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 		additionalDirectories,
 	);
 	const imageBlocks = await promptImageBlocks(prompt);
+	// A conversation DCC keeps warm reuses the query its last turn left open,
+	// when this turn asks for the same options (`warm-query.mjs`).
+	const keepWarm = payload?.keepWarm === true;
+	const key = keepWarm
+		? warmKey(payload, state.mcpProjection, process.env)
+		: null;
+	if (!keepWarm) {
+		state.warm.drop();
+	}
+	let kept = keepWarm ? state.warm.take(key) : null;
+	if (kept && (await discardBuffered(kept.reader)).ended) {
+		closeWarmEntry(kept);
+		kept = null;
+	}
+	if (kept) {
+		return runKeptTurn(kept, { prompt, imageBlocks }, state, trace);
+	}
 	// The prompt stays open during the turn so steering can add guidance. With
 	// DCC MCP servers the first message waits until they are attached.
-	const turnInput = createTurnInput();
+	const channel = keepWarm ? createInputChannel() : null;
+	const turnInput = createTurnInput({ channel });
 	if (!hasDccMcpServers) {
 		turnInput.start(prompt, imageBlocks);
 	}
@@ -345,6 +372,8 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 		},
 	});
 	let terminalResult = null;
+	// Set when the turn ended cleanly on a query worth keeping.
+	let warm = null;
 
 	try {
 		let mcpStatus;
@@ -373,19 +402,100 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 		// A server that failed to attach is reported in the status above and
 		// simply left out: one broken integration never stops the turn.
 		turnInput.start(prompt, imageBlocks);
-		for await (const message of q) {
+		const handle = (message) => {
 			updateResumeSessionId(message, state, trace);
 			if (turnInput.observe(message)) {
-				continue;
+				return;
 			}
 			// With steering Claude can run a follow-up and report again; the
 			// last result closes the DCC turn.
 			if (message && message.type === "result") {
 				terminalResult = message;
-				continue;
+				return;
 			}
 			emit(message);
+		};
+		if (channel) {
+			// Read until the turn is over, leaving the query open for the next.
+			const reader = createQueryReader(q);
+			const { ended } = await readTurn(reader, turnInput.over, handle);
+			// A query that started without one of its servers is not kept:
+			// the next turn starts fresh and tries that server again.
+			const allAttached = !(mcpStatus?.failed?.length > 0);
+			if (
+				!ended &&
+				allAttached &&
+				terminalResult &&
+				terminalResult.is_error !== true
+			) {
+				warm = { key, query: q, channel, reader };
+			}
+		} else {
+			for await (const message of q) {
+				handle(message);
+			}
 		}
+	} catch (error) {
+		warm = null;
+		if (!terminalResult) {
+			terminalResult = {
+				type: "result",
+				is_error: true,
+				result: error instanceof Error ? error.message : String(error),
+				session_id: state.resumeSessionId ?? null,
+			};
+		}
+	} finally {
+		if (state.activeTurnInput === turnInput) {
+			state.activeTurnInput = null;
+		}
+		turnInput.close();
+		if (warm) {
+			state.warm.keep(warm);
+		} else {
+			channel?.end();
+			try {
+				q.close();
+			} catch {
+				// Ignore close failures during shutdown.
+			}
+		}
+	}
+
+	return (
+		terminalResult ?? {
+			type: "result",
+			is_error: true,
+			result: "Claude SDK query ended without a terminal result",
+			session_id: state.resumeSessionId ?? null,
+		}
+	);
+}
+
+// A turn on the query the conversation's last turn left open: no new
+// process, no MCP servers to attach again. The query is kept again when the
+// turn ends cleanly; anything else closes it and the next turn starts fresh.
+async function runKeptTurn(kept, { prompt, imageBlocks }, state, trace) {
+	// The session was initialized by the turn that started the query.
+	trace.sawInit = true;
+	const turnInput = createTurnInput({ channel: kept.channel });
+	state.activeTurnInput = turnInput;
+	let terminalResult = null;
+	let keep = false;
+	try {
+		turnInput.start(prompt, imageBlocks);
+		const { ended } = await readTurn(kept.reader, turnInput.over, (message) => {
+			updateResumeSessionId(message, state, trace);
+			if (turnInput.observe(message)) {
+				return;
+			}
+			if (message && message.type === "result") {
+				terminalResult = message;
+				return;
+			}
+			emit(message);
+		});
+		keep = !ended && terminalResult !== null && terminalResult.is_error !== true;
 	} catch (error) {
 		if (!terminalResult) {
 			terminalResult = {
@@ -400,13 +510,12 @@ async function runTurn(payload, state, trace = createTurnTrace()) {
 			state.activeTurnInput = null;
 		}
 		turnInput.close();
-		try {
-			q.close();
-		} catch {
-			// Ignore close failures during shutdown.
+		if (keep) {
+			state.warm.keep(kept);
+		} else {
+			closeWarmEntry(kept);
 		}
 	}
-
 	return (
 		terminalResult ?? {
 			type: "result",
@@ -472,6 +581,8 @@ async function main() {
 		pendingUserInputs: new Map(),
 		pendingPermissions: new Map(),
 		mcpProjection: normalizeDccMcpServers([]),
+		// The query kept between the turns of a conversation DCC keeps warm.
+		warm: createWarmSlot(),
 	};
 
 	const rl = readline.createInterface({
@@ -617,6 +728,8 @@ async function main() {
 			finishTurn(state, terminalResult, emit);
 		})();
 	}
+	// DCC closed the input: a query kept for a next turn has none coming.
+	state.warm.drop();
 }
 
 main().catch((error) => {
