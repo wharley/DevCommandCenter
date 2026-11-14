@@ -177,4 +177,83 @@ impl TeamRoom {
             )
             .into_any_element()
     }
+
+    /// A chain's result going back to the agent it started with, as one
+    /// line ("↩ Dev devolveu para Suporte").
+    pub(super) fn returned_line(
+        &self,
+        index: usize,
+        heading: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = cx.theme().colors.clone();
+        // `↪ Dev → Suporte: returned`
+        let names = heading
+            .trim_start_matches(dcc_core::domain::team_room::HANDOFF_MARK)
+            .split_once(": ")
+            .map_or(heading, |(names, _)| names);
+        let (from, to) = names.split_once(" → ").unwrap_or((names, ""));
+        let text = cx.t_with(
+            "agents.room.handoff.returned",
+            &Args::default()
+                .with("from", from.trim().to_string())
+                .with("to", to.trim().to_string()),
+        );
+        div()
+            .debug_selector(move || format!("room-returned-{index}"))
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .max_w(px(560.0))
+                    .truncate()
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .rounded(px(10.0))
+                    .bg(colors.accent.opacity(0.6))
+                    .text_size(px(11.5))
+                    .text_color(colors.muted_foreground)
+                    .child(text),
+            )
+            .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::super::room_list_tests::room_with_lines;
+    use crate::data::agents::AgentState;
+    use crate::data::team_room::{RoomLine, Speaker};
+
+    #[gpui::test]
+    fn a_chains_result_coming_back_is_one_line(cx: &mut TestAppContext) {
+        let line = |index: usize, speaker: Speaker, text: String| RoomLine {
+            key: format!("l-{index}"),
+            agent_id: "dev".into(),
+            session_id: "s-geral".into(),
+            speaker,
+            text,
+            at: format!("2026-11-10T10:0{index}:00Z"),
+            receipt: None,
+            tasks: Vec::new(),
+            steps: Default::default(),
+        };
+        let back = dcc_core::domain::agent_chain::return_prompt("QA", "Dev", "Testei e passou.");
+        let (_page, _room, cx) = room_with_lines(
+            cx,
+            vec![
+                line(0, Speaker::Person, back),
+                line(1, Speaker::Agent, "O QA testou e passou.".into()),
+            ],
+            AgentState::Idle,
+        );
+        // Not the person's words, not a pass: its own line, then the answer
+        // that closes it.
+        assert!(cx.debug_bounds("room-returned-0").is_some());
+        assert!(cx.debug_bounds("room-said-0").is_none());
+        assert!(cx.debug_bounds("room-passed-0").is_none());
+        assert!(cx.debug_bounds("room-answer-1").is_some());
+    }
 }

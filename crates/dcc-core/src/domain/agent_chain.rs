@@ -5,6 +5,11 @@
 //! The Reviewer never joins a chain — it is offered at the end of a task's
 //! turn or called by the person. A chain stops after `MAX_CHAIN_STEPS`
 //! passes with nobody writing; a message from the person starts it over.
+//!
+//! When the chain ends — the last agent answers without passing on — what
+//! it answered goes back once to the agent the chain started with, so that
+//! one closes it with the person (Tucano's `pedir`, where the result returns
+//! to who asked). A return never starts another chain.
 
 use super::agent::REVIEWER_PRESET;
 use super::team_room::{handoff_prompt, HANDOFF_MARK};
@@ -12,11 +17,19 @@ use super::team_room::{handoff_prompt, HANDOFF_MARK};
 pub const MAX_CHAIN_STEPS: u32 = 5;
 const STEP_LINE: &str = "Passed on automatically by DCC, chain step ";
 const ANSWER_LINE: &str = "Answer passed on: ";
+/// The line that marks a chain's result going back to who started it.
+const RETURN_LINE: &str = "Returned by DCC at the end of the chain.";
+/// How much of the last answer goes back.
+const RETURN_CHARS: usize = 2_000;
 
 /// Which step of a chain the turn `prompt` started is; 0 for the person's.
 pub fn chain_step(prompt: &str) -> u32 {
     if !prompt.starts_with(HANDOFF_MARK) {
         return 0;
+    }
+    // A result that came back: the chain is over, nothing follows it.
+    if is_return(prompt) {
+        return MAX_CHAIN_STEPS;
     }
     prompt
         .lines()
@@ -56,6 +69,34 @@ pub fn auto_handoff_prompt(
     )
 }
 
+/// Whether `prompt` is a chain's result going back to who started it.
+pub fn is_return(prompt: &str) -> bool {
+    prompt.starts_with(HANDOFF_MARK) && prompt.lines().any(|line| line == RETURN_LINE)
+}
+
+/// The message that takes the last answer of a chain back to the agent it
+/// started with: the room shows its first line as a pass (`from → to`).
+pub fn return_prompt(from: &str, to: &str, answer: &str) -> String {
+    let said: String = answer.chars().take(RETURN_CHARS).collect();
+    format!(
+        "{HANDOFF_MARK}{from} → {to}: returned\n\n{RETURN_LINE}\nWhat you passed on reached {from}, who answered:\n{said}\n\nClose it with the person: say where it stands in one or two sentences, in their language. Do not pass it on again. If it adds nothing they need to know, answer exactly {} and nothing else.",
+        super::agent_routine::QUIET_ANSWER
+    )
+}
+
+/// Whether a turn that `prompt` started and that passed nothing on owes a
+/// return: it was itself a pass, and not a return.
+pub fn owes_return(prompt: &str) -> bool {
+    prompt.starts_with(HANDOFF_MARK) && !is_return(prompt)
+}
+
+/// The agent that passed `prompt`, by its name in the first line
+/// (`↪ Suporte → Dev: …`).
+pub fn passed_by(prompt: &str) -> Option<&str> {
+    let heading = prompt.strip_prefix(HANDOFF_MARK)?.lines().next()?;
+    heading.split_once(" → ").map(|(from, _)| from.trim())
+}
+
 /// The answer a pass without the person came from, when `prompt` is one.
 pub fn passed_answer(prompt: &str) -> Option<&str> {
     prompt
@@ -92,5 +133,28 @@ mod tests {
         assert_eq!(next_step(&last, &may, "dev", None), None);
         assert_eq!(chain_step("corrige"), 0);
         assert_eq!(passed_answer("corrige"), None);
+    }
+
+    #[test]
+    fn the_last_answer_goes_back_once_and_starts_nothing() {
+        let may = vec!["dev".to_string()];
+        let passed = auto_handoff_prompt("Suporte", "Dev", "@Dev corrigir", "análise", "s:t", 1);
+        assert!(owes_return(&passed));
+        assert_eq!(passed_by(&passed), Some("Suporte"));
+        // The person's own message owes nothing: there was no pass.
+        assert!(!owes_return("corrige isso"));
+        assert_eq!(passed_by("corrige isso"), None);
+
+        let back = return_prompt("Dev", "Suporte", "Abri a tarefa e o PR.");
+        assert!(is_return(&back));
+        assert!(back.starts_with("↪ Dev → Suporte: returned"));
+        assert!(back.contains("Abri a tarefa e o PR."));
+        // A return is not a pass to return again, and nothing is passed from it.
+        assert!(!owes_return(&back));
+        assert_eq!(next_step(&back, &may, "dev", None), None);
+        assert!(!is_return(&passed));
+        // A long answer goes back cut.
+        let long = return_prompt("Dev", "Suporte", &"a".repeat(5_000));
+        assert!(long.chars().count() < 3_000);
     }
 }

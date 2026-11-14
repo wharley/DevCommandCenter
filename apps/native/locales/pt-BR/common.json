@@ -533,6 +533,7 @@
       "handoff": {
         "suggests": "{{agent}} sugere passar a vez para {{teammate}}",
         "autoPassed": "Passado automaticamente para {{teammate}}",
+        "returned": "↩ {{from}} devolveu o resultado para {{to}}",
         "automatic": "automático",
         "pass": "Passar a vez",
         "ignore": "Ignorar",

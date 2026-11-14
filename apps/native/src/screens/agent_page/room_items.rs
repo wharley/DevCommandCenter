@@ -151,6 +151,10 @@ impl TeamRoom {
             return rows;
         }
         if let Some(heading) = handoff_heading(&line.text) {
+            // A chain's result going back to who started it.
+            if dcc_core::domain::agent_chain::is_return(&line.text) {
+                return vec![self.returned_line(index, heading, cx)];
+            }
             let automatic = dcc_core::domain::agent_chain::passed_answer(&line.text).is_some();
             return vec![self.passed_line(index, heading, automatic, cx)];
         }

@@ -5,13 +5,22 @@
 //! itself, DCC sends the teammate the same message the card would, in its
 //! own conversation, marked with the chain's step. A teammate with no
 //! conversation yet waits for the person's click, which makes it.
+//!
+//! And the way back: when the turn that ended was itself a pass and passes
+//! nothing on, the chain is over, and what its agent answered goes once to
+//! the agent the chain started with, in that one's own conversation, to
+//! close it with the person.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 use dcc_core::application::SendTurnInput;
 use dcc_core::domain::agent::ReviewerPresetText;
-use dcc_core::domain::agent_chain::{auto_handoff_prompt, next_step};
+use dcc_core::domain::agent_chain::{
+    auto_handoff_prompt, next_step, owes_return, passed_answer, passed_by, return_prompt,
+    MAX_CHAIN_STEPS,
+};
+use dcc_core::domain::agent_routine::QUIET_ANSWER;
 use dcc_core::domain::provider::ProviderApprovalPolicy;
 use dcc_core::domain::session::{SessionEventKind, SessionId, SessionProjection};
 use dcc_core::domain::team_room::{handoff, Teammate};
@@ -43,7 +52,7 @@ async fn pass_if_allowed(
     let Some(agent) = state.session_agent(session_id).map_err(text)? else {
         return Ok(());
     };
-    if agent.may_call.is_empty() || !state.is_agent_conversation(session_id).map_err(text)? {
+    if !state.is_agent_conversation(session_id).map_err(text)? {
         return Ok(());
     }
     let events = SessionEventRepo::list_events_by_session(state, session_id)
@@ -99,11 +108,13 @@ async fn pass_if_allowed(
             preset: mate.preset.as_deref(),
         })
         .collect();
-    let Some((mate, request)) = handoff(&answer, &mates, &agent.id) else {
-        return Ok(());
-    };
-    let Some(step) = next_step(&prompt, &agent.may_call, mate.id, mate.preset) else {
-        return Ok(());
+    // A pass the agent may make itself; none: the chain ends here, and
+    // its result goes back to who started it.
+    let handed = handoff(&answer, &mates, &agent.id).and_then(|(mate, request)| {
+        next_step(&prompt, &agent.may_call, mate.id, mate.preset).map(|step| (mate, request, step))
+    });
+    let Some((mate, request, step)) = handed else {
+        return return_if_owed(state, session_id, &agent, &prompt, &answer, &key, &team).await;
     };
     // The teammate's conversation in the same room; none there yet waits
     // for the person's click on the card, which makes it.
@@ -126,6 +137,94 @@ async fn pass_if_allowed(
         ..serde_json::from_value(serde_json::json!({
             "sessionId": to_session,
             "prompt": auto_handoff_prompt(&agent.name, mate.name, &request, &answer, &key, step),
+        }))
+        .map_err(|error| error.to_string())?
+    };
+    crate::commands::session_commands::send_turn_with_state(state, input)
+        .await
+        .map(|_| ())
+}
+
+/// The turn `key` of `agent` ended a chain: its answer goes back, once, to
+/// the agent the chain started with.
+async fn return_if_owed(
+    state: &SessionCommandState,
+    session_id: &SessionId,
+    agent: &dcc_core::domain::agent::ResidentAgent,
+    prompt: &str,
+    answer: &str,
+    key: &str,
+    team: &[dcc_core::domain::agent::ResidentAgent],
+) -> Result<(), String> {
+    let text = |error: dcc_core::CoreError| error.to_string();
+    if !owes_return(prompt) || answer.trim() == QUIET_ANSWER {
+        return Ok(());
+    }
+    // Back through the passes DCC made itself, each naming the answer it
+    // came from, to the conversation the first one left.
+    let mut root: Option<SessionId> = None;
+    let mut current = prompt.to_string();
+    for _ in 0..MAX_CHAIN_STEPS {
+        let Some((from_session, from_turn)) =
+            passed_answer(&current).and_then(|from| from.split_once(':'))
+        else {
+            break;
+        };
+        let from_session = SessionId(from_session.to_string());
+        let events = SessionEventRepo::list_events_by_session(state, &from_session)
+            .await
+            .map_err(text)?;
+        let started = events.iter().find_map(|event| match &event.kind {
+            SessionEventKind::TurnStarted {
+                turn_id, prompt, ..
+            } if turn_id.0 == from_turn => Some(prompt.clone()),
+            _ => None,
+        });
+        root = Some(from_session);
+        match started {
+            Some(started) => current = started,
+            None => break,
+        }
+    }
+    // A pass the person clicked names no answer: who passed it, by name,
+    // in the same room.
+    let root = match root {
+        Some(root) => root,
+        None => {
+            let Some(from) = passed_by(prompt).and_then(|name| {
+                team.iter()
+                    .find(|mate| mate.name.trim().eq_ignore_ascii_case(name))
+            }) else {
+                return Ok(());
+            };
+            let room = state.session_room(session_id).map_err(text)?;
+            match state
+                .agent_room_session(&from.id, room.as_deref())
+                .map_err(text)?
+            {
+                Some(session) => SessionId(session),
+                None => return Ok(()),
+            }
+        }
+    };
+    let Some(first) = state.session_agent(&root).map_err(text)? else {
+        return Ok(());
+    };
+    if first.id == agent.id || root == *session_id {
+        return Ok(());
+    }
+    if !passed()
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(format!("return:{key}"))
+    {
+        return Ok(());
+    }
+    let input = SendTurnInput {
+        approval_policy: Some(ProviderApprovalPolicy::Ask),
+        ..serde_json::from_value(serde_json::json!({
+            "sessionId": root.0,
+            "prompt": return_prompt(&agent.name, &first.name, answer),
         }))
         .map_err(|error| error.to_string())?
     };
