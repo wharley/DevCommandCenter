@@ -669,6 +669,7 @@
         "retryFailed": "Não deu para tentar de novo: {{error}}"
       },
       "queued": "Na fila · sai quando o {{agent}} terminar",
+      "steerNow": "Enviar agora",
       "unqueue": "Tirar da fila",
       "unqueueFailed": "Não deu para tirar da fila: {{error}}",
       "jumpTip": "Ir para o fim",

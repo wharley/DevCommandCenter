@@ -162,6 +162,9 @@ impl TeamRoom {
         else {
             return bubble;
         };
+        // Into the turn at work now, where its provider takes it
+        // (`room_steer`).
+        let steer = self.steer_button(index, sent, cx);
         div()
             .flex()
             .flex_col()
@@ -169,13 +172,20 @@ impl TeamRoom {
             .gap(px(4.0))
             .child(bubble)
             .child(
-                Button::new(SharedString::from(format!("room-unqueue-{index}")))
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::Xs)
-                    .on_click(cx.listener(move |room, _, _, cx| {
-                        room.unqueue(session_id.clone(), id.clone(), cx)
-                    }))
-                    .child(cx.t("agents.room.unqueue")),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .children(steer)
+                    .child(
+                        Button::new(SharedString::from(format!("room-unqueue-{index}")))
+                            .variant(ButtonVariant::Ghost)
+                            .size(ButtonSize::Xs)
+                            .on_click(cx.listener(move |room, _, _, cx| {
+                                room.unqueue(session_id.clone(), id.clone(), cx)
+                            }))
+                            .child(cx.t("agents.room.unqueue")),
+                    ),
             )
             .into_any_element()
     }

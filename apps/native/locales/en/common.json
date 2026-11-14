@@ -669,6 +669,7 @@
         "retryFailed": "Couldn't try again: {{error}}"
       },
       "queued": "Queued · goes when {{agent}} finishes",
+      "steerNow": "Send now",
       "unqueue": "Remove from queue",
       "unqueueFailed": "Could not remove it from the queue: {{error}}",
       "jumpTip": "Jump to the end",

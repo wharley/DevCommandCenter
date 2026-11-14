@@ -136,6 +136,7 @@ mod room_running;
 mod room_running_tests;
 mod room_reply;
 mod room_said;
+mod room_steer;
 mod room_shipped;
 mod room_source_group;
 mod room_status_chips;

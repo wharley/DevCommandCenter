@@ -83,3 +83,62 @@ fn a_message_to_an_agent_at_work_is_queued(cx: &mut TestAppContext) {
     assert_eq!(body["prompt"], "e o cache?");
     assert_eq!(seen[1].0, "DELETE /api/v1/sessions/s-geral/queue/q-1");
 }
+
+#[gpui::test]
+fn a_queued_message_goes_into_the_turn_at_work_where_the_provider_takes_it(
+    cx: &mut TestAppContext,
+) {
+    let (_page, room, cx) = room_with_lines(cx, Vec::new(), AgentState::Working);
+    let (port, desktop) = fake_desktop_routes(vec![
+        (
+            "/api/v1/sessions/s-geral/queue",
+            200,
+            r#"{"queuedTurn":{"id":"q-1","sessionId":"s-geral","prompt":"usa o cache novo","createdAt":"2026-11-11T10:00:00Z"}}"#.into(),
+        ),
+        ("/api/v1/sessions/s-geral/steer", 200, "{}".into()),
+        ("/api/v1/sessions/s-geral/queue/q-1", 200, r#"{"queue":[]}"#.into()),
+    ]);
+    room.update(cx, |room, cx| {
+        room.composer
+            .update(cx, |composer, _| composer.catalog = Some(codex_catalog()));
+        room.api = Some(crate::data::desktop_api::DesktopApi::new(port, "k"));
+        room.input
+            .update(cx, |area, cx| area.set_text("usa o cache novo", cx));
+        room.send(cx);
+    });
+    cx.run_until_parked();
+    // A provider that takes no guidance mid-turn: only "Tirar da fila".
+    assert!(cx.debug_bounds("room-unqueue-0").is_some());
+    assert!(cx.debug_bounds("room-steer-0").is_none());
+
+    // One that does: "Enviar agora" beside it.
+    room.update(cx, |room, cx| {
+        let mut providers = (*codex_catalog()).clone();
+        providers[0].capabilities.supports_steering = true;
+        room.composer.update(cx, |composer, _| {
+            composer.catalog = Some(std::sync::Arc::new(providers))
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let steer = cx.debug_bounds("room-steer-0").unwrap();
+    cx.simulate_click(steer.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the calls"
+    );
+    cx.run_until_parked();
+    // Taken by the turn: it left the queue.
+    assert!(room.update(cx, |room, _| room.pending.is_empty()));
+    let seen = desktop.join().unwrap();
+    let paths: Vec<&str> = seen.iter().map(|(path, _)| path.as_str()).collect();
+    assert!(
+        paths.iter().any(|path| path.ends_with("/steer")),
+        "{paths:?}"
+    );
+    assert!(
+        paths.iter().any(|path| path.ends_with("/queue/q-1")),
+        "{paths:?}"
+    );
+}
