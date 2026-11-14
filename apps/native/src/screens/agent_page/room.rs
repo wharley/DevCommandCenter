@@ -102,6 +102,8 @@ pub struct TeamRoom {
     pub(crate) cleanup_path: Option<PathBuf>,
     /// Selecting and copying the lines' text (`room_copy`).
     pub(crate) copy: super::room_copy::RoomCopy,
+    /// "Buscar na sala", while open (`room_find`).
+    pub(crate) find: Option<super::room_find::RoomFind>,
     /// The one agent shown, on its page's "Conversa" (`room_focus`).
     pub(crate) focus: Option<String>,
     /// The project whose room this is; none: the Geral room.
@@ -241,6 +243,7 @@ impl TeamRoom {
             cleanup: Default::default(),
             cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
             copy: super::room_copy::RoomCopy::new(cx),
+            find: None,
             focus: None,
             room: None,
             room_generation: 0,

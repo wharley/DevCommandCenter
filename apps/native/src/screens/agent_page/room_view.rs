@@ -164,7 +164,8 @@ impl Render for TeamRoom {
         let scope = self.scope();
         // A conversation at work is read as it goes while this draws.
         self.watch_live(cx);
-        if self.list.needs_build(&scope) {
+        let rebuilt = self.list.needs_build(&scope);
+        if rebuilt {
             let model = self.build_rows(cx);
             {
                 let mut markdown = self.markdown.borrow_mut();
@@ -173,6 +174,9 @@ impl Render for TeamRoom {
             }
             self.list.take(model);
         }
+        self.sync_find(rebuilt, cx);
+        let find_bar = self.find_bar(cx);
+        let find_button = self.find_button(cx);
         // The questions and approvals wait on the field, not in the list.
         let question = self.question_card(self.questions(&self.list.model().agents), cx);
         let dock = self.approval_dock(self.approvals(&self.list.model().agents), question, cx);
@@ -213,6 +217,7 @@ impl Render for TeamRoom {
                                 .items_center()
                                 .gap(px(8.0))
                                 .children(self.status_chips(cx))
+                                .child(find_button)
                                 .children(self.pause_button(cx)),
                         ),
                 )
@@ -241,6 +246,7 @@ impl Render for TeamRoom {
         div()
             .debug_selector(|| "team-room".into())
             .track_focus(&self.copy.keys)
+            .on_key_down(cx.listener(Self::find_key))
             .on_action(
                 cx.listener(|room, _: &crate::app::menus::EditCopy, _, cx| room.copy_selection(cx)),
             )
@@ -251,6 +257,7 @@ impl Render for TeamRoom {
             .bg(colors.background)
             // On one agent, its page draws the head.
             .children(header)
+            .children(find_bar)
             .child(
                 div()
                     .id("room-lines")

@@ -13,6 +13,7 @@ pub mod delivery_rail;
 pub mod dialog;
 pub mod diff_squares;
 mod feedback;
+pub(crate) mod find_strip;
 mod icon;
 mod kbd;
 pub mod layer;

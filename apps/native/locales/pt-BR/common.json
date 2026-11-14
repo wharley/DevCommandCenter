@@ -619,6 +619,10 @@
       "unqueue": "Tirar da fila",
       "unqueueFailed": "Não deu para tirar da fila: {{error}}",
       "jumpTip": "Ir para o fim",
+      "find": {
+        "placeholder": "Buscar nesta sala…",
+        "open": "Buscar na sala (⌘F)"
+      },
       "newLines_one": "{{count}} nova",
       "newLines_other": "{{count}} novas",
       "showMore": "ver mais",

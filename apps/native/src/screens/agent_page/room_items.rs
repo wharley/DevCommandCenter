@@ -119,14 +119,17 @@ impl TeamRoom {
                 said,
                 steps,
             } => match model.agent(&line.agent_id) {
-                Some(agent) => self.line_rows(
-                    (*index, *first, said.as_ref(), steps.as_ref()),
-                    line,
-                    agent,
-                    model,
-                    window,
-                    cx,
-                ),
+                Some(agent) => {
+                    let rows = self.line_rows(
+                        (*index, *first, said.as_ref(), steps.as_ref()),
+                        line,
+                        agent,
+                        model,
+                        window,
+                        cx,
+                    );
+                    self.find_ring(&line.key, rows, GAP, cx)
+                }
                 None => Vec::new(),
             },
         }

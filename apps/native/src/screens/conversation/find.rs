@@ -34,13 +34,27 @@ fn collapse_whitespace(text: &str) -> String {
 
 /// `findInThread`
 pub fn find_in_thread(rows: &[TimelineMessage], query: &str) -> Vec<FindMatch> {
+    find_in_texts(
+        rows.iter()
+            .filter(|row| !row.streaming)
+            .map(|row| (row.id.as_str(), row.content.as_str())),
+        query,
+    )
+}
+
+/// The same search over any texts, each with what names it (the team
+/// room's lines).
+pub fn find_in_texts<'a>(
+    texts: impl Iterator<Item = (&'a str, &'a str)>,
+    query: &str,
+) -> Vec<FindMatch> {
     let needle: Vec<char> = query.trim().to_lowercase().chars().collect();
     if needle.len() < MIN_QUERY_CHARS {
         return Vec::new();
     }
     let mut matches = Vec::new();
-    for row in rows.iter().filter(|row| !row.streaming) {
-        let content: Vec<char> = row.content.chars().collect();
+    for (id, text) in texts {
+        let content: Vec<char> = text.chars().collect();
         let haystack: Vec<char> = content
             .iter()
             .map(|ch| ch.to_lowercase().next().unwrap_or(*ch))
@@ -61,7 +75,7 @@ pub fn find_in_thread(rows: &[TimelineMessage], query: &str) -> Vec<FindMatch> {
             if end < content.len() { "…" } else { "" }
         );
         matches.push(FindMatch {
-            message_id: row.id.clone(),
+            message_id: id.to_string(),
             snippet,
         });
         if matches.len() >= MAX_MATCHES {

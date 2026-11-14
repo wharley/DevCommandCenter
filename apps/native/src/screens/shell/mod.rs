@@ -900,6 +900,13 @@ impl Render for Shell {
             // ⌘F: find in the conversation.
             .on_action(cx.listener(
                 |this, _: &crate::screens::conversation::OpenThreadFind, window, cx| {
+                    // On the agents' page it is the room that is searched.
+                    if this.surface == Surface::Agent {
+                        if let Some((page, _)) = &this.agent_page {
+                            page.update(cx, |page, cx| page.open_room_find(window, cx));
+                        }
+                        return;
+                    }
                     this.conversation
                         .update(cx, |conversation, cx| conversation.open_find(window, cx))
                 },

@@ -78,6 +78,7 @@ mod room_checkins;
 mod room_cleanup;
 mod room_composer;
 mod room_copy;
+mod room_find;
 mod room_day;
 mod room_delivery;
 mod room_dock;

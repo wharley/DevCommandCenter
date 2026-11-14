@@ -4,16 +4,13 @@
 //! row scrolls into view with the ring around it. It closes with another
 //! conversation.
 
-use gpui::{
-    AnyElement, AppContext, Context, KeyDownEvent, Subscription, Window, div, prelude::*, px,
-};
+use gpui::{AnyElement, AppContext, Context, Subscription, Window};
 
 use super::ConversationView;
 use super::find::{FindMatch, find_in_thread, step};
-use crate::i18n::{Args, Translate};
-use crate::theme::ActiveTheme;
+use crate::i18n::Translate;
+use crate::ui::find_strip::{FindIds, FindStrip, find_strip};
 use crate::ui::text_input::{TextInput, TextInputEvent};
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip, tabular_nums};
 
 gpui::actions!(
     conversation,
@@ -139,111 +136,32 @@ impl ConversationView {
 
     pub(super) fn find_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let find = self.find.as_ref()?;
-        let colors = cx.theme().colors.clone();
-        let radius = cx.theme().radius;
-        let query = find.input.read(cx).text().trim().to_string();
-        let total = find.matches.len();
-        let status = if query.is_empty() {
-            cx.t("conversation.find.hint").to_string()
-        } else if total == 0 {
-            cx.t("conversation.find.empty").to_string()
-        } else {
-            cx.t_with(
-                "conversation.find.count",
-                &Args::default()
-                    .with("current", (find.active + 1).to_string())
-                    .with("total", total.to_string()),
-            )
-            .to_string()
-        };
-        let snippet = find
-            .matches
-            .get(find.active)
-            .map(|found| format!(" · {}", found.snippet))
-            .unwrap_or_default();
-        let nav =
-            |id: &'static str, icon: &'static str, label: &'static str, cx: &mut Context<Self>| {
-                let forward = icon == "chevron-down";
-                Tooltip::text(
-                    id,
-                    Button::new(id)
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconSm)
-                        .disabled(total == 0)
-                        .on_click(cx.listener(move |view, _, _, cx| view.step_find(forward, cx)))
-                        .child(Icon::new(icon).size(14.0)),
-                    cx.t(label),
-                )
-            };
-        Some(
-            div()
-                .debug_selector(|| "thread-find-bar".into())
-                .flex()
-                .flex_shrink_0()
-                .items_center()
-                .gap(px(8.0))
-                .border_b_1()
-                .border_color(colors.border.opacity(0.6))
-                .bg(colors.background.opacity(0.95))
-                .px(px(16.0))
-                .py(px(6.0))
-                .child(
-                    div()
-                        .id("thread-find-field")
-                        .flex()
-                        .h(px(28.0))
-                        .w_full()
-                        .max_w(px(320.0))
-                        .items_center()
-                        .rounded(radius.lg)
-                        .border_1()
-                        .border_color(colors.input)
-                        .px(px(10.0))
-                        .text_size(px(12.0))
-                        .on_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
-                            let keystroke = &event.keystroke;
-                            if keystroke.key == "enter" && keystroke.modifiers.shift {
-                                cx.stop_propagation();
-                                view.step_find(false, cx);
-                            }
-                        }))
-                        .child(find.input.clone()),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .truncate()
-                        .text_size(px(11.0))
-                        .font_features(tabular_nums())
-                        .text_color(colors.muted_foreground)
-                        .child(format!("{status}{snippet}")),
-                )
-                .child(nav(
-                    "thread-find-previous",
-                    "chevron-up",
-                    "conversation.find.previous",
-                    cx,
-                ))
-                .child(nav(
-                    "thread-find-next",
-                    "chevron-down",
-                    "conversation.find.next",
-                    cx,
-                ))
-                .child(Tooltip::text(
-                    "thread-find-close-tip",
-                    Button::new("thread-find-close")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconSm)
-                        .on_click(cx.listener(|view, _, _, cx| view.close_find(cx)))
-                        .child(Icon::new("x").size(14.0)),
-                    cx.t("conversation.find.close"),
-                ))
-                .into_any_element(),
-        )
+        Some(find_strip(
+            FindStrip {
+                ids: &IDS,
+                input: &find.input,
+                active: find.active,
+                total: find.matches.len(),
+                snippet: find
+                    .matches
+                    .get(find.active)
+                    .map(|found| found.snippet.as_str()),
+            },
+            Self::step_find,
+            |view, _, cx| view.close_find(cx),
+            cx,
+        ))
     }
 }
+
+const IDS: FindIds = FindIds {
+    bar: "thread-find-bar",
+    field: "thread-find-field",
+    previous: "thread-find-previous",
+    next: "thread-find-next",
+    close: "thread-find-close",
+    close_tip: "thread-find-close-tip",
+};
 
 #[cfg(test)]
 mod tests {

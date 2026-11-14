@@ -619,6 +619,10 @@
       "unqueue": "Remove from queue",
       "unqueueFailed": "Could not remove it from the queue: {{error}}",
       "jumpTip": "Jump to the end",
+      "find": {
+        "placeholder": "Find in this room…",
+        "open": "Find in the room (⌘F)"
+      },
       "newLines_one": "{{count}} new",
       "newLines_other": "{{count}} new",
       "showMore": "show more",

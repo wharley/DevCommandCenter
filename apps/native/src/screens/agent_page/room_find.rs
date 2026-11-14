@@ -1,0 +1,356 @@
+//! "Buscar na sala": ⌘F (or the magnifier in the room's head) opens the
+//! find bar a task's conversation has (`ui::find_strip`), over the room's
+//! lines — what the person wrote and what the agents answered, in the room
+//! or on one agent's "Conversa". The current hit's line scrolls into view
+//! with the ring around it; Enter and Shift+Enter step, Esc closes and gives
+//! the field back. It searches what the room has read, nothing is asked of
+//! the database, and it closes with another room or agent.
+
+use gpui::{AnyElement, AppContext, Context, Focusable, KeyDownEvent, Subscription, Window};
+use gpui::{div, prelude::*, px};
+
+use super::room::TeamRoom;
+use super::room_rows::{RoomModel, Row};
+use crate::data::team_room::Speaker;
+use crate::i18n::Translate;
+use crate::screens::conversation::find::{FindMatch, find_in_texts, step};
+use crate::theme::ActiveTheme;
+use crate::ui::find_strip::{FindIds, FindStrip, find_strip};
+use crate::ui::text_input::{TextInput, TextInputEvent};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tooltip};
+
+const IDS: FindIds = FindIds {
+    bar: "room-find-bar",
+    field: "room-find-field",
+    previous: "room-find-previous",
+    next: "room-find-next",
+    close: "room-find-close",
+    close_tip: "room-find-close-tip",
+};
+
+pub(crate) struct RoomFind {
+    input: gpui::Entity<TextInput>,
+    active: usize,
+    matches: Vec<FindMatch>,
+    /// The room and the agent it was opened on.
+    place: (Option<String>, Option<String>),
+    _events: Subscription,
+}
+
+/// The lines that are someone's words, each with its key: the person's
+/// messages as written and the agents' answers. Cards, turns passed and
+/// the routines' and sources' own lines are not searched.
+pub(crate) fn texts(model: &RoomModel) -> impl Iterator<Item = (&str, &str)> {
+    model.rows.iter().filter_map(|row| match row {
+        Row::Line { line, said, .. } => match said {
+            Some(said) => Some((line.key.as_str(), said.words.as_str())),
+            None if line.speaker == Speaker::Agent && model.agent(&line.agent_id).is_some() => {
+                Some((line.key.as_str(), line.text.as_str()))
+            }
+            None => None,
+        },
+        _ => None,
+    })
+}
+
+impl TeamRoom {
+    pub(crate) fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.find.is_none() {
+            let placeholder = cx.t("agents.room.find.placeholder");
+            let input = cx.new(|cx| TextInput::new(window, cx).with_placeholder(placeholder));
+            let events =
+                cx.subscribe_in(&input, window, |room, _, event, window, cx| match event {
+                    TextInputEvent::Changed => room.search(true, cx),
+                    TextInputEvent::Submitted => room.step_find(true, cx),
+                    TextInputEvent::Cancelled => room.close_find(window, cx),
+                    TextInputEvent::Blurred => {}
+                });
+            self.find = Some(RoomFind {
+                input,
+                active: 0,
+                matches: Vec::new(),
+                place: (self.room.clone(), self.focus.clone()),
+                _events: events,
+            });
+        }
+        if let Some(find) = &self.find {
+            let input = find.input.clone();
+            input.update(cx, |input, cx| input.focus_and_select_all(window, cx));
+        }
+        self.keep_rows(cx);
+    }
+
+    pub(crate) fn find_open(&self) -> bool {
+        self.find.is_some()
+    }
+
+    /// Closes the bar; the room's field takes the keys back.
+    pub(crate) fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.find.take().is_some() {
+            let field = self.input.read(cx).focus_handle(cx);
+            window.focus(&field, cx);
+            self.keep_rows(cx);
+        }
+    }
+
+    /// Draws again with the rows as they are.
+    fn keep_rows(&mut self, cx: &mut Context<Self>) {
+        self.live.quiet = true;
+        cx.notify();
+    }
+
+    /// The hits again, as the query changed; starts from the first.
+    fn search(&mut self, restart: bool, cx: &mut Context<Self>) {
+        let before = self.find_focus().map(str::to_string);
+        self.read_hits(restart, cx);
+        if self.find_focus() != before.as_deref() {
+            self.reveal_find();
+        }
+        self.keep_rows(cx);
+    }
+
+    fn read_hits(&mut self, restart: bool, cx: &gpui::App) {
+        let model = self.list.model();
+        let Some(find) = self.find.as_mut() else {
+            return;
+        };
+        let query = find.input.read(cx).text().to_string();
+        find.matches = find_in_texts(texts(&model), &query);
+        find.active = if restart || find.matches.is_empty() {
+            0
+        } else {
+            find.active.min(find.matches.len() - 1)
+        };
+    }
+
+    /// While the room draws: the bar of another room or agent goes away,
+    /// and rows read again are searched again (the view stays put).
+    pub(super) fn sync_find(&mut self, rebuilt: bool, cx: &gpui::App) {
+        let here = (self.room.clone(), self.focus.clone());
+        if self.find.as_ref().is_some_and(|find| find.place != here) {
+            self.find = None;
+        } else if rebuilt {
+            self.read_hits(false, cx);
+        }
+    }
+
+    fn step_find(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(find) = self.find.as_mut() else {
+            return;
+        };
+        find.active = step(find.active, find.matches.len(), forward);
+        self.reveal_find();
+        self.keep_rows(cx);
+    }
+
+    /// The key of the current hit's line, if the bar has one.
+    pub(crate) fn find_focus(&self) -> Option<&str> {
+        let find = self.find.as_ref()?;
+        find.matches
+            .get(find.active)
+            .map(|found| found.message_id.as_str())
+    }
+
+    fn reveal_find(&mut self) {
+        let Some(key) = self.find_focus() else {
+            return;
+        };
+        let model = self.list.model();
+        let index = model
+            .rows
+            .iter()
+            .position(|row| matches!(row, Row::Line { line, .. } if line.key == key));
+        if let Some(index) = index {
+            // Following the end would pull the view back from the hit.
+            self.list.state.pause_following_tail();
+            self.list.state.scroll_to_reveal_item(index);
+        }
+    }
+
+    pub(super) fn find_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let find = self.find.as_ref()?;
+        Some(find_strip(
+            FindStrip {
+                ids: &IDS,
+                input: &find.input,
+                active: find.active,
+                total: find.matches.len(),
+                snippet: find
+                    .matches
+                    .get(find.active)
+                    .map(|found| found.snippet.as_str()),
+            },
+            Self::step_find,
+            Self::close_find,
+            cx,
+        ))
+    }
+
+    /// The magnifier in the room's head.
+    pub(super) fn find_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        Tooltip::text(
+            "room-find-open-tip",
+            Button::new("room-find-open")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::IconSm)
+                .on_click(cx.listener(|room, _, window, cx| room.open_find(window, cx)))
+                .child(Icon::new("search").size(14.0)),
+            cx.t("agents.room.find.open"),
+        )
+        .into_any_element()
+    }
+
+    /// ⌘F with the keys anywhere in the room, its field included.
+    pub(super) fn find_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keystroke = &event.keystroke;
+        let modifiers = keystroke.modifiers;
+        if keystroke.key == "f"
+            && modifiers.platform
+            && !modifiers.shift
+            && !modifiers.alt
+            && !modifiers.control
+        {
+            cx.stop_propagation();
+            self.open_find(window, cx);
+        }
+    }
+
+    /// The ring 4px out around the current hit's line.
+    pub(super) fn find_ring(
+        &self,
+        key: &str,
+        content: Vec<AnyElement>,
+        gap: f32,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        if self.find_focus() != Some(key) || content.is_empty() {
+            return content;
+        }
+        let ring = cx.theme().colors.ring.opacity(0.55);
+        vec![
+            div()
+                .debug_selector(|| "room-find-focus".into())
+                .relative()
+                .flex()
+                .flex_col()
+                .gap(px(gap))
+                .children(content)
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(-4.0))
+                        .bottom(px(-4.0))
+                        .left(px(-4.0))
+                        .right(px(-4.0))
+                        .rounded(px(8.0))
+                        .border_2()
+                        .border_color(ring),
+                )
+                .into_any_element(),
+        ]
+    }
+}
+
+impl super::AgentPage {
+    /// ⌘F with the keys outside the room: finds in the room on screen (the
+    /// team's, or the agent's "Conversa"), if one is.
+    pub(crate) fn open_room_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let on_screen = self.editor.is_none()
+            && (self.room_open || self.tab == super::page_tabs::AgentTab::Conversation);
+        if let Some((room, _)) = self.room.as_ref().filter(|_| on_screen) {
+            room.update(cx, |room, cx| room.open_find(window, cx));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{Modifiers, TestAppContext};
+
+    use super::super::room_list_tests::room_with_lines;
+    use crate::data::agents::AgentState;
+    use crate::data::team_room::{RoomLine, Speaker};
+
+    fn line(index: usize, speaker: Speaker, text: &str) -> RoomLine {
+        RoomLine {
+            key: format!("l-{index}"),
+            agent_id: "dev".into(),
+            session_id: "s-geral".into(),
+            speaker,
+            text: text.into(),
+            at: format!("2026-11-10T10:0{index}:00Z"),
+            receipt: None,
+            tasks: Vec::new(),
+            steps: Default::default(),
+        }
+    }
+
+    fn lines() -> Vec<RoomLine> {
+        vec![
+            line(0, Speaker::Person, "vigia minhas menções no Slack"),
+            line(1, Speaker::Agent, "Proponho uma fonte para o Slack."),
+            line(2, Speaker::Person, "corrige o login"),
+            line(3, Speaker::Agent, "Feito."),
+        ]
+    }
+
+    #[gpui::test]
+    fn the_room_is_searched_and_the_hits_are_stepped(cx: &mut TestAppContext) {
+        let (page, room, cx) = room_with_lines(cx, lines(), AgentState::Idle);
+        assert!(cx.debug_bounds("room-find-bar").is_none());
+
+        // The magnifier in the room's head opens the bar.
+        let open = cx.debug_bounds("room-find-open").unwrap();
+        cx.simulate_click(open.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("room-find-bar").is_some());
+
+        // Both the person's line and the agent's answer, in order.
+        cx.simulate_input("slack");
+        cx.run_until_parked();
+        let focus = |cx: &mut gpui::VisualTestContext| {
+            room.read_with(cx, |room, _| room.find_focus().map(str::to_string))
+        };
+        assert_eq!(focus(cx).as_deref(), Some("l-0"));
+        assert!(cx.debug_bounds("room-find-focus").is_some());
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(focus(cx).as_deref(), Some("l-1"));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(focus(cx).as_deref(), Some("l-0"), "wraps");
+
+        // Esc closes it and the room's field has the keys again.
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(!room.read_with(cx, |room, _| room.find_open()));
+        assert!(cx.debug_bounds("room-find-bar").is_none());
+        cx.simulate_input("oi");
+        cx.run_until_parked();
+        assert_eq!(
+            room.read_with(cx, |room, cx| room.input.read(cx).text().to_string()),
+            "oi"
+        );
+
+        // ⌘F from the field opens it again; so does the page, asked from
+        // outside the room.
+        cx.simulate_keystrokes("cmd-f");
+        cx.run_until_parked();
+        assert!(room.read_with(cx, |room, _| room.find_open()));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        page.update_in(cx, |page, window, cx| page.open_room_find(window, cx));
+        cx.run_until_parked();
+        assert!(room.read_with(cx, |room, _| room.find_open()));
+
+        // On one agent it is another conversation: the bar goes away.
+        page.update(cx, |page, cx| page.show_conversation("dev".into(), cx));
+        cx.run_until_parked();
+        assert!(!room.read_with(cx, |room, _| room.find_open()));
+    }
+}
