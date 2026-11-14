@@ -23,7 +23,13 @@ pub(crate) fn needs_gutter(width: f32) -> bool {
 /// A stop per message of the person's, with the last answer after it.
 pub(crate) fn room_trail_items(rows: &[Row]) -> Vec<TrailItem> {
     let mut items: Vec<TrailItem> = Vec::new();
-    for (row, item) in rows.iter().enumerate() {
+    // Each line with the list's row it is drawn in: its own, or the block
+    // of the subject that holds it.
+    let lines = rows.iter().enumerate().flat_map(|(row, item)| match item {
+        Row::Subject { rows, .. } => rows.iter().map(|inner| (row, inner)).collect::<Vec<_>>(),
+        other => vec![(row, other)],
+    });
+    for (row, item) in lines {
         let Row::Line { line, said, .. } = item else {
             continue;
         };

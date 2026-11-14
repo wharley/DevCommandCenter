@@ -97,6 +97,18 @@ impl TeamRoom {
         )
     }
 
+    /// A row inside a subject's block: drawn as any row is.
+    pub(super) fn inner_row(
+        &mut self,
+        row: &Row,
+        model: &RoomModel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let content = self.row(row, model, window, cx);
+        self.find_ring(row, content, GAP, cx)
+    }
+
     fn row(
         &mut self,
         row: &Row,
@@ -115,6 +127,15 @@ impl TeamRoom {
             Row::Bulletin => vec![self.bulletin_card(&model.agents, cx)],
             Row::Day { day } => vec![self.day_row(*day, cx)],
             Row::Sources { key, lines, open } => self.sources_row(key, lines, *open, cx),
+            Row::Subject {
+                key,
+                title,
+                state,
+                count,
+                open,
+                rows,
+                ..
+            } => self.subject_row(key, title, *state, *count, *open, rows, model, window, cx),
             Row::Line {
                 index,
                 line,

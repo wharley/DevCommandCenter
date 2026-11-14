@@ -240,7 +240,7 @@ mod tests {
             tasks: Vec::new(),
             steps: Default::default(),
         };
-        let back = dcc_core::domain::agent_chain::return_prompt("QA", "Dev", "Testei e passou.");
+        let back = dcc_core::domain::agent_chain::return_prompt("QA", "Dev", "Testei e passou.", "s-qa:t-1");
         let (_page, _room, cx) = room_with_lines(
             cx,
             vec![

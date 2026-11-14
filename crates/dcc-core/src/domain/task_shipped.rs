@@ -10,6 +10,9 @@ use super::task_origin::{Started, TaskOrigin};
 
 /// How the message opens in the agent's conversation.
 pub const SHIPPED_MARK: &str = "[DCC] Delivered";
+/// The line that names the turn the work started with, for the room to
+/// show the delivery with it.
+const ORIGIN_LINE: &str = "Origin turn: ";
 
 /// What DCC read of the pull request after its merge.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,10 +93,27 @@ pub fn shipped_prompt(
         _ => String::new(),
     };
     format!(
-        "{SHIPPED_MARK} \"{title}\" ({pull_request}): {}.\n\nThis is DCC, not a message from the person. The task \"{title}\" that started with you is done: pull request {pull_request}. {stands}\n{}\n\nTell the person in one or two sentences, in their language.{reply} Do not open a task and do not pass this on.",
+        "{SHIPPED_MARK} \"{title}\" ({pull_request}): {}.\n\nThis is DCC, not a message from the person. The task \"{title}\" that started with you is done: pull request {pull_request}. {stands}\n{}\n\nTell the person in one or two sentences, in their language.{reply} Do not open a task and do not pass this on.{}",
         outcome.as_str(),
-        started_line(origin)
+        started_line(origin),
+        origin
+            .steps
+            .first()
+            .map(|step| format!("\n{ORIGIN_LINE}{} {}", step.session_id, step.at))
+            .unwrap_or_default()
     )
+}
+
+/// The conversation and the time of the turn the work started with, as the
+/// message names them.
+pub fn shipped_origin(text: &str) -> Option<(&str, &str)> {
+    if !text.starts_with(SHIPPED_MARK) {
+        return None;
+    }
+    text.lines()
+        .rev()
+        .find_map(|line| line.strip_prefix(ORIGIN_LINE))
+        .and_then(|rest| rest.trim().split_once(' '))
 }
 
 /// The task's name and how it stands (`merged`, `live`, `deploy failed`),
@@ -119,7 +139,7 @@ mod tests {
                 agent: "Suporte".into(),
                 session_id: "s".into(),
                 room: None,
-                at: String::new(),
+                at: "2026-11-14T09:15:00Z".into(),
             }],
             opened_at: String::new(),
         }
@@ -150,6 +170,8 @@ mod tests {
         assert!(live.contains("https://acme.slack.com/p1"));
         assert!(live.contains("dcc_propose_reply"));
         assert_eq!(shipped_line(&live), Some(("Corrigir CEP", "live")));
+        assert_eq!(shipped_origin(&live), Some(("s", "2026-11-14T09:15:00Z")));
+        assert_eq!(shipped_origin("corrige o CEP"), None);
 
         let merged = shipped_prompt(
             "Corrigir CEP",

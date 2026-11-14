@@ -44,12 +44,13 @@ pub(crate) struct RoomFind {
 
 /// What a row is named by in the search: a line's key, a card's, a
 /// check-in's place.
-fn row_has(row: &Row, id: &str) -> bool {
+pub(crate) fn row_has(row: &Row, id: &str) -> bool {
     match row {
         Row::Line { line, .. } => line.key == id,
         Row::Sources { lines, .. } => lines.iter().any(|(_, line)| line.key == id),
         Row::Card { card, .. } => card.key == id,
         Row::CheckIn { index, .. } => check_in_id(*index) == id,
+        Row::Subject { rows, .. } => rows.iter().any(|row| row_has(row, id)),
         Row::Recap | Row::Bulletin | Row::Day { .. } => false,
     }
 }
@@ -86,7 +87,7 @@ fn line_text(line: &RoomLine, said: Option<&Said>) -> Option<String> {
 /// are not searched.
 pub(crate) fn texts(model: &RoomModel) -> Vec<(String, String)> {
     let mut found = Vec::new();
-    for row in &model.rows {
+    for row in model.line_rows() {
         match row {
             Row::Line { line, said, .. } if model.agent(&line.agent_id).is_some() => {
                 if let Some(text) = line_text(line, said.as_deref()) {
@@ -174,10 +175,8 @@ impl TeamRoom {
     fn search(&mut self, restart: bool, cx: &mut Context<Self>) {
         let before = self.find_focus().map(str::to_string);
         self.read_hits(restart, cx);
-        if self.find_focus() != before.as_deref() {
-            self.reveal_find();
-        }
-        self.keep_rows(cx);
+        let opened = self.find_focus() != before.as_deref() && self.reveal_find();
+        self.redraw_find(opened, cx);
     }
 
     fn read_hits(&mut self, restart: bool, cx: &gpui::App) {
@@ -220,8 +219,8 @@ impl TeamRoom {
             return;
         };
         find.active = step(find.active, find.matches.len(), forward);
-        self.reveal_find();
-        self.keep_rows(cx);
+        let opened = self.reveal_find();
+        self.redraw_find(opened, cx);
     }
 
     /// The key of the current hit's line, if the bar has one.
@@ -232,16 +231,36 @@ impl TeamRoom {
             .map(|found| found.message_id.as_str())
     }
 
-    fn reveal_find(&mut self) {
-        let Some(key) = self.find_focus() else {
-            return;
+    /// Brings the current hit's row into view; true when its subject's
+    /// block had to open for it (the rows are then read again).
+    fn reveal_find(&mut self) -> bool {
+        let Some(key) = self.find_focus().map(str::to_string) else {
+            return false;
         };
         let model = self.list.model();
-        let index = model.rows.iter().position(|row| row_has(row, key));
-        if let Some(index) = index {
-            // Following the end would pull the view back from the hit.
-            self.list.state.pause_following_tail();
-            self.list.state.scroll_to_reveal_item(index);
+        let Some(index) = model.rows.iter().position(|row| row_has(row, &key)) else {
+            return false;
+        };
+        // Following the end would pull the view back from the hit.
+        self.list.state.pause_following_tail();
+        self.list.state.scroll_to_reveal_item(index);
+        match &model.rows[index] {
+            Row::Subject {
+                key, open: false, ..
+            } => {
+                self.subjects_open.insert(key.clone(), true);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Draws again after the hit moved: the rows kept, unless a block opened.
+    fn redraw_find(&mut self, opened: bool, cx: &mut Context<Self>) {
+        if opened {
+            cx.notify();
+        } else {
+            self.keep_rows(cx);
         }
     }
 

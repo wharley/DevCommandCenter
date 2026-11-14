@@ -6,7 +6,6 @@
 use gpui::{AnyElement, Context, SharedString, div, prelude::*, px};
 
 use super::room::TeamRoom;
-use super::room_rows::Row;
 use crate::i18n::Translate;
 use crate::markdown::Block;
 use crate::theme::ActiveTheme;
@@ -32,7 +31,8 @@ impl TeamRoom {
         if let Some(row) = model
             .rows
             .iter()
-            .position(|row| matches!(row, Row::Line { line, .. } if line.key == key))
+            // The answer's own row, or the subject's block that holds it.
+            .position(|row| super::room_find::row_has(row, key))
         {
             self.list.remeasure_row(row);
         }

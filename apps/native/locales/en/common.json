@@ -546,6 +546,15 @@
         "action": "Reply",
         "to": "Replying to {{agent}}:"
       },
+      "subject": {
+        "working": "in progress",
+        "answered": "answered",
+        "merged": "merged",
+        "live": "in production",
+        "deployFailed": "deploy failed",
+        "lines_one": "{{count}} line",
+        "lines_other": "{{count}} lines"
+      },
       "handoff": {
         "suggests": "{{agent}} suggests passing to {{teammate}}",
         "autoPassed": "Passed on to {{teammate}} automatically",

@@ -55,6 +55,18 @@ pub(crate) enum Row {
     Day {
         day: chrono::NaiveDate,
     },
+    /// The lines of one piece of work, gathered where its last one was
+    /// (`room_subjects`); `rows` are its lines, arranged.
+    Subject {
+        key: String,
+        title: String,
+        state: super::room_subjects::SubjectState,
+        /// When its last line was.
+        at: String,
+        count: usize,
+        open: bool,
+        rows: Vec<Row>,
+    },
     /// Source news in a row, as one line (`room_source_group`).
     Sources {
         key: String,
@@ -88,6 +100,28 @@ impl Row {
                 },
             ) => a == b && fa == fb && sa == sb && ta == tb,
             (Row::Day { day: a }, Row::Day { day: b }) => a == b,
+            (
+                Row::Subject {
+                    key: ka,
+                    state: sa,
+                    open: oa,
+                    rows: ra,
+                    ..
+                },
+                Row::Subject {
+                    key: kb,
+                    state: sb,
+                    open: ob,
+                    rows: rb,
+                    ..
+                },
+            ) => {
+                ka == kb
+                    && sa == sb
+                    && oa == ob
+                    && ra.len() == rb.len()
+                    && ra.iter().zip(rb).all(|(a, b)| a.same(b))
+            }
             (
                 Row::Sources {
                     lines: a, open: oa, ..
@@ -123,7 +157,7 @@ impl RoomModel {
 
     /// The answers' lines, for the markdown kept by line.
     pub(crate) fn answers(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.rows.iter().filter_map(|row| match row {
+        self.line_rows().filter_map(|row| match row {
             Row::Line { line, .. } if line.speaker == Speaker::Agent => {
                 Some((line.key.as_str(), line.text.as_str()))
             }
@@ -232,6 +266,12 @@ impl TeamRoom {
                 }
             }
         }
+        // The lines of one piece of work, gathered (`room_subjects`).
+        let names: std::collections::HashMap<String, String> = agents
+            .iter()
+            .map(|agent| (agent.name.to_lowercase(), agent.id.clone()))
+            .collect();
+        let rows = super::room_subjects::group(rows, &names, &self.subjects_open);
         let rows = super::room_flow::arrange(rows);
         let rows = super::room_source_group::group(rows, &self.sources_open);
         let talk = super::room_jump::talk(&rows);

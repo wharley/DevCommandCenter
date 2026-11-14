@@ -16,6 +16,7 @@ fn when(row: &Row) -> Option<DateTime<Utc>> {
         Row::Line { line, .. } => &line.at,
         Row::Card { card, .. } => &card.at,
         Row::CheckIn { check, .. } => &check.at,
+        Row::Subject { at, .. } => at,
         _ => return None,
     };
     DateTime::parse_from_rfc3339(at)

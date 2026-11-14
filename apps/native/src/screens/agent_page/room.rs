@@ -108,6 +108,8 @@ pub struct TeamRoom {
     pub(crate) lead: super::room_lead::RoomLead,
     /// The answer the next message replies to (`room_reply`).
     pub(crate) reply: Option<super::room_reply::ReplyTo>,
+    /// The subjects the person opened or closed, by key (`room_subjects`).
+    pub(crate) subjects_open: HashMap<String, bool>,
     /// The one agent shown, on its page's "Conversa" (`room_focus`).
     pub(crate) focus: Option<String>,
     /// The project whose room this is; none: the Geral room.
@@ -250,6 +252,7 @@ impl TeamRoom {
             find: None,
             lead: Default::default(),
             reply: None,
+            subjects_open: HashMap::new(),
             focus: None,
             room: None,
             room_generation: 0,

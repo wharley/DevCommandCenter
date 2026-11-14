@@ -224,7 +224,7 @@ async fn return_if_owed(
         approval_policy: Some(ProviderApprovalPolicy::Ask),
         ..serde_json::from_value(serde_json::json!({
             "sessionId": root.0,
-            "prompt": return_prompt(&agent.name, &first.name, answer),
+            "prompt": return_prompt(&agent.name, &first.name, answer, key),
         }))
         .map_err(|error| error.to_string())?
     };

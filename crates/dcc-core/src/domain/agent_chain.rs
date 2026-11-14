@@ -76,10 +76,10 @@ pub fn is_return(prompt: &str) -> bool {
 
 /// The message that takes the last answer of a chain back to the agent it
 /// started with: the room shows its first line as a pass (`from → to`).
-pub fn return_prompt(from: &str, to: &str, answer: &str) -> String {
+pub fn return_prompt(from: &str, to: &str, answer: &str, answer_key: &str) -> String {
     let said: String = answer.chars().take(RETURN_CHARS).collect();
     format!(
-        "{HANDOFF_MARK}{from} → {to}: returned\n\n{RETURN_LINE}\nWhat you passed on reached {from}, who answered:\n{said}\n\nClose it with the person: say where it stands in one or two sentences, in their language. Do not pass it on again. If it adds nothing they need to know, answer exactly {} and nothing else.",
+        "{HANDOFF_MARK}{from} → {to}: returned\n\n{RETURN_LINE}\nWhat you passed on reached {from}, who answered:\n{said}\n\nClose it with the person: say where it stands in one or two sentences, in their language. Do not pass it on again. If it adds nothing they need to know, answer exactly {} and nothing else.\n{ANSWER_LINE}{answer_key}",
         super::agent_routine::QUIET_ANSWER
     )
 }
@@ -145,7 +145,10 @@ mod tests {
         assert!(!owes_return("corrige isso"));
         assert_eq!(passed_by("corrige isso"), None);
 
-        let back = return_prompt("Dev", "Suporte", "Abri a tarefa e o PR.");
+        let back = return_prompt("Dev", "Suporte", "Abri a tarefa e o PR.", "s-dev:t-9");
+        // It names the answer it brings, as a pass does (the room groups
+        // them by it).
+        assert_eq!(passed_answer(&back), Some("s-dev:t-9"));
         assert!(is_return(&back));
         assert!(back.starts_with("↪ Dev → Suporte: returned"));
         assert!(back.contains("Abri a tarefa e o PR."));
@@ -154,7 +157,7 @@ mod tests {
         assert_eq!(next_step(&back, &may, "dev", None), None);
         assert!(!is_return(&passed));
         // A long answer goes back cut.
-        let long = return_prompt("Dev", "Suporte", &"a".repeat(5_000));
+        let long = return_prompt("Dev", "Suporte", &"a".repeat(5_000), "s:t");
         assert!(long.chars().count() < 3_000);
     }
 }

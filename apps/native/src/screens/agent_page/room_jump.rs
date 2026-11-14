@@ -27,6 +27,9 @@ pub(crate) fn talk(rows: &[Row]) -> usize {
     rows.iter()
         .filter(|row| match row {
             Row::Line { line, said, .. } => said.is_some() || line.speaker == Speaker::Agent,
+            // Counted once: a block grows by its lines, which a rebuilt
+            // subject brings as one row.
+            Row::Subject { .. } => true,
             _ => false,
         })
         .count()
