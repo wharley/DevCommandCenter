@@ -11,7 +11,7 @@ use gpui::{AnyElement, App, Context, Hsla, WeakEntity, div, prelude::*, px};
 
 use super::MergeResolver;
 use crate::i18n::Translate;
-use crate::screens::file_view::bands::{LineActions, LineBand};
+use crate::screens::file_view::bands::{GhostLines, LineActions, LineBand, LineLabel};
 use crate::theme::tailwind as tw;
 use crate::ui::{Button, ButtonSize, ButtonVariant};
 
@@ -44,6 +44,25 @@ pub(crate) fn block_lines(text: &str) -> Vec<BlockLines> {
                 start,
                 divider,
                 end,
+            }
+        })
+        .collect()
+}
+
+/// A conflict block as the lines it was, to show what a proposal took
+/// out: each side under its name, the closing marker left out.
+pub(crate) fn removed_lines(original: &str, mine: &str, incoming: &str) -> Vec<String> {
+    original
+        .lines()
+        .filter_map(|line| {
+            if line.starts_with("<<<<<<<") {
+                Some(mine.to_string())
+            } else if line.starts_with("=======") {
+                Some(incoming.to_string())
+            } else if line.starts_with(">>>>>>>") || line.starts_with("|||||||") {
+                None
+            } else {
+                Some(line.to_string())
             }
         })
         .collect()
@@ -126,6 +145,31 @@ impl MergeResolver {
         };
         let blocks = block_lines(&open.buffer);
         let mut bands = bands(&blocks, tw::SKY_500.alpha(0.14), tw::AMBER_500.alpha(0.14));
+        // The marker lines read as whose side starts there, not as git's
+        // `<<<<<<<`; the closing one is a blank line of the block.
+        let ((mine, _), (incoming, _)) = self.labels(cx);
+        let common = cx.t("mergeConflict.inline.commonBase");
+        let text: Vec<&str> = open.buffer.lines().collect();
+        let (sky, amber) = (tw::SKY_500.hsla(), tw::AMBER_500.hsla());
+        let mut labels = Vec::new();
+        for block in &blocks {
+            let label =
+                |line: usize, text: gpui::SharedString, color| LineLabel { line, text, color };
+            labels.push(label(block.start, mine.clone().into(), sky));
+            // A diff3 block also names the common ancestor's lines.
+            labels.extend(
+                (block.start + 1..block.divider)
+                    .filter(|line| {
+                        text.get(*line)
+                            .is_some_and(|text| text.starts_with("|||||||"))
+                    })
+                    .map(|line| label(line, common.clone(), sky)),
+            );
+            if block.divider < block.end {
+                labels.push(label(block.divider, incoming.clone().into(), amber));
+                labels.push(label(block.end, "".into(), amber));
+            }
+        }
         // What the agent wrote and is still offered, block by block.
         let proposed = self
             .proposal
@@ -136,6 +180,24 @@ impl MergeResolver {
             lines: lines.clone(),
             color: tw::EMERALD_500.alpha(0.14),
         }));
+        // What each of them took out, in red above what it wrote.
+        let ghosts: Vec<GhostLines> = match &self.proposal {
+            Some(proposal) => proposed
+                .iter()
+                .filter_map(|(index, lines)| {
+                    let block = proposal.blocks.get(*index)?;
+                    Some(GhostLines {
+                        before: lines.start,
+                        lines: removed_lines(&block.original, &mine, &incoming)
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
+                        color: tw::RED_500.hsla(),
+                    })
+                })
+                .collect(),
+            None => Vec::new(),
+        };
         let offered: Vec<(usize, usize)> = proposed
             .iter()
             .map(|(index, lines)| (lines.start, *index))
@@ -154,6 +216,8 @@ impl MergeResolver {
         });
         open.editor.clone().update(cx, |editor, cx| {
             editor.set_bands(bands, cx);
+            editor.set_line_labels(labels, cx);
+            editor.set_ghosts(ghosts, cx);
             editor.set_line_actions(Some(actions), cx);
         });
     }
@@ -212,6 +276,15 @@ mod tests {
             ]
         );
         assert!(block_lines("no conflict here\n").is_empty());
+    }
+
+    #[test]
+    fn what_a_proposal_took_out_reads_by_side_without_gits_markers() {
+        let block = "<<<<<<< HEAD\nmine 1\n||||||| base\n=======\ntheirs\n>>>>>>> origin/main\n";
+        assert_eq!(
+            removed_lines(block, "Seu código", "Base"),
+            ["Seu código", "mine 1", "Base", "theirs"]
+        );
     }
 
     #[test]

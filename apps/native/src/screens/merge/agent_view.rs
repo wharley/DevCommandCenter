@@ -157,6 +157,22 @@ fn run_strip(resolver: &MergeResolver, cx: &mut Context<MergeResolver>) -> Optio
                                     "mergeConflict.agent.run.analyzing"
                                 })),
                         )
+                        // Which file it is on, when every file was asked for.
+                        .children((run.total > 1).then(|| {
+                            div()
+                                .debug_selector(|| "merge-agent-file".into())
+                                .truncate()
+                                .text_size(px(11.0))
+                                .child(
+                                    cx.t_with(
+                                        "mergeConflict.agent.runFile",
+                                        &Args::default()
+                                            .with("position", run.position().to_string())
+                                            .with("total", run.total.to_string())
+                                            .with("path", run.path.clone()),
+                                    ),
+                                )
+                        }))
                         .child(
                             div()
                                 .text_size(px(11.0))

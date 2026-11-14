@@ -448,11 +448,18 @@ fn a_merge_under_way_can_be_dropped_for_the_current_base(cx: &mut TestAppContext
             ("/api/v1/git/validation-config", 200, checks(&[])),
         ],
     );
-    // The abort's question has a second answer.
-    click(cx, "merge-abort");
-    assert!(cx.debug_bounds("merge-confirm-restart").is_some());
-    resolver.update(cx, |resolver, cx| resolver.confirm_restart(cx));
+    // From the merge's "⋯": asked first, like aborting.
+    assert!(cx.debug_bounds("merge-menu").is_some());
+    assert!(
+        cx.debug_bounds("merge-abort").is_none(),
+        "not a button any more"
+    );
+    resolver.update(cx, |resolver, cx| resolver.request_restart(cx));
     cx.run_until_parked();
+    resolver.read_with(cx, |resolver, _| {
+        assert_eq!(resolver.pending, Some(Pending::Restart));
+    });
+    click(cx, "merge-confirm-ok");
     let calls = server.join().unwrap();
     cx.run_until_parked();
     let order: Vec<&str> = calls

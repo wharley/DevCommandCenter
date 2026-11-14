@@ -93,6 +93,8 @@ pub(crate) enum Pending {
     EmptyResult,
     DeleteResult,
     Abort,
+    /// Drop the merge under way and bring the current base in.
+    Restart,
     ValidationCommands,
 }
 
@@ -148,6 +150,8 @@ pub struct MergeResolver {
     /// The agent's run on the open file, and the answer it left there.
     pub(crate) agent: Option<agent::AgentRun>,
     pub(crate) proposal: Option<proposal::Proposal>,
+    /// Answers for files that were not on screen, by path ("Resolver todos").
+    pub(crate) answers: std::collections::HashMap<String, agent::KeptAnswer>,
     pub(crate) _agent: Option<Task<()>>,
     pub(crate) _read: Option<Task<()>>,
     pub(crate) _action: Option<Task<()>>,
@@ -172,6 +176,7 @@ impl MergeResolver {
             width: Rc::new(Cell::new(0.0)),
             agent: None,
             proposal: None,
+            answers: Default::default(),
             _agent: None,
             _read: None,
             _action: None,
@@ -276,6 +281,8 @@ impl MergeResolver {
             _edits: edits,
         });
         self.decorate(cx);
+        // An answer the agent already has for this file is offered now.
+        self.offer_kept(cx);
         cx.notify();
     }
 

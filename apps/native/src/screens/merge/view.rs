@@ -14,7 +14,9 @@ use super::{Busy, Load, MergeResolver};
 use crate::i18n::{Args, Translate};
 use crate::theme::tailwind as tw;
 use crate::theme::{ActiveTheme, Appearance, fonts};
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon, Tracked, spinner};
+use crate::ui::{
+    Button, ButtonSize, ButtonVariant, Icon, Menu, MenuAlign, MenuEntry, MenuItem, Tracked, spinner,
+};
 
 pub(crate) fn dark(cx: &gpui::App) -> bool {
     cx.theme().appearance == Appearance::Dark
@@ -166,17 +168,7 @@ fn header(resolver: &MergeResolver, cx: &mut Context<MergeResolver>) -> AnyEleme
                             .child(div().mt(px(6.0)).child(progress(resolved, total, cx))),
                     )
                 })
-                .when(merging, |row| {
-                    row.child(
-                        Button::new("merge-abort")
-                            .variant(ButtonVariant::Outline)
-                            .size(ButtonSize::Sm)
-                            .disabled(busy)
-                            .on_click(cx.listener(|resolver, _, _, cx| resolver.request_abort(cx)))
-                            .child(Icon::new("rotate-ccw").size(14.0))
-                            .child(cx.t("mergeConflict.abort")),
-                    )
-                })
+                .when(merging, |row| row.child(merge_menu(resolver, busy, cx)))
                 .child(
                     Button::new("merge-close")
                         .variant(ButtonVariant::Ghost)
@@ -187,6 +179,56 @@ fn header(resolver: &MergeResolver, cx: &mut Context<MergeResolver>) -> AnyEleme
                 ),
         )
         .into_any_element()
+}
+
+/// "⋯" of the merge: restart it with the current base, or abort it. Both
+/// drop what was resolved, and ask first.
+fn merge_menu(resolver: &MergeResolver, busy: bool, cx: &mut Context<MergeResolver>) -> AnyElement {
+    let colors = cx.theme().colors.clone();
+    let can_restart = resolver.request.task_id.is_some();
+    let this = cx.entity().downgrade();
+    Menu::dropdown(
+        "merge-menu",
+        move |_| {
+            div()
+                .debug_selector(|| "merge-menu".into())
+                .flex()
+                .size(px(28.0))
+                .items_center()
+                .justify_center()
+                .rounded(px(8.0))
+                .text_color(colors.muted_foreground)
+                .cursor_pointer()
+                .when(busy, |button| button.opacity(0.5))
+                .hover(|button| button.bg(colors.accent))
+                .child(Icon::new("ellipsis").size(16.0))
+                .into_any_element()
+        },
+        move |_, cx| {
+            let mut entries = Vec::new();
+            if can_restart {
+                let this = this.clone();
+                entries.push(MenuEntry::Item(
+                    MenuItem::new(cx.t("mergeConflict.restart"), move |_, cx| {
+                        let _ = this.update(cx, |resolver, cx| resolver.request_restart(cx));
+                    })
+                    .icon(Icon::new("refresh-cw").size(14.0)),
+                ));
+            }
+            let this = this.clone();
+            entries.push(MenuEntry::Item(
+                MenuItem::new(cx.t("mergeConflict.abort"), move |_, cx| {
+                    let _ = this.update(cx, |resolver, cx| resolver.request_abort(cx));
+                })
+                .icon(Icon::new("rotate-ccw").size(14.0))
+                .destructive(),
+            ));
+            entries
+        },
+    )
+    .align(MenuAlign::End)
+    .min_width(260.0)
+    .into_any_element()
 }
 
 pub(crate) fn centered(content: impl IntoElement, max_width: f32) -> AnyElement {

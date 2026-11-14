@@ -104,6 +104,10 @@ fn running(resolver: &gpui::Entity<MergeResolver>, cx: &mut gpui::VisualTestCont
             token: "tok".into(),
             raw: None,
             raw_open: false,
+            path: "src/a.rs".into(),
+            queue: Vec::new(),
+            total: 1,
+            failed: Vec::new(),
         });
         cx.notify();
     });
@@ -217,6 +221,23 @@ fn the_answer_is_offered_block_by_block_in_the_file(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("merge-proposal").is_some());
     assert!(cx.debug_bounds("merge-proposal-accept-0").is_some());
     assert!(cx.debug_bounds("merge-proposal-refuse-1").is_some());
+    // What each block took out shows above what the agent wrote, and is
+    // not part of the file.
+    assert!(cx.debug_bounds("file-ghost-line").is_some());
+    resolver.read_with(cx, |resolver, cx| {
+        let open = resolver.open.as_ref().unwrap();
+        let editor = open.editor.read(cx);
+        assert_eq!(editor.ghosts.len(), 2);
+        assert_eq!(
+            editor.ghosts[0]
+                .lines
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()[1..],
+            ["mine a", "origin/main · branch base", "theirs a"][..]
+        );
+        assert_eq!(editor.text(), RESOLVED, "the text has no ghost");
+    });
     // The bar's arrows and each block's note take the editor to it.
     assert!(cx.debug_bounds("merge-hunk-position").is_some());
     resolver.read_with(cx, |resolver, _| {
@@ -324,4 +345,95 @@ fn a_stopped_run_leaves_the_file_as_it_was(cx: &mut TestAppContext) {
         assert_eq!(resolver.open.as_ref().unwrap().buffer, two_blocks());
     });
     assert!(cx.debug_bounds("merge-agent-run").is_none());
+}
+
+#[gpui::test]
+fn every_file_is_asked_in_turn_and_each_answer_waits_for_its_file(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::Toaster::init(cx);
+        crate::screens::file_view::bind_keys(cx);
+    });
+    let other = WorkspaceGitConflictEntry {
+        path: "src/b.rs".into(),
+        ..entry()
+    };
+    let merge = WorkspaceGitConflictOperation::Merge;
+    let (port, _server) = fake_desktop_routes(vec![
+        (
+            "/api/v1/git/conflict-state",
+            200,
+            state(merge, vec![entry(), other]),
+        ),
+        ("/api/v1/git/validation-config", 200, checks(&[])),
+    ]);
+    let request = MergeResolverRequest {
+        start: false,
+        root: "/tmp/checkout".into(),
+        task_id: Some("w-1".into()),
+        base_branch: Some("main".into()),
+        forge_login: None,
+        workspace_label: None,
+        agent: None,
+    };
+    let (resolver, cx) = cx.add_window_view(move |_, cx| {
+        MergeResolver::new(request, cx).with_endpoint(DesktopApi::new(port, "k"), cx)
+    });
+    cx.simulate_resize(size(px(1400.0), px(900.0)));
+    cx.run_until_parked();
+    // A run over both files, on the first (the open one).
+    resolver.update(cx, |resolver, cx| {
+        resolver.busy = Some(Busy::Agent);
+        resolver.agent = Some(AgentRun {
+            status: AgentStatus::Analyzing,
+            error: None,
+            token: "tok".into(),
+            raw: None,
+            raw_open: false,
+            path: "src/a.rs".into(),
+            queue: vec!["src/b.rs".into()],
+            total: 2,
+            failed: Vec::new(),
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("merge-agent-file").is_some(), "which file");
+    // The open file's answer is offered at once; the run goes on to the next.
+    resolver.update(cx, |resolver, cx| {
+        resolver.finish_agent(Ok(answer("tok", RESOLVED)), &two_blocks(), "tok", cx)
+    });
+    cx.run_until_parked();
+    let token = resolver.read_with(cx, |resolver, _| {
+        assert!(resolver.proposal.is_some());
+        let run = resolver.agent.as_ref().expect("still running");
+        assert_eq!((run.path.as_str(), run.position()), ("src/b.rs", 2));
+        run.token.clone()
+    });
+    // The other file's answer is kept, not put anywhere yet.
+    resolver.update(cx, |resolver, cx| {
+        resolver.finish_agent(Ok(answer(&token, RESOLVED)), &two_blocks(), &token, cx)
+    });
+    cx.run_until_parked();
+    resolver.read_with(cx, |resolver, _| {
+        assert!(resolver.agent.is_none() && resolver.busy.is_none());
+        assert!(resolver.answers.contains_key("src/b.rs"));
+        assert_eq!(resolver.open.as_ref().unwrap().entry.path, "src/a.rs");
+    });
+    // Opening that file offers what was kept for it.
+    resolver.update(cx, |resolver, cx| {
+        resolver.proposal = None;
+        resolver.open_path("src/b.rs", cx)
+    });
+    cx.run_until_parked();
+    resolver.read_with(cx, |resolver, _| {
+        let open = resolver.open.as_ref().unwrap();
+        assert_eq!(
+            (open.entry.path.as_str(), open.buffer.as_str()),
+            ("src/b.rs", RESOLVED)
+        );
+        assert_eq!(resolver.proposal.as_ref().unwrap().blocks.len(), 2);
+        assert!(resolver.answers.is_empty());
+    });
 }

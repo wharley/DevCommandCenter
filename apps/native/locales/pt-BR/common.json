@@ -5443,6 +5443,7 @@
     "currentWorkspaceLabel": "{{workspace}} · workspace atual",
     "incomingBranchLabel": "{{branch}} · branch base",
     "close": "Fechar",
+    "restart": "Recomeçar com a base atual",
     "abort": "Abortar merge",
     "loadingGit": "Lendo estado do Git…",
     "files": "Arquivos",
@@ -5463,8 +5464,9 @@
       "remainingMarkers": "Ainda existem linhas parecidas com marcadores de conflito. Marcar como resolvido mesmo assim?",
       "emptyResult": "O resultado está vazio, mas uma das versões do arquivo possui conteúdo. Salvar um arquivo vazio e marcá-lo como resolvido mesmo assim?",
       "deleteResult": "Excluir {{path}} como resultado deste merge?",
-      "abort": "Abortar o merge e descartar todas as resoluções realizadas?\nSe este merge não é com a base atual do pull request, dá para recomeçar com ela: as resoluções feitas até aqui também são descartadas.",
-      "restart": "Abortar e recomeçar com a base atual",
+      "abort": "Abortar o merge e descartar todas as resoluções realizadas?",
+      "restart": "Descartar este merge e recomeçar com a base atual do pull request?\nAs resoluções feitas até aqui são descartadas e os conflitos da base atual aparecem aqui.",
+      "restartOk": "Recomeçar",
       "validationCommands": "O DCC executará estes comandos definidos pelo projeto antes do commit:\n\n{{commands}}\n\nContinuar?"
     },
     "toast": {
@@ -5529,6 +5531,9 @@
       "unsupported": "O arquivo é binário, não UTF-8 ou existe somente como objeto especial do Git.",
       "instruction": "Escolha uma das versões completas ou a exclusão."
     },
+    "inline": {
+      "commonBase": "Base comum dos dois lados"
+    },
     "bar": {
       "file": "arquivo {{current}} de {{total}}",
       "compare": "Comparar",
@@ -5562,6 +5567,9 @@
       "cancelled": "Análise cancelada.",
       "showAnswer": "Ver resposta",
       "hideAnswer": "Ocultar resposta",
+      "resolveAll": "Resolver todos os arquivos com agente",
+      "runFile": "Arquivo {{position}} de {{total}} · {{path}}",
+      "allDone": "O agente propôs {{done}} de {{total}} arquivos. Cada proposta aparece quando o arquivo abre.",
       "readOnlyRun": "Lê o arquivo e o projeto, sem alterar nada. Nenhuma conversa é criada na tarefa.",
       "resolveFile": "Resolver com agente",
       "resolveFileTitle": "O agente analisa todos os blocos deste arquivo de uma só vez e propõe o código final",

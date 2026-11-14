@@ -25,7 +25,8 @@ impl FileView {
         let geometry = self.geometry.get();
         let line = self.buffer.line_of(offset);
         let top = self.list.logical_scroll_top();
-        let rows = line as f32 - top.item_ix as f32;
+        // Rows that are not in the text count: the line may sit lower.
+        let rows = super::bands::rows_to(&self.ghosts, top.item_ix, line);
         let text = self.buffer.line(line);
         let column = column_of(
             text,
@@ -45,7 +46,7 @@ impl FileView {
         let top = self.list.logical_scroll_top();
         let y = f32::from(position.y - geometry.bounds.top()) - super::view::TOP
             + f32::from(top.offset_in_item);
-        let line = (top.item_ix as f32 + (y / LINE).floor()).max(0.0) as usize;
+        let line = super::bands::line_at_row(&self.ghosts, top.item_ix, y / LINE);
         if line >= self.buffer.line_count() {
             return self.buffer.text().len();
         }

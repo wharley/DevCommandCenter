@@ -98,6 +98,10 @@ pub struct FileView {
     pub(crate) bands: Vec<bands::LineBand>,
     /// What sits at the right of a line.
     pub(crate) line_actions: Option<bands::LineActions>,
+    /// Lines read as a label while the caret is elsewhere.
+    pub(crate) line_labels: Vec<bands::LineLabel>,
+    /// Lines drawn above some line that are not in the text.
+    pub(crate) ghosts: Vec<bands::GhostLines>,
     _colors: Option<Task<()>>,
     _blink: Option<Task<()>>,
 }
@@ -140,6 +144,8 @@ impl FileView {
             read_only: false,
             bands: Vec::new(),
             line_actions: None,
+            line_labels: Vec::new(),
+            ghosts: Vec::new(),
             _colors: None,
             _blink: None,
         };

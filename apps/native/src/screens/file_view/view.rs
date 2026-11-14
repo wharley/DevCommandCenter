@@ -125,6 +125,10 @@ fn row(view: &FileView, index: usize, style: &RowStyle, cx: &mut Context<FileVie
         selected_colors(palette, palette.background, palette.background);
     let plus = view.line_plus(index, GROUP, style.number_width, cell, cx);
     let band = super::bands::band_at(&view.bands, index);
+    let label = view
+        .line_labels
+        .iter()
+        .find(|label| label.line == index && !caret_line);
     // What the owner pins to the right of this line.
     let pinned = view
         .line_actions
@@ -137,7 +141,7 @@ fn row(view: &FileView, index: usize, style: &RowStyle, cx: &mut Context<FileVie
         .filter(|at| (start..end).contains(at))
         .map(display_column)
         .collect();
-    div()
+    let line = div()
         .group(GROUP)
         .relative()
         .flex()
@@ -214,15 +218,25 @@ fn row(view: &FileView, index: usize, style: &RowStyle, cx: &mut Context<FileVie
                         .w(px((to - from) * cell))
                         .bg(style.selection)
                 }))
-                .child(
-                    div()
+                .child(match label {
+                    // Read as its label; its own text while being edited.
+                    Some(label) => div()
+                        .absolute()
+                        .top_0()
+                        .left(px(left))
+                        .whitespace_nowrap()
+                        .font_family(crate::theme::fonts::SANS)
+                        .text_size(px(11.0))
+                        .text_color(label.color)
+                        .child(label.text.clone()),
+                    None => div()
                         .absolute()
                         .top_0()
                         .left(px(left))
                         .whitespace_nowrap()
                         .text_color(palette.foreground)
                         .child(styled),
-                )
+                })
                 .children(caret.map(|column| {
                     div()
                         .debug_selector(|| "file-caret".into())
@@ -247,7 +261,68 @@ fn row(view: &FileView, index: usize, style: &RowStyle, cx: &mut Context<FileVie
                 .items_center()
                 .cursor_default()
                 .child(pinned)
+        }));
+    // Lines that are not in the text, above this one: read-only, in the
+    // color their owner gave them.
+    let ghosts: Vec<_> = view
+        .ghosts
+        .iter()
+        .filter(|ghost| ghost.before == index)
+        .flat_map(|ghost| {
+            ghost
+                .lines
+                .iter()
+                .map(move |text| (text.clone(), ghost.color))
+        })
+        .collect();
+    if ghosts.is_empty() {
+        return line.into_any_element();
+    }
+    let number_width = style.number_width;
+    let background = palette.background;
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .children(ghosts.into_iter().map(|(text, color)| {
+            div()
+                .debug_selector(|| "file-ghost-line".into())
+                .flex()
+                .h(px(LINE))
+                .w_full()
+                .cursor_default()
+                .child(
+                    div()
+                        .flex()
+                        .flex_shrink_0()
+                        .justify_end()
+                        .w(px(number_width))
+                        .pr(px(cell))
+                        .bg(background)
+                        .text_color(color)
+                        .child("−"),
+                )
+                .child(div().w(px(2.0)).flex_shrink_0().h_full().bg(background))
+                .child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .overflow_hidden()
+                        .bg(color.opacity(0.12))
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left(px(left))
+                                .whitespace_nowrap()
+                                .text_color(color)
+                                .child(text),
+                        ),
+                )
         }))
+        .child(line)
         .into_any_element()
 }
 

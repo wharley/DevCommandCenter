@@ -31,6 +31,7 @@ pub(crate) fn confirm_dialog(
             ),
         ),
         Pending::Abort => cx.t("mergeConflict.confirm.abort"),
+        Pending::Restart => cx.t("mergeConflict.confirm.restart"),
         Pending::ValidationCommands => {
             let commands = match &resolver.validation {
                 Some(super::Load::Ready(config)) => config
@@ -48,42 +49,26 @@ pub(crate) fn confirm_dialog(
         }
     };
     let colors = cx.theme().colors.clone();
-    // Aborting has a second answer: drop this merge and bring the current
-    // base in, when the merge under way is not the one to resolve.
-    let restart = (pending == Pending::Abort && resolver.request.task_id.is_some()).then(|| {
-        Button::new("merge-confirm-restart")
-            .variant(ButtonVariant::Outline)
-            .size(ButtonSize::Default)
-            .on_click(cx.listener(|resolver, _, _, cx| resolver.confirm_restart(cx)))
-            .child(cx.t("mergeConflict.confirm.restart"))
-            .into_any_element()
-    });
+    let ok = match pending {
+        Pending::Abort => cx.t("mergeConflict.abort").to_string(),
+        Pending::Restart => cx.t("mergeConflict.confirm.restartOk").to_string(),
+        _ => "OK".to_string(),
+    };
     let footer = dialog_footer(
         [
-            Some(
-                Button::new("merge-confirm-cancel")
-                    .variant(ButtonVariant::Outline)
-                    .size(ButtonSize::Default)
-                    .on_click(cx.listener(|resolver, _, _, cx| resolver.cancel_pending(cx)))
-                    .child(cx.t("inspector.gitConfirmation.cancel"))
-                    .into_any_element(),
-            ),
-            restart,
-            Some(
-                Button::new("merge-confirm-ok")
-                    .variant(ButtonVariant::Default)
-                    .size(ButtonSize::Default)
-                    .on_click(cx.listener(|resolver, _, _, cx| resolver.confirm(cx)))
-                    .child(if pending == Pending::Abort {
-                        cx.t("mergeConflict.abort").to_string()
-                    } else {
-                        "OK".to_string()
-                    })
-                    .into_any_element(),
-            ),
-        ]
-        .into_iter()
-        .flatten(),
+            Button::new("merge-confirm-cancel")
+                .variant(ButtonVariant::Outline)
+                .size(ButtonSize::Default)
+                .on_click(cx.listener(|resolver, _, _, cx| resolver.cancel_pending(cx)))
+                .child(cx.t("inspector.gitConfirmation.cancel"))
+                .into_any_element(),
+            Button::new("merge-confirm-ok")
+                .variant(ButtonVariant::Default)
+                .size(ButtonSize::Default)
+                .on_click(cx.listener(|resolver, _, _, cx| resolver.confirm(cx)))
+                .child(ok)
+                .into_any_element(),
+        ],
         cx,
     );
     let close = cx.entity().downgrade();

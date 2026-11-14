@@ -289,12 +289,13 @@ impl MergeResolver {
         }));
     }
 
-    /// The abort's other answer: the merge under way dropped and the
-    /// current base brought in, for a merge that is not with it.
-    pub(crate) fn confirm_restart(&mut self, cx: &mut Context<Self>) {
-        if self.pending.take() == Some(Pending::Abort) {
-            self.abort(true, cx);
+    /// "Recomeçar com a base atual", from the merge's menu: asked first.
+    pub(crate) fn request_restart(&mut self, cx: &mut Context<Self>) {
+        if self.busy.is_some() {
+            return;
         }
+        self.pending = Some(Pending::Restart);
+        cx.notify();
     }
 
     /// `abortMerge`, once confirmed: the resolver closes, or with `restart`
@@ -384,6 +385,9 @@ impl MergeResolver {
     }
 
     pub(crate) fn request_abort(&mut self, cx: &mut Context<Self>) {
+        if self.busy.is_some() {
+            return;
+        }
         self.pending = Some(Pending::Abort);
         cx.notify();
     }
@@ -397,6 +401,7 @@ impl MergeResolver {
             Some(Pending::EmptyResult) => self.save(true, true, cx),
             Some(Pending::DeleteResult) => self.delete_result(cx),
             Some(Pending::Abort) => self.abort(false, cx),
+            Some(Pending::Restart) => self.abort(true, cx),
             Some(Pending::ValidationCommands) => self.complete(cx),
             None => {}
         }

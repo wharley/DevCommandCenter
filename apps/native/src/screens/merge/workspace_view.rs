@@ -165,6 +165,7 @@ fn more_menu(resolver: &MergeResolver, cx: &mut Context<MergeResolver>) -> AnyEl
         )
     };
     let (use_current, use_incoming) = (use_file(&current, cx), use_file(&incoming, cx));
+    let several = resolver.conflicts().len() > 1;
     let this = cx.entity().downgrade();
     Menu::dropdown(
         "merge-more-menu",
@@ -176,10 +177,22 @@ fn more_menu(resolver: &MergeResolver, cx: &mut Context<MergeResolver>) -> AnyEl
                     let _ = this.update(cx, |resolver, cx| resolver.use_whole_side(side, cx));
                 }))
             };
-            let mut entries = vec![
-                side(use_current.clone(), WorkspaceGitConflictSide::Current),
-                side(use_incoming.clone(), WorkspaceGitConflictSide::Incoming),
-            ];
+            let mut entries = Vec::new();
+            // Every conflicted file to the agent, one after the other.
+            if several {
+                let this = this.clone();
+                entries.push(MenuEntry::Item(
+                    MenuItem::new(cx.t("mergeConflict.agent.resolveAll"), move |_, cx| {
+                        let _ = this.update(cx, |resolver, cx| resolver.resolve_all_with_agent(cx));
+                    })
+                    .icon(Icon::new("sparkles").size(14.0)),
+                ));
+            }
+            entries.push(side(use_current.clone(), WorkspaceGitConflictSide::Current));
+            entries.push(side(
+                use_incoming.clone(),
+                WorkspaceGitConflictSide::Incoming,
+            ));
             if dirty {
                 let this = this.clone();
                 entries.push(MenuEntry::Item(
