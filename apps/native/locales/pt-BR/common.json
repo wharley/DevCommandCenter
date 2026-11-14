@@ -226,6 +226,7 @@
       "failed": "Não enviou: {{error}}"
     },
     "sources": {
+      "edit": "Editar",
       "readNow": "Ler agora",
       "reading": "Lendo a fonte; se houver novidade, o agente avisa na sala.",
       "form": {
@@ -246,6 +247,7 @@
         "test": "Testar leitura",
         "testing": "Lendo…",
         "create": "Criar fonte",
+        "save": "Salvar",
         "creating": "Criando…",
         "cancel": "Cancelar",
         "loading": "Lendo seus conectores…",
@@ -547,6 +549,7 @@
         "to": "Respondendo a {{agent}}:"
       },
       "subject": {
+        "waiting": "aguardando você",
         "working": "em andamento",
         "answered": "respondido",
         "merged": "mesclado",

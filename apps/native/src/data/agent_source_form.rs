@@ -279,6 +279,24 @@ impl DesktopApi {
         )?)
     }
 
+    /// "Salvar" on a source being edited.
+    pub fn update_source(
+        &self,
+        agent_id: &str,
+        source_id: &str,
+        source: &Value,
+    ) -> Result<(), ApiError> {
+        self.post(
+            &format!(
+                "/api/v1/agents/{}/sources/{}/update",
+                encode(agent_id),
+                encode(source_id)
+            ),
+            source,
+        )
+        .map(|_| ())
+    }
+
     /// "Criar fonte": stored and on.
     pub fn create_source(&self, agent_id: &str, source: &Value) -> Result<AgentSource, ApiError> {
         decode(self.post(

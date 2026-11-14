@@ -226,6 +226,7 @@
       "failed": "Not sent: {{error}}"
     },
     "sources": {
+      "edit": "Edit",
       "readNow": "Read now",
       "reading": "Reading the source; if there is news, the agent says so in the room.",
       "form": {
@@ -246,6 +247,7 @@
         "test": "Test read",
         "testing": "Reading…",
         "create": "Create source",
+        "save": "Save",
         "creating": "Creating…",
         "cancel": "Cancel",
         "loading": "Reading your connectors…",
@@ -547,6 +549,7 @@
         "to": "Replying to {{agent}}:"
       },
       "subject": {
+        "waiting": "waiting on you",
         "working": "in progress",
         "answered": "answered",
         "merged": "merged",

@@ -71,6 +71,9 @@ pub(crate) struct SourceForm {
     /// Bumped when the connector changes: an answer for the one before is
     /// dropped.
     turn: u64,
+    /// The source being changed ("Editar"); none: a new one. Its connector,
+    /// tool and arguments fill the form as each is read.
+    pub(crate) editing: Option<dcc_core::domain::agent_source::AgentSource>,
     _name_changed: Subscription,
 }
 
@@ -120,6 +123,23 @@ fn first_tool(tools: &[FormTool]) -> usize {
 }
 
 impl AgentPage {
+    /// "Editar" on a source: the form on it, saved over it.
+    pub(super) fn edit_source(
+        &mut self,
+        source: &dcc_core::domain::agent_source::AgentSource,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_source_form(window, cx);
+        if let Some(form) = &mut self.source_form {
+            let watch = source.watch.clone();
+            form.name.update(cx, |input, cx| input.set_text(watch, cx));
+            form.every = source.every_minutes;
+            form.room = source.room.clone();
+            form.editing = Some(source.clone());
+        }
+    }
+
     pub(super) fn open_source_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let placeholder = cx.t("agents.sources.form.namePlaceholder");
         let name = cx.new(|cx| {
@@ -143,6 +163,7 @@ impl AgentPage {
             test: None,
             note: String::new(),
             turn: 0,
+            editing: None,
             _name_changed: changed,
         });
         cx.notify();
@@ -178,10 +199,20 @@ impl AgentPage {
             return;
         };
         let any = !connectors.is_empty();
+        // A source being edited opens on its own connector.
+        let first = form
+            .editing
+            .as_ref()
+            .and_then(|source| {
+                connectors
+                    .iter()
+                    .position(|(id, _)| *id == source.connector_id)
+            })
+            .unwrap_or(0);
         form.connectors = Some(connectors);
         cx.notify();
         if any {
-            self.pick_source_connector(0, window, cx);
+            self.pick_source_connector(first, window, cx);
         }
     }
 
@@ -235,9 +266,25 @@ impl AgentPage {
         };
         match found {
             Ok(tools) => {
+                // A source being edited, on its connector: its tool, with
+                // the arguments it has.
+                let edited = form
+                    .editing
+                    .as_ref()
+                    .filter(|source| form.connector_id() == Some(source.connector_id.as_str()))
+                    .and_then(|source| {
+                        let index = tools.iter().position(|tool| tool.name == source.tool)?;
+                        let arguments: Value = serde_json::from_str(&source.arguments).ok()?;
+                        Some((index, arguments))
+                    });
                 let first = first_tool(&tools);
                 form.tools = Tools::Ready(tools);
-                self.pick_source_tool(first, None, window, cx);
+                match edited {
+                    Some((index, arguments)) => {
+                        self.pick_source_tool(index, Some(&arguments), window, cx)
+                    }
+                    None => self.pick_source_tool(first, None, window, cx),
+                }
             }
             Err(error) => {
                 form.tools = Tools::Failed(error);
@@ -428,12 +475,19 @@ impl AgentPage {
             return;
         };
         form.busy = Some(Busy::Creating);
+        let editing = form.editing.as_ref().map(|source| source.id.clone());
         cx.notify();
         let agent = self.agent_id.clone();
         cx.spawn(async move |page, cx| {
             let made = cx
                 .background_executor()
-                .spawn(async move { api.create_source(&agent, &input).map(|_| read()) })
+                .spawn(async move {
+                    match editing {
+                        Some(id) => api.update_source(&agent, &id, &input),
+                        None => api.create_source(&agent, &input).map(|_| ()),
+                    }
+                    .map(|()| read())
+                })
                 .await;
             let _ = page.update(cx, |page, cx| {
                 match made {
@@ -947,11 +1001,13 @@ impl AgentPage {
                         .size(ButtonSize::Sm)
                         .disabled(!ready)
                         .on_click(cx.listener(|page, _, _, cx| page.create_source_form(cx)))
-                        .child(cx.t(if form.busy == Some(Busy::Creating) {
-                            "agents.sources.form.creating"
-                        } else {
-                            "agents.sources.form.create"
-                        })),
+                        .child(
+                            cx.t(match (form.busy == Some(Busy::Creating), &form.editing) {
+                                (true, _) => "agents.sources.form.creating",
+                                (false, Some(_)) => "agents.sources.form.save",
+                                (false, None) => "agents.sources.form.create",
+                            }),
+                        ),
                 )
                 .into_any_element(),
         );

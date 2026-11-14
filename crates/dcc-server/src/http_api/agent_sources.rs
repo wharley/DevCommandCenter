@@ -161,3 +161,17 @@ pub(super) async fn form_suggest(
     .map_err(HttpApiError::bad_request)?;
     Ok(Json(json!(pick)))
 }
+
+/// "Salvar" on a source being edited.
+pub(super) async fn update(
+    State(backend): State<Arc<HttpBackend>>,
+    Path((agent_id, source_id)): Path<(String, String)>,
+    Json(input): Json<dcc_tauri::state::SourceInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    let changed = backend
+        .sessions
+        .update_agent_source(agent_id.trim(), source_id.trim(), input)
+        .await
+        .map_err(|error| HttpApiError::bad_request(error.to_string()))?;
+    found(changed)
+}

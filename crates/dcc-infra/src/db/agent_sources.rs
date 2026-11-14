@@ -106,6 +106,29 @@ impl SqliteSessionRepo {
         Ok(stored)
     }
 
+    /// The person changed a source: what it reads and how often. What it
+    /// had seen is forgotten, so its next read only marks what is there.
+    pub fn update_agent_source(&self, id: &str, source: &AgentSource) -> Result<bool> {
+        let conn = self.conn.lock().map_err(repository_error)?;
+        let changed = conn
+            .execute(
+                "UPDATE dcc_agent_sources SET connector_id = ?3, connector = ?4, watch = ?5, tool = ?6, arguments = ?7, every_minutes = ?8, room_project_id = ?9, seen_json = NULL, last_checked_at = NULL WHERE id = ?1 AND agent_id = ?2",
+                params![
+                    id,
+                    source.agent_id,
+                    source.connector_id,
+                    source.connector,
+                    source.watch,
+                    source.tool,
+                    source.arguments,
+                    source.every_minutes,
+                    source.room
+                ],
+            )
+            .map_err(repository_error)?;
+        Ok(changed > 0)
+    }
+
     /// "Criar" on a proposal; or the person's switch.
     pub fn set_agent_source(&self, agent_id: &str, id: &str, enabled: bool) -> Result<bool> {
         let conn = self.conn.lock().map_err(repository_error)?;

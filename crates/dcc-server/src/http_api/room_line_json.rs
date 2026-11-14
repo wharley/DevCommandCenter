@@ -33,6 +33,36 @@ pub(super) fn wake(line: &RoomLine) -> Option<(&'static str, String)> {
     None
 }
 
+/// What the phone shows of a line DCC wrote that it has no row of its own
+/// for: a chain's result coming back and a task's delivery read as a passed
+/// line (the phone draws a `↪ …` first line as one), worded as the desktop
+/// words them. None: the line goes as it is.
+pub(super) fn phone_text(line: &RoomLine) -> Option<String> {
+    use dcc_core::domain::agent_chain::is_return;
+    use dcc_core::domain::task_shipped::shipped_line;
+    use dcc_core::domain::team_room::{handoff_heading, HANDOFF_MARK};
+    if line.speaker != Speaker::Person {
+        return None;
+    }
+    if is_return(&line.text) {
+        let heading = handoff_heading(&line.text)?.trim_start_matches(HANDOFF_MARK);
+        let names = heading.split_once(": ").map_or(heading, |(names, _)| names);
+        let (from, to) = names.split_once(" → ")?;
+        return Some(format!(
+            "{HANDOFF_MARK}{} devolveu o resultado para {}",
+            from.trim(),
+            to.trim()
+        ));
+    }
+    let (task, state) = shipped_line(&line.text)?;
+    let stands = match state {
+        "live" => "em produção",
+        "deploy failed" => "mesclado, mas o deploy falhou",
+        _ => "mesclado",
+    };
+    Some(format!("{HANDOFF_MARK}Entrega · {task} · {stands}"))
+}
+
 /// The lines the phone shows, as the desktop's room does: an answer with
 /// nothing to report stays quiet, and so does the wake that asked for it.
 pub(super) fn shown(lines: Vec<RoomLine>) -> Vec<RoomLine> {
@@ -146,6 +176,9 @@ pub(super) fn line_json(line: &RoomLine, tasks: &HashMap<String, Value>) -> Valu
     if let Some((kind, about)) = wake(line) {
         object.insert("kind".into(), json!(kind));
         object.insert("about".into(), json!(about));
+    }
+    if let Some(text) = phone_text(line) {
+        object.insert("text".into(), json!(text));
     }
     let reports: Vec<Value> = line
         .tasks
@@ -267,6 +300,20 @@ mod tests {
         assert_eq!(value["about"], "menções no Slack (Slack)");
         assert!(wake(&said("a", Speaker::Person, "oi")).is_none());
         assert!(wake(&said("a", Speaker::Agent, source)).is_none());
+    }
+
+    #[test]
+    fn a_return_and_a_delivery_reach_the_phone_as_the_desktop_words_them() {
+        let back = dcc_core::domain::agent_chain::return_prompt("Dev", "Suporte", "Feito.", "s:t");
+        let value = line_json(&said("a", Speaker::Person, &back), &HashMap::new());
+        assert_eq!(value["text"], "↪ Dev devolveu o resultado para Suporte");
+        let shipped = "[DCC] Delivered \"Corrigir CEP\" (#1014): live.\n\nThis is DCC…";
+        let value = line_json(&said("a", Speaker::Person, shipped), &HashMap::new());
+        assert_eq!(value["text"], "↪ Entrega · Corrigir CEP · em produção");
+        // A pass and what the person wrote go as they are.
+        assert!(phone_text(&said("a", Speaker::Person, "↪ A → B: corrige")).is_none());
+        assert!(phone_text(&said("a", Speaker::Person, "oi")).is_none());
+        assert!(phone_text(&said("a", Speaker::Agent, &back)).is_none());
     }
 
     #[test]

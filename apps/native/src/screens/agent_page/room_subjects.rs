@@ -317,6 +317,24 @@ impl RoomModel {
 }
 
 impl TeamRoom {
+    /// Whether a conversation of the subject's lines waits on the person.
+    fn subject_waits(&self, rows: &[Row], cx: &gpui::App) -> bool {
+        let agents = self.sidebar.read(cx).agents();
+        rows.iter().any(|row| {
+            let Row::Line { line, .. } = row else {
+                return false;
+            };
+            agents
+                .iter()
+                .filter(|agent| agent.id == line.agent_id)
+                .flat_map(|agent| agent.sessions.iter())
+                .any(|session| {
+                    session.session_id == line.session_id
+                        && session.state == crate::data::agents::AgentState::NeedsYou
+                })
+        })
+    }
+
     /// Opens or closes the subject `key`; the rows are read again.
     pub(crate) fn toggle_subject(&mut self, key: String, open: bool, cx: &mut Context<Self>) {
         self.subjects_open.insert(key, open);
@@ -338,11 +356,20 @@ impl TeamRoom {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let colors = cx.theme().colors.clone();
+        // At work, and one of its conversations waits on the person (an
+        // approval, a question): that is what it stands on.
+        let waiting = state == SubjectState::Working && self.subject_waits(rows, cx);
         let tone = match state {
+            _ if waiting => crate::theme::tailwind::AMBER_500.hsla(),
             SubjectState::Live => colors.success,
             SubjectState::DeployFailed => colors.destructive,
             SubjectState::Working => colors.primary,
             SubjectState::Answered | SubjectState::Merged => colors.muted_foreground,
+        };
+        let stands = if waiting {
+            cx.t("agents.room.subject.waiting")
+        } else {
+            cx.t(state.key())
         };
         let id = SharedString::from(format!("room-subject-{key}"));
         let selector = id.to_string();
@@ -394,7 +421,7 @@ impl TeamRoom {
                     .bg(tone.opacity(0.1))
                     .text_size(px(11.0))
                     .text_color(tone)
-                    .child(cx.t(state.key())),
+                    .child(stands),
             );
         let mut body: Vec<AnyElement> = Vec::new();
         if open {

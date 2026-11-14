@@ -234,3 +234,110 @@ fn the_new_source_form_draws_the_tools_arguments_as_fields(cx: &mut TestAppConte
     cx.run_until_parked();
     assert!(cx.debug_bounds("agent-source-form").is_none());
 }
+
+#[gpui::test]
+fn editing_a_source_opens_the_form_on_what_it_has(cx: &mut TestAppContext) {
+    use crate::data::agent_source_form::FormTool;
+    use gpui::Modifiers;
+    use serde_json::json;
+    let mut watched = source("s-1", "menções a mim", false);
+    watched.arguments = json!({"query": "to:me", "limit": 20}).to_string();
+    watched.every_minutes = 30;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+        cx.set_global(Sources {
+            list: vec![watched],
+        });
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let seen = dir.path().join("seen.json");
+    let (page, cx) = cx.add_window_view(move |window, cx| {
+        let sidebar = cx.new(|cx| Sidebar::new(false, false, false, seen, cx));
+        let composer = cx.new(|cx| Composer::new(window, cx));
+        AgentPage::new("sup".into(), sidebar, composer, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1200.0), gpui::px(2400.0)));
+    let mut suporte = super::editor_role::blank_agent();
+    suporte.id = "sup".into();
+    suporte.name = "Suporte".into();
+    page.update(cx, |page, cx| {
+        page.sidebar.update(cx, |sidebar, cx| {
+            sidebar.apply_for_tests(
+                SidebarData {
+                    agents: vec![suporte],
+                    ..SidebarData::default()
+                },
+                cx,
+            )
+        });
+        page.show("sup".into(), cx);
+    });
+    cx.run_until_parked();
+    let edit = cx.debug_bounds("agent-source-edit-0").unwrap();
+    cx.simulate_click(edit.center(), Modifiers::none());
+    cx.run_until_parked();
+    // Its name, its pace; then its connector and tool as each is read.
+    page.read_with(cx, |page, cx| {
+        let form = page.source_form.as_ref().unwrap();
+        assert_eq!(form.name.read(cx).text(), "menções a mim");
+        assert_eq!(form.every, 30);
+        assert_eq!(
+            form.editing.as_ref().map(|source| source.id.as_str()),
+            Some("s-1")
+        );
+    });
+    let tools = vec![
+        FormTool {
+            name: "slack_read_channel".into(),
+            description: String::new(),
+            input_schema: json!({"type": "object", "properties": {"channel": {"type": "string"}}}),
+        },
+        FormTool {
+            name: "slack_search_public".into(),
+            description: String::new(),
+            input_schema: json!({"type": "object", "properties": {
+                "query": {"type": "string"}, "limit": {"type": "integer"}
+            }, "required": ["query"]}),
+        },
+    ];
+    page.update_in(cx, |page, window, cx| {
+        page.take_source_connectors(
+            vec![
+                ("trello".into(), "Trello".into()),
+                ("slack".into(), "Slack".into()),
+            ],
+            window,
+            cx,
+        );
+        page.take_source_tools(Ok(tools), window, cx);
+    });
+    cx.run_until_parked();
+    page.read_with(cx, |page, cx| {
+        let form = page.source_form.as_ref().unwrap();
+        assert_eq!(form.connector, 1, "its own connector, not the first");
+        assert_eq!(form.tool, 1, "its own tool");
+        let typed: Vec<(String, String)> = form
+            .fields
+            .iter()
+            .map(|field| {
+                (
+                    field.field.name.clone(),
+                    field.input.read(cx).text().to_string(),
+                )
+            })
+            .collect();
+        assert!(
+            typed.contains(&("query".into(), "to:me".into())),
+            "{typed:?}"
+        );
+        assert!(typed.contains(&("limit".into(), "20".into())), "{typed:?}");
+    });
+    // It saves over the source: the button says so.
+    assert!(cx.debug_bounds("agent-source-create").is_some());
+    cx.update(|_, cx| {
+        use crate::i18n::Translate;
+        assert_eq!(cx.t("agents.sources.form.save"), "Salvar")
+    });
+}

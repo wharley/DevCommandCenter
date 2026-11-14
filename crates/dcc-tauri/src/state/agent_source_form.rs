@@ -135,6 +135,18 @@ impl SessionCommandState {
         Ok((agent, source))
     }
 
+    /// "Salvar" on a source being edited: checked as a new one is; false
+    /// when it is gone.
+    pub async fn update_agent_source(
+        &self,
+        agent_id: &str,
+        id: &str,
+        input: SourceInput,
+    ) -> Result<bool> {
+        let (_, source) = self.checked_source(agent_id, input, true).await?;
+        self.session_repo.update_agent_source(id, &source)
+    }
+
     /// "Criar fonte": stored and on.
     pub async fn create_agent_source(
         &self,

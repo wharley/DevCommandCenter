@@ -89,6 +89,7 @@ impl AgentPage {
         };
         let page = cx.entity().downgrade();
         let (toggled, removed, read_now) = (source.clone(), source.clone(), source.clone());
+        let edited = source.clone();
         div()
             .debug_selector(move || format!("agent-source-{index}"))
             .flex()
@@ -150,6 +151,17 @@ impl AgentPage {
                         .child(cx.t("agents.sources.readNow")),
                 )
             })
+            .child(
+                Button::new(SharedString::from(format!("agent-source-edit-{index}")))
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::Sm)
+                    .on_click(
+                        cx.listener(move |page, _, window, cx| {
+                            page.edit_source(&edited, window, cx)
+                        }),
+                    )
+                    .child(cx.t("agents.sources.edit")),
+            )
             .child(
                 Button::new(SharedString::from(format!("agent-source-delete-{index}")))
                     .variant(ButtonVariant::Ghost)
