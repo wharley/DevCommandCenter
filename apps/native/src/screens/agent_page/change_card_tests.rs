@@ -184,6 +184,7 @@ fn room_with_task(
                 AgentPageEvent::OpenPullRequest(id) => AgentPageEvent::OpenPullRequest(id.clone()),
                 AgentPageEvent::OpenTask(task) => AgentPageEvent::OpenTask(task.clone()),
                 AgentPageEvent::ReadSource(source) => AgentPageEvent::ReadSource(source.clone()),
+                AgentPageEvent::RunRoutine(routine) => AgentPageEvent::RunRoutine(routine.clone()),
                 AgentPageEvent::OpenSession {
                     task_id,
                     session_id,

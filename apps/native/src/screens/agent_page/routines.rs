@@ -24,6 +24,10 @@ pub(crate) struct RoutineForm {
     pub(crate) days: Vec<u8>,
     pub(crate) time: Entity<TextInput>,
     pub(crate) prompt: Entity<TextArea>,
+    /// The routine it changes, with its switch as it is; none: a new one.
+    pub(crate) editing: Option<(String, bool)>,
+    /// The request changed: the examples go once something is written.
+    pub(crate) _changed: gpui::Subscription,
 }
 
 /// `09:00` → (9, 0).
@@ -53,7 +57,9 @@ impl AgentPage {
         self.routine_form = Some(RoutineForm {
             days: vec![0, 1, 2, 3, 4],
             time,
+            _changed: cx.observe(&prompt, |_, _, cx| cx.notify()),
             prompt,
+            editing: None,
         });
         cx.notify();
     }
@@ -115,6 +121,24 @@ impl AgentPage {
             }
         };
         let agent = self.agent_id.clone();
+        // "Editar": the same routine, changed in place.
+        if let Some((id, enabled)) = form.editing.clone() {
+            let changed = id.clone();
+            self.update_routines(cx, |list| {
+                for found in list.iter_mut().filter(|found| found.id == changed) {
+                    found.days = draft.days.clone();
+                    found.hour = hour;
+                    found.minute = minute;
+                    found.prompt = draft.prompt.clone();
+                }
+            });
+            self.call(cx, move |api| {
+                api.save_routine(&agent, Some(&id), &draft, enabled)
+            });
+            self.routine_form = None;
+            cx.notify();
+            return;
+        }
         self.update_routines(cx, |list| {
             list.push(Routine {
                 id: format!("pending-{}", list.len()),
@@ -200,6 +224,11 @@ impl AgentPage {
                 None => cx.t("agents.routines.off").to_string(),
             }
         };
+        let detail = match Self::routine_last_run(routine, english, cx) {
+            Some(last) => format!("{detail} · {last}"),
+            None => detail,
+        };
+        let tools = self.routine_tools(index, routine, cx);
         let (agent, id, on) = (
             routine.agent_id.clone(),
             routine.id.clone(),
@@ -291,6 +320,7 @@ impl AgentPage {
                     }),
                 )
             })
+            .children(tools)
             .child(
                 Button::new(SharedString::from(format!("agent-routine-delete-{index}")))
                     .variant(ButtonVariant::Ghost)
@@ -316,6 +346,7 @@ impl AgentPage {
             .map(|(index, routine)| self.routine_row(index, routine, cx))
             .collect();
         let full = routines.len() >= MAX_ROUTINES;
+        let examples = self.routine_examples(cx);
         let form = self.routine_form.as_ref().map(|form| {
             let (time, prompt) = (form.time.clone(), form.prompt.clone());
             div()
@@ -364,6 +395,7 @@ impl AgentPage {
                         .text_size(px(13.0))
                         .child(prompt),
                 )
+                .children(examples)
                 .child(
                     div()
                         .flex()

@@ -152,6 +152,7 @@ mod room_task_live_tests;
 mod room_tests;
 mod room_timeline;
 mod room_view;
+mod routine_tools;
 mod routines;
 mod runs_on;
 #[cfg(test)]
@@ -193,6 +194,9 @@ pub enum AgentPageEvent {
     /// "Ler agora" on a source: read by the sources' clock's own path, so
     /// its news wakes the agent and the holds apply (`shell::sources`).
     ReadSource(Box<dcc_core::domain::agent_source::AgentSource>),
+    /// "Rodar agora" on a routine: sent by the routines' clock's own path
+    /// (`shell::routines`).
+    RunRoutine(Box<dcc_core::domain::agent_routine::Routine>),
 }
 
 pub struct AgentPage {

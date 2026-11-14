@@ -799,6 +799,15 @@
       "tokensTrend": "tokens {{change}} vs the week before"
     },
     "routines": {
+      "runNow": "Run now",
+      "running": "Routine sent to the agent; the answer arrives in its conversation.",
+      "edit": "Edit",
+      "last": "Last: {{when}}",
+      "example": {
+        "prs": "Summarize the open PRs waiting on me.",
+        "yesterday": "What changed in the projects since yesterday?",
+        "stuck": "Is any task stuck or waiting for an answer?"
+      },
       "title": "Routines",
       "empty": "No routines. A routine asks this agent something on set days and times, in its conversation; when there is nothing to report, it stays quiet.",
       "new": "New routine",

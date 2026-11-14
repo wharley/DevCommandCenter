@@ -55,6 +55,9 @@ impl Shell {
                         AgentPageEvent::ReadSource(source) => {
                             shell.sources_due(std::slice::from_ref(source.as_ref()), cx)
                         }
+                        AgentPageEvent::RunRoutine(routine) => {
+                            shell.routines_due(std::slice::from_ref(routine.as_ref()), cx)
+                        }
                         // `requestOpenPullRequest`
                         AgentPageEvent::OpenPullRequest(pr_id) => {
                             PrReviewJobs::request_open(cx, pr_id);

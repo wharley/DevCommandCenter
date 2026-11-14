@@ -799,6 +799,15 @@
       "tokensTrend": "tokens {{change}} vs semana anterior"
     },
     "routines": {
+      "runNow": "Rodar agora",
+      "running": "Rotina enviada ao agente; a resposta chega na conversa dele.",
+      "edit": "Editar",
+      "last": "Última: {{when}}",
+      "example": {
+        "prs": "Resuma os PRs abertos que esperam por mim.",
+        "yesterday": "O que mudou nos projetos desde ontem?",
+        "stuck": "Tem alguma tarefa travada ou esperando resposta?"
+      },
       "title": "Rotinas",
       "empty": "Nenhuma rotina. Uma rotina pede algo a este agente em dias e horário fixos, na conversa dele; quando não há nada a relatar, ele fica quieto.",
       "new": "Nova rotina",
