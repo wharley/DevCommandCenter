@@ -59,6 +59,7 @@ pub mod room_presence;
 pub mod session;
 pub mod task_report;
 pub mod task_title;
+pub mod task_origin;
 pub mod team_room;
 pub mod team_room_lines;
 pub mod team_room_live;

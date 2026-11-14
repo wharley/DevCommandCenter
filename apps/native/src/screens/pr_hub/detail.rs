@@ -260,6 +260,7 @@ impl PrHub {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(item.title.clone()),
             )
+            .children(self.origin_strip(&item, cx))
             .child(
                 div()
                     .mt(px(8.0))

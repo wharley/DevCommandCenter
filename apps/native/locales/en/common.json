@@ -1265,6 +1265,32 @@
       "inspectorDetails": "Open workspace details"
     }
   },
+  "origin": {
+    "label": "Origin:",
+    "who": "{{agent}} in the {{room}} room",
+    "roomGeneral": "General",
+    "inRoom": "{{room}} room",
+    "open": "open",
+    "from": {
+      "source": "{{connector}} source · {{watch}}",
+      "person": "your request",
+      "routine": "routine",
+      "event": "a DCC event",
+      "passed": "{{from}}"
+    },
+    "row": {
+      "message": "Message in {{connector}}",
+      "source": "Source \"{{watch}}\" woke {{agent}}",
+      "person": "You asked {{agent}}",
+      "routine": "{{agent}}'s routine",
+      "event": "An event woke {{agent}}",
+      "passed": "{{from}} passed it to {{to}}",
+      "opened": "{{agent}} opened this task",
+      "pr": "PR {{label}}",
+      "review": "The Reviewer's review: {{verdict}}",
+      "reviewRunning": "The Reviewer's review is running"
+    }
+  },
   "pullRequests": {
     "verdict": {
       "approve": "Can approve",

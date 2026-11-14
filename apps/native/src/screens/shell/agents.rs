@@ -70,6 +70,29 @@ impl Shell {
         self.show(Surface::Agent, cx);
     }
 
+    /// A step of a task's origin: the agent's "Conversa" in that room.
+    pub(super) fn open_agent_room(
+        &mut self,
+        agent_id: String,
+        room: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .sidebar
+            .read(cx)
+            .agents()
+            .iter()
+            .any(|agent| agent.id == agent_id)
+        {
+            return;
+        }
+        self.open_agent(agent_id, window, cx);
+        if let Some((page, _)) = &self.agent_page {
+            page.update(cx, |page, cx| page.find_in_room(room, "", cx));
+        }
+    }
+
     /// "Agentes": the team's screen as it was left, the first time on the
     /// team room.
     pub(super) fn open_agents(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -104,17 +127,21 @@ impl Shell {
                     cx.observe(&self.sidebar, |shell, _, cx| shell.feed_pr_hub(cx)),
                     cx.observe(&composer, |shell, _, cx| shell.feed_pr_hub(cx)),
                 ];
-                let events = cx.subscribe(&hub, |shell, _, event, cx| match event {
-                    PrHubEvent::OpenTask(task_id) => {
-                        let task_id = task_id.clone();
-                        shell
-                            .conversation
-                            .update(cx, |conversation, cx| conversation.open(&task_id, None, cx));
-                        shell.show(Surface::Conversation, cx);
-                    }
-                    // The new task opens once the list has it, its composer in focus.
-                    PrHubEvent::Created(task_id) => shell.open_created(task_id.clone(), cx),
-                });
+                let events =
+                    cx.subscribe_in(&hub, window, |shell, _, event, window, cx| match event {
+                        PrHubEvent::OpenAgentRoom { agent_id, room } => {
+                            shell.open_agent_room(agent_id.clone(), room.clone(), window, cx)
+                        }
+                        PrHubEvent::OpenTask(task_id) => {
+                            let task_id = task_id.clone();
+                            shell.conversation.update(cx, |conversation, cx| {
+                                conversation.open(&task_id, None, cx)
+                            });
+                            shell.show(Surface::Conversation, cx);
+                        }
+                        // The new task opens once the list has it, its composer in focus.
+                        PrHubEvent::Created(task_id) => shell.open_created(task_id.clone(), cx),
+                    });
                 self.pr_hub = Some((hub, events, sources));
             }
         }

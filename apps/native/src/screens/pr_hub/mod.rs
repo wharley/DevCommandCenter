@@ -15,6 +15,7 @@ mod actions;
 mod checks;
 mod merge;
 mod merge_options;
+mod origin;
 #[cfg(test)]
 mod news_tests;
 mod reviewer;
@@ -52,6 +53,12 @@ pub enum PrHubEvent {
     OpenTask(String),
     /// "Trabalhar nisto" made a task: it opens with the composer in focus.
     Created(String),
+    /// A step of the task's origin: that agent's conversation in the room
+    /// it happened in (none: Geral).
+    OpenAgentRoom {
+        agent_id: String,
+        room: Option<String>,
+    },
 }
 
 pub struct PrHub {
@@ -68,6 +75,8 @@ pub struct PrHub {
     /// Narrow: the detail in front of the list.
     pub(crate) detail_open: bool,
     pub(crate) detail: Option<DetailRead>,
+    /// Where the picked pull request's task came from (`origin`).
+    pub(crate) origin: origin::PrOrigin,
     pub(crate) comment: Entity<TextArea>,
     pub(crate) sending: bool,
     pub(crate) comment_error: Option<String>,
@@ -157,6 +166,7 @@ impl PrHub {
             selected: None,
             detail_open: false,
             detail: None,
+            origin: Default::default(),
             comment,
             sending: false,
             comment_error: None,
@@ -482,6 +492,7 @@ impl PrHub {
 
 impl Render for PrHub {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_origin(cx);
         self.render_hub(window, cx)
     }
 }

@@ -1265,6 +1265,32 @@
       "inspectorDetails": "Abrir detalhes do workspace"
     }
   },
+  "origin": {
+    "label": "Origem:",
+    "who": "{{agent}} na sala {{room}}",
+    "roomGeneral": "Geral",
+    "inRoom": "sala {{room}}",
+    "open": "abrir",
+    "from": {
+      "source": "fonte {{connector}} · {{watch}}",
+      "person": "pedido seu",
+      "routine": "rotina",
+      "event": "evento do DCC",
+      "passed": "{{from}}"
+    },
+    "row": {
+      "message": "Mensagem no {{connector}}",
+      "source": "Fonte \"{{watch}}\" acordou {{agent}}",
+      "person": "Você pediu a {{agent}}",
+      "routine": "Rotina de {{agent}}",
+      "event": "Um evento acordou {{agent}}",
+      "passed": "{{from}} passou para {{to}}",
+      "opened": "{{agent}} abriu esta tarefa",
+      "pr": "PR {{label}}",
+      "review": "Revisão do Revisor: {{verdict}}",
+      "reviewRunning": "Revisão do Revisor em andamento"
+    }
+  },
   "pullRequests": {
     "verdict": {
       "approve": "Pode aprovar",

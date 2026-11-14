@@ -35,6 +35,7 @@ mod last_turn_events;
 mod session_stall;
 mod usage_marks;
 mod agent_rooms;
+mod task_origin;
 use agent_memory::AGENT_MEMORY_TABLE_SQL;
 use agent_proposals::AGENT_PROPOSAL_TABLE_SQL;
 use agent_reactions::AGENT_REACTION_TABLE_SQL;

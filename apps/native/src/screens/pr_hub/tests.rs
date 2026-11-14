@@ -74,6 +74,7 @@ fn the_hub_lists_filters_and_reads_a_pull_request(cx: &mut TestAppContext) {
             sink.borrow_mut().push(match event {
                 PrHubEvent::OpenTask(id) => format!("task {id}"),
                 PrHubEvent::Created(id) => format!("created {id}"),
+                PrHubEvent::OpenAgentRoom { agent_id, .. } => format!("room {agent_id}"),
             })
         })
         .detach();

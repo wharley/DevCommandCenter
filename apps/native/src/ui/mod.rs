@@ -14,6 +14,7 @@ pub mod dialog;
 pub mod diff_squares;
 mod feedback;
 pub(crate) mod find_strip;
+pub(crate) mod origin_strip;
 mod icon;
 mod kbd;
 pub mod layer;

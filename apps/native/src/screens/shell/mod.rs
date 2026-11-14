@@ -531,6 +531,9 @@ impl Shell {
             crate::screens::conversation::ConversationEvent::OpenSessionSearch => {
                 self.open_session_search(window, cx)
             }
+            crate::screens::conversation::ConversationEvent::OpenAgentRoom { agent_id, room } => {
+                self.open_agent_room(agent_id.clone(), room.clone(), window, cx)
+            }
             crate::screens::conversation::ConversationEvent::ToggleDevice => {
                 #[cfg(target_os = "macos")]
                 self.toggle_device(window, cx);

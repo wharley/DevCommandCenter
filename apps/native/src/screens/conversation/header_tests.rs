@@ -88,6 +88,7 @@ fn open<'a>(
                 ConversationEvent::OpenSessionSearch => "session-search",
                 ConversationEvent::OpenInEditor(editor) => editor,
                 ConversationEvent::ReviewDelegation { .. } => "delegation",
+                ConversationEvent::OpenAgentRoom { .. } => "agent-room",
             });
         })
         .detach();
@@ -633,4 +634,72 @@ fn an_agents_own_conversation_shows_no_code_tools(cx: &mut TestAppContext) {
     assert_eq!(composer, "composer.placeholder.agent");
     let plan = cx.update(|_, cx| view.read(cx).composer.read(cx).placeholder_key(true));
     assert_eq!(plan, "composer.placeholder.plan");
+}
+
+#[gpui::test]
+fn a_task_an_agent_opened_shows_where_it_came_from(cx: &mut TestAppContext) {
+    use crate::data::task_origin::OriginRead;
+    use dcc_core::domain::task_origin::{OriginStep, Started, TaskOrigin};
+    let (view, cx, events, _server) = open(cx, Vec::new());
+    // A task the person made: no line.
+    assert!(cx.debug_bounds("task-origin").is_none());
+    let step = |agent: &str, room: Option<&str>, started| OriginStep {
+        started,
+        agent_id: agent.to_lowercase(),
+        agent: agent.into(),
+        session_id: format!("s-{agent}"),
+        room: room.map(str::to_string),
+        at: "2026-11-14T09:15:00Z".into(),
+    };
+    view.update(cx, |view, cx| {
+        view.origin.read = Some(OriginRead {
+            origin: TaskOrigin {
+                steps: vec![
+                    step(
+                        "Suporte",
+                        None,
+                        Started::Source {
+                            connector: "Slack".into(),
+                            watch: "menções a mim".into(),
+                            excerpt: "o CEP não calcula frete".into(),
+                            link: Some("https://acme.slack.com/p1".into()),
+                        },
+                    ),
+                    step(
+                        "Dev",
+                        Some("checkout"),
+                        Started::Passed {
+                            from: "Suporte".into(),
+                            to: "Dev".into(),
+                            request: "corrige o CEP".into(),
+                        },
+                    ),
+                ],
+                opened_at: "2026-11-14T09:17:00Z".into(),
+            },
+            rooms: [("checkout".to_string(), "Checkout".to_string())].into(),
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    // The line, closed; a click opens the chain: the message, the source,
+    // the pass, the task.
+    assert!(cx.debug_bounds("task-origin-line").is_some());
+    assert!(cx.debug_bounds("task-origin-chain").is_none());
+    click(cx, "task-origin-line");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("task-origin-chain").is_some());
+    assert!(
+        cx.debug_bounds("task-origin-link-0").is_some(),
+        "the message's link"
+    );
+    assert!(cx.debug_bounds("task-origin-row-3").is_some());
+    assert!(cx.debug_bounds("task-origin-row-4").is_none());
+    // The pass happened in Dev's conversation in the Checkout's room.
+    click(cx, "task-origin-row-2");
+    cx.run_until_parked();
+    assert_eq!(events.borrow().last().copied(), Some("agent-room"));
+    click(cx, "task-origin-line");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("task-origin-chain").is_none());
 }

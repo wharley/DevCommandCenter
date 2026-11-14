@@ -12,6 +12,7 @@ mod cards;
 mod delegation_card;
 pub(crate) mod find;
 mod find_bar;
+mod origin;
 
 pub use find_bar::OpenThreadFind;
 pub(crate) use find_bar::bind_keys;
@@ -90,6 +91,12 @@ pub enum ConversationEvent {
     OpenSessionSearch,
     /// "Abrir no editor" with this editor (it becomes the preferred one).
     OpenInEditor(&'static str),
+    /// A step of the task's origin: that agent's conversation in the room
+    /// it happened in (none: Geral).
+    OpenAgentRoom {
+        agent_id: String,
+        room: Option<String>,
+    },
 }
 
 impl gpui::EventEmitter<ConversationEvent> for ConversationView {}
@@ -150,6 +157,8 @@ pub struct ConversationView {
     _call_agents: gpui::Subscription,
     /// "Buscar na conversa", while open.
     find: Option<find_bar::FindBar>,
+    /// Where the task came from, when an agent opened it (`origin`).
+    pub(crate) origin: origin::TaskOriginState,
     /// `ConversationTrail`, in the left gutter of a wide thread.
     trail: trail::TrailState,
     /// Something arrived while the person read away from the end.
@@ -233,6 +242,7 @@ impl ConversationView {
             call_agents,
             _call_agents: call_agent_events,
             find: None,
+            origin: Default::default(),
             trail: trail::TrailState::default(),
             new_activity: false,
             proposals: Default::default(),
@@ -280,6 +290,7 @@ impl ConversationView {
             return;
         }
         if !same_task {
+            self.read_origin(task_id, cx);
             self.open.clear();
             self.run_limits.clear();
             self.markdown.borrow_mut().clear();
@@ -888,6 +899,7 @@ impl Render for ConversationView {
             .when(self.task_id.is_some(), |area| {
                 area.child(header::header(self, cx))
             })
+            .children(self.origin_strip(cx))
             .children(self.find_bar(cx))
             .child(
                 div()
