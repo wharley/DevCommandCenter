@@ -67,7 +67,34 @@ pub struct TaskOrigin {
     pub opened_at: String,
 }
 
+/// `text` with the credentials of any address in it left out
+/// (`scheme://user:secret@host` reads `scheme://…@host`): an excerpt is
+/// shown on the task's head and told to an agent, where a database address
+/// pasted in a request has no business.
+pub fn without_credentials(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("://") {
+        let (before, after) = rest.split_at(at + 3);
+        out.push_str(before);
+        // The authority ends at the first `/`, space or quote.
+        let end = after
+            .find(|c: char| c == '/' || c.is_whitespace() || c == '"' || c == '\'')
+            .unwrap_or(after.len());
+        match after[..end].rfind('@') {
+            Some(user_end) => {
+                out.push('…');
+                rest = &after[user_end..];
+            }
+            None => rest = after,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn excerpt(text: &str) -> String {
+    let text = without_credentials(text);
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() <= EXCERPT_CHARS {
         return flat;
@@ -262,6 +289,26 @@ mod tests {
             Started::Person {
                 excerpt: "corrige o login por favor".into()
             }
+        );
+        // An address pasted with its password is shown without it.
+        match started(
+            "olha o banco postgresql://ana:s3gr3do@127.0.0.1:5544/production?x=1 por favor",
+        ) {
+            Started::Person { excerpt } => {
+                assert_eq!(
+                    excerpt,
+                    "olha o banco postgresql://…@127.0.0.1:5544/production?x=1 por favor"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            without_credentials("https://acme.slack.com/p1"),
+            "https://acme.slack.com/p1"
+        );
+        assert_eq!(
+            without_credentials("a://u@h b://x:y@z/p"),
+            "a://…@h b://…@z/p"
         );
         // A long message is cut.
         match started(&"a".repeat(400)) {

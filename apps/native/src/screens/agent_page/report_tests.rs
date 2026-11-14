@@ -92,6 +92,37 @@ fn an_answer_to_tasks_carries_their_report(cx: &mut TestAppContext) {
     cx.simulate_click(row.center(), Modifiers::none());
     cx.run_until_parked();
     assert_eq!(opened.borrow().as_slice(), ["w-campo"]);
+    // A later answer about the same task: the report is where the task
+    // stands now, so it shows once, under that answer.
+    page.update(cx, |page, cx| {
+        let room = page.room.as_ref().unwrap().0.clone();
+        room.update(cx, |room, cx| {
+            let answer = |turn: &str, minute: u32, text: &str| RoomLine {
+                key: format!("s-home:{turn}"),
+                agent_id: "dev".into(),
+                session_id: "s-home".into(),
+                speaker: Speaker::Agent,
+                text: text.into(),
+                at: format!("2026-11-09T10:{minute:02}:00Z"),
+                receipt: None,
+                tasks: vec!["t-1".into()],
+                steps: Default::default(),
+            };
+            let mut feed = HomeFeed::new("dev", "s-home");
+            feed.lines = vec![
+                answer("t", 6, "Implementei o envio do campo."),
+                answer("t2", 20, "Ajustei a mensagem na mesma tarefa."),
+            ];
+            room.take(vec![feed]);
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("room-report-0").is_none(),
+        "not under the earlier answer"
+    );
+    assert!(cx.debug_bounds("room-report-1").is_some());
 }
 
 /// A task that changed nothing is its answer: the room shows it in place,

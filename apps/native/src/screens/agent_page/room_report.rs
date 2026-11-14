@@ -40,9 +40,13 @@ impl TeamRoom {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let sidebar = self.sidebar.read(cx);
+        // Only the tasks this answer is the last to report: the report is
+        // where the task stands now, the same under any answer.
+        let model = self.list.model();
         let tasks: Vec<TaskReport> = line
             .tasks
             .iter()
+            .filter(|id| model.reports.get(*id).is_none_or(|last| *last == line.key))
             .filter_map(|id| sidebar.task_report(id).cloned())
             .collect();
         if tasks.is_empty() {

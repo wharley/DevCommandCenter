@@ -148,6 +148,10 @@ pub(crate) struct RoomModel {
     pub talk: usize,
     /// The trail's stops, read once with the rows (`room_trail`).
     pub trail: Rc<Vec<crate::ui::trail::TrailItem>>,
+    /// The last answer that reports each task, by the task's id: a task's
+    /// report is where it stands now, so it shows once, under that answer,
+    /// not again under every earlier one (`room_report`).
+    pub reports: std::collections::HashMap<String, String>,
 }
 
 impl RoomModel {
@@ -276,7 +280,7 @@ impl TeamRoom {
         let rows = super::room_source_group::group(rows, &self.sources_open);
         let talk = super::room_jump::talk(&rows);
         let trail = Rc::new(super::room_trail::room_trail_items(&rows));
-        RoomModel {
+        let mut model = RoomModel {
             scope: self.scope(),
             agents,
             mentions,
@@ -284,6 +288,18 @@ impl TeamRoom {
             unread,
             talk,
             trail,
+            reports: Default::default(),
+        };
+        // Later lines win: the rows are in the order they show.
+        let mut reports = std::collections::HashMap::new();
+        for row in model.line_rows() {
+            if let Row::Line { line, .. } = row {
+                for task in &line.tasks {
+                    reports.insert(task.clone(), line.key.clone());
+                }
+            }
         }
+        model.reports = reports;
+        model
     }
 }
