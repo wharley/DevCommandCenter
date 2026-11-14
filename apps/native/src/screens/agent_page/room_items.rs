@@ -158,6 +158,10 @@ impl TeamRoom {
             let automatic = dcc_core::domain::agent_chain::passed_answer(&line.text).is_some();
             return vec![self.passed_line(index, heading, automatic, cx)];
         }
+        // DCC told the agent its task was merged, or is live.
+        if let Some((title, state)) = dcc_core::domain::task_shipped::shipped_line(&line.text) {
+            return vec![self.shipped_row(index, title, state, cx)];
+        }
         if line
             .text
             .starts_with(dcc_core::domain::agent_routine::ROUTINE_MARK)

@@ -978,6 +978,10 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             post(git_conflicts::conflict_agent),
         )
         .route(
+            "/api/v1/git/pr-shipped",
+            post(git_conflicts::pull_request_shipped),
+        )
+        .route(
             "/api/v1/git/conflict-agent/cancel",
             post(git_conflicts::cancel_conflict_agent),
         )

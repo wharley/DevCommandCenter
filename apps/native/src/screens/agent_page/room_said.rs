@@ -33,6 +33,9 @@ pub(crate) fn is_message(line: &RoomLine) -> bool {
         && !line
             .text
             .starts_with(dcc_core::domain::agent_source::SOURCE_MARK)
+        && !line
+            .text
+            .starts_with(dcc_core::domain::task_shipped::SHIPPED_MARK)
 }
 
 impl Said {

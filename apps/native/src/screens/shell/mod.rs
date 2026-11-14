@@ -39,6 +39,7 @@ mod room_notices_tests;
 mod routines;
 mod session_search;
 mod settings;
+mod shipped;
 mod sidebar_events;
 mod skills;
 mod sources;
@@ -188,6 +189,8 @@ pub struct Shell {
     _pr_watch: (Entity<pr_watch::PrWatch>, gpui::Subscription),
     _routines: (Entity<routines::RoutineClock>, gpui::Subscription),
     _sources: (Entity<sources::SourceClock>, gpui::Subscription),
+    /// The merged tasks to tell their agents about (`shipped`).
+    shipped: shipped::ShippedWatch,
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
@@ -253,6 +256,8 @@ impl Shell {
             });
             this.sync_session_agents(cx);
             this.watch_rooms(cx);
+            // A task whose pull request just merged (`shipped`).
+            this.shipped_seen(cx);
         });
         let new_task_events = cx.subscribe_in(&new_task, window, Self::on_new_task_event);
         let conversation_events =
@@ -376,11 +381,15 @@ impl Shell {
                     shell.checks_failing(&event.failing, cx);
                     shell.reviews_received(&event.received, cx);
                     shell.check_in_arrived(event, cx);
+                    // The same pass looks at the merged tasks still waiting
+                    // for their deployment.
+                    shell.shipped_due(cx);
                 });
                 (watch, news)
             },
             _routines: routines::start(cx),
             _sources: sources::start(cx),
+            shipped: shipped::ShippedWatch::new(),
             notes,
             _notes: notes_follow,
             delivery,

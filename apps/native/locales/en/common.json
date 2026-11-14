@@ -530,6 +530,11 @@
     "room": {
       "today": "Today",
       "yesterday": "Yesterday",
+      "shipped": {
+        "live": "Delivery · {{task}} · in production",
+        "merged": "Delivery · {{task}} · merged",
+        "deployFailed": "Delivery · {{task}} · merged, but the deploy failed"
+      },
       "handoff": {
         "suggests": "{{agent}} suggests passing to {{teammate}}",
         "autoPassed": "Passed on to {{teammate}} automatically",

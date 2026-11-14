@@ -129,6 +129,7 @@ pub mod seen;
 pub mod session_activity;
 pub mod session_list;
 pub mod session_search;
+pub mod shipped;
 pub mod task_origin;
 pub mod session_search_rooms;
 pub mod setup_report;

@@ -33,14 +33,14 @@ pub struct GithubTarget {
     pub login: Option<String>,
 }
 
-struct Gh {
+pub(super) struct Gh {
     program: std::path::PathBuf,
-    host: String,
+    pub(super) host: String,
     envs: Vec<(String, String)>,
 }
 
 impl Gh {
-    fn new(target: &GithubTarget) -> Result<Self, String> {
+    pub(super) fn new(target: &GithubTarget) -> Result<Self, String> {
         let auth = resolve_auth_context(&target.host, target.login.as_deref())?;
         Ok(Self {
             program: resolve_cli_binary("gh")?,
@@ -49,7 +49,7 @@ impl Gh {
         })
     }
 
-    fn json(&self, argv: &[String]) -> Result<Value, String> {
+    pub(super) fn json(&self, argv: &[String]) -> Result<Value, String> {
         if !is_read_only_argv(argv) {
             return Err("DCC refused a GitHub call that is not a read.".to_string());
         }
@@ -117,7 +117,7 @@ fn pull_requests(gh: &Gh, target: &GithubTarget, query: &ListQuery) -> Result<Va
     Ok(answer)
 }
 
-fn str_at(value: &Value, pointer: &str) -> Option<String> {
+pub(super) fn str_at(value: &Value, pointer: &str) -> Option<String> {
     value
         .pointer(pointer)
         .and_then(Value::as_str)
@@ -292,7 +292,11 @@ fn deployment(raw: &Value, status: Option<&Value>) -> Value {
 }
 
 /// Deployments with the latest status of the first few.
-fn read_deployments(gh: &Gh, repo: &RepoSlug, argv: &[String]) -> Result<Vec<Value>, String> {
+pub(super) fn read_deployments(
+    gh: &Gh,
+    repo: &RepoSlug,
+    argv: &[String],
+) -> Result<Vec<Value>, String> {
     let raw = gh.json(argv)?;
     Ok(raw
         .as_array()

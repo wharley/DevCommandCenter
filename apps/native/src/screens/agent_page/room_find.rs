@@ -74,6 +74,9 @@ fn line_text(line: &RoomLine, said: Option<&Said>) -> Option<String> {
     if let Some(request) = routine_request(&line.text) {
         return Some(request.to_string());
     }
+    if let Some((title, _)) = dcc_core::domain::task_shipped::shipped_line(&line.text) {
+        return Some(title.to_string());
+    }
     source_request(&line.text).map(|(watch, connector)| format!("{watch} ({connector})"))
 }
 

@@ -100,3 +100,16 @@ pub(super) async fn complete_merge(
             .await,
     )
 }
+
+/// Whether a task's merged pull request is live (`pr_shipped`): read from
+/// GitHub, nothing changed.
+pub(super) async fn pull_request_shipped(
+    State(backend): State<Arc<HttpBackend>>,
+    Json(input): Json<dcc_tauri::commands::pr_shipped::PullRequestShippedInput>,
+) -> Result<Json<Value>, HttpApiError> {
+    git_changes::task_checkout(&backend, &input.workspace_root).await?;
+    reply(
+        dcc_tauri::commands::pr_shipped::pull_request_shipped_with_state(&backend.workspace, input)
+            .await,
+    )
+}
