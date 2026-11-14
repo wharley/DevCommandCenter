@@ -104,6 +104,8 @@ pub struct TeamRoom {
     pub(crate) copy: super::room_copy::RoomCopy,
     /// "Buscar na sala", while open (`room_find`).
     pub(crate) find: Option<super::room_find::RoomFind>,
+    /// Who answers here by default, as the person set it (`room_lead`).
+    pub(crate) lead: super::room_lead::RoomLead,
     /// The one agent shown, on its page's "Conversa" (`room_focus`).
     pub(crate) focus: Option<String>,
     /// The project whose room this is; none: the Geral room.
@@ -244,6 +246,7 @@ impl TeamRoom {
             cleanup_path: (!cfg!(test)).then(|| crate::prefs::native_file("cleanup-alert.json")),
             copy: super::room_copy::RoomCopy::new(cx),
             find: None,
+            lead: Default::default(),
             focus: None,
             room: None,
             room_generation: 0,
@@ -399,6 +402,7 @@ impl TeamRoom {
             text,
             &team,
             last.as_ref().map(|(id, minutes)| (id.as_str(), *minutes)),
+            self.lead.agent_id.as_deref(),
         )?;
         let agent = agents.iter().find(|agent| agent.id == mate.id)?.clone();
         Some((agent, reason))

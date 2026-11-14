@@ -102,6 +102,7 @@ mod room_approval_respond;
 mod room_cards;
 mod room_feed;
 mod room_handoffs;
+mod room_lead;
 mod room_line_json;
 mod room_steps;
 mod room_turns;
@@ -1164,6 +1165,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/agents/:agent_id/sources/:source_id/read",
             post(agent_sources::read),
         )
+        .route("/api/v1/rooms/lead", post(room_lead::set))
         .route(
             "/api/v1/agents/:agent_id/reactions",
             post(agent_reactions::set),

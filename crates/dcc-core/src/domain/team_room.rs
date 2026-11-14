@@ -96,11 +96,13 @@ fn reviewer_job(text: &str) -> bool {
 }
 
 /// Who answers `text`: `last` is the agent that answered last and how many
-/// minutes ago.
+/// minutes ago; `lead` the agent the person set to answer in this room when
+/// nothing else says who (none: the Reviewer, else the first).
 pub fn route<'a>(
     text: &str,
     team: &[Teammate<'a>],
     last: Option<(&str, i64)>,
+    lead: Option<&str>,
 ) -> Option<(Teammate<'a>, RouteReason)> {
     if let Some(mate) = mentioned(text, team) {
         return Some((mate, RouteReason::Mention));
@@ -117,7 +119,8 @@ pub fn route<'a>(
     if let Some(mate) = continues {
         return Some((*mate, RouteReason::Continues));
     }
-    reviewer
+    lead.and_then(|lead| team.iter().find(|mate| mate.id == lead))
+        .or(reviewer)
         .or(team.first())
         .map(|mate| (*mate, RouteReason::Default))
 }
@@ -211,7 +214,7 @@ mod tests {
     ];
 
     fn who(text: &str, last: Option<(&str, i64)>) -> (&'static str, RouteReason) {
-        let (mate, reason) = route(text, &TEAM, last).unwrap();
+        let (mate, reason) = route(text, &TEAM, last, None).unwrap();
         (mate.id, reason)
     }
 
@@ -265,7 +268,7 @@ mod tests {
         assert_eq!(who("qual o price?", None), ("rev", RouteReason::Default));
         // Without a Reviewer, the first agent.
         assert_eq!(
-            route("oi", &TEAM[1..], None).map(|(mate, reason)| (mate.id, reason)),
+            route("oi", &TEAM[1..], None, None).map(|(mate, reason)| (mate.id, reason)),
             Some(("res", RouteReason::Default))
         );
     }
@@ -292,5 +295,36 @@ mod tests {
             .contains("pass to Dev yourself"));
         assert!(block.contains("Pesquisa, QA") && block.contains("never contact"));
         assert!(handoff_block(&[], &[]).is_none());
+    }
+
+    #[test]
+    fn the_rooms_lead_answers_when_nothing_else_says_who() {
+        let lead = TEAM[1].id;
+        // Nobody named, no review word, nobody spoke lately: the lead.
+        let (mate, reason) = route("e o deploy de hoje?", &TEAM, None, Some(lead)).unwrap();
+        assert_eq!((mate.id, reason), (lead, RouteReason::Default));
+        // A mention and whoever was just talking still come first.
+        let named = format!("@{} olha isso", TEAM[2].name);
+        assert_eq!(
+            route(&named, &TEAM, None, Some(lead)).unwrap().0.id,
+            TEAM[2].id
+        );
+        let (mate, reason) = route(
+            "e o deploy de hoje?",
+            &TEAM,
+            Some((TEAM[2].id, 5)),
+            Some(lead),
+        )
+        .unwrap();
+        assert_eq!((mate.id, reason), (TEAM[2].id, RouteReason::Continues));
+        // A lead that left the team is as none set.
+        let (mate, _) = route("e o deploy de hoje?", &TEAM, None, Some("gone")).unwrap();
+        assert_eq!(
+            mate.id,
+            route("e o deploy de hoje?", &TEAM, None, None)
+                .unwrap()
+                .0
+                .id
+        );
     }
 }

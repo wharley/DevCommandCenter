@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS dcc_agent_rooms (
     project_id TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+-- Who answers in a room when nothing else says who; '' is the Geral room.
+CREATE TABLE IF NOT EXISTS dcc_room_leads (
+    room TEXT PRIMARY KEY NOT NULL,
+    agent_id TEXT NOT NULL
+);
 "#;
 
 fn repository_error(error: impl ToString) -> dcc_core::CoreError {
@@ -17,6 +22,38 @@ fn repository_error(error: impl ToString) -> dcc_core::CoreError {
 }
 
 impl SqliteSessionRepo {
+    /// The agent the person set to answer in `room` (none: Geral) when
+    /// nothing else says who.
+    pub fn room_lead(&self, room: Option<&str>) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(repository_error)?;
+        let found = conn.query_row(
+            "SELECT agent_id FROM dcc_room_leads WHERE room = ?1",
+            params![room.unwrap_or_default()],
+            |row| row.get(0),
+        );
+        match found.optional() {
+            Ok(lead) => Ok(lead),
+            // A database from before the table: none set.
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Sets who answers in `room` by default; none: back to DCC's own pick.
+    pub fn set_room_lead(&self, room: Option<&str>, agent_id: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().map_err(repository_error)?;
+        let room = room.unwrap_or_default();
+        match agent_id.map(str::trim).filter(|id| !id.is_empty()) {
+            Some(agent_id) => conn.execute(
+                "INSERT INTO dcc_room_leads (room, agent_id) VALUES (?1, ?2)
+                 ON CONFLICT(room) DO UPDATE SET agent_id = excluded.agent_id",
+                params![room, agent_id],
+            ),
+            None => conn.execute("DELETE FROM dcc_room_leads WHERE room = ?1", params![room]),
+        }
+        .map_err(repository_error)?;
+        Ok(())
+    }
+
     /// Marks `session_id` as the conversation of `project_id`'s room.
     pub fn set_session_room(&self, session_id: &SessionId, project_id: &str) -> Result<()> {
         let project_id = project_id.trim();

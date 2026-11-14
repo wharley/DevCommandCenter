@@ -91,6 +91,7 @@ mod room_flat_tests;
 mod room_flow;
 mod room_focus;
 mod room_handoff;
+mod room_lead;
 mod room_images;
 #[cfg(test)]
 mod room_images_tests;

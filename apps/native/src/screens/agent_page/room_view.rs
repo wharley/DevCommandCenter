@@ -175,6 +175,8 @@ impl Render for TeamRoom {
             self.list.take(model);
         }
         self.sync_find(rebuilt, cx);
+        self.sync_lead();
+        let lead_menu = self.lead_menu(cx);
         let find_bar = self.find_bar(cx);
         let find_button = self.find_button(cx);
         // The questions and approvals wait on the field, not in the list.
@@ -217,6 +219,7 @@ impl Render for TeamRoom {
                                 .items_center()
                                 .gap(px(8.0))
                                 .children(self.status_chips(cx))
+                                .children(lead_menu)
                                 .child(find_button)
                                 .children(self.pause_button(cx)),
                         ),

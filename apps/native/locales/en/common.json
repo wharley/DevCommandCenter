@@ -535,6 +535,12 @@
         "merged": "Delivery · {{task}} · merged",
         "deployFailed": "Delivery · {{task}} · merged, but the deploy failed"
       },
+      "lead": {
+        "auto": "Answers: automatic",
+        "set": "Answers: {{agent}}",
+        "autoOption": "Automatic",
+        "hint": "Who answers when you name nobody. A review still goes to the Reviewer, and whoever was talking goes on."
+      },
       "handoff": {
         "suggests": "{{agent}} suggests passing to {{teammate}}",
         "autoPassed": "Passed on to {{teammate}} automatically",

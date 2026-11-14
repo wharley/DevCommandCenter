@@ -16,6 +16,11 @@ impl SessionCommandState {
         self.session_repo.session_room(session_id)
     }
 
+    /// Who answers in `room` by default (none: Geral), as the person set it.
+    pub fn set_room_lead(&self, room: Option<&str>, agent_id: Option<&str>) -> Result<()> {
+        self.session_repo.set_room_lead(room, agent_id)
+    }
+
     /// What a turn in a project's room hears: which project it is, so work
     /// asked there goes to it without the person naming it.
     pub(super) fn room_block(&self, session_id: &SessionId) -> Result<Option<String>> {

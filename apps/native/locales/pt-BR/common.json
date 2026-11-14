@@ -535,6 +535,12 @@
         "merged": "Entrega · {{task}} · mesclado",
         "deployFailed": "Entrega · {{task}} · mesclado, mas o deploy falhou"
       },
+      "lead": {
+        "auto": "Responde: automático",
+        "set": "Responde: {{agent}}",
+        "autoOption": "Automático",
+        "hint": "Quem responde quando você não cita ninguém. Assunto de revisão ainda vai para o Revisor, e quem estava falando continua."
+      },
       "handoff": {
         "suggests": "{{agent}} sugere passar a vez para {{teammate}}",
         "autoPassed": "Passado automaticamente para {{teammate}}",

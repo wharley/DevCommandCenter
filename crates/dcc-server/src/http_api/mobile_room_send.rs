@@ -86,6 +86,7 @@ fn pick<'a>(
     agents: &'a [ResidentAgent],
     lines: &[RoomLine],
     now: chrono::DateTime<chrono::Utc>,
+    lead: Option<&str>,
 ) -> Option<(&'a ResidentAgent, RouteReason)> {
     let lines: Vec<&RoomLine> = lines.iter().collect();
     let last = last_answer(&lines, now);
@@ -101,6 +102,7 @@ fn pick<'a>(
         text,
         &team,
         last.as_ref().map(|(id, minutes)| (id.as_str(), *minutes)),
+        lead,
     )?;
     let agent = agents.iter().find(|agent| agent.id == mate.id)?;
     Some((agent, reason))
@@ -190,7 +192,15 @@ fn destination(
         });
     }
     let lines = room_lines(&repo, &team.room_homes(room))?;
-    let Some((agent, reason)) = pick(text, &team.agents, &lines, chrono::Utc::now()) else {
+    // The agent the person set to answer in this room by default.
+    let lead = repo.room_lead(room).ok().flatten();
+    let Some((agent, reason)) = pick(
+        text,
+        &team.agents,
+        &lines,
+        chrono::Utc::now(),
+        lead.as_deref(),
+    ) else {
         return Ok(Err(HttpApiError::Refused(
             "roomNoAgent",
             "no agent can answer".to_string(),
@@ -541,9 +551,9 @@ mod tests {
             .unwrap()
             .with_timezone(&chrono::Utc);
         let lines = [answered("ops", "2026-11-10T10:00:00Z")];
-        let (agent, reason) = pick("e o deploy?", &agents, &lines, now).unwrap();
+        let (agent, reason) = pick("e o deploy?", &agents, &lines, now, None).unwrap();
         assert_eq!((agent.id.as_str(), reason), ("ops", RouteReason::Continues));
-        let (agent, reason) = pick("@Agente dev olha isso", &agents, &lines, now).unwrap();
+        let (agent, reason) = pick("@Agente dev olha isso", &agents, &lines, now, None).unwrap();
         assert_eq!((agent.id.as_str(), reason), ("dev", RouteReason::Mention));
         assert_eq!(reason_name(RouteReason::Default), "default");
     }
