@@ -21,6 +21,9 @@ use crate::data::team_room_poll::{LivePoll, LiveProbe, Polled};
 
 /// Between two reads while DCC is in front.
 pub(crate) const LIVE_BEAT: Duration = Duration::from_millis(700);
+/// While a turn has shown nothing yet: its first sign is what the person
+/// waits for, so it is looked for more often until it comes.
+pub(crate) const FIRST_SIGN_BEAT: Duration = Duration::from_millis(250);
 /// With DCC in the back: what moved is there when it comes back.
 const LIVE_BEAT_BACK: Duration = Duration::from_millis(2500);
 /// A room not drawn for this long is not looked at: the loop stops and the
@@ -50,6 +53,16 @@ pub(crate) struct RoomLive {
     /// Beats that read the database, for the tests.
     #[cfg(test)]
     pub(crate) polls: usize,
+}
+
+/// How long until the next read: often while a turn's first sign is
+/// awaited, at the usual pace once it works, rarely with DCC in the back.
+pub(crate) fn beat_for(foreground: bool, awaiting_first_sign: bool) -> Duration {
+    match (foreground, awaiting_first_sign) {
+        (false, _) => LIVE_BEAT_BACK,
+        (true, true) => FIRST_SIGN_BEAT,
+        (true, false) => LIVE_BEAT,
+    }
 }
 
 impl TeamRoom {
@@ -137,11 +150,12 @@ impl TeamRoom {
             self.live.watching = false;
             return None;
         }
-        let beat = if crate::data::foreground::is_foreground(cx) {
-            LIVE_BEAT
-        } else {
-            LIVE_BEAT_BACK
-        };
+        let waiting = self.live_feeds(cx).iter().any(|feed| {
+            feed.now
+                .live()
+                .is_some_and(|turn| turn.doing == dcc_core::domain::team_room_live::Doing::Reading)
+        });
+        let beat = beat_for(crate::data::foreground::is_foreground(cx), waiting);
         Some((probes, self.db_path.clone(), self.room_generation, beat))
     }
 
@@ -212,5 +226,19 @@ impl TeamRoom {
         self.live
             .stopping
             .retain(|session| live.contains_key(session.as_str()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_first_sign_is_looked_for_more_often() {
+        assert_eq!(beat_for(true, true), FIRST_SIGN_BEAT);
+        assert_eq!(beat_for(true, false), LIVE_BEAT);
+        // In the back nothing is hurried.
+        assert_eq!(beat_for(false, true), LIVE_BEAT_BACK);
+        assert!(FIRST_SIGN_BEAT < LIVE_BEAT && LIVE_BEAT < LIVE_BEAT_BACK);
     }
 }
