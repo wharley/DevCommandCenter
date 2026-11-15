@@ -61,6 +61,15 @@ describe("resident agents", () => {
 		expect(drop).toContain("M50 8C64");
 		expect(drop).toContain('translate(0 16)');
 		expect(drop).not.toContain("rotate(24 84 52)");
+		const cat = residentMascotSvg({ ...avatar, shape: "cat", accessory: "cap" }, "watching");
+		expect(cat).toContain("M21 19L39 32");
+		expect(cat).toContain("translate(0 10)");
+		// The cap sits between its ears.
+		expect(cat).toContain("M34 40Q50 13 66 40z");
+		const cloud = residentMascotSvg({ ...avatar, shape: "cloud", accessory: "antenna" }, "needsYou");
+		expect(cloud).toContain("M22 84a16 16");
+		expect(cloud).toContain("translate(0 13)");
+		expect(cloud).not.toContain("rotate(24 84 52)");
 		expect(residentMascotSvg({ ...avatar, accessory: "glasses" }, "watching")).toContain('r="10.5"');
 		const parsed = parseResidentAgents(answer, null);
 		if (!parsed || parsed.unchanged) throw new Error("expected agents");

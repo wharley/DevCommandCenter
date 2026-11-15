@@ -22,7 +22,7 @@ export type ResidentAgentAvatar = {
 	color: string;
 	arms: number;
 	eyes: string;
-	/** `octopus` | `drop` | `block` | `ghost` */
+	/** `octopus` | `drop` | `block` | `ghost` | `cat` | `cloud` */
 	shape: string;
 	/** `none` | `glasses` | `magnifier` | `antenna` | `cap` */
 	accessory: string;
@@ -197,6 +197,14 @@ function silhouette(shape: string, arms: number, fill: string): { body: string; 
 				eyesDy: 0,
 				raisesArm: false,
 			};
+		case "cat":
+			return {
+				body: `<path d="M21 19L39 32Q50 28 61 32L79 19V60a29 26 0 0 1-58 0z" fill="${fill}" stroke="${fill}" stroke-width="6" stroke-linejoin="round"/>${shine(33, 42)}`,
+				eyesDy: 10,
+				raisesArm: false,
+			};
+		case "cloud":
+			return { body: `<path d="M22 84a16 16 0 0 1-2-32a18 18 0 0 1 20-18a20 20 0 0 1 34 6a17 17 0 0 1 4 44z" fill="${fill}"/>${shine(38, 40)}`, eyesDy: 13, raisesArm: false };
 		default: {
 			const count = Math.min(5, Math.max(3, Math.round(arms)));
 			const gap = 3;
@@ -218,7 +226,11 @@ function accessory(item: string, shape: string, eyesDy: number): string {
 			? { capTop: 22, capHalf: 15, antenna: 14 }
 			: shape === "block"
 				? { capTop: 16, capHalf: 27, antenna: 19 }
-				: { capTop: 12, capHalf: 24, antenna: 15 };
+				: shape === "cat"
+					? { capTop: 25, capHalf: 16, antenna: 28 }
+					: shape === "cloud"
+						? { capTop: 14, capHalf: 20, antenna: 16 }
+						: { capTop: 12, capHalf: 24, antenna: 15 };
 	const eyes = 46 + eyesDy;
 	switch (item) {
 		case "glasses":

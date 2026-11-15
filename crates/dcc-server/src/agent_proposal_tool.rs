@@ -185,7 +185,7 @@ mod tests {
         for bad in [
             json!({"name": "QA", "role": "x"}),
             json!({"name": " ", "role": "x", "firstRequest": "y"}),
-            json!({"name": "QA", "role": "x", "firstRequest": "y", "mascot": {"shape": "cat", "color": "blue"}}),
+            json!({"name": "QA", "role": "x", "firstRequest": "y", "mascot": {"shape": "fish", "color": "blue"}}),
             json!({"name": "QA", "role": "x", "firstRequest": "y", "dccTools": {"shell": "read"}}),
             json!({"name": "QA", "role": "x", "firstRequest": "y", "extra": 1}),
         ] {

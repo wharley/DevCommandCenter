@@ -37,6 +37,18 @@ fn head(shape: &str) -> Head {
             cap_half: 27.0,
             antenna_base: 19.0,
         },
+        // Between its ears.
+        "cat" => Head {
+            cap_top: 25.0,
+            cap_half: 16.0,
+            antenna_base: 28.0,
+        },
+        // On its middle puff.
+        "cloud" => Head {
+            cap_top: 14.0,
+            cap_half: 20.0,
+            antenna_base: 16.0,
+        },
         _ => Head {
             cap_top: 12.0,
             cap_half: 24.0,
@@ -75,6 +87,24 @@ pub(super) fn silhouette(shape: &str, arms: u8, fill: &str) -> Silhouette {
                 shine(36.0, 27.0)
             ),
             eyes_dy: 0.0,
+            raises_arm: false,
+        },
+        // Two ears for corners; the stroke rounds their tips.
+        "cat" => Silhouette {
+            body: format!(
+                r##"<path d="M21 19L39 32Q50 28 61 32L79 19V60a29 26 0 0 1-58 0z" fill="{fill}" stroke="{fill}" stroke-width="6" stroke-linejoin="round"/>{}"##,
+                shine(33.0, 42.0)
+            ),
+            eyes_dy: 10.0,
+            raises_arm: false,
+        },
+        // Wider than tall: a flat base under three puffs.
+        "cloud" => Silhouette {
+            body: format!(
+                r##"<path d="M22 84a16 16 0 0 1-2-32a18 18 0 0 1 20-18a20 20 0 0 1 34 6a17 17 0 0 1 4 44z" fill="{fill}"/>{}"##,
+                shine(38.0, 40.0)
+            ),
+            eyes_dy: 13.0,
             raises_arm: false,
         },
         _ => {

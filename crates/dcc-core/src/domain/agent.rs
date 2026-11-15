@@ -23,8 +23,9 @@ pub const AGENT_AVATAR_COLORS: &[&str] = &["blue", "cyan", "violet", "amber", "g
 pub const AGENT_AVATAR_EYES: &[&str] = &["round", "smile", "visor"];
 pub const AGENT_AVATAR_MIN_ARMS: u8 = 3;
 pub const AGENT_AVATAR_MAX_ARMS: u8 = 5;
-/// The mascot's silhouette: the octopus (arms count), a drop, a block, a ghost.
-pub const AGENT_AVATAR_SHAPES: &[&str] = &["octopus", "drop", "block", "ghost"];
+/// The mascot's silhouette: the octopus (arms count), a drop, a block, a ghost,
+/// a cat, a cloud.
+pub const AGENT_AVATAR_SHAPES: &[&str] = &["octopus", "drop", "block", "ghost", "cat", "cloud"];
 /// What it wears or holds.
 pub const AGENT_AVATAR_ACCESSORIES: &[&str] = &["none", "glasses", "magnifier", "antenna", "cap"];
 pub const REVIEWER_PRESET: &str = "reviewer";
