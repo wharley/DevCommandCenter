@@ -128,6 +128,7 @@ pub async fn open(
             parent_session_id: parent,
             project: args.project,
             title: args.title.trim().to_string(),
+            brief: args.task.clone(),
             instruction: dcc_tauri::agent_task::task_instruction(
                 &args.task,
                 args.worktree.unwrap_or(true),

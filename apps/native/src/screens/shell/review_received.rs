@@ -118,7 +118,14 @@ impl Shell {
 
     /// Sends the pull request's open review conversations to the task's
     /// own conversation (`review_fix`).
-    fn fix_in_task(&mut self, pr: Received, task: String, path: String, cx: &mut Context<Self>) {
+    fn fix_in_task(
+        &mut self,
+        pr: Received,
+        task: String,
+        path: String,
+        seen: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let db = crate::data::loader::database_path();
         cx.spawn(async move |_, cx| {
             let sent = cx
@@ -132,8 +139,24 @@ impl Shell {
                             .review_comments(&path, Some(&pr.head_branch), None)
                             .map_err(|error| error.to_string())?;
                         let url = read.url.clone().filter(|url| !url.is_empty());
+                        // The pull request's own conversation, read as the
+                        // hub reads it; a failure leaves it out.
+                        let item = crate::data::pr_hub::Item {
+                            provider: "github".to_string(),
+                            repository_root: path.clone(),
+                            number: pr.number,
+                            url: pr.url.clone(),
+                            ..crate::data::pr_hub::Item::default()
+                        };
+                        let general = api
+                            .pr_hub_detail(&item, false)
+                            .map(|detail| {
+                                super::review_fix::general_since(&detail, &pr.from, seen.as_deref())
+                            })
+                            .unwrap_or_default();
                         let Some(prompt) = super::review_fix::fix_prompt(
                             &read.comments,
+                            &general,
                             &pr.from,
                             url.as_deref().or(Some(pr.url.as_str())),
                         ) else {
@@ -188,6 +211,10 @@ impl Shell {
             ) else {
                 continue;
             };
+            // What was seen before this look: only what came after is new.
+            let seen = cx
+                .global::<AgentTriggers>()
+                .received_at(&reviewer.id, &pr.url);
             let news = cx.update_global::<AgentTriggers, _>(|triggers, _| {
                 triggers.advance_received(&reviewer.id, &pr.url, &pr.last_activity)
             });
@@ -208,7 +235,7 @@ impl Shell {
                 cx.update_global::<AgentTriggers, _>(|triggers, _| {
                     triggers.record(&reviewer.id, Trigger::ReviewReceived, &task, now)
                 });
-                self.fix_in_task(pr.clone(), task, path, cx);
+                self.fix_in_task(pr.clone(), task, path, seen, cx);
                 continue;
             }
             let Some(run) = review_run(&reviewer, &providers, &pick, &path, String::new()) else {

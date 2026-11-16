@@ -373,7 +373,7 @@
         "ask": "Analyse only",
         "send": "Fix in the task",
         "askHint": "When someone comments on a pull request of yours, this agent reads it and says what to change, in a conversation of its own in the task. It does not change the code.",
-        "sendHint": "When someone comments on a pull request of yours, the open conversations go straight to the task's own agent, which fixes them. This agent is not called. The fix waits for you to deliver, or goes to the pull request where delivery is granted. Use it on private repositories: the comments' text reaches an agent that can change code.",
+        "sendHint": "When someone comments on a pull request of yours, the conversations open on lines and what was written in the pull request's own conversation go straight to the task's own agent, which fixes them. This agent is not called. The fix waits for you to deliver, or goes to the pull request where delivery is granted. Use it on private repositories: the comments' text reaches an agent that can change code.",
         "sent": "comments sent to the task to be fixed",
         "failed": "could not send to the task: {{error}}"
       },

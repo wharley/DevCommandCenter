@@ -1995,6 +1995,31 @@ pub async fn message_task(
     Ok(task)
 }
 
+/// A turn of DCC's own in `session_id`, as that conversation last ran:
+/// queued when a turn is at work there, started otherwise
+/// (`task_same_work`'s forward).
+pub(crate) async fn send_dcc_turn(
+    state: &SessionCommandState,
+    session_id: &SessionId,
+    prompt: String,
+) -> Result<(), String> {
+    let busy = SessionEventRepo::list_events_by_session(state, session_id)
+        .await
+        .ok()
+        .and_then(|events| SessionProjection::fold(&events))
+        .and_then(|projection| projection.active_turn_id)
+        .is_some();
+    let turn = hand_back_turn(session_id, prompt);
+    if busy {
+        run_queue_turn(state, state, QueueTurnInput { turn })
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    } else {
+        send_turn_with_state(state, turn).await.map(|_| ())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ProposeTaskInput {
     pub parent_session_id: SessionId,

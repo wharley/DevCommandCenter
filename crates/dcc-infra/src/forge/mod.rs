@@ -4,6 +4,7 @@ pub mod detect;
 pub mod github;
 pub mod github_actions_job;
 pub mod github_checks;
+pub mod github_head;
 pub mod github_merge;
 pub mod github_read;
 pub mod github_read_run;

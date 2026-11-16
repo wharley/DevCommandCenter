@@ -47,6 +47,8 @@ pub struct OpenTaskInput {
     pub project: String,
     pub title: String,
     pub instruction: String,
+    /// The brief as the agent wrote it, before `task_instruction`.
+    pub brief: String,
     pub worktree: bool,
     pub target_provider_id: Option<String>,
     pub target_model_id: Option<String>,
@@ -156,6 +158,34 @@ pub async fn open_task(
             ));
         }
     }
+    // Work on a branch or pull request an open task already has gets no
+    // second task (`task_same_work`).
+    let (db_path, named, looked) = (
+        state.db_path().to_path_buf(),
+        format!("{}\n{}", input.title, input.instruction),
+        target.clone(),
+    );
+    let existing = tokio::task::spawn_blocking(move || {
+        crate::task_same_work::existing_task(&db_path, &looked, &named)
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    if let Some(existing) = existing {
+        let agent = state
+            .session_agent(&input.parent_session_id)
+            .ok()
+            .flatten()
+            .map_or_else(|| "An agent".to_string(), |agent| agent.name);
+        // Brought to the task that owns it; refused with why when that
+        // task has no conversation of its own to take it.
+        let brought =
+            crate::task_same_work::forward(state, &existing, &agent, &input.title, &input.brief)
+                .await;
+        return Err(match brought {
+            Ok(()) => dcc_core::domain::task_same_work::forwarded(&existing.what, &existing.name),
+            Err(_) => dcc_core::domain::task_same_work::refusal(&existing.what, &existing.name),
+        });
+    }
     propose_task(
         state,
         ProposeTaskInput {
@@ -240,6 +270,7 @@ mod tests {
             parent_session_id: SessionId("parent".into()),
             project: project.into(),
             title: "Fase 2".into(),
+            brief: "Do it.".into(),
             instruction: "Implement it.".into(),
             worktree: true,
             target_provider_id: None,

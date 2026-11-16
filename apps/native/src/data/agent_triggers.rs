@@ -203,6 +203,14 @@ impl AgentTriggers {
     /// seen before. A pull request seen for the first time is news when its
     /// activity came after the trigger was turned on (its first review is
     /// what lists it); older reviews never wake the agent.
+    /// The latest review activity already seen on that pull request.
+    pub fn received_at(&self, agent_id: &str, url: &str) -> Option<String> {
+        self.stored
+            .received
+            .get(&format!("{agent_id}|{url}"))
+            .cloned()
+    }
+
     pub fn advance_received(&mut self, agent_id: &str, url: &str, latest: &str) -> bool {
         let key = format!("{agent_id}|{url}");
         // Turned on before this was kept: from now on.
