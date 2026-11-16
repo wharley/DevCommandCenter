@@ -393,6 +393,11 @@
         "failed": "Could not deliver {{task}} ({{agent}}): {{error}}"
       },
       "replySent": "{{agent}} replied in {{destination}}",
+      "notSent": {
+        "nothing": "not sent: the review brought no comment and no summary to publish",
+        "unreadable": "not sent: the agent's answer could not be read as a review ({{error}}); the drafts may not show in Pull Requests",
+        "refused": "not sent: {{error}}"
+      },
       "sent": {
         "approve": "approved",
         "request_changes": "asked for changes",

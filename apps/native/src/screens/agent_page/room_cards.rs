@@ -214,6 +214,19 @@ impl TeamRoom {
                         ),
                         _ => None,
                     })
+                    .children(match &card.kind {
+                        CardKind::PrReview {
+                            not_sent: Some(why),
+                            ..
+                        } => Some(
+                            div()
+                                .debug_selector(move || format!("room-card-not-sent-{index}"))
+                                .text_size(px(11.0))
+                                .text_color(tw::AMBER_500.hsla())
+                                .child(why.words(cx)),
+                        ),
+                        _ => None,
+                    })
                     .children(reason.map(|reason| {
                         div()
                             .debug_selector(move || format!("room-card-reason-{index}"))

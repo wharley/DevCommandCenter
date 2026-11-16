@@ -41,6 +41,9 @@ pub struct PrReviewJob {
     /// DCC sent it for the agent (`agent_auto_send`): nothing waits in
     /// Pull Requests.
     pub sent: Option<super::agent_auto_send::SentReview>,
+    /// It was to go by itself and did not, and why: its drafts wait in
+    /// Pull Requests.
+    pub not_sent: Option<super::agent_auto_send::NotSent>,
 }
 
 impl PrReviewJob {
@@ -106,6 +109,7 @@ impl PrReviewJobs {
                 started_at: Some(chrono::Utc::now().to_rfc3339()),
                 agent_id: None,
                 sent: None,
+                not_sent: None,
             },
         );
         true
@@ -129,6 +133,8 @@ impl PrReviewJobs {
             job.finished = Some(finished);
             job.finished_at = Some(chrono::Utc::now().to_rfc3339());
         }
+        // No longer at work: nothing to start again if the app quits.
+        super::pr_reviews_running::remove(pr_id);
     }
 
     /// The job of `pr_id` was started by the Reviewer's trigger.
@@ -167,6 +173,18 @@ impl PrReviewJobs {
         }
     }
 
+    /// The review of `pr_id` was to be sent for the agent and was not.
+    pub fn not_sent(cx: &mut App, pr_id: &str, why: super::agent_auto_send::NotSent) {
+        if let Some(job) = cx
+            .default_global::<Self>()
+            .jobs
+            .iter_mut()
+            .find(|job| job.pr_id == pr_id)
+        {
+            job.not_sent = Some(why);
+        }
+    }
+
     /// `markPrReviewJobSeen`
     pub fn mark_seen(cx: &mut App, pr_id: &str) {
         let unseen = Self::get(cx).is_some_and(|jobs| {
@@ -184,6 +202,7 @@ impl PrReviewJobs {
 
     /// `dismissPrReviewJob`: the review was sent, or failed.
     pub fn dismiss(cx: &mut App, pr_id: &str) {
+        super::pr_reviews_running::remove(pr_id);
         if Self::get(cx).is_some_and(|jobs| jobs.jobs.iter().any(|job| job.pr_id == pr_id)) {
             cx.global_mut::<Self>()
                 .jobs

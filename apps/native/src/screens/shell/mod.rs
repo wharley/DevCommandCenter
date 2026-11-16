@@ -34,6 +34,7 @@ mod reply_auto_send;
 mod review_auto_send;
 mod review_fix;
 mod review_requests;
+mod review_resume;
 mod review_trigger;
 mod reviewer_in_task;
 mod room_delivery;
@@ -197,6 +198,10 @@ pub struct Shell {
     shipped: shipped::ShippedWatch,
     reply_auto_send: reply_auto_send::ReplyAutoSend,
     deliver: deliver_auto::DeliverWatch,
+    /// The reviews cut short by the last quit were started again.
+    reviews_resumed: bool,
+    /// The review being started now is one of those (`review_resume`).
+    resuming_review: bool,
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
@@ -266,6 +271,8 @@ impl Shell {
             this.shipped_seen(cx);
             // A task of an agent's ready to be sent (`deliver_auto`).
             this.deliver_due(cx);
+            // A review the last quit cut short (`review_resume`).
+            this.resume_reviews(cx);
         });
         let new_task_events = cx.subscribe_in(&new_task, window, Self::on_new_task_event);
         let conversation_events =
@@ -400,6 +407,8 @@ impl Shell {
             shipped: shipped::ShippedWatch::new(),
             reply_auto_send: reply_auto_send::ReplyAutoSend::new(cx),
             deliver: deliver_auto::DeliverWatch::default(),
+            reviews_resumed: false,
+            resuming_review: false,
             notes,
             _notes: notes_follow,
             delivery,

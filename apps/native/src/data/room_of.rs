@@ -90,6 +90,7 @@ mod tests {
             reason: None,
             verdict: None,
             sent: None,
+            not_sent: None,
         });
         let labels: HashMap<String, String> =
             [("pr-924".to_string(), "vendeagora-app#924".to_string())].into();

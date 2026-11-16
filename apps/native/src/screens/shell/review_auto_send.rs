@@ -15,7 +15,7 @@ use chrono::Utc;
 use gpui::{App, Context};
 
 use super::Shell;
-use crate::data::agent_auto_send::{ReviewSend, SentReview, plan};
+use crate::data::agent_auto_send::{NotSent, ReviewSend, SentReview, plan};
 use crate::data::agent_triggers::AgentTriggers;
 use crate::data::agents::AgentRecord;
 use crate::data::desktop_api::DesktopApi;
@@ -27,11 +27,11 @@ use crate::data::pr_review_jobs::PrReviewJobs;
 use crate::i18n::{Args, Translate};
 use crate::ui::Toaster;
 
-/// A review that ran, and what became of sending it: `None` when nothing
-/// was to be sent.
+/// A review that ran, and what became of sending it: `None` when sending
+/// was not granted.
 pub(super) struct ReviewOutcome {
     pub answer: Result<String, String>,
-    pub sent: Option<Result<SentReview, String>>,
+    pub sent: Option<Result<SentReview, NotSent>>,
 }
 
 /// Submits the review in `response`, when `send` grants it and there is
@@ -42,11 +42,14 @@ pub(super) fn send_review(
     detail: &Detail,
     response: &str,
     send: ReviewSend,
-) -> Option<Result<SentReview, String>> {
+) -> Option<Result<SentReview, NotSent>> {
     if send == ReviewSend::Ask {
         return None;
     }
-    let mut review = parse_review(response, detail).ok()?;
+    let mut review = match parse_review(response, detail) {
+        Ok(review) => review,
+        Err(error) => return Some(Err(NotSent::Unreadable(error))),
+    };
     if let Some(login) = &item.forge_login {
         drop_repeats(&mut review, detail, login);
     }
@@ -54,22 +57,24 @@ pub(super) fn send_review(
         event_blocked(verdict.event(), item, detail.review_capabilities.as_ref()).is_some()
     });
     let summary = review.summary.trim();
-    let event = plan(
+    let Some(event) = plan(
         send,
         review.verdict,
         decision_blocked,
         review.comments.len(),
         summary,
-    )?;
+    ) else {
+        return Some(Err(NotSent::Nothing));
+    };
     let body = Some(summary).filter(|body| !body.is_empty());
     let sent = api
         .pr_hub_submit_review(item, body, event, &review.comments)
-        .map_err(|error| error.to_string())
+        .map_err(|error| NotSent::Refused(error.to_string()))
         .and_then(|result| {
             if !result.submitted {
-                return Err(result
-                    .warning
-                    .unwrap_or_else(|| "the forge did not take the review".to_string()));
+                return Err(NotSent::Refused(result.warning.unwrap_or_else(|| {
+                    "the forge did not take the review".to_string()
+                })));
             }
             Ok(SentReview {
                 // A decision the forge left out went as a comment.
@@ -93,7 +98,7 @@ pub(super) fn landed(
     pr_id: &str,
     agent: &str,
     label: &str,
-    sent: Option<Result<SentReview, String>>,
+    sent: Option<Result<SentReview, NotSent>>,
 ) -> bool {
     let args = Args::default()
         .with("agent", agent.to_string())
@@ -105,8 +110,10 @@ pub(super) fn landed(
             PrReviewJobs::sent(cx, pr_id, sent);
             true
         }
-        Some(Err(error)) => {
-            let text = cx.t_with("agents.autoSend.failed", &args.with("error", error));
+        // Said on the card, where it stays, and once on screen.
+        Some(Err(why)) => {
+            let text = cx.t_with("agents.autoSend.failed", &args.with("error", why.words(cx)));
+            PrReviewJobs::not_sent(cx, pr_id, why);
             Toaster::error(text, cx);
             false
         }

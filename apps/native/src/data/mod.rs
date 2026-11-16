@@ -98,6 +98,7 @@ pub mod pr_review_jobs;
 pub mod pr_review_verdict;
 pub mod pr_review_pick;
 pub mod pr_review_requests;
+pub mod pr_reviews_running;
 pub mod pr_since_review;
 pub mod project_logo;
 pub mod prompt;

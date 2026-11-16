@@ -106,6 +106,36 @@ pub struct SentReview {
     pub warning: Option<String>,
 }
 
+/// Why a review that was to go by itself did not: said on its card, so
+/// "reviewed" with nothing on the pull request is never left unexplained.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NotSent {
+    /// The agent's answer could not be read as a review.
+    Unreadable(String),
+    /// No comment and no text to send.
+    Nothing,
+    /// The forge refused it, in its words.
+    Refused(String),
+}
+
+impl NotSent {
+    pub fn words(&self, cx: &gpui::App) -> String {
+        let key = |name: &str| format!("agents.autoSend.notSent.{name}");
+        match self {
+            Self::Nothing => cx.t(&key("nothing")).to_string(),
+            Self::Unreadable(why) => cx
+                .t_with(
+                    &key("unreadable"),
+                    &Args::default().with("error", why.clone()),
+                )
+                .to_string(),
+            Self::Refused(why) => cx
+                .t_with(&key("refused"), &Args::default().with("error", why.clone()))
+                .to_string(),
+        }
+    }
+}
+
 impl SentReview {
     /// "aprovou · 3 comentários".
     pub fn words(&self, cx: &gpui::App) -> String {

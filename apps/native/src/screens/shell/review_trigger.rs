@@ -251,10 +251,13 @@ impl Shell {
         let db = crate::data::loader::database_path();
         for pr in news {
             let now = Utc::now();
+            // One cut short by a quit was allowed and counted when it
+            // first started.
+            let resumed = self.resuming_review;
             let allowed = cx
                 .global::<AgentTriggers>()
                 .check(&reviewer.id, trigger, &pr.url, now);
-            if allowed.is_err() {
+            if allowed.is_err() && !resumed {
                 continue;
             }
             // Only the pull requests of the agent's projects.
@@ -282,9 +285,26 @@ impl Shell {
                 continue;
             }
             PrReviewJobs::started_by_trigger(cx, &item.id);
-            cx.update_global::<AgentTriggers, _>(|triggers, _| {
-                triggers.record(&reviewer.id, trigger, &pr.url, now)
+            // Written down until it ends, to be started again if the app
+            // quits meanwhile.
+            crate::data::pr_reviews_running::add(crate::data::pr_reviews_running::RunningReview {
+                pr_id: item.id.clone(),
+                started_at: now.to_rfc3339(),
+                resumed,
+                started: crate::data::pr_reviews_running::Started::Trigger {
+                    trigger,
+                    url: pr.url.clone(),
+                    number: pr.number,
+                    repository: pr.repository.clone(),
+                    title: pr.title.clone(),
+                    author: pr.author.clone(),
+                },
             });
+            if !resumed {
+                cx.update_global::<AgentTriggers, _>(|triggers, _| {
+                    triggers.record(&reviewer.id, trigger, &pr.url, now)
+                });
+            }
             let (reviewer, providers, pick, pr) = (
                 reviewer.clone(),
                 providers.clone(),

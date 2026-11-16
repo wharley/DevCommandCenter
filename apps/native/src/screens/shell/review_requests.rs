@@ -103,6 +103,14 @@ impl Shell {
                 continue;
             }
             PrReviewJobs::asked_by(cx, &item.id, &agent.id);
+            crate::data::pr_reviews_running::add(crate::data::pr_reviews_running::RunningReview {
+                pr_id: item.id.clone(),
+                started_at: chrono::Utc::now().to_rfc3339(),
+                resumed: self.resuming_review,
+                started: crate::data::pr_reviews_running::Started::Asked {
+                    request: request.clone(),
+                },
+            });
             let send = cx
                 .try_global::<AgentTriggers>()
                 .map(|triggers| triggers.review_send(&agent.id, &project_id))

@@ -393,6 +393,11 @@
         "failed": "Não foi possível entregar {{task}} ({{agent}}): {{error}}"
       },
       "replySent": "{{agent}} respondeu em {{destination}}",
+      "notSent": {
+        "nothing": "não enviado: a revisão não trouxe comentário nem resumo para publicar",
+        "unreadable": "não enviado: a resposta do agente não pôde ser lida como revisão ({{error}}); os rascunhos podem não aparecer em Pull Requests",
+        "refused": "não enviado: {{error}}"
+      },
       "sent": {
         "approve": "aprovou",
         "request_changes": "pediu mudanças",
