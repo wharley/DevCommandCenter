@@ -15,7 +15,7 @@ use dcc_core::domain::provider::ProviderDescriptor;
 use gpui::{App, Context, Global};
 
 use super::Shell;
-use super::review_auto_send::{ReviewOutcome, landed};
+use super::review_auto_send::{ReviewOutcome, landed, sent_prompt};
 use super::review_trigger::{Checkout, hub_item, local_repository, read_and_review, review_run};
 use crate::data::agent_triggers::AgentTriggers;
 use crate::data::desktop_api::DesktopApi;
@@ -108,21 +108,34 @@ impl Shell {
                 .map(|triggers| triggers.review_send(&agent.id, &project_id))
                 .unwrap_or_default();
             let (agent, providers, pick) = (agent.clone(), providers.clone(), pick.clone());
-            cx.spawn(async move |_, cx| {
+            // The room of the conversation it asked from; none: Geral.
+            let room = agent
+                .sessions
+                .iter()
+                .find(|session| session.session_id == request.session_id)
+                .and_then(|session| session.room.clone());
+            let (asker, url) = (agent.clone(), request.url.clone());
+            cx.spawn(async move |shell, cx| {
                 let id = item.id.clone();
                 let name = agent.name.clone();
                 let answer = cx
                     .background_executor()
                     .spawn(async move { read_and_review(&agent, &providers, &pick, &item, send) })
                     .await;
-                let _ = cx.update(|cx| {
+                let _ = shell.update(cx, |shell, cx| {
                     // Merged or closed since it was asked: no review, no card.
                     let Some(ReviewOutcome { answer, sent }) = answer else {
                         return PrReviewJobs::dismiss(cx, &id);
                     };
                     let ok = answer.is_ok();
                     PrReviewJobs::finish(cx, &id, answer);
+                    let went = sent.as_ref().and_then(|sent| sent.as_ref().ok()).cloned();
                     if landed(cx, &id, &name, &label, sent) {
+                        // Whoever asked for it through a connector is answered.
+                        if let Some(went) = went {
+                            let prompt = sent_prompt(&label, &url, &went);
+                            shell.tell_review_sent(&asker, room.as_deref(), prompt, cx);
+                        }
                         return;
                     }
                     let key = if ok {
