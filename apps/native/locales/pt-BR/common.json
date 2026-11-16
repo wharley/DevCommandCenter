@@ -358,6 +358,25 @@
         "general": "Geral",
         "noRooms": "Escolha ao menos uma sala para valer."
       },
+      "check": {
+        "title": "Conferir",
+        "ok": "Nada faltando: o que está ligado tem onde valer e o que o acione.",
+        "paused": "\"Pausar todos\" está ligado: nada sai sozinho enquanto estiver.",
+        "announceWaits": "\"Ao abrir o PR\" está preenchido, mas a Resposta para fora não está em \"Enviar\" com uma sala: o anúncio vai esperar como cartão.",
+        "sourceRoom": "Uma fonte deste agente está numa sala em que a Resposta para fora não vale (em geral, a Geral): as respostas que ela gerar vão esperar como cartão.",
+        "fixWithoutTrigger": "\"Corrigir na tarefa\" está escolhido, mas o gatilho \"Review chegou num PR de tarefa\" está desligado: nunca vai acontecer.",
+        "reviewNeverStarts": "A revisão está autorizada, mas nenhum gatilho de revisão está ligado e não há fonte: nada inicia uma revisão sozinha.",
+        "holdsNowhere": "Há uma autorização ligada sem projeto ou sala marcada: ela não vale em lugar nenhum."
+      },
+      "fix": {
+        "title": "Comentários no seu PR",
+        "ask": "Só analisar",
+        "send": "Corrigir na tarefa",
+        "askHint": "Quando comentam num PR seu, este agente lê e diz o que mudar, numa conversa dele na tarefa. Ele não altera o código.",
+        "sendHint": "Quando comentam num PR seu, as conversas abertas vão direto ao agente da própria tarefa, que corrige. Este agente não é chamado. O ajuste espera você entregar, ou vai ao PR onde a entrega está autorizada. Use em repositórios privados: o texto dos comentários chega a um agente que pode alterar código.",
+        "sent": "comentários enviados à tarefa para corrigir",
+        "failed": "não foi possível enviar à tarefa: {{error}}"
+      },
       "deliver": {
         "note": "Ao abrir o PR",
         "notePlaceholder": "ex.: avise no #tech marcando o Giovanni e o Daniel",

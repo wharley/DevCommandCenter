@@ -358,6 +358,25 @@
         "general": "Geral",
         "noRooms": "Pick at least one room for it to hold."
       },
+      "check": {
+        "title": "Check",
+        "ok": "Nothing missing: what is on has somewhere to hold and something that starts it.",
+        "paused": "\"Pause all\" is on: nothing goes by itself while it is.",
+        "announceWaits": "\"When the pull request opens\" is written, but Reply to the outside is not on \"Send\" with a room: the announcement will wait as a card.",
+        "sourceRoom": "A source of this agent is in a room where Reply to the outside does not hold (usually Geral): the replies it leads to will wait as cards.",
+        "fixWithoutTrigger": "\"Fix in the task\" is picked, but the trigger \"A review came on a task's pull request\" is off: it will never happen.",
+        "reviewNeverStarts": "The review is granted, but no review trigger is on and there is no source: nothing starts a review by itself.",
+        "holdsNowhere": "A grant is on with no project or room picked: it holds nowhere."
+      },
+      "fix": {
+        "title": "Comments on your pull request",
+        "ask": "Analyse only",
+        "send": "Fix in the task",
+        "askHint": "When someone comments on a pull request of yours, this agent reads it and says what to change, in a conversation of its own in the task. It does not change the code.",
+        "sendHint": "When someone comments on a pull request of yours, the open conversations go straight to the task's own agent, which fixes them. This agent is not called. The fix waits for you to deliver, or goes to the pull request where delivery is granted. Use it on private repositories: the comments' text reaches an agent that can change code.",
+        "sent": "comments sent to the task to be fixed",
+        "failed": "could not send to the task: {{error}}"
+      },
       "deliver": {
         "note": "When the pull request opens",
         "notePlaceholder": "e.g. tell #tech and mention Giovanni and Daniel",

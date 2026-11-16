@@ -70,6 +70,16 @@ pub struct AutoSend {
     /// the person's words ("avise no #tech marcando o Giovanni"); empty:
     /// it is not told.
     pub deliver_note: String,
+    /// Review comments on the person's own pull request go to the task's
+    /// own conversation to be fixed, instead of this agent reading them
+    /// and only saying what to change (its "review received" trigger).
+    pub fix_in_task: bool,
+}
+
+impl AutoSend {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// The longest `AutoSend::deliver_note`.
@@ -287,6 +297,33 @@ impl AgentTriggers {
             && after_grant() == Some(true)
     }
 
+    pub fn fix_in_task(&self, agent_id: &str) -> bool {
+        !self.stored.paused
+            && self
+                .stored
+                .auto_send
+                .get(agent_id)
+                .is_some_and(|grants| grants.fix_in_task)
+    }
+
+    /// What the person picked, whatever "Pausar todos" says.
+    pub fn fix_in_task_choice(&self, agent_id: &str) -> bool {
+        self.stored
+            .auto_send
+            .get(agent_id)
+            .is_some_and(|grants| grants.fix_in_task)
+    }
+
+    pub fn set_fix_in_task(&mut self, agent_id: &str, on: bool) {
+        self.stored
+            .auto_send
+            .entry(agent_id.to_string())
+            .or_default()
+            .fix_in_task = on;
+        self.forget_empty_grants(agent_id);
+        self.save();
+    }
+
     pub fn deliver_note(&self, agent_id: &str) -> String {
         self.stored
             .auto_send
@@ -337,7 +374,12 @@ impl AgentTriggers {
     }
 
     fn forget_empty_grants(&mut self, agent_id: &str) {
-        if self.stored.auto_send.get(agent_id) == Some(&AutoSend::default()) {
+        if self
+            .stored
+            .auto_send
+            .get(agent_id)
+            .is_some_and(AutoSend::is_default)
+        {
             self.stored.auto_send.remove(agent_id);
         }
     }
@@ -417,6 +459,13 @@ mod tests {
         assert!(!triggers.may_deliver("sup", "app", &later));
         triggers.stored.paused = true;
         assert!(!triggers.may_deliver("dev", "app", &later));
+        // Review comments go to the task only where picked, and not paused.
+        assert!(!triggers.fix_in_task("dev"));
+        triggers.set_fix_in_task("dev", true);
+        assert!(triggers.fix_in_task_choice("dev") && !triggers.fix_in_task("dev"));
+        triggers.stored.paused = false;
+        assert!(triggers.fix_in_task("dev"));
+        triggers.stored.paused = true;
         // What to do when the pull request opens, in the person's words.
         assert_eq!(triggers.deliver_note("dev"), "");
         triggers.set_deliver_note("dev", "  avise no #tech  ");

@@ -6,7 +6,9 @@
 //! person turned this on and its ceilings allow: it reads the open review
 //! conversations (the code column's read) and, read-only in its own
 //! conversation in that task, says for each whether it holds and what to
-//! change.
+//! change. Where the person chose "Corrigir na tarefa" for that agent, the
+//! conversations go to the task's own agent to be fixed instead
+//! (`review_fix`).
 
 use chrono::Utc;
 use dcc_core::domain::provider::ProviderDescriptor;
@@ -114,6 +116,57 @@ impl Shell {
         }
     }
 
+    /// Sends the pull request's open review conversations to the task's
+    /// own conversation (`review_fix`).
+    fn fix_in_task(&mut self, pr: Received, task: String, path: String, cx: &mut Context<Self>) {
+        let db = crate::data::loader::database_path();
+        cx.spawn(async move |_, cx| {
+            let sent = cx
+                .background_executor()
+                .spawn({
+                    let pr = pr.clone();
+                    async move {
+                        let api =
+                            DesktopApi::load().ok_or_else(|| "DCC is not running".to_string())?;
+                        let read = api
+                            .review_comments(&path, Some(&pr.head_branch), None)
+                            .map_err(|error| error.to_string())?;
+                        let url = read.url.clone().filter(|url| !url.is_empty());
+                        let Some(prompt) = super::review_fix::fix_prompt(
+                            &read.comments,
+                            &pr.from,
+                            url.as_deref().or(Some(pr.url.as_str())),
+                        ) else {
+                            return Ok(false);
+                        };
+                        let session = super::review_fix::own_session(&db, &task)
+                            .ok_or_else(|| "the task has no conversation of its own".to_string())?;
+                        super::review_fix::send(&api, &session, &prompt).map(|()| true)
+                    }
+                })
+                .await;
+            let _ = cx.update(|cx| {
+                let what = match &sent {
+                    // No open conversation on a line: nothing was sent.
+                    Ok(false) => return,
+                    Ok(true) => cx.t("agents.autoSend.fix.sent").to_string(),
+                    Err(error) => cx
+                        .t_with(
+                            "agents.autoSend.fix.failed",
+                            &Args::default().with("error", error.clone()),
+                        )
+                        .to_string(),
+                };
+                let body = format!("{} #{} · {what}", pr.repository, pr.number);
+                crate::ui::attention::notify_away(&cx.t("agents.autoSend.fix.title"), &body);
+                if sent.is_err() {
+                    crate::ui::Toaster::error(body, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     fn reviews_received_for(
         &mut self,
         reviewer: crate::data::agents::AgentRecord,
@@ -148,6 +201,14 @@ impl Shell {
                 .check(&reviewer.id, Trigger::ReviewReceived, &task, now)
                 .is_err()
             {
+                continue;
+            }
+            // "Corrigir na tarefa": the task's own agent gets them, not this one.
+            if cx.global::<AgentTriggers>().fix_in_task(&reviewer.id) {
+                cx.update_global::<AgentTriggers, _>(|triggers, _| {
+                    triggers.record(&reviewer.id, Trigger::ReviewReceived, &task, now)
+                });
+                self.fix_in_task(pr.clone(), task, path, cx);
                 continue;
             }
             let Some(run) = review_run(&reviewer, &providers, &pick, &path, String::new()) else {

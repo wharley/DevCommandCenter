@@ -32,6 +32,7 @@ mod review_received;
 mod deliver_auto;
 mod reply_auto_send;
 mod review_auto_send;
+mod review_fix;
 mod review_requests;
 mod review_trigger;
 mod reviewer_in_task;

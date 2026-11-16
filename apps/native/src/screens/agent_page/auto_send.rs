@@ -32,6 +32,7 @@ enum Grant {
     Review,
     Reply,
     Deliver,
+    Fix,
 }
 
 impl Grant {
@@ -40,6 +41,7 @@ impl Grant {
             Self::Review => "review",
             Self::Reply => "reply",
             Self::Deliver => "deliver",
+            Self::Fix => "fix",
         }
     }
 }
@@ -86,6 +88,8 @@ impl AgentPage {
                     Grant::Review => triggers.set_review_send_in(&agent, &place_id, !on),
                     Grant::Reply => triggers.set_reply_send_in(&agent, &place_id, !on),
                     Grant::Deliver => triggers.set_deliver_in(&agent, &place_id, !on),
+                    // It holds wherever the agent's trigger does.
+                    Grant::Fix => {}
                 });
                 cx.notify();
             }))
@@ -131,7 +135,8 @@ impl AgentPage {
                 .text_color(colors.muted_foreground)
                 .child(text)
         };
-        let granted = picked > 0;
+        // The fix has no places to pick: it holds wherever the trigger does.
+        let granted = picked > 0 && !matches!(grant, Grant::Fix);
         let nowhere = granted && !places.iter().any(|place| place.2);
         let chips: Vec<AnyElement> = places
             .into_iter()
@@ -149,7 +154,7 @@ impl AgentPage {
                 "agents.autoSend.reply.rooms",
                 "agents.autoSend.reply.noRooms",
             ),
-            Grant::Deliver => (
+            Grant::Deliver | Grant::Fix => (
                 "agents.autoSend.deliver.projects",
                 "agents.autoSend.deliver.noProjects",
             ),
@@ -252,6 +257,13 @@ impl AgentPage {
         let review = triggers.review_send_choice(&agent_id);
         let reply = triggers.reply_send_on(&agent_id);
         let deliver = triggers.deliver_on(&agent_id);
+        // Only where its "review received" trigger is on: that is what
+        // brings the comments.
+        let watches_reviews = triggers.is_on(
+            &agent_id,
+            crate::data::agent_triggers::Trigger::ReviewReceived,
+        );
+        let fix = triggers.fix_in_task_choice(&agent_id);
         // The projects it works in, by name.
         let mut projects: Vec<(String, String)> = data
             .project_labels
@@ -295,7 +307,83 @@ impl AgentPage {
             (id, name, on)
         })
         .collect();
+        // "Conferir": what is set that does not close.
+        let source_rooms: Vec<Option<String>> = cx
+            .try_global::<crate::data::agent_sources::Sources>()
+            .map(|sources| {
+                sources
+                    .list
+                    .iter()
+                    .filter(|source| source.agent_id == agent_id && source.enabled)
+                    .map(|source| source.room.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let gaps = triggers.auto_send_gaps(&agent_id, &source_rooms);
+        let granted_any = triggers.any_auto_send(&agent_id);
         let colors = cx.theme().colors.clone();
+        let check = granted_any.then(|| {
+            let line = |text: SharedString, warn: bool| {
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(8.0))
+                    .text_size(px(12.0))
+                    .line_height(px(18.0))
+                    .child(
+                        div().flex_none().pt(px(2.0)).child(
+                            Icon::new(if warn { "triangle-alert" } else { "check" })
+                                .size(13.0)
+                                .color(if warn {
+                                    crate::theme::tailwind::AMBER_500.hsla()
+                                } else {
+                                    colors.muted_foreground
+                                }),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_color(if warn {
+                                colors.foreground
+                            } else {
+                                colors.muted_foreground
+                            })
+                            .child(text),
+                    )
+            };
+            let lines: Vec<gpui::Div> = if gaps.is_empty() {
+                vec![line(cx.t("agents.autoSend.check.ok"), false)]
+            } else {
+                gaps.iter()
+                    .map(|gap| line(cx.t(&format!("agents.autoSend.check.{}", gap.key())), true))
+                    .collect()
+            };
+            let open = !gaps.is_empty();
+            div()
+                .debug_selector(move || {
+                    if open {
+                        "agent-auto-send-gaps".to_string()
+                    } else {
+                        "agent-auto-send-ok".to_string()
+                    }
+                })
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .pt(px(12.0))
+                .border_t_1()
+                .border_color(colors.border.opacity(0.7))
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(colors.muted_foreground)
+                        .child(cx.t("agents.autoSend.check.title")),
+                )
+                .children(lines)
+        });
         let review_row = reviewer.then(|| {
             let choices = ReviewSend::ALL
                 .iter()
@@ -362,6 +450,27 @@ impl AgentPage {
                 cx,
             )
         };
+        let fix_row = watches_reviews.then(|| {
+            let choices = vec![
+                cx.t("agents.autoSend.fix.ask"),
+                cx.t("agents.autoSend.fix.send"),
+            ];
+            let hint = cx.t(if fix {
+                "agents.autoSend.fix.sendHint"
+            } else {
+                "agents.autoSend.fix.askHint"
+            });
+            self.auto_send_row(
+                Grant::Fix,
+                &agent_id,
+                choices,
+                usize::from(fix),
+                hint,
+                Vec::new(),
+                |triggers, agent, index| triggers.set_fix_in_task(agent, index == 1),
+                cx,
+            )
+        });
         Some(
             Self::card(cx)
                 .debug_selector(|| "agent-auto-send".into())
@@ -387,6 +496,7 @@ impl AgentPage {
                         .child(cx.t("agents.autoSend.hint")),
                 )
                 .children(review_row)
+                .children(fix_row)
                 .child(reply_row)
                 .child(deliver_row)
                 .children(deliver.then(|| {
@@ -421,6 +531,7 @@ impl AgentPage {
                                 .child(cx.t("agents.autoSend.deliver.noteHint")),
                         )
                 }))
+                .children(check)
                 .into_any_element(),
         )
     }

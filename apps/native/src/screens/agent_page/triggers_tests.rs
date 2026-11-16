@@ -156,6 +156,8 @@ fn the_reviewers_trigger_is_off_until_turned_on(cx: &mut TestAppContext) {
     page.update(cx, |_, cx| cx.notify());
     cx.run_until_parked();
     assert!(cx.debug_bounds("agent-auto-send-reply-place-0").is_some());
+    // "Conferir" says it: sending with no room holds nowhere.
+    assert!(cx.debug_bounds("agent-auto-send-gaps").is_some());
     assert!(cx.debug_bounds("agent-auto-send-reply-nowhere").is_some());
     assert!(cx.debug_bounds("agent-triggers").is_some());
     assert!(cx.debug_bounds("agent-trigger-prUpdated").is_none());
