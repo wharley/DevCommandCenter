@@ -930,7 +930,8 @@ impl AgentPage {
                             .on_select(move |index, _, cx| {
                                 let _ = page.update(cx, |page, cx| {
                                     if let Some(form) = &mut page.source_form {
-                                        form.every = EVERY_CHOICES[index.min(3)];
+                                        form.every =
+                                            EVERY_CHOICES[index.min(EVERY_CHOICES.len() - 1)];
                                         cx.notify();
                                     }
                                 });

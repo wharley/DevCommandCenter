@@ -12,7 +12,7 @@ use serde_json::Value;
 pub const PROPOSE_SOURCE_TOOL: &str = "dcc_propose_source";
 pub const MAX_SOURCES_PER_AGENT: usize = 8;
 /// How often a source may be read, in minutes.
-pub const EVERY_CHOICES: [u32; 4] = [5, 15, 30, 60];
+pub const EVERY_CHOICES: [u32; 6] = [1, 2, 5, 15, 30, 60];
 pub const DEFAULT_EVERY: u32 = 15;
 /// Items remembered as seen per source.
 const MAX_SEEN: usize = 300;
@@ -100,9 +100,95 @@ fn element_id(element: &Value) -> Option<String> {
         })
 }
 
+/// The ids of items cut from a document of results (`document_items`).
+/// A source read before those existed remembers the whole document as one
+/// item; `read_news` uses the mark to tell that apart from real news.
+const DOCUMENT_ID: &str = "m:";
+
+/// A text result that is JSON in a string (`{"results": "# Search…"}`, as
+/// Slack's search answers): its list's elements when it holds one, else
+/// its string values as the text.
+fn unwrapped(text: &str) -> Option<Result<Vec<Value>, String>> {
+    let value: Value = serde_json::from_str(text.trim()).ok()?;
+    match value {
+        Value::Array(list) => Some(Ok(list)),
+        Value::Object(fields) => {
+            if let Some(list) = fields.values().find_map(Value::as_array) {
+                return Some(Ok(list.clone()));
+            }
+            let texts: Vec<&str> = fields.values().filter_map(Value::as_str).collect();
+            (!texts.is_empty()).then(|| Err(texts.join("\n")))
+        }
+        Value::String(text) => Some(Err(text)),
+        _ => None,
+    }
+}
+
+/// A document of results under `###` headings ("### Result 1 of 20", one
+/// message each), cut into one item a result: what comes before the first
+/// heading is the document's title, not an item. Each is known by its
+/// permalink or timestamp when it shows one, so a result that moves down
+/// the list is still the same. None when the text has no such headings.
+fn document_items(text: &str) -> Option<Vec<SourceItem>> {
+    let mut blocks: Vec<String> = Vec::new();
+    let mut started = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("### ") {
+            started = true;
+            blocks.push(String::new());
+            continue;
+        }
+        if !started || line.trim() == "---" {
+            continue;
+        }
+        if let Some(block) = blocks.last_mut() {
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    if !started {
+        return None;
+    }
+    let items = blocks
+        .iter()
+        .map(|block| block.trim())
+        .filter(|block| !block.is_empty())
+        .map(|block| {
+            let own = block.lines().find_map(|line| {
+                ["Permalink:", "Message_ts:", "URL:"]
+                    .iter()
+                    .find_map(|field| line.trim().strip_prefix(field))
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            });
+            SourceItem {
+                id: format!(
+                    "{DOCUMENT_ID}{}",
+                    own.map_or_else(|| stable_id(block), stable_id)
+                ),
+                text: clip(block),
+            }
+        })
+        .collect();
+    Some(items)
+}
+
+fn elements(list: &[Value]) -> Vec<SourceItem> {
+    list.iter()
+        .map(|element| {
+            let text = element.to_string();
+            SourceItem {
+                id: element_id(element).unwrap_or_else(|| stable_id(&text)),
+                text: clip(&text),
+            }
+        })
+        .collect()
+}
+
 /// The items of an MCP `tools/call` result: the elements of the first list
-/// in its structured content, or else its text cut into blocks (blank lines
-/// or list entries).
+/// in its structured content, or else its text — JSON in a string read as
+/// what it holds, a document of results cut by its headings, anything else
+/// into blocks (blank lines or list entries).
 pub fn items_of(result: &Value) -> Vec<SourceItem> {
     let structured = result.get("structuredContent");
     let list = structured.and_then(|content| match content {
@@ -111,16 +197,7 @@ pub fn items_of(result: &Value) -> Vec<SourceItem> {
         _ => None,
     });
     if let Some(list) = list.filter(|list| !list.is_empty()) {
-        return list
-            .iter()
-            .map(|element| {
-                let text = element.to_string();
-                SourceItem {
-                    id: element_id(element).unwrap_or_else(|| stable_id(&text)),
-                    text: clip(&text),
-                }
-            })
-            .collect();
+        return elements(list);
     }
     let text: String = result
         .get("content")
@@ -130,6 +207,14 @@ pub fn items_of(result: &Value) -> Vec<SourceItem> {
         .filter_map(|block| block.get("text").and_then(Value::as_str))
         .collect::<Vec<_>>()
         .join("\n");
+    let text = match unwrapped(&text) {
+        Some(Ok(list)) if !list.is_empty() => return elements(&list),
+        Some(Err(inner)) => inner,
+        _ => text,
+    };
+    if let Some(items) = document_items(&text) {
+        return items;
+    }
     let mut items: Vec<SourceItem> = Vec::new();
     let mut block = String::new();
     let mut flush = |block: &mut String| {
@@ -161,10 +246,16 @@ pub fn items_of(result: &Value) -> Vec<SourceItem> {
 }
 
 /// The items not in `seen`, and `seen` with all of `items` remembered.
+/// A source that remembered a document of results as one item (before
+/// `document_items`) has none of its results in `seen`: that read only
+/// marks what is there, or every old result would count as news.
 pub fn read_news(seen: &[String], items: &[SourceItem]) -> (Vec<SourceItem>, Vec<String>) {
+    let cut_now = |id: &String| id.starts_with(DOCUMENT_ID);
+    let marks_only =
+        !seen.is_empty() && items.iter().any(|item| cut_now(&item.id)) && !seen.iter().any(cut_now);
     let news: Vec<SourceItem> = items
         .iter()
-        .filter(|item| !seen.contains(&item.id))
+        .filter(|item| !marks_only && !seen.contains(&item.id))
         .cloned()
         .collect();
     let mut remembered: Vec<String> = items.iter().map(|item| item.id.clone()).collect();
@@ -187,7 +278,7 @@ pub fn source_prompt(source: &AgentSource, news: &[SourceItem]) -> String {
         .collect();
     let more = news.len().saturating_sub(MAX_NEW_ITEMS);
     format!(
-        "{SOURCE_MARK} \"{}\" ({}): {} new item(s).\n\n{}{}\n\nThis is what the person asked you to watch, not a message they wrote. Act on what needs them: look into it, open a task (it starts or waits as a card, as the person set for you) or pass it to a teammate. When an item is someone asking the person something and you find the answer, propose the reply with dcc_propose_reply (it waits as a card the person sends) instead of only describing it. If nothing here needs the person, answer exactly {} and nothing else.",
+        "{SOURCE_MARK} \"{}\" ({}): {} new item(s).\n\n{}{}\n\nThis is what the person asked you to watch, not a message they wrote. Act on what needs them: look into it, open a task (it starts or waits as a card, as the person set for you) or pass it to a teammate.\n\nSomeone asking the person something, or naming them about a problem, always needs an answer: never leave it unanswered. Read the thread first. If you can answer from what you can reach (the connectors, your memory, the project's notes), propose the reply with dcc_propose_reply, in the same thread: it goes as the person set for you, by itself or as a card they send. If answering takes looking at the code or the data and you cannot from here, pass it to a teammate who can, saying exactly what to check: the result comes back to you, and then you propose the reply with what was found (what is fine, or what is wrong and that it is being fixed). If it is a problem to fix, pass it on the same way. If you can neither answer nor pass it on, tell the person here in one or two lines what was asked and what you are missing.\n\nAnswer exactly {} and nothing else only when no item asks anything of the person: an announcement, a reply already given, a message that is not for them.",
         source.watch,
         source.connector,
         news.len(),
@@ -254,6 +345,43 @@ mod tests {
         let (news, _) = read_news(&seen, &items_of(&again));
         assert_eq!(news.len(), 1);
         assert!(news[0].text.contains("Bia"));
+
+        // A document of results in a JSON string (Slack's search): one
+        // item a result, known by its permalink.
+        let search = |results: &[(&str, &str)]| {
+            let body: String = results
+                .iter()
+                .enumerate()
+                .map(|(index, (link, text))| {
+                    format!(
+                        "### Result {} of {}\nChannel: #suporte\nPermalink: {link}\nText: \n{text}\n\n---\n\n",
+                        index + 1,
+                        results.len()
+                    )
+                })
+                .collect();
+            let wrapped = json!({"results": format!("# Search Results for: \n\n## Messages ({} results)\n{body}", results.len())});
+            json!({"content": [{"type": "text", "text": wrapped.to_string()}]})
+        };
+        let first = items_of(&search(&[("l/1", "@Wharley pode olhar?")]));
+        assert_eq!(first.len(), 1);
+        assert!(first[0].text.contains("pode olhar") && !first[0].text.contains("Search Results"));
+        let (_, seen) = read_news(&[], &first);
+        // Two mentions in one interval are two items, and the one already
+        // seen is not news though it moved down the list.
+        let two = items_of(&search(&[
+            ("l/3", "@Wharley e o seller 2?"),
+            ("l/2", "@Wharley arredondamento?"),
+            ("l/1", "@Wharley pode olhar?"),
+        ]));
+        let (news, _) = read_news(&seen, &two);
+        assert_eq!(news.len(), 2);
+        assert!(news[0].text.contains("seller 2") && news[1].text.contains("arredondamento"));
+        // A source that remembered the whole document as one item only
+        // marks what is there on its next read.
+        let (news, remembered) = read_news(&["62efdfb302f53a71".to_string()], &two);
+        assert!(news.is_empty());
+        assert_eq!(read_news(&remembered, &two).0.len(), 0);
 
         // Structured results keep their own ids.
         let structured = json!({"structuredContent": {"tasks": [{"id": "t1", "name": "Ver campo"}, {"id": "t2", "name": "Deploy"}]}});
