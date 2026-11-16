@@ -134,7 +134,7 @@ impl Shell {
                         // Whoever asked for it through a connector is answered.
                         if let Some(went) = went {
                             let prompt = sent_prompt(&label, &url, &went);
-                            shell.tell_review_sent(&asker, room.as_deref(), prompt, cx);
+                            shell.tell_agent(&asker, room.as_deref(), prompt, cx);
                         }
                         return;
                     }

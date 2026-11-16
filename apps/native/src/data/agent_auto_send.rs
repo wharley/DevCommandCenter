@@ -66,7 +66,14 @@ pub struct AutoSend {
     /// When delivery was turned on: a task that ended before it is the
     /// person's to send, or turning it on would send every old one.
     pub deliver_since: Option<String>,
+    /// What the agent is to do when a pull request it delivered opens, in
+    /// the person's words ("avise no #tech marcando o Giovanni"); empty:
+    /// it is not told.
+    pub deliver_note: String,
 }
+
+/// The longest `AutoSend::deliver_note`.
+pub const MAX_DELIVER_NOTE: usize = 400;
 
 /// Geral among `AutoSend::reply_rooms`.
 pub const GENERAL_ROOM: &str = "";
@@ -280,6 +287,28 @@ impl AgentTriggers {
             && after_grant() == Some(true)
     }
 
+    pub fn deliver_note(&self, agent_id: &str) -> String {
+        self.stored
+            .auto_send
+            .get(agent_id)
+            .map(|grants| grants.deliver_note.trim().to_string())
+            .unwrap_or_default()
+    }
+
+    pub fn set_deliver_note(&mut self, agent_id: &str, note: &str) {
+        let note: String = note.trim().chars().take(MAX_DELIVER_NOTE).collect();
+        if self.deliver_note(agent_id) == note {
+            return;
+        }
+        self.stored
+            .auto_send
+            .entry(agent_id.to_string())
+            .or_default()
+            .deliver_note = note;
+        self.forget_empty_grants(agent_id);
+        self.save();
+    }
+
     pub fn set_deliver(&mut self, agent_id: &str, on: bool) {
         let grants = self
             .stored
@@ -388,6 +417,10 @@ mod tests {
         assert!(!triggers.may_deliver("sup", "app", &later));
         triggers.stored.paused = true;
         assert!(!triggers.may_deliver("dev", "app", &later));
+        // What to do when the pull request opens, in the person's words.
+        assert_eq!(triggers.deliver_note("dev"), "");
+        triggers.set_deliver_note("dev", "  avise no #tech  ");
+        assert_eq!(triggers.deliver_note("dev"), "avise no #tech");
     }
 
     #[test]

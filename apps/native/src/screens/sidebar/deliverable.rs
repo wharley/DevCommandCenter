@@ -13,6 +13,8 @@ pub struct DeliverableTask {
     pub id: String,
     pub name: String,
     pub agent_id: String,
+    /// The agent's conversation the task was opened from.
+    pub session_id: String,
     pub project_id: String,
     /// Its pull request is open already: the changes are pushed to it.
     pub has_request: bool,
@@ -41,6 +43,13 @@ pub(crate) fn sendable(snapshot: &GitSnapshot) -> Option<bool> {
 }
 
 impl Sidebar {
+    /// The task's open pull request as the rail last read it: its number
+    /// and its link.
+    pub fn request_of(&self, task_id: &str) -> Option<(u32, Option<String>)> {
+        let pr = self.state.git.get(task_id)?.pr.as_ref()?;
+        Some((pr.number?, pr.url.clone()))
+    }
+
     /// Every task an agent opened that ended a turn with changes to send.
     /// Only a task in its own worktree: one in the project's checkout
     /// would be committed on whatever branch is checked out there.
@@ -70,6 +79,7 @@ impl Sidebar {
                     id: task.id.clone(),
                     name: task.name.clone(),
                     agent_id: opened.agent_id.clone(),
+                    session_id: opened.session_id.clone(),
                     project_id: task.project_id.clone(),
                     has_request,
                     ended_at,

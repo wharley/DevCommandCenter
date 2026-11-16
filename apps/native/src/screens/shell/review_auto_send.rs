@@ -129,9 +129,10 @@ pub(super) fn sent_prompt(label: &str, url: &str, sent: &SentReview) -> String {
 }
 
 impl Shell {
-    /// Tells `agent`, in the conversation it asked from, that its review
-    /// went, unless something holds it (the quiet hours, its brake).
-    pub(super) fn tell_review_sent(
+    /// Tells `agent` something DCC did for it, in the room's conversation
+    /// it asked from (its review went, its pull request opened), unless
+    /// something holds it (the quiet hours, its brake).
+    pub(super) fn tell_agent(
         &mut self,
         agent: &AgentRecord,
         room: Option<&str>,

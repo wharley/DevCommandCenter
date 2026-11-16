@@ -222,6 +222,8 @@ pub struct AgentPage {
     pub(crate) api: Option<crate::data::desktop_api::DesktopApi>,
     /// "Memória", made on the first render (its fields need the window).
     pub(crate) memory: Option<Entity<memory::MemoryCard>>,
+    /// "Ao abrir o PR" of the agent on screen (`auto_send`).
+    deliver_note: Option<auto_send::NoteField>,
     /// The team room, made the first time it shows.
     pub(crate) room: Option<(Entity<room::TeamRoom>, Subscription)>,
     /// The room is on screen instead of an agent's page.
@@ -310,6 +312,7 @@ impl AgentPage {
             routine_form: None,
             source_form: None,
             memory: None,
+            deliver_note: None,
             room: None,
             room_open: false,
             room_project: None,
@@ -685,7 +688,7 @@ impl AgentPage {
                     })),
             );
         let triggers = self.triggers_card(&data, cx);
-        let auto_send = self.auto_send_card(&data, cx);
+        let auto_send = self.auto_send_card(&data, window, cx);
         let spend = self.spend_card(agent.monthly_token_limit, cx);
         let routines = self.routines_card(cx);
         let sources = self.sources_card(cx);

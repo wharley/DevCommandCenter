@@ -6,15 +6,25 @@
 //! deliver — holds in the projects picked. Everything starts at asking.
 
 use dcc_core::domain::agent::REVIEWER_PRESET;
-use gpui::{AnyElement, BorrowAppContext, Context, FontWeight, SharedString, div, prelude::*, px};
+use gpui::{
+    AnyElement, AppContext, BorrowAppContext, Context, Entity, FontWeight, SharedString,
+    Subscription, Window, div, prelude::*, px,
+};
 
 use super::AgentPage;
-use crate::data::agent_auto_send::{GENERAL_ROOM, REPLIES_A_DAY, ReviewSend};
+use crate::data::agent_auto_send::{GENERAL_ROOM, MAX_DELIVER_NOTE, REPLIES_A_DAY, ReviewSend};
 use crate::data::agent_triggers::AgentTriggers;
 use crate::i18n::{Args, Translate};
 use crate::screens::sidebar::AgentPageData;
 use crate::theme::ActiveTheme;
-use crate::ui::{Icon, ToggleGroup};
+use crate::ui::{Icon, TextInput, TextInputEvent, ToggleGroup};
+
+/// The field of one agent's "Ao abrir o PR", kept while its page shows.
+pub(super) struct NoteField {
+    agent_id: String,
+    input: Entity<TextInput>,
+    _events: Subscription,
+}
 
 /// Which grant a chip switches.
 #[derive(Clone, Copy)]
@@ -185,11 +195,57 @@ impl AgentPage {
             .into_any_element()
     }
 
+    /// The agent's "Ao abrir o PR" field, with what is stored; what is
+    /// typed is kept when the field is left or Enter is pressed.
+    fn deliver_note_field(
+        &mut self,
+        agent_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TextInput> {
+        if let Some(field) = &self.deliver_note
+            && field.agent_id == agent_id
+        {
+            return field.input.clone();
+        }
+        let stored = cx
+            .try_global::<AgentTriggers>()
+            .map(|triggers| triggers.deliver_note(agent_id))
+            .unwrap_or_default();
+        let input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .with_max_len(MAX_DELIVER_NOTE)
+                .with_placeholder(cx.t("agents.autoSend.deliver.notePlaceholder"));
+            input.set_text(stored, cx);
+            input
+        });
+        let agent = agent_id.to_string();
+        let events = cx.subscribe(&input, move |_, input, event: &TextInputEvent, cx| {
+            if !matches!(event, TextInputEvent::Blurred | TextInputEvent::Submitted) {
+                return;
+            }
+            let text = input.read(cx).text().to_string();
+            if cx.has_global::<AgentTriggers>() {
+                cx.update_global::<AgentTriggers, _>(|triggers, _| {
+                    triggers.set_deliver_note(&agent, &text)
+                });
+            }
+        });
+        self.deliver_note = Some(NoteField {
+            agent_id: agent_id.to_string(),
+            input: input.clone(),
+            _events: events,
+        });
+        input
+    }
+
     pub(super) fn auto_send_card(
-        &self,
+        &mut self,
         data: &AgentPageData,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let note_field = self.deliver_note_field(&data.agent.id, window, cx);
         let triggers = cx.try_global::<AgentTriggers>()?;
         let reviewer = data.agent.preset.as_deref() == Some(REVIEWER_PRESET);
         let agent_id = data.agent.id.clone();
@@ -333,6 +389,38 @@ impl AgentPage {
                 .children(review_row)
                 .child(reply_row)
                 .child(deliver_row)
+                .children(deliver.then(|| {
+                    div()
+                        .debug_selector(|| "agent-auto-send-deliver-note".into())
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(colors.muted_foreground)
+                                .child(cx.t("agents.autoSend.deliver.note")),
+                        )
+                        .child(
+                            div()
+                                .h(px(34.0))
+                                .px(px(10.0))
+                                .flex()
+                                .items_center()
+                                .rounded(px(8.0))
+                                .border_1()
+                                .border_color(colors.border)
+                                .text_size(px(13.0))
+                                .child(note_field.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.5))
+                                .line_height(px(17.0))
+                                .text_color(colors.muted_foreground)
+                                .child(cx.t("agents.autoSend.deliver.noteHint")),
+                        )
+                }))
                 .into_any_element(),
         )
     }

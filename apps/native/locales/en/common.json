@@ -359,6 +359,9 @@
         "noRooms": "Pick at least one room for it to hold."
       },
       "deliver": {
+        "note": "When the pull request opens",
+        "notePlaceholder": "e.g. tell #tech and mention Giovanni and Daniel",
+        "noteHint": "What the agent does when the pull request opens, in your words: where to tell and whom to mention, through any of its connectors. It writes the message, which goes as its replies are granted. Empty: nobody is told.",
         "title": "Task delivery",
         "ask": "Ask",
         "send": "Deliver",

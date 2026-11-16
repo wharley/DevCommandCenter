@@ -359,6 +359,9 @@
         "noRooms": "Escolha ao menos uma sala para valer."
       },
       "deliver": {
+        "note": "Ao abrir o PR",
+        "notePlaceholder": "ex.: avise no #tech marcando o Giovanni e o Daniel",
+        "noteHint": "O que o agente faz quando o PR abre, com as suas palavras: onde avisar e quem marcar, em qualquer conector dele. Ele escreve a mensagem, que sai como as respostas dele estão autorizadas. Vazio: ninguém é avisado.",
         "title": "Entrega da tarefa",
         "ask": "Perguntar",
         "send": "Entregar",
