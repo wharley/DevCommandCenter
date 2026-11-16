@@ -147,6 +147,9 @@ fn the_reviewers_trigger_is_off_until_turned_on(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("agent-auto-send-review-0").is_none());
     assert!(cx.debug_bounds("agent-auto-send-reply-1").is_some());
     assert!(cx.debug_bounds("agent-auto-send-reply-places").is_none());
+    // And the delivery of the tasks it opens, asking too.
+    assert!(cx.debug_bounds("agent-auto-send-deliver-1").is_some());
+    assert!(cx.debug_bounds("agent-auto-send-deliver-places").is_none());
     cx.update(|_, cx| {
         cx.update_global::<AgentTriggers, _>(|triggers, _| triggers.set_reply_send("a-2", true))
     });

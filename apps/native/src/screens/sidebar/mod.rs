@@ -23,6 +23,7 @@ mod labels;
 pub use labels::reason_label;
 mod list;
 pub mod mascot;
+pub(crate) mod deliverable;
 pub(crate) mod merged;
 mod meta_chips;
 mod navigation;

@@ -1,7 +1,8 @@
 //! What an agent may send without asking the person first (Compozy's
 //! `auto_accept`: an explicit grant for one kind of action, with a ceiling
 //! a day): the review the Reviewer writes of a pull request, per project,
-//! and the reply an agent proposes through a connector, per room. Off
+//! the reply an agent proposes through a connector, per room, and the
+//! delivery of a task it opened (commit, push, pull request), per project. Off
 //! everywhere until the person turns it on, on the agent's page; "Pausar
 //! todos" holds it too. Kept with the triggers (`agent-triggers.json`), on
 //! this computer.
@@ -57,6 +58,14 @@ pub struct AutoSend {
     pub reply_rooms: Vec<String>,
     /// When each reply went by itself today, for the ceiling.
     pub replies_sent: Vec<String>,
+    /// A task it opened is committed, pushed and gets its pull request
+    /// when it ends a turn with changes.
+    pub deliver: bool,
+    /// The projects that holds in; none: nowhere.
+    pub deliver_projects: Vec<String>,
+    /// When delivery was turned on: a task that ended before it is the
+    /// person's to send, or turning it on would send every old one.
+    pub deliver_since: Option<String>,
 }
 
 /// Geral among `AutoSend::reply_rooms`.
@@ -237,6 +246,67 @@ impl AgentTriggers {
         self.save();
     }
 
+    pub fn deliver_on(&self, agent_id: &str) -> bool {
+        self.stored
+            .auto_send
+            .get(agent_id)
+            .is_some_and(|grants| grants.deliver)
+    }
+
+    pub fn deliver_in(&self, agent_id: &str, project_id: &str) -> bool {
+        self.stored
+            .auto_send
+            .get(agent_id)
+            .is_some_and(|grants| grants.deliver_projects.iter().any(|id| id == project_id))
+    }
+
+    /// Whether a task the agent opened in `project_id`, whose turn ended at
+    /// `ended_at`, is sent by itself now.
+    pub fn may_deliver(&self, agent_id: &str, project_id: &str, ended_at: &str) -> bool {
+        let after_grant = || {
+            let since = self
+                .stored
+                .auto_send
+                .get(agent_id)?
+                .deliver_since
+                .as_deref()?;
+            let since = DateTime::parse_from_rfc3339(since).ok()?;
+            let ended = DateTime::parse_from_rfc3339(ended_at).ok()?;
+            Some(ended > since)
+        };
+        !self.stored.paused
+            && self.deliver_on(agent_id)
+            && self.deliver_in(agent_id, project_id)
+            && after_grant() == Some(true)
+    }
+
+    pub fn set_deliver(&mut self, agent_id: &str, on: bool) {
+        let grants = self
+            .stored
+            .auto_send
+            .entry(agent_id.to_string())
+            .or_default();
+        grants.deliver = on;
+        grants.deliver_since = on.then(|| Utc::now().to_rfc3339());
+        self.forget_empty_grants(agent_id);
+        self.save();
+    }
+
+    pub fn set_deliver_in(&mut self, agent_id: &str, project_id: &str, on: bool) {
+        let grants = self
+            .stored
+            .auto_send
+            .entry(agent_id.to_string())
+            .or_default();
+        grants.deliver_projects.retain(|id| id != project_id);
+        if on {
+            grants.deliver_projects.push(project_id.to_string());
+            grants.deliver_projects.sort();
+        }
+        self.forget_empty_grants(agent_id);
+        self.save();
+    }
+
     fn forget_empty_grants(&mut self, agent_id: &str) {
         if self.stored.auto_send.get(agent_id) == Some(&AutoSend::default()) {
             self.stored.auto_send.remove(agent_id);
@@ -296,6 +366,28 @@ mod tests {
         assert!(triggers.may_send_reply("sup", None, now + chrono::Duration::days(2)));
         triggers.set_reply_send("sup", false);
         assert!(!triggers.may_send_reply("sup", None, now + chrono::Duration::days(2)));
+    }
+
+    #[test]
+    fn a_task_is_sent_only_where_delivery_is_granted() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut triggers = AgentTriggers::load(dir.path().join("agent-triggers.json"));
+        let later = (Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
+        let before = (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339();
+        assert!(!triggers.may_deliver("dev", "app", &later));
+        triggers.set_deliver("dev", true);
+        assert!(
+            !triggers.may_deliver("dev", "app", &later),
+            "no project yet"
+        );
+        triggers.set_deliver_in("dev", "app", true);
+        assert!(triggers.may_deliver("dev", "app", &later));
+        // A task that ended before it was turned on stays the person's.
+        assert!(!triggers.may_deliver("dev", "app", &before));
+        assert!(!triggers.may_deliver("dev", "site", &later));
+        assert!(!triggers.may_deliver("sup", "app", &later));
+        triggers.stored.paused = true;
+        assert!(!triggers.may_deliver("dev", "app", &later));
     }
 
     #[test]

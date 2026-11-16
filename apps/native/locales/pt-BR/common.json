@@ -358,6 +358,18 @@
         "general": "Geral",
         "noRooms": "Escolha ao menos uma sala para valer."
       },
+      "deliver": {
+        "title": "Entrega da tarefa",
+        "ask": "Perguntar",
+        "send": "Entregar",
+        "askHint": "A tarefa que o agente abre termina e espera você commitar e abrir o PR.",
+        "sendHint": "Quando a tarefa que o agente abriu termina um turno com mudanças, o DCC faz o commit, o push e abre o PR (ou envia ao PR já aberto). Só tarefa em worktree própria; o merge continua seu. O que for recusado (checks, branch atrás) avisa e espera você.",
+        "projects": "Vale em",
+        "noProjects": "Escolha ao menos um projeto para valer.",
+        "opened": "{{agent}} entregou {{task}}: PR aberto",
+        "pushed": "{{agent}} entregou {{task}}: enviado ao PR",
+        "failed": "Não foi possível entregar {{task}} ({{agent}}): {{error}}"
+      },
       "replySent": "{{agent}} respondeu em {{destination}}",
       "sent": {
         "approve": "aprovou",

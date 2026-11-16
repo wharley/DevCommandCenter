@@ -2,7 +2,8 @@
 //! what it may publish by itself. The Reviewer's review of a pull request —
 //! ask, comment only, or comment and decide — holds in the projects picked;
 //! any agent's reply through a connector — ask or send — holds in the rooms
-//! picked, Geral among them. Everything starts at asking.
+//! picked, Geral among them; the delivery of a task it opened — ask or
+//! deliver — holds in the projects picked. Everything starts at asking.
 
 use dcc_core::domain::agent::REVIEWER_PRESET;
 use gpui::{AnyElement, BorrowAppContext, Context, FontWeight, SharedString, div, prelude::*, px};
@@ -20,6 +21,7 @@ use crate::ui::{Icon, ToggleGroup};
 enum Grant {
     Review,
     Reply,
+    Deliver,
 }
 
 impl Grant {
@@ -27,6 +29,7 @@ impl Grant {
         match self {
             Self::Review => "review",
             Self::Reply => "reply",
+            Self::Deliver => "deliver",
         }
     }
 }
@@ -72,6 +75,7 @@ impl AgentPage {
                 cx.update_global::<AgentTriggers, _>(|triggers, _| match grant {
                     Grant::Review => triggers.set_review_send_in(&agent, &place_id, !on),
                     Grant::Reply => triggers.set_reply_send_in(&agent, &place_id, !on),
+                    Grant::Deliver => triggers.set_deliver_in(&agent, &place_id, !on),
                 });
                 cx.notify();
             }))
@@ -135,6 +139,10 @@ impl AgentPage {
                 "agents.autoSend.reply.rooms",
                 "agents.autoSend.reply.noRooms",
             ),
+            Grant::Deliver => (
+                "agents.autoSend.deliver.projects",
+                "agents.autoSend.deliver.noProjects",
+            ),
         };
         let where_it_holds = granted.then(|| {
             div()
@@ -187,6 +195,7 @@ impl AgentPage {
         let agent_id = data.agent.id.clone();
         let review = triggers.review_send_choice(&agent_id);
         let reply = triggers.reply_send_on(&agent_id);
+        let deliver = triggers.deliver_on(&agent_id);
         // The projects it works in, by name.
         let mut projects: Vec<(String, String)> = data
             .project_labels
@@ -202,6 +211,16 @@ impl AgentPage {
                     id.clone(),
                     name.clone().into(),
                     triggers.review_send_in(&agent_id, id),
+                )
+            })
+            .collect();
+        let deliver_places: Vec<(String, SharedString, bool)> = projects
+            .iter()
+            .map(|(id, name)| {
+                (
+                    id.clone(),
+                    name.clone().into(),
+                    triggers.deliver_in(&agent_id, id),
                 )
             })
             .collect();
@@ -266,6 +285,27 @@ impl AgentPage {
                 cx,
             )
         };
+        let deliver_row = {
+            let choices = vec![
+                cx.t("agents.autoSend.deliver.ask"),
+                cx.t("agents.autoSend.deliver.send"),
+            ];
+            let hint = cx.t(if deliver {
+                "agents.autoSend.deliver.sendHint"
+            } else {
+                "agents.autoSend.deliver.askHint"
+            });
+            self.auto_send_row(
+                Grant::Deliver,
+                &agent_id,
+                choices,
+                usize::from(deliver),
+                hint,
+                deliver_places,
+                |triggers, agent, index| triggers.set_deliver(agent, index == 1),
+                cx,
+            )
+        };
         Some(
             Self::card(cx)
                 .debug_selector(|| "agent-auto-send".into())
@@ -292,6 +332,7 @@ impl AgentPage {
                 )
                 .children(review_row)
                 .child(reply_row)
+                .child(deliver_row)
                 .into_any_element(),
         )
     }

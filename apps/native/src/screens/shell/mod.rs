@@ -29,6 +29,7 @@ mod pr_watch;
 mod quick_open;
 mod regions;
 mod review_received;
+mod deliver_auto;
 mod reply_auto_send;
 mod review_auto_send;
 mod review_requests;
@@ -194,6 +195,7 @@ pub struct Shell {
     /// The merged tasks to tell their agents about (`shipped`).
     shipped: shipped::ShippedWatch,
     reply_auto_send: reply_auto_send::ReplyAutoSend,
+    deliver: deliver_auto::DeliverWatch,
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
@@ -261,6 +263,8 @@ impl Shell {
             this.watch_rooms(cx);
             // A task whose pull request just merged (`shipped`).
             this.shipped_seen(cx);
+            // A task of an agent's ready to be sent (`deliver_auto`).
+            this.deliver_due(cx);
         });
         let new_task_events = cx.subscribe_in(&new_task, window, Self::on_new_task_event);
         let conversation_events =
@@ -394,6 +398,7 @@ impl Shell {
             _sources: sources::start(cx),
             shipped: shipped::ShippedWatch::new(),
             reply_auto_send: reply_auto_send::ReplyAutoSend::new(cx),
+            deliver: deliver_auto::DeliverWatch::default(),
             notes,
             _notes: notes_follow,
             delivery,

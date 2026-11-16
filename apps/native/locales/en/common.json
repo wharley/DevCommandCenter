@@ -358,6 +358,18 @@
         "general": "Geral",
         "noRooms": "Pick at least one room for it to hold."
       },
+      "deliver": {
+        "title": "Task delivery",
+        "ask": "Ask",
+        "send": "Deliver",
+        "askHint": "A task the agent opens ends and waits for you to commit and open the pull request.",
+        "sendHint": "When a task the agent opened ends a turn with changes, DCC commits, pushes and opens the pull request (or sends to the one already open). Only a task in its own worktree; the merge stays yours. What is refused (checks, a branch behind) is told and waits for you.",
+        "projects": "Holds in",
+        "noProjects": "Pick at least one project for it to hold.",
+        "opened": "{{agent}} delivered {{task}}: pull request opened",
+        "pushed": "{{agent}} delivered {{task}}: sent to the pull request",
+        "failed": "Could not deliver {{task}} ({{agent}}): {{error}}"
+      },
       "replySent": "{{agent}} replied in {{destination}}",
       "sent": {
         "approve": "approved",
