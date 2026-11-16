@@ -334,6 +334,40 @@
     "reviewRequest": {
       "noCheckout": "{{agent}} found no checkout of {{repository}} in your projects to review."
     },
+    "autoSend": {
+      "title": "Send without asking",
+      "hint": "What this agent may publish by itself. Off until you turn it on, in each place. The merge is always yours, and \"Pause all\" holds this too.",
+      "review": {
+        "title": "Pull request review",
+        "ask": "Ask",
+        "comment": "Comment only",
+        "decide": "Comment and decide",
+        "askHint": "The drafts wait in Pull Requests until you send them.",
+        "commentHint": "Sends the comments and the summary. Approving or asking for changes stays with you.",
+        "decideHint": "Sends the comments with the decision: approves or asks for changes. \"Not decided yet\" goes as a comment, for the author to read; on your own pull request only the comment goes too.",
+        "projects": "Holds in",
+        "noProjects": "Pick at least one project for it to hold."
+      },
+      "reply": {
+        "title": "Reply to the outside",
+        "ask": "Ask",
+        "send": "Send",
+        "askHint": "The reply waits as a card in the room until you send it.",
+        "sendHint": "The reply the agent proposes (Slack and other connectors) goes with no card, up to {{count}} a day; past that it waits for you again. What fails stays as a card with why.",
+        "rooms": "Holds in the rooms",
+        "general": "Geral",
+        "noRooms": "Pick at least one room for it to hold."
+      },
+      "replySent": "{{agent}} replied in {{destination}}",
+      "sent": {
+        "approve": "approved",
+        "request_changes": "asked for changes",
+        "comment": "commented",
+        "oneComment": "1 comment",
+        "comments": "{{count}} comments"
+      },
+      "failed": "Could not send {{agent}}'s review of {{task}}: {{error}}. The drafts are in Pull Requests."
+    },
     "triggers": {
       "title": "Triggers",
       "limits": "Up to {{daily}} runs a day and {{target}} per PR or task. Today: {{today}}.",
@@ -573,6 +607,7 @@
         "done": "{{agent}} finished in {{task}}",
         "waiting": "{{agent}} needs you in {{task}}",
         "reviewed": "{{agent}} reviewed {{task}}",
+        "reviewSent": "{{agent}} reviewed and sent {{task}}",
         "reviewing": "{{agent}} is reviewing {{task}}",
         "reviewFailed": "{{agent}} could not review {{task}}",
         "signInExpired": "The provider's sign-in expired. Sign in again in Settings › Providers or pick another account in Runs on.",

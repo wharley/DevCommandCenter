@@ -49,6 +49,8 @@ pub(super) struct Stored {
     pub(super) quiet: Option<super::agent_quiet::QuietHours>,
     /// When the person last talked to each agent (`agent_brake`).
     pub(super) attended: BTreeMap<String, String>,
+    /// What each agent may send without asking (`agent_auto_send`).
+    pub(super) auto_send: BTreeMap<String, super::agent_auto_send::AutoSend>,
 }
 
 #[derive(Default)]

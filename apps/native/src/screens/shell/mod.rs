@@ -29,6 +29,8 @@ mod pr_watch;
 mod quick_open;
 mod regions;
 mod review_received;
+mod reply_auto_send;
+mod review_auto_send;
 mod review_requests;
 mod review_trigger;
 mod reviewer_in_task;
@@ -191,6 +193,7 @@ pub struct Shell {
     _sources: (Entity<sources::SourceClock>, gpui::Subscription),
     /// The merged tasks to tell their agents about (`shipped`).
     shipped: shipped::ShippedWatch,
+    reply_auto_send: reply_auto_send::ReplyAutoSend,
     _browser_approvals: [Subscription; 2],
     /// The agents' computer-use requests (screen 8d).
     computer_approvals: Entity<crate::screens::computer_use::approval::ComputerApprovals>,
@@ -390,6 +393,7 @@ impl Shell {
             _routines: routines::start(cx),
             _sources: sources::start(cx),
             shipped: shipped::ShippedWatch::new(),
+            reply_auto_send: reply_auto_send::ReplyAutoSend::new(cx),
             notes,
             _notes: notes_follow,
             delivery,

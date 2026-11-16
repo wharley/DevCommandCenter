@@ -3,7 +3,8 @@
 //! again by itself — when the person turned that on for it and its ceilings
 //! allow (`AgentTriggers`). The review is the hub's own ("Gerar revisão"):
 //! its job shows "resultado pronto" and its drafts wait in the hub when the
-//! person opens the pull request. Nothing is published.
+//! person opens the pull request. Nothing is published, unless the person
+//! granted sending for that project (`review_auto_send`).
 //!
 //! No `gh` is added to find out what changed: the news comes from the one
 //! search `PrWatch` already makes. The run reads that pull request (its
@@ -20,6 +21,8 @@ use dcc_infra::db::SqliteWorkspaceRepo;
 use gpui::{App, BorrowAppContext, Context};
 
 use super::Shell;
+use super::review_auto_send::{ReviewOutcome, landed, send_review};
+use crate::data::agent_auto_send::ReviewSend;
 use crate::data::agent_triggers::{AgentTriggers, Trigger};
 use crate::data::agents::AgentRecord;
 use crate::data::composer_settings::clamp_effort;
@@ -168,7 +171,8 @@ pub(super) fn read_and_review(
     providers: &[ProviderDescriptor],
     pick: &(Option<String>, Option<String>),
     item: &Item,
-) -> Option<Result<String, String>> {
+    send: ReviewSend,
+) -> Option<ReviewOutcome> {
     let read = || {
         let api = DesktopApi::load().ok_or_else(|| "DCC is not running".to_string())?;
         let detail = api
@@ -178,17 +182,25 @@ pub(super) fn read_and_review(
     };
     let (api, detail) = match read() {
         Ok(read) => read,
-        Err(error) => return Some(Err(error)),
+        Err(error) => {
+            return Some(ReviewOutcome {
+                answer: Err(error),
+                sent: None,
+            });
+        }
     };
     if detail.settled() {
         return None;
     }
     let prompt = review_prompt(item, &detail, "");
-    Some(
-        review_run(agent, providers, pick, &item.repository_root, prompt)
-            .ok_or_else(|| "no provider can review".to_string())
-            .and_then(|run| api.pr_review_agent(&run).map_err(|error| error.to_string())),
-    )
+    let answer = review_run(agent, providers, pick, &item.repository_root, prompt)
+        .ok_or_else(|| "no provider can review".to_string())
+        .and_then(|run| api.pr_review_agent(&run).map_err(|error| error.to_string()));
+    let sent = answer
+        .as_ref()
+        .ok()
+        .and_then(|response| send_review(&api, item, &detail, response, send));
+    Some(ReviewOutcome { answer, sent })
 }
 
 /// "Revisor revisou de novo" — "acme/app #1014 · 3 comentários para revisar".
@@ -246,11 +258,18 @@ impl Shell {
                 continue;
             }
             // Only the pull requests of the agent's projects.
-            let Some(Checkout { root, login, .. }) = local_repository(&db, &pr.repository)
+            let Some(Checkout {
+                root,
+                login,
+                project_id,
+            }) = local_repository(&db, &pr.repository)
                 .filter(|checkout| reviewer.works_in(&checkout.project_id))
             else {
                 continue;
             };
+            let send = cx
+                .global::<AgentTriggers>()
+                .review_send(&reviewer.id, &project_id);
             let Some(item) = hub_item(pr, &root, login) else {
                 continue;
             };
@@ -259,7 +278,7 @@ impl Shell {
                 continue;
             }
             let label = format!("{}#{}", item.repository_name, item.number);
-            if !PrReviewJobs::start(cx, &item.id, label, item.title.clone()) {
+            if !PrReviewJobs::start(cx, &item.id, label.clone(), item.title.clone()) {
                 continue;
             }
             PrReviewJobs::started_by_trigger(cx, &item.id);
@@ -277,12 +296,18 @@ impl Shell {
                 let name = reviewer.name.clone();
                 let answer = cx
                     .background_executor()
-                    .spawn(async move { read_and_review(&reviewer, &providers, &pick, &item) })
+                    .spawn(
+                        async move { read_and_review(&reviewer, &providers, &pick, &item, send) },
+                    )
                     .await;
                 let _ = cx.update(|cx| match answer {
-                    Some(answer) => {
-                        announce(trigger, &name, &pr, &answer, cx);
+                    Some(ReviewOutcome { answer, sent }) => {
+                        let told = answer.clone();
                         PrReviewJobs::finish(cx, &id, answer);
+                        // Sent: that is the news, not drafts to look at.
+                        if !landed(cx, &id, &name, &label, sent) {
+                            announce(trigger, &name, &pr, &told, cx);
+                        }
                     }
                     // Merged or closed meanwhile: no review, no card.
                     None => PrReviewJobs::dismiss(cx, &id),

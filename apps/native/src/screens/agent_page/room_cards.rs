@@ -102,6 +102,7 @@ impl TeamRoom {
             CardKind::TaskResult { .. } => ("agents.room.card.done", false),
             CardKind::TaskWaiting { .. } => ("agents.room.card.waiting", true),
             CardKind::PrReview { running: true, .. } => ("agents.room.card.reviewing", false),
+            CardKind::PrReview { sent: Some(_), .. } => ("agents.room.card.reviewSent", false),
             CardKind::PrReview { failed: false, .. } => ("agents.room.card.reviewed", false),
             CardKind::PrReview { failed: true, .. } => ("agents.room.card.reviewFailed", false),
         };
@@ -198,6 +199,18 @@ impl TeamRoom {
                                     *verdict,
                                     cx,
                                 )),
+                        ),
+                        _ => None,
+                    })
+                    .children(match &card.kind {
+                        CardKind::PrReview {
+                            sent: Some(sent), ..
+                        } => Some(
+                            div()
+                                .debug_selector(move || format!("room-card-sent-{index}"))
+                                .text_size(px(11.0))
+                                .text_color(colors.muted_foreground)
+                                .child(sent.words(cx)),
                         ),
                         _ => None,
                     })

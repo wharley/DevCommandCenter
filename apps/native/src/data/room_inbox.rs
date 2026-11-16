@@ -40,6 +40,8 @@ pub enum CardKind {
         reason: Option<String>,
         /// The reviewer's verdict, once done.
         verdict: Option<super::pr_review_verdict::Verdict>,
+        /// DCC sent it for the agent.
+        sent: Option<super::agent_auto_send::SentReview>,
     },
 }
 
@@ -166,6 +168,7 @@ pub fn cards(sources: &InboxSources<'_>) -> Vec<InboxCard> {
                     .then(|| job.response.as_deref())
                     .flatten()
                     .and_then(super::pr_review_verdict::verdict_of),
+                sent: job.sent.clone(),
             },
             title,
             trigger: job.by_trigger.then_some(Trigger::PrUpdated),
@@ -292,6 +295,7 @@ mod tests {
             by_trigger: true,
             started_at: Some("2026-11-07T10:45:00Z".into()),
             agent_id: None,
+            sent: None,
         }];
         let unread = |session: &str, _: &str| session == "s-ci";
         let now = parse_ms("2026-11-07T11:00:00Z").unwrap();

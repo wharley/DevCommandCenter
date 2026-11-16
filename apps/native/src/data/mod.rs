@@ -5,6 +5,7 @@ pub mod account_selection;
 pub mod actions;
 pub mod activity;
 pub mod agent_brake;
+pub mod agent_auto_send;
 pub mod agent_ceiling;
 pub mod agent_conversation;
 pub mod agent_line;

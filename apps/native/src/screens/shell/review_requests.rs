@@ -3,7 +3,9 @@
 //! and each is taken once — marked in the desktop — and run as the hub's
 //! own review ("Gerar revisão") on the agent's provider, in the person's
 //! checkout of the repository. The team room shows it working and then its
-//! result; its drafts wait in Pull Requests. No task, nothing published.
+//! result; its drafts wait in Pull Requests. No task, and nothing published
+//! unless the person granted that agent sending in the project
+//! (`review_auto_send`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -13,7 +15,9 @@ use dcc_core::domain::provider::ProviderDescriptor;
 use gpui::{App, Context, Global};
 
 use super::Shell;
+use super::review_auto_send::{ReviewOutcome, landed};
 use super::review_trigger::{Checkout, hub_item, local_repository, read_and_review, review_run};
+use crate::data::agent_triggers::AgentTriggers;
 use crate::data::desktop_api::DesktopApi;
 use crate::data::pr_hub::Reviewed;
 use crate::data::pr_review_jobs::PrReviewJobs;
@@ -70,11 +74,18 @@ impl Shell {
                 repository: request.repository.clone(),
                 ..Reviewed::default()
             };
-            let found = checkout.and_then(|Checkout { root, login, .. }| {
-                let item = hub_item(&pr, &root, login)?;
-                review_run(agent, &providers, &pick, &root, String::new()).map(|_| item)
-            });
-            let Some(item) = found else {
+            let found = checkout.and_then(
+                |Checkout {
+                     root,
+                     login,
+                     project_id,
+                 }| {
+                    let item = hub_item(&pr, &root, login)?;
+                    review_run(agent, &providers, &pick, &root, String::new())
+                        .map(|_| (item, project_id))
+                },
+            );
+            let Some((item, project_id)) = found else {
                 Toaster::error(
                     cx.t_with(
                         "agents.reviewRequest.noCheckout",
@@ -92,20 +103,29 @@ impl Shell {
                 continue;
             }
             PrReviewJobs::asked_by(cx, &item.id, &agent.id);
+            let send = cx
+                .try_global::<AgentTriggers>()
+                .map(|triggers| triggers.review_send(&agent.id, &project_id))
+                .unwrap_or_default();
             let (agent, providers, pick) = (agent.clone(), providers.clone(), pick.clone());
             cx.spawn(async move |_, cx| {
                 let id = item.id.clone();
                 let name = agent.name.clone();
                 let answer = cx
                     .background_executor()
-                    .spawn(async move { read_and_review(&agent, &providers, &pick, &item) })
+                    .spawn(async move { read_and_review(&agent, &providers, &pick, &item, send) })
                     .await;
                 let _ = cx.update(|cx| {
                     // Merged or closed since it was asked: no review, no card.
-                    let Some(answer) = answer else {
+                    let Some(ReviewOutcome { answer, sent }) = answer else {
                         return PrReviewJobs::dismiss(cx, &id);
                     };
-                    let key = if answer.is_ok() {
+                    let ok = answer.is_ok();
+                    PrReviewJobs::finish(cx, &id, answer);
+                    if landed(cx, &id, &name, &label, sent) {
+                        return;
+                    }
+                    let key = if ok {
                         "agents.room.card.reviewed"
                     } else {
                         "agents.room.card.reviewFailed"
@@ -115,7 +135,6 @@ impl Shell {
                         &Args::default().with("agent", name).with("task", label),
                     );
                     crate::ui::attention::notify_away(&text, "");
-                    PrReviewJobs::finish(cx, &id, answer);
                 });
             })
             .detach();

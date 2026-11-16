@@ -38,6 +38,9 @@ pub struct PrReviewJob {
     /// The agent that asked for it (`dcc_review_pull_request`); none: the
     /// Reviewer, from the hub or its trigger.
     pub agent_id: Option<String>,
+    /// DCC sent it for the agent (`agent_auto_send`): nothing waits in
+    /// Pull Requests.
+    pub sent: Option<super::agent_auto_send::SentReview>,
 }
 
 impl PrReviewJob {
@@ -102,6 +105,7 @@ impl PrReviewJobs {
                 by_trigger: false,
                 started_at: Some(chrono::Utc::now().to_rfc3339()),
                 agent_id: None,
+                sent: None,
             },
         );
         true
@@ -148,6 +152,18 @@ impl PrReviewJobs {
             .find(|job| job.pr_id == pr_id)
         {
             job.agent_id = Some(agent_id.to_string());
+        }
+    }
+
+    /// The review of `pr_id` was sent for the agent.
+    pub fn sent(cx: &mut App, pr_id: &str, sent: super::agent_auto_send::SentReview) {
+        if let Some(job) = cx
+            .default_global::<Self>()
+            .jobs
+            .iter_mut()
+            .find(|job| job.pr_id == pr_id)
+        {
+            job.sent = Some(sent);
         }
     }
 

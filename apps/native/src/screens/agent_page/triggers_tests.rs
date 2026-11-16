@@ -2,9 +2,10 @@
 //! person turns it on, with the ceilings and today's runs in sight; no other
 //! agent has the card.
 
-use gpui::{AppContext, Modifiers, TestAppContext, WindowAppearance};
+use gpui::{AppContext, BorrowAppContext, Modifiers, TestAppContext, WindowAppearance};
 
 use super::AgentPage;
+use crate::data::agent_auto_send::ReviewSend;
 use crate::data::agent_triggers::{AgentTriggers, Trigger};
 use crate::data::agents::AgentRecord;
 use crate::data::loader::SidebarData;
@@ -112,9 +113,47 @@ fn the_reviewers_trigger_is_off_until_turned_on(cx: &mut TestAppContext) {
         "a trigger is on"
     );
 
+    // "Enviar sem perguntar": asking until the person picks more, and then
+    // it holds only in the projects picked.
+    let send = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|_, cx| cx.global::<AgentTriggers>().review_send_choice("a-1"))
+    };
+    assert!(cx.debug_bounds("agent-auto-send").is_some());
+    assert_eq!(send(cx), ReviewSend::Ask);
+    assert!(cx.debug_bounds("agent-auto-send-review-places").is_none());
+    // Its three choices are there (the card sits below the fold here, so
+    // the choice is made in the store the buttons write to).
+    assert!(cx.debug_bounds("agent-auto-send-review-2").is_some());
+    cx.update(|_, cx| {
+        cx.update_global::<AgentTriggers, _>(|triggers, _| {
+            triggers.set_review_send("a-1", ReviewSend::Decide)
+        })
+    });
+    page.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    assert_eq!(send(cx), ReviewSend::Decide);
+    assert!(cx.debug_bounds("agent-auto-send-review-nowhere").is_some());
+    cx.update(|_, cx| {
+        let triggers = cx.global::<AgentTriggers>();
+        assert_eq!(triggers.review_send("a-1", "app"), ReviewSend::Ask);
+    });
+
     // Any agent has triggers; the hub's reviews stay the Reviewer's.
     page.update(cx, |page, cx| page.show("a-2".into(), cx));
     cx.run_until_parked();
+    // Another agent has no review to send, only its replies: asking, and
+    // once sending is picked, Geral is among the rooms to grant.
+    assert!(cx.debug_bounds("agent-auto-send").is_some());
+    assert!(cx.debug_bounds("agent-auto-send-review-0").is_none());
+    assert!(cx.debug_bounds("agent-auto-send-reply-1").is_some());
+    assert!(cx.debug_bounds("agent-auto-send-reply-places").is_none());
+    cx.update(|_, cx| {
+        cx.update_global::<AgentTriggers, _>(|triggers, _| triggers.set_reply_send("a-2", true))
+    });
+    page.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-auto-send-reply-place-0").is_some());
+    assert!(cx.debug_bounds("agent-auto-send-reply-nowhere").is_some());
     assert!(cx.debug_bounds("agent-triggers").is_some());
     assert!(cx.debug_bounds("agent-trigger-prUpdated").is_none());
     assert!(cx.debug_bounds("agent-trigger-ciFailed").is_some());

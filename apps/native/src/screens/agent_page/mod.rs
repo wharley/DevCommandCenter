@@ -29,6 +29,7 @@ mod agent_card_tests;
 mod agent_card_view;
 mod agent_duplicate;
 mod agent_room_switch;
+mod auto_send;
 #[cfg(test)]
 mod chain_tests;
 #[cfg(test)]
@@ -684,6 +685,7 @@ impl AgentPage {
                     })),
             );
         let triggers = self.triggers_card(&data, cx);
+        let auto_send = self.auto_send_card(&data, cx);
         let spend = self.spend_card(agent.monthly_token_limit, cx);
         let routines = self.routines_card(cx);
         let sources = self.sources_card(cx);
@@ -774,6 +776,7 @@ impl AgentPage {
                     .py(px(32.0))
                     .child(header)
                     .children(triggers)
+                    .children(auto_send)
                     .children(spend)
                     .child(routines)
                     .child(sources)

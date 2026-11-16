@@ -135,6 +135,10 @@ impl PrHub {
         }
         self.review.applied = job.finished;
         PrReviewJobs::mark_seen(cx, &job.pr_id);
+        // Sent for the agent: its comments are on the pull request already.
+        if job.sent.is_some() {
+            return;
+        }
         let fallback = || cx.t("pullRequests.code.agentError").to_string();
         if job.status == JobStatus::Failed {
             self.review.agent_error = Some(job.error.clone().unwrap_or_else(fallback));

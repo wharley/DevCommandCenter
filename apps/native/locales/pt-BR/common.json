@@ -334,6 +334,40 @@
     "reviewRequest": {
       "noCheckout": "O {{agent}} não achou um checkout de {{repository}} nos seus projetos para revisar."
     },
+    "autoSend": {
+      "title": "Enviar sem perguntar",
+      "hint": "O que este agente pode publicar sozinho. Desligado até você ligar, em cada lugar. O merge é sempre seu, e \"Pausar todos\" segura isto também.",
+      "review": {
+        "title": "Revisão de pull request",
+        "ask": "Perguntar",
+        "comment": "Só comentar",
+        "decide": "Comentar e decidir",
+        "askHint": "Os rascunhos esperam em Pull Requests até você enviar.",
+        "commentHint": "Envia os comentários e o resumo. Aprovar ou pedir mudanças continua com você.",
+        "decideHint": "Envia os comentários com a decisão: aprova ou pede mudanças. \"Falta decidir\" vai como comentário, para o autor ler; no seu próprio PR também vai só o comentário.",
+        "projects": "Vale em",
+        "noProjects": "Escolha ao menos um projeto para valer."
+      },
+      "reply": {
+        "title": "Resposta para fora",
+        "ask": "Perguntar",
+        "send": "Enviar",
+        "askHint": "A resposta espera como cartão na sala até você enviar.",
+        "sendHint": "A resposta que o agente propõe (Slack e outros conectores) vai sem cartão, até {{count}} por dia; passando disso, volta a esperar você. O que falhar fica como cartão com o motivo.",
+        "rooms": "Vale nas salas",
+        "general": "Geral",
+        "noRooms": "Escolha ao menos uma sala para valer."
+      },
+      "replySent": "{{agent}} respondeu em {{destination}}",
+      "sent": {
+        "approve": "aprovou",
+        "request_changes": "pediu mudanças",
+        "comment": "comentou",
+        "oneComment": "1 comentário",
+        "comments": "{{count}} comentários"
+      },
+      "failed": "Não foi possível enviar a revisão de {{agent}} em {{task}}: {{error}}. Os rascunhos estão em Pull Requests."
+    },
     "triggers": {
       "title": "Gatilhos",
       "limits": "Até {{daily}} execuções por dia e {{target}} por PR ou tarefa. Hoje: {{today}}.",
@@ -573,6 +607,7 @@
         "done": "{{agent}} terminou em {{task}}",
         "waiting": "{{agent}} precisa de você em {{task}}",
         "reviewed": "{{agent}} revisou {{task}}",
+        "reviewSent": "{{agent}} revisou e enviou {{task}}",
         "reviewing": "{{agent}} está revisando {{task}}",
         "reviewFailed": "{{agent}} não conseguiu revisar {{task}}",
         "signInExpired": "O login do provider expirou. Entre de novo em Configurações › Providers ou escolha outra conta em Roda em.",
