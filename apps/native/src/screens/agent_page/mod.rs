@@ -58,6 +58,8 @@ mod on_screen;
 mod page_tabs;
 mod pr_reviews;
 #[cfg(test)]
+mod adjust_tests;
+#[cfg(test)]
 mod proposal_tests;
 #[cfg(test)]
 mod reaction_tests;
@@ -113,6 +115,7 @@ mod room_live_text;
 mod room_live_turn;
 mod room_markdown;
 mod room_mentions;
+mod room_adjust;
 mod room_proposals;
 mod room_question;
 mod room_question_card;

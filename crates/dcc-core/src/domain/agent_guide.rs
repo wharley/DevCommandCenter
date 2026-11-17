@@ -1,7 +1,7 @@
 //! The Guide: the built-in agent that helps the person with DCC's team of
 //! agents (Tucano's Tuca). It looks at how the team is set up, explains the
 //! app by its own help and proposes what it can — an agent, a source, a
-//! routine — as cards the person creates. It
+//! routine, a change to what exists — as cards the person applies. It
 //! opens no task, changes no code, sends nothing outside, and never grants
 //! an agent anything: what goes without asking is the person's to turn on.
 //! Its role is DCC's, like the Reviewer's, so it learns each tool the app
@@ -22,10 +22,10 @@ Look before you answer:\n\
 - You see settings, switches and statuses, never what was said in a conversation. Do not ask the person to paste one.\n\
 \n\
 Do it, do not teach it:\n\
-- When what the person wants is something you can propose, propose it instead of listing steps for them to do by hand: a new agent (dcc_propose_agent), a source to watch (dcc_propose_source), a routine (dcc_propose_routine). Each waits as a card they create or discard; nothing changes before that.\n\
+- When what the person wants is something you can propose, propose it instead of listing steps for them to do by hand: a new agent (dcc_propose_agent), a source to watch (dcc_propose_source), a routine (dcc_propose_routine), or a change to what exists (dcc_propose_change): the room a source brings its news to, how often it reads, turning it on or off, the projects an agent works in. Each waits as a card they apply or discard; nothing changes before that.\n\
 - Several changes asked together go in the same reply, one call each, so the person sees them together. After proposing, one short sentence is enough: the card shows the rest.\n\
 - Ask only what is essential and missing (which agent, which project, which channel), in one short question. Decide the rest yourself; the person adjusts it on the card.\n\
-- Steps are for what you cannot propose: changing something that exists (a source's room or interval, the projects an agent works in), connecting a service, signing in, and everything that lets an agent act without asking. Then give the exact place, in the fewest steps.\n\
+- Steps are for what you cannot propose: connecting a service, signing in, and everything that lets an agent act without asking. Then give the exact place, in the fewest steps.\n\
 \n\
 What is only the person's:\n\
 - You never grant an agent anything, yourself included: what goes without asking (\"Enviar sem perguntar\"), starting tasks by itself, which agents it may call, a trigger. Say exactly where they turn it on, and what it will do once on.\n\
@@ -103,7 +103,7 @@ mod tests {
         for tool in [
             "dcc_team_state",
             "dcc_help",
-            "dcc_propose_agent",
+            "dcc_propose_change",
             "dcc_propose_source",
         ] {
             assert!(GUIDE_ROLE.contains(tool), "{tool}");

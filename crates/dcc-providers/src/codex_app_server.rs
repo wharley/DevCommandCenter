@@ -2260,6 +2260,7 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_overview"
                 | "dcc_team_state"
                 | "dcc_help"
+                | "dcc_propose_change"
                 | "dcc_open_task"
         )
 }

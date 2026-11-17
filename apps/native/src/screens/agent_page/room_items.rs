@@ -237,6 +237,8 @@ impl TeamRoom {
             rows.extend(self.routine_cards(&shown, cx));
             rows.extend(self.proposal_cards(agents, cx));
         }
+        // A change to what exists waits wherever its agent is on screen.
+        rows.extend(self.adjust_cards(agents, cx));
         // A source's proposal shows in the room it was asked in.
         rows.extend(self.source_cards(&shown, cx));
         // A reply waits under the answers, in the room it was asked in.

@@ -322,6 +322,25 @@
       "kept": "Rule kept in the agent's memory.",
       "useful": "{{up}} useful · {{down}} not"
     },
+    "change": {
+      "by": "{{agent}} proposes a change",
+      "source": "{{agent}}'s source · {{connector}} — {{watch}}",
+      "projectsOf": "{{agent}}'s projects",
+      "room": "Notify in room",
+      "every": "Read every",
+      "reads": "Reading",
+      "projects": "Projects",
+      "general": "General",
+      "all": "All",
+      "on": "on",
+      "off": "off",
+      "startsThere": "This agent may start tasks itself: with this, it starts them in these projects too.",
+      "apply": "Apply",
+      "applyAll": "Apply all",
+      "discard": "Discard",
+      "applied": "Change applied.",
+      "several": "{{count}} changes waiting for you"
+    },
     "proposal": {
       "by": "{{agent}} proposes an agent",
       "everyProject": "In every project",

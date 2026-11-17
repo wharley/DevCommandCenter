@@ -487,6 +487,11 @@ impl Sidebar {
         &self.state.data.agent_proposals
     }
 
+    /// Changes an agent proposed to what exists, waiting for the person.
+    pub fn agent_changes(&self) -> &[dcc_core::domain::agent_change::AgentChange] {
+        &self.state.data.agent_changes
+    }
+
     /// Every task the list has (ideas excluded).
     pub fn tasks(&self) -> &[crate::data::tasks::TaskSummary] {
         &self.state.data.tasks

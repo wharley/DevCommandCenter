@@ -322,6 +322,25 @@
       "kept": "Regra guardada na memória do agente.",
       "useful": "{{up}} útil · {{down}} não"
     },
+    "change": {
+      "by": "{{agent}} propõe um ajuste",
+      "source": "Fonte de {{agent}} · {{connector}} — {{watch}}",
+      "projectsOf": "Projetos de {{agent}}",
+      "room": "Avisar na sala",
+      "every": "Ler a cada",
+      "reads": "Leitura",
+      "projects": "Projetos",
+      "general": "Geral",
+      "all": "Todos",
+      "on": "ligada",
+      "off": "desligada",
+      "startsThere": "Este agente pode começar tarefas sozinho: com isso, começa também nesses projetos.",
+      "apply": "Aplicar",
+      "applyAll": "Aplicar todos",
+      "discard": "Descartar",
+      "applied": "Ajuste aplicado.",
+      "several": "{{count}} ajustes esperando você"
+    },
     "proposal": {
       "by": "{{agent}} propõe um agente",
       "everyProject": "Em todos os projetos",

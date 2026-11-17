@@ -12,6 +12,7 @@ pub mod agent_conversation;
 pub mod agent_line;
 pub mod agent_memory;
 pub mod agent_mentions;
+pub mod agent_changes;
 pub mod agent_proposals;
 pub mod guide;
 pub mod agent_quiet;
