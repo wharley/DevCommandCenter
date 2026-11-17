@@ -10,6 +10,11 @@
 //! `PrWatch` already makes every five minutes — one read of GitHub per
 //! waiting task, for half an hour at most. A task the person made is
 //! remembered as done and never asked about again.
+//!
+//! A merged task is completed at once when it is open on screen
+//! (`complete_if_merged`), and a completed task is no row to read: the
+//! column says it merged before completing it (`shipped_merged`), and what
+//! reads its pull request is kept with the wait.
 
 use std::collections::HashSet;
 
@@ -20,7 +25,7 @@ use gpui::Context;
 use super::Shell;
 use crate::data::agent_triggers::AgentTriggers;
 use crate::data::desktop_api::DesktopApi;
-use crate::data::shipped::{Entry, Next, ShippedStore, next};
+use crate::data::shipped::{Entry, Kept, Next, ShippedStore, next};
 use crate::screens::sidebar::merged::MergedTask;
 
 /// What the shell keeps for it.
@@ -59,11 +64,34 @@ impl Shell {
         if merged.is_empty() || cfg!(test) {
             return;
         }
+        self.shipped_wait(merged, cx);
+    }
+
+    /// The open task's pull request merged and the task is about to be
+    /// completed: its wait starts here, since it leaves the rows.
+    pub(super) fn shipped_merged(&mut self, task: MergedTask, cx: &mut Context<Self>) {
+        if self.shipped.store.tasks.contains_key(&task.id) {
+            return;
+        }
+        self.shipped_wait(vec![task], cx);
+    }
+
+    /// Starts the wait of each: kept at once, then set aside when the
+    /// person made it and not an agent.
+    fn shipped_wait(&mut self, merged: Vec<MergedTask>, cx: &mut Context<Self>) {
         for task in &merged {
             // Held here so a second change of the rows does not ask twice.
-            self.shipped
-                .store
-                .set(&task.id, Entry::Waiting { since: now() });
+            self.shipped.store.set(
+                &task.id,
+                Entry::Waiting {
+                    since: now(),
+                    task: Some(Kept {
+                        name: task.name.clone(),
+                        root: task.checkout.clone(),
+                        number: task.number,
+                    }),
+                },
+            );
         }
         cx.spawn(async move |shell, cx| {
             let found = cx
@@ -97,8 +125,17 @@ impl Shell {
             return;
         }
         let merged = self.sidebar.read(cx).merged_tasks();
-        for (task_id, since) in self.shipped.store.waiting() {
-            let Some(task) = merged.iter().find(|task| task.id == task_id).cloned() else {
+        for (task_id, since, kept) in self.shipped.store.waiting() {
+            // What was kept with the wait, or its row while it is one.
+            let task = kept
+                .map(|kept| MergedTask {
+                    id: task_id.clone(),
+                    name: kept.name,
+                    checkout: kept.root,
+                    number: kept.number,
+                })
+                .or_else(|| merged.iter().find(|task| task.id == task_id).cloned());
+            let Some(task) = task else {
                 continue;
             };
             if !self.shipped.reading.insert(task_id.clone()) {

@@ -10,7 +10,8 @@ use crate::data::tasks::TaskSummary;
 pub struct MergedTask {
     pub id: String,
     pub name: String,
-    /// Where its branch is checked out.
+    /// The project's own checkout, which outlives the task's worktree: the
+    /// pull request is read from it after the task is completed.
     pub checkout: String,
     pub number: u32,
 }
@@ -28,10 +29,7 @@ impl Sidebar {
                 Some(MergedTask {
                     id: task.id.clone(),
                     name: task.name.clone(),
-                    checkout: task
-                        .worktree_path
-                        .clone()
-                        .unwrap_or_else(|| task.root_path.clone()),
+                    checkout: task.root_path.clone(),
                     number: meta.pr_number?,
                 })
             })

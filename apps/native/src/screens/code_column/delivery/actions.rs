@@ -497,6 +497,17 @@ impl CodeColumn {
             return;
         }
         self.delivery.completed = Some(task.id.0.clone());
+        // Said before the task is completed and leaves the rows.
+        if let Some(number) = self.delivery.pr.as_ref().and_then(|pr| pr.number) {
+            cx.emit(super::super::CodeColumnEvent::TaskMerged(
+                crate::screens::sidebar::merged::MergedTask {
+                    id: task.id.0.clone(),
+                    name: task.name.clone().unwrap_or_default(),
+                    checkout: task.root_path.clone(),
+                    number,
+                },
+            ));
+        }
         let api = self.api();
         let id = task.id.0;
         cx.spawn(async move |this, cx| {

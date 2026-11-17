@@ -22,11 +22,28 @@ pub const WAIT_MINUTES: i64 = 30;
 /// Tasks remembered as told.
 const MAX_REMEMBERED: usize = 500;
 
+/// What is needed to read a merged task's pull request and say which task
+/// it was, kept with the wait: a merged task is completed at once when it
+/// is open on screen, and a completed task is no longer a row to read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Kept {
+    pub name: String,
+    /// The project's own checkout: it outlives the task's worktree.
+    pub root: String,
+    pub number: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Entry {
     /// Merged, an agent started it: its deployment is awaited since then.
-    Waiting { since: String },
+    Waiting {
+        since: String,
+        /// None in a wait kept before this was (the row is read instead).
+        #[serde(default)]
+        task: Option<Kept>,
+    },
     /// Told, or nothing to tell (the person's own task).
     Done { at: String },
 }
@@ -114,12 +131,13 @@ impl ShippedStore {
         self.save();
     }
 
-    /// The tasks waiting for their deployment, with since when.
-    pub fn waiting(&self) -> Vec<(String, String)> {
+    /// The tasks waiting for their deployment, with since when and what
+    /// was kept of each.
+    pub fn waiting(&self) -> Vec<(String, String, Option<Kept>)> {
         self.tasks
             .iter()
             .filter_map(|(id, entry)| match entry {
-                Entry::Waiting { since } => Some((id.clone(), since.clone())),
+                Entry::Waiting { since, task } => Some((id.clone(), since.clone(), task.clone())),
                 Entry::Done { .. } => None,
             })
             .collect()
@@ -235,10 +253,16 @@ mod tests {
         let path = dir.path().join("shipped.json");
         let mut store = ShippedStore::load(Some(path.clone()));
         assert!(store.tasks.is_empty());
+        let kept = Kept {
+            name: "Corrigir o campo".into(),
+            root: "/repo".into(),
+            number: 12,
+        };
         store.set(
             "t-1",
             Entry::Waiting {
                 since: SINCE.into(),
+                task: Some(kept.clone()),
             },
         );
         store.set("t-2", Entry::Done { at: SINCE.into() });
@@ -247,7 +271,21 @@ mod tests {
             again.started_at, store.started_at,
             "kept from the first run"
         );
-        assert_eq!(again.waiting(), [("t-1".to_string(), SINCE.to_string())]);
+        // What reads its pull request is kept with the wait: the task may
+        // be completed, and gone from the rows, by the time it is read.
+        assert_eq!(
+            again.waiting(),
+            [("t-1".to_string(), SINCE.to_string(), Some(kept))]
+        );
+        // A wait kept before that reads with nothing kept.
+        let old: Entry = serde_json::from_str(r#"{"waiting":{"since":"x"}}"#).unwrap();
+        assert_eq!(
+            old,
+            Entry::Waiting {
+                since: "x".into(),
+                task: None
+            }
+        );
         assert_eq!(
             again.tasks.get("t-2"),
             Some(&Entry::Done { at: SINCE.into() })

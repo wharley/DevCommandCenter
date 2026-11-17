@@ -634,6 +634,7 @@ impl Shell {
             CodeColumnEvent::OpenMergeResolver(request) => {
                 self.open_merge_resolver(request.clone(), cx)
             }
+            CodeColumnEvent::TaskMerged(task) => self.shipped_merged(task.clone(), cx),
             CodeColumnEvent::OpenDiff(request) => {
                 let open = Some((request.scope.clone(), request.path.clone()));
                 self.code_column.update(cx, |column, cx| {

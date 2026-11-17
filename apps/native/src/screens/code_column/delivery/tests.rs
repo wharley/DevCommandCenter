@@ -358,6 +358,21 @@ fn a_merged_task_with_its_own_worktree_completes_once(cx: &mut TestAppContext) {
     let repo = git_checkout(&[("a.txt", "um\n")]);
     let parent = tempfile::tempdir().unwrap();
     let (column, cx, setup) = open(cx, parent.path(), Some(repo.path()), vec![ok(COMPLETE)]);
+    // Completed, it leaves the rows: that it merged is said first, once,
+    // with what reads its pull request from the project's own checkout.
+    let said = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = said.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(
+            &column,
+            move |_, event: &crate::screens::code_column::CodeColumnEvent, _| {
+                if let crate::screens::code_column::CodeColumnEvent::TaskMerged(task) = event {
+                    sink.borrow_mut().push(task.clone());
+                }
+            },
+        )
+        .detach();
+    });
     column.update(cx, |column, cx| {
         column.delivery.pr = Some(open_pr("merged"));
         assert_eq!(column.commit_mode(), CommitMode::Merged);
@@ -370,6 +385,14 @@ fn a_merged_task_with_its_own_worktree_completes_once(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("delivery-commit").is_none());
     let paths: Vec<String> = requests(setup).into_iter().map(|(path, _)| path).collect();
     assert_eq!(paths, vec!["/api/v1/workspaces/w-1/delivery/complete"]);
+    let said = said.borrow();
+    assert_eq!(said.len(), 1);
+    assert_eq!(said[0].id, "w-1");
+    let root = column.read_with(cx, |column, _| {
+        column.delivery.task.as_ref().unwrap().root_path.clone()
+    });
+    assert_eq!(said[0].checkout, root);
+    assert!(said[0].number > 0);
 }
 
 /// A checkout on `feature` in the middle of merging `main`, `a.txt` conflicted.

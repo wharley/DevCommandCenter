@@ -82,6 +82,10 @@ pub enum CodeColumnEvent {
     Annotate(crate::screens::annotation::AnnotationRequest),
     /// "Mudanças" to look at (the conversation menu's fix and conflicts).
     ReviewChanges,
+    /// The open task's pull request merged and the task is being
+    /// completed: said before it leaves the rows, for the agent the work
+    /// started with to be told (`shell::shipped`).
+    TaskMerged(crate::screens::sidebar::merged::MergedTask),
 }
 
 /// The checkout's files: tracked and new, then the ignored ones (dimmed).
