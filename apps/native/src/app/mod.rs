@@ -38,6 +38,9 @@ pub fn run() {
         dcc_server::shell_env::bootstrap();
     }
     crate::data::host::start();
+    if !cfg!(test) {
+        crate::data::guide::ensure();
+    }
     crate::data::provider_catalog::locate_claude_helper();
     let prefs_path = prefs::default_path();
     let prefs = Prefs::load(&prefs_path);

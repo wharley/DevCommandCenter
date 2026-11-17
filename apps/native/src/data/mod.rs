@@ -13,6 +13,7 @@ pub mod agent_line;
 pub mod agent_memory;
 pub mod agent_mentions;
 pub mod agent_proposals;
+pub mod guide;
 pub mod agent_quiet;
 pub mod agent_reactions;
 pub mod agent_rooms;

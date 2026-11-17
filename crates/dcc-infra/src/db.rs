@@ -23,6 +23,7 @@ use workspace_ports::WORKSPACE_PORTS_TABLE_SQL;
 mod agent_conversation;
 mod agent_memory;
 mod agent_proposals;
+mod guide_agent;
 mod agent_reactions;
 mod agent_routines;
 mod agent_sources;
@@ -7914,7 +7915,7 @@ impl SqliteSessionRepo {
     ) -> Result<Vec<ResidentAgent>> {
         let mut statement = conn
             .prepare(&format!(
-                "SELECT {} FROM dcc_agents a WHERE a.deleted_at IS NULL ORDER BY a.created_at, CASE a.preset WHEN 'reviewer' THEN 0 ELSE 1 END, a.id",
+                "SELECT {} FROM dcc_agents a WHERE a.deleted_at IS NULL ORDER BY CASE a.preset WHEN 'reviewer' THEN 0 WHEN 'guide' THEN 1 ELSE 2 END, a.created_at, a.id",
                 Self::RESIDENT_AGENT_COLUMNS
             ))
             .map_err(|error| dcc_core::CoreError::Repository(error.to_string()))?;

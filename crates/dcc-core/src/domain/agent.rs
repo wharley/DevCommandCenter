@@ -147,6 +147,7 @@ fn default_accessory() -> String {
 pub fn default_look(preset: Option<&str>) -> (&'static str, &'static str) {
     match preset {
         Some(REVIEWER_PRESET) => ("octopus", "glasses"),
+        Some(super::agent_guide::GUIDE_PRESET) => ("cat", "cap"),
         _ => ("octopus", "none"),
     }
 }
@@ -387,6 +388,12 @@ impl ResidentAgent {
                 if !self.offer_prompt.is_empty() {
                     self.offer_prompt = text.offer_prompt();
                 }
+            }
+            // The Guide's role is DCC's too; it is called by talking to it.
+            Some(super::agent_guide::GUIDE_PRESET) => {
+                self.role = super::agent_guide::GUIDE_ROLE.to_string();
+                self.kickoff_prompt = String::new();
+                self.offer_prompt = String::new();
             }
             _ => {}
         }
