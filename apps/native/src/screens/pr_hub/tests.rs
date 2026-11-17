@@ -648,3 +648,87 @@ fn the_summary_approves_with_its_text_without_opening_the_code(cx: &mut TestAppC
         assert_eq!(hub.review.event, ReviewEvent::Comment);
     });
 }
+
+#[gpui::test]
+fn a_reviewer_is_asked_from_the_summarys_review_card(cx: &mut TestAppContext) {
+    use crate::test_support::fake_desktop_routes;
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+        crate::ui::text_input::bind_keys(cx);
+        crate::ui::Toaster::init(cx);
+    });
+    let list =
+        json!({ "items": [item("pr-1", 1, "Fix login", false, true)], "warnings": [] }).to_string();
+    let detail = json!({
+        "body": null, "comments": [], "checks": [], "files": [], "inlineComments": [],
+        "reviews": [{ "author": { "login": "caio" }, "state": "approved", "body": "" }],
+    })
+    .to_string();
+    // Who is on the review already (bob wrote it, ana was asked, caio
+    // reviewed) is not offered again.
+    let candidates = json!({ "candidates": [
+        { "login": "ana" }, { "login": "caio" }, { "login": "bob" },
+        { "login": "duda", "name": "Duda", "suggested": true },
+        { "login": "edu" },
+    ] })
+    .to_string();
+    let (port, desktop) = fake_desktop_routes(vec![
+        ("/api/v1/pull-request-hub/list", 200, list.clone()),
+        ("/api/v1/pull-request-hub/detail", 200, detail.clone()),
+        ("/api/v1/forge/reviewer-candidates", 200, candidates),
+        ("/api/v1/forge/request-reviewers", 200, "{}".into()),
+        ("/api/v1/pull-request-hub/detail", 200, detail),
+        ("/api/v1/pull-request-hub/list", 200, list),
+    ]);
+    let (hub, cx) = cx.add_window_view(PrHub::new);
+    cx.simulate_resize(size(px(1400.0), px(900.0)));
+    hub.update(cx, |hub, cx| {
+        hub.api = Some(DesktopApi::new(port, "k"));
+        hub.filter = crate::data::pr_hub::Filter::Mine;
+        hub.refresh(cx);
+    });
+    cx.run_until_parked();
+    let ask = cx.debug_bounds("pr-request-review").expect("the button");
+    cx.simulate_click(ask.center(), Modifiers::none());
+    for _ in 0..20 {
+        cx.run_until_parked();
+        if cx.debug_bounds("pr-reviewer-candidate-duda").is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    for login in ["ana", "caio", "bob"] {
+        assert!(
+            cx.debug_bounds(match login {
+                "ana" => "pr-reviewer-candidate-ana",
+                "caio" => "pr-reviewer-candidate-caio",
+                _ => "pr-reviewer-candidate-bob",
+            })
+            .is_none(),
+            "{login} is on the review"
+        );
+    }
+    assert!(cx.debug_bounds("pr-reviewer-candidate-edu").is_some());
+    let duda = cx.debug_bounds("pr-reviewer-candidate-duda").unwrap();
+    cx.simulate_click(duda.center(), Modifiers::none());
+    cx.run_until_parked();
+    assert!(
+        crate::test_support::desktop_done(&desktop, || cx.run_until_parked()),
+        "the desktop never got the calls"
+    );
+    let seen = desktop.join().unwrap();
+    let asked = seen
+        .iter()
+        .find(|(line, _)| line == "POST /api/v1/forge/request-reviewers")
+        .expect("the forge was asked");
+    let body: serde_json::Value = serde_json::from_str(&asked.1).unwrap();
+    assert_eq!(body["workspaceRoot"], "/repo");
+    assert_eq!(body["number"], 1);
+    assert_eq!(body["add"], json!(["duda"]));
+    assert_eq!(body["remove"], json!([]));
+    assert_eq!(body["forgeLogin"], "ana");
+    hub.read_with(cx, |hub, _| {
+        assert!(hub.reviewer_picker.is_none() && !hub.requesting_review)
+    });
+}

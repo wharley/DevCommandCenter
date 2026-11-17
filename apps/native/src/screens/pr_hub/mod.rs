@@ -18,6 +18,7 @@ mod merge_options;
 mod origin;
 #[cfg(test)]
 mod news_tests;
+mod request_review;
 mod reviewer;
 mod sections;
 mod summary_review;
@@ -79,6 +80,10 @@ pub struct PrHub {
     pub(crate) origin: origin::PrOrigin,
     pub(crate) comment: Entity<TextArea>,
     pub(crate) sending: bool,
+    /// "Pedir revisão" open on the summary's review card.
+    pub(crate) reviewer_picker: Option<request_review::ReviewerPicker>,
+    /// A reviewer is being asked on the forge.
+    pub(crate) requesting_review: bool,
     pub(crate) comment_error: Option<String>,
     pub(crate) working_on: Option<String>,
     /// The merge method picked, waiting for its confirmation.
@@ -169,6 +174,8 @@ impl PrHub {
             origin: Default::default(),
             comment,
             sending: false,
+            reviewer_picker: None,
+            requesting_review: false,
             comment_error: None,
             working_on: None,
             pending_merge: None,

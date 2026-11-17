@@ -487,7 +487,10 @@ fn calling_an_agent_starts_its_bound_session_with_the_kickoff(cx: &mut TestAppCo
         buttons.set_busy(false, cx);
     });
     cx.run_until_parked();
-    // Every agent takes a button; the reviewer waits for changes.
+    // A team is a pile that opens its list: every agent has a row, and
+    // the reviewer waits for changes.
+    assert!(cx.debug_bounds("call-agent-0").is_none());
+    click(cx, "call-agents");
     assert!(cx.debug_bounds("call-agent-0").is_some());
     assert!(cx.debug_bounds("call-agent-1").is_some());
     assert!(cx.debug_bounds("call-agent-2").is_some());
@@ -509,7 +512,12 @@ fn calling_an_agent_starts_its_bound_session_with_the_kickoff(cx: &mut TestAppCo
         buttons.set_agents(all, cx);
     });
     cx.run_until_parked();
+    if cx.debug_bounds("call-agent-0").is_none() {
+        click(cx, "call-agents");
+    }
     click(cx, "call-agent-0");
+    // Called: the list closes.
+    assert!(!cx.update(|_, cx| buttons.read(cx).open));
     let requests = server.join().unwrap();
     let lines: Vec<&str> = requests.iter().map(|(line, _)| line.as_str()).collect();
     assert_eq!(

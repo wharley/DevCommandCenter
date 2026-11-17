@@ -585,6 +585,7 @@
       "dismiss": "Not now"
     },
     "call": {
+      "team": "Call an agent in this task",
       "nothingToReview": "There are no changes to review in this task yet.",
       "busy": "Wait for this task's agent to finish.",
       "inTask": "Call {{agent}} in this task",

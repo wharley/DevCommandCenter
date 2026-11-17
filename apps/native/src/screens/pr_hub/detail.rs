@@ -290,6 +290,31 @@ impl PrHub {
             )
             .child(rail);
         let reviewers = self.reviewers_card(&item, self.merge_detail(&item), english, cx);
+        // Under who reviewed and who was asked: asking someone else.
+        let reviewed: Vec<String> = self
+            .merge_detail(&item)
+            .and_then(|detail| detail.as_ref().ok())
+            .map(|detail| {
+                detail
+                    .reviews
+                    .iter()
+                    .filter_map(|review| review.author.as_ref())
+                    .map(|author| author.login.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let ask = self.request_review_trigger(
+            &item,
+            super::request_review::on_the_review(&item, &reviewed),
+            cx,
+        );
+        let reviewers = div()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(reviewers)
+            .child(ask)
+            .into_any_element();
         let checks = self.checks_card(self.merge_detail(&item), cx);
         let description: AnyElement = match detail
             .as_ref()
