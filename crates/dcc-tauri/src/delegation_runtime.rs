@@ -2080,11 +2080,24 @@ pub async fn propose_task(
     // The person's turn starts tasks; an event that woke an agent opens one
     // in a project (started only if the agent may start tasks itself); a
     // task's [DCC] status opens none (`task_gate`).
-    let starts_itself = input.new_task.is_some()
-        && state
-            .session_agent(&parent.id)
-            .map_err(|error| error.to_string())?
-            .is_some_and(|agent| agent.auto_start_tasks);
+    // ...and only in a project the person placed it in (`starts_alone`).
+    let starts_itself = match &input.new_task {
+        Some(target) => {
+            let room = state.session_room(&parent.id).ok().flatten();
+            state
+                .session_agent(&parent.id)
+                .map_err(|error| error.to_string())?
+                .is_some_and(|agent| {
+                    agent.auto_start_tasks
+                        && dcc_core::domain::agent_projects::starts_alone(
+                            &agent.projects,
+                            room.as_deref(),
+                            &target.project_id,
+                        )
+                })
+        }
+        None => false,
+    };
     let gate = crate::task_gate::task_gate(
         open_turn.as_ref().map(|(_, prompt)| prompt.as_str()),
         input.new_task.is_some(),

@@ -31,7 +31,7 @@ pub fn is_overview_tool(name: &str) -> bool {
 pub fn definition() -> Value {
     json!({
         "name": OVERVIEW_TOOL,
-        "description": "Only in your own conversation as a DCC resident agent (your instructions carry a dcc_agent_conversation block): the person's projects and tasks across DCC. needsYou is DCC's \"Precisa de você\" list, each with its reason: permission or input (the agent waits on them), checksFailing or prConflicts (with the PR number), conflicts, delegatedReview, usageLimit, woke, setup. running has a turn in progress; recent are the latest others, newest first. Every time is the person's local time with its UTC offset; quote it as local time. Read it before answering what needs the person, how the day went or where a task stands.",
+        "description": "Only in your own conversation as a DCC resident agent (your instructions carry a dcc_agent_conversation block): the person's projects and tasks across DCC. projects lists each project with its name, its repository (host/owner/name) and folder: that, not the name alone, is what says whose code a project is. needsYou is DCC's \"Precisa de você\" list, each with its reason: permission or input (the agent waits on them), checksFailing or prConflicts (with the PR number), conflicts, delegatedReview, usageLimit, woke, setup. running has a turn in progress; recent are the latest others, newest first. Every time is the person's local time with its UTC offset; quote it as local time. Read it before answering what needs the person, how the day went or where a task stands.",
         "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
         "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
     })
@@ -68,17 +68,61 @@ fn task_view(task: &Task) -> Value {
     })
 }
 
-fn projects(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
+/// Where a repository lives, as its remote says it without the scheme, a
+/// user or a password: `github.com/acme/loja`. It is what tells one
+/// project from another of the same name.
+fn repository_of(remote_url: &str) -> Option<String> {
+    let url = remote_url.trim().trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    // The user (and a password) end at the last `@` before the path.
+    let head = rest.split_once('/').map_or(rest, |(head, _)| head);
+    let rest = head
+        .rfind('@')
+        .map_or(rest, |at| rest.get(at + 1..).unwrap_or(rest));
+    let (host, path) = rest.split_once(['/', ':'])?;
+    let path = path.trim_matches('/');
+    (!host.is_empty() && !path.is_empty()).then(|| format!("{host}/{path}"))
+}
+
+/// The person's projects: each with its name and where its code lives.
+/// `only`: the projects chosen for the agent (empty: every project).
+fn projects(conn: &Connection, only: &[String]) -> Result<Vec<Value>, rusqlite::Error> {
     let mut statement = conn.prepare(
-        "SELECT MIN(COALESCE(NULLIF(display_name, ''), name)) AS label
+        "SELECT project_id, MIN(COALESCE(NULLIF(display_name, ''), name)) AS label,
+                MIN(remote_url), MIN(root_path)
          FROM dcc_repositories
          WHERE project_id NOT LIKE 'dcc-agent-%'
          GROUP BY project_id ORDER BY lower(label)",
     )?;
-    let names = statement
-        .query_map([], |row| row.get::<_, String>(0))?
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(names)
+    Ok(rows
+        .into_iter()
+        .filter(|(id, ..)| dcc_core::domain::agent_projects::works_in(only, id))
+        .map(|(_, name, remote, folder)| {
+            let mut project = json!({ "name": name });
+            if let Some(repository) = remote.as_deref().and_then(repository_of) {
+                project["repository"] = json!(repository);
+            }
+            let folder = folder
+                .as_deref()
+                .and_then(|path| std::path::Path::new(path).file_name())
+                .and_then(|name| name.to_str());
+            if let Some(folder) = folder {
+                project["folder"] = json!(folder);
+            }
+            project
+        })
+        .collect())
 }
 
 /// Every task's name and project, by workspace id; the homes are left out.
@@ -174,18 +218,19 @@ fn room_first(items: &mut [Value], room: &str) {
 
 /// The overview as the agent reads it. `attention` is DCC's "Precisa de
 /// você" list, or `None` when it could not be read; `room` is the project
-/// whose room the agent talks in.
+/// whose room the agent talks in; `only` the projects chosen for it.
 pub fn read_overview(
     db_path: &std::path::Path,
     attention: Option<&[AttentionItem]>,
     room: Option<&str>,
+    only: &[String],
 ) -> Result<Value, String> {
     let mut conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|error| error.to_string())?;
     conn.busy_timeout(Duration::from_millis(300))
         .map_err(|error| error.to_string())?;
     let tasks = read_tasks_with(&mut conn, RECENT_TASKS).map_err(|error| error.to_string())?;
-    let projects = projects(&conn).map_err(|error| error.to_string())?;
+    let projects = projects(&conn, only).map_err(|error| error.to_string())?;
     let labels = task_labels(&conn).map_err(|error| error.to_string())?;
     let pick = |statuses: &[&str]| -> Vec<Value> {
         tasks
@@ -244,8 +289,14 @@ pub async fn dispatch(sessions: &SessionCommandState, session_id: &str) -> Value
         .session_room(&SessionId(session_id.to_string()))
         .ok()
         .flatten();
+    let only = sessions
+        .session_agent(&SessionId(session_id.to_string()))
+        .ok()
+        .flatten()
+        .map(|agent| agent.projects)
+        .unwrap_or_default();
     let overview = tokio::task::spawn_blocking(move || {
-        read_overview(&db_path, attention.as_deref(), room.as_deref())
+        read_overview(&db_path, attention.as_deref(), room.as_deref(), &only)
     })
     .await
     .map_err(|error| error.to_string())
@@ -300,10 +351,11 @@ mod tests {
             "CREATE TABLE dcc_sessions (id TEXT, workspace_id TEXT);
             CREATE TABLE dcc_threads (session_id TEXT, title TEXT, archived_at TEXT);
             CREATE TABLE dcc_workspaces (id TEXT, project_id TEXT, name TEXT, root_path TEXT, state TEXT);
-            CREATE TABLE dcc_repositories (project_id TEXT, display_name TEXT, name TEXT, root_path TEXT);
+            CREATE TABLE dcc_repositories (project_id TEXT, display_name TEXT, name TEXT, root_path TEXT, remote_url TEXT);
             CREATE TABLE dcc_session_events (session_id TEXT, sequence INTEGER, kind_json TEXT, occurred_at TEXT);
-            INSERT INTO dcc_repositories VALUES ('p', 'Loja', 'loja', '/loja');
-            INSERT INTO dcc_repositories VALUES ('dcc-agent-a', NULL, 'a', '/home/a');
+            INSERT INTO dcc_repositories VALUES ('p', 'Loja', 'loja', '/code/loja-web', 'https://someone:secret@gitlab.acme.com/acme/loja-web.git');
+            INSERT INTO dcc_repositories VALUES ('q', NULL, 'painel', '/code/painel', 'git@github.com:outra/painel.git');
+            INSERT INTO dcc_repositories VALUES ('dcc-agent-a', NULL, 'a', '/home/a', NULL);
             INSERT INTO dcc_workspaces VALUES ('w', 'p', 'Checkout', '/loja', 'ready');
             INSERT INTO dcc_workspaces VALUES ('h', 'dcc-agent-a', 'Conversa', '/home/a', 'ready');
             INSERT INTO dcc_sessions VALUES ('s', 'w');
@@ -326,9 +378,20 @@ mod tests {
             item("w", AttentionReason::Completed, None),
             item("h", AttentionReason::Input, None),
         ];
-        let overview = read_overview(&db, Some(&attention), None).unwrap();
+        let overview = read_overview(&db, Some(&attention), None, &[]).unwrap();
         assert!(overview.get("room").is_none());
-        assert_eq!(overview["projects"], json!(["Loja"]));
+        // Each project says where its code lives, with no user or password.
+        assert_eq!(
+            overview["projects"],
+            json!([
+                {"name": "Loja", "repository": "gitlab.acme.com/acme/loja-web", "folder": "loja-web"},
+                {"name": "painel", "repository": "github.com/outra/painel", "folder": "painel"}
+            ])
+        );
+        // An agent placed in some projects sees only those.
+        let placed = read_overview(&db, None, None, &["p".to_string()]).unwrap();
+        assert_eq!(placed["projects"].as_array().unwrap().len(), 1);
+        assert_eq!(placed["projects"][0]["name"], "Loja");
         assert_eq!(overview["running"][0]["task"], "Checkout");
         assert_eq!(overview["running"].as_array().unwrap().len(), 1);
         let needs = overview["needsYou"].as_array().unwrap();
@@ -347,10 +410,10 @@ mod tests {
         )
         .is_ok());
 
-        let fallback = read_overview(&db, None, None).unwrap();
+        let fallback = read_overview(&db, None, None, &[]).unwrap();
         assert_eq!(fallback["needsYou"], json!([]));
         // In the room of project "p": it says so.
-        let in_room = read_overview(&db, None, Some("p")).unwrap();
+        let in_room = read_overview(&db, None, Some("p"), &[]).unwrap();
         assert_eq!(in_room["room"], "Loja");
     }
 }
