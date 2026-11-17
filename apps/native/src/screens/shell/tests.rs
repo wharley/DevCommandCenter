@@ -922,7 +922,7 @@ fn an_appshot_from_the_key_goes_into_the_open_tasks_composer(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn the_floating_terminal_opens_over_any_screen_right_of_the_sidebar(cx: &mut TestAppContext) {
+fn the_floating_terminal_opens_over_any_screen_in_the_corner(cx: &mut TestAppContext) {
     let (shell, cx, _dir) = open_shell(cx, Prefs::default());
     cx.update(|_, cx| super::bind_keys(cx));
     assert!(cx.debug_bounds("floating-terminal").is_none());
@@ -932,9 +932,15 @@ fn the_floating_terminal_opens_over_any_screen_right_of_the_sidebar(cx: &mut Tes
         cx.emit(crate::screens::sidebar::SidebarEvent::ToggleFloatingTerminal)
     });
     cx.run_until_parked();
+    // In the bottom-right corner, like Orca's.
     let panel = cx.debug_bounds("floating-terminal").expect("the panel");
-    let sidebar_width = shell.read_with(cx, |shell, _| shell.layout.sidebar_rail_width());
-    assert!(f32::from(panel.origin.x) > sidebar_width, "{panel:?}");
+    let viewport = cx.update(|window, _| window.viewport_size());
+    assert_eq!(f32::from(viewport.width - panel.right()), 24.0, "{panel:?}");
+    assert_eq!(
+        f32::from(viewport.height - panel.bottom()),
+        24.0,
+        "{panel:?}"
+    );
     assert!(
         cx.debug_bounds("terminal-dock").is_none(),
         "not the task's dock"

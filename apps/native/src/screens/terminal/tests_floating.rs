@@ -2,7 +2,7 @@
 //! shell opens in its own folder under its own key, says nothing of a task,
 //! offers nothing to an agent, and ⌘⌥T opens, focuses and hides it.
 
-use gpui::{TestAppContext, WindowAppearance};
+use gpui::{Modifiers, MouseButton, TestAppContext, WindowAppearance, point, px, size};
 use serde_json::{Value, json};
 
 use super::dock::{ScopeKind, TerminalDock};
@@ -74,4 +74,45 @@ fn it_opens_in_its_folder_and_the_shortcut_toggles_it(cx: &mut TestAppContext) {
     cx.update(|window, cx| dock.update(cx, |dock, cx| dock.toggle_floating(window, cx)));
     cx.run_until_parked();
     assert!(cx.debug_bounds("floating-terminal").is_some());
+}
+
+#[gpui::test]
+fn its_bar_drags_the_window(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(Theme::new(ThemePreference::Light, WindowAppearance::Light));
+        crate::i18n::I18n::init(crate::i18n::Locale::PtBr, cx);
+    });
+    let tabs = TabStore::default().with_tab(FLOATING_SCOPE, "t1");
+    let (dock, cx) =
+        cx.add_window_view(move |_, _| TerminalDock::floating_in("/Users/me".into(), tabs, None));
+    cx.simulate_resize(size(px(1600.0), px(1000.0)));
+    cx.update(|window, cx| dock.update(cx, |dock, cx| dock.toggle_floating(window, cx)));
+    cx.run_until_parked();
+    let before = cx.update(|_, cx| dock.read(cx).floating_rect(size(1600.0, 1000.0)));
+    // The view is the whole window here: the bar's empty end is grabbed.
+    let bar = cx.debug_bounds("floating-terminal-bar").expect("the bar");
+    let from = point(bar.center().x, bar.center().y);
+    cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(
+        from - point(px(40.0), px(20.0)),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_move(
+        from - point(px(300.0), px(200.0)),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_up(
+        from - point(px(300.0), px(200.0)),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    cx.run_until_parked();
+    let after = cx.update(|_, cx| dock.read(cx).floating_rect(size(1600.0, 1000.0)));
+    assert_eq!(after.size, before.size);
+    assert_eq!(
+        after.origin,
+        point(before.origin.x - 300.0, before.origin.y - 200.0)
+    );
 }

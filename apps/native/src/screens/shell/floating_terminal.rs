@@ -1,6 +1,6 @@
 //! The floating terminal over every screen (`terminal/floating.rs`): made
 //! with the shell, toggled by ⌘⌥T, the sidebar's button and the palette,
-//! and placed over the main area, right of the sidebar. It shares nothing
+//! and drawn where it says it sits (bottom-right, like Orca's). It shares nothing
 //! with the task's dock but the desktop's activity, read once by that dock.
 
 use gpui::{AnyElement, AppContext, Context, Entity, Subscription, Window, div, prelude::*, px};
@@ -9,9 +9,6 @@ use super::{Shell, Surface};
 use crate::data::desktop_api::DesktopApi;
 use crate::screens::terminal::tabs::TabStore;
 use crate::screens::terminal::{DockEvent, TerminalDock};
-
-/// Its gap to the window's edges and the sidebar.
-const MARGIN: f32 = 12.0;
 
 pub(super) fn new_floating(
     window: &mut Window,
@@ -63,29 +60,28 @@ impl Shell {
         }
     }
 
-    /// The panel over the main area: its height at the bottom, or all of it
-    /// when expanded.
-    pub(super) fn floating_terminal_overlay(&self, cx: &gpui::App) -> Option<AnyElement> {
+    /// The window over every screen, where it says it sits.
+    pub(super) fn floating_terminal_overlay(
+        &self,
+        window: &Window,
+        cx: &gpui::App,
+    ) -> Option<AnyElement> {
         let dock = self.floating_terminal.read(cx);
         if !dock.open {
             return None;
         }
-        let left = self.layout.sidebar_rail_width() + MARGIN;
-        let height = dock.height;
-        let expanded = dock.expanded;
+        let viewport = window.viewport_size();
+        let rect = dock.floating_rect(gpui::size(
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+        ));
         Some(
             div()
                 .absolute()
-                .left(px(left))
-                .right(px(MARGIN))
-                .bottom(px(MARGIN))
-                .map(|panel| {
-                    if expanded {
-                        panel.top(px(MARGIN))
-                    } else {
-                        panel.h(px(height))
-                    }
-                })
+                .left(px(rect.origin.x))
+                .top(px(rect.origin.y))
+                .w(px(rect.size.width))
+                .h(px(rect.size.height))
                 .child(self.floating_terminal.clone())
                 .into_any_element(),
         )

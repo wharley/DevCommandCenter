@@ -153,6 +153,8 @@ pub struct TerminalSession {
     banner: bool,
     /// Its selection can go to the task's agent (not in the floating one).
     pub agent: bool,
+    /// Drawn in the desktop's dashed viewport (not in the floating window).
+    pub framed: bool,
     _open: Option<Task<()>>,
 }
 
@@ -193,6 +195,7 @@ impl TerminalSession {
             dev_servers: Default::default(),
             banner: true,
             agent: true,
+            framed: true,
             _open: None,
         };
         session.open(cx);

@@ -92,10 +92,16 @@ pub(super) struct ByOwnerRequest {
     rows: Option<u16>,
 }
 
-/// The app's own commands with no task to hold them ("Conectar GitHub",
-/// an agent CLI's update): the only shells that may open in the person's
-/// home folder.
-const HOME_OWNERS: [&str; 2] = ["forge-connect:", "cli-update:"];
+/// The shells with no task to hold them, the only ones that may open in
+/// the person's home folder: the app's own commands ("Conectar GitHub", an
+/// agent CLI's update) and the native app's terminal outside tasks.
+const HOME_OWNERS: [&str; 3] = ["forge-connect:", "cli-update:", "terminal:floating:"];
+
+fn opens_in_home(owner_key: &str) -> bool {
+    HOME_OWNERS
+        .iter()
+        .any(|prefix| owner_key.starts_with(prefix))
+}
 
 /// Whether `cwd` is the person's home folder.
 fn is_home(cwd: &str) -> bool {
@@ -138,10 +144,7 @@ async fn by_owner(
     Path(owner_key): Path<String>,
     Json(input): Json<ByOwnerRequest>,
 ) -> Result<Json<Value>, HttpApiError> {
-    let app_command = HOME_OWNERS
-        .iter()
-        .any(|prefix| owner_key.starts_with(prefix));
-    if !(app_command && is_home(&input.cwd)) {
+    if !(opens_in_home(&owner_key) && is_home(&input.cwd)) {
         git_changes::task_checkout(&backend, &input.cwd).await?;
     }
     let env = task_env(&backend, &owner_key, &input.cwd).await;
@@ -214,6 +217,16 @@ async fn stream() -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::con
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_shells_without_a_task_may_open_in_home() {
+        assert!(opens_in_home("terminal:floating:term-1"));
+        assert!(opens_in_home("cli-update:claude"));
+        assert!(opens_in_home("forge-connect:github"));
+        // A task's shells stay in its checkout.
+        assert!(!opens_in_home("terminal:worktree:w-1:term-1"));
+        assert!(!opens_in_home("terminal:p-1:term-1"));
+    }
 
     #[test]
     fn events_read_like_the_webview_payloads() {

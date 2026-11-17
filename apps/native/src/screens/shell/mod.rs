@@ -1041,7 +1041,7 @@ impl Render for Shell {
                     self.pr_hub_element()
                 }
             }))
-            .children(self.floating_terminal_overlay(cx))
+            .children(self.floating_terminal_overlay(window, cx))
             .child(self.delivery.overlay.clone())
             .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))
             .children(self.annotation.as_ref().map(|(card, _)| card.clone()))

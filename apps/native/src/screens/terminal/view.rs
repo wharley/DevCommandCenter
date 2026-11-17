@@ -347,17 +347,20 @@ impl Render for TerminalSession {
             .min_w_0()
             .flex_col()
             .overflow_hidden()
-            // `.dcc-terminal__viewport`
-            .p(px(VIEWPORT_PAD))
-            .rounded(px(10.0))
-            .border_1()
-            .border_dashed()
-            .border_color(colors.border)
-            .bg(mix_oklab(
-                mix_oklab(colors.muted, 0.86, colors.foreground),
-                0.72,
-                gpui::transparent_black(),
-            ))
+            // `.dcc-terminal__viewport`; a floating window is its own frame.
+            .when(self.framed, |viewport| {
+                viewport
+                    .p(px(VIEWPORT_PAD))
+                    .rounded(px(10.0))
+                    .border_1()
+                    .border_dashed()
+                    .border_color(colors.border)
+                    .bg(mix_oklab(
+                        mix_oklab(colors.muted, 0.86, colors.foreground),
+                        0.72,
+                        gpui::transparent_black(),
+                    ))
+            })
             .child(
                 // `.dcc-terminal__surface`
                 div()

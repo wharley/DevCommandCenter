@@ -156,6 +156,8 @@ pub struct TerminalDock {
     /// The terminal that belongs to no task (`floating.rs`): its own tabs
     /// in `~`, nothing of a task's (scope, agent, browser) on its bar.
     pub(super) floating: bool,
+    /// Where the floating window sits and how big it is.
+    pub(super) float: super::floating::Float,
     /// "Renomear terminal", while open.
     pub(super) renaming: Option<super::dock_actions::Renaming>,
     /// "Há um processo em execução": the tab and what runs in it.
@@ -185,6 +187,7 @@ impl TerminalDock {
             api,
             ui_states: HashMap::new(),
             floating: false,
+            float: Default::default(),
             activity: Default::default(),
             renaming: None,
             closing: None,
@@ -349,6 +352,7 @@ impl TerminalDock {
         let session = cx.new(|cx| {
             let mut session = TerminalSession::new(owner.clone(), spec, context, api, cx);
             session.agent = agent;
+            session.framed = agent;
             session
         });
         self._sessions.push(
