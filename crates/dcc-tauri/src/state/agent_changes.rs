@@ -31,7 +31,7 @@ fn invalid(message: String) -> dcc_core::CoreError {
 }
 
 /// Geral, as an agent may write it.
-fn is_general(room: &str) -> bool {
+pub(super) fn is_general(room: &str) -> bool {
     ["geral", "general", ""].contains(&room.trim().to_lowercase().as_str())
 }
 
@@ -68,7 +68,7 @@ fn pick_source<'a>(
 }
 
 impl SessionCommandState {
-    fn agent_named(&self, name: &str) -> Result<ResidentAgent> {
+    pub(super) fn agent_of_name(&self, name: &str) -> Result<ResidentAgent> {
         let agents = self
             .session_repo
             .list_stored_resident_agents(&ReviewerPresetText::default())?;
@@ -89,7 +89,7 @@ impl SessionCommandState {
             })
     }
 
-    fn project_named(&self, name: &str) -> Result<String> {
+    pub(super) fn project_of_name(&self, name: &str) -> Result<String> {
         crate::agent_task::find_project(&self.db_path, name, false, None)
             .map(|target| target.project_id)
             .map_err(invalid)
@@ -97,7 +97,7 @@ impl SessionCommandState {
 
     /// The change as it is kept: ids, with what each field is now.
     fn resolve_change(&self, proposed: &ProposedChange) -> Result<Change> {
-        let agent = self.agent_named(&proposed.agent)?;
+        let agent = self.agent_of_name(&proposed.agent)?;
         let Some(watch) = proposed.source.as_deref() else {
             let Some(names) = &proposed.projects else {
                 return Err(invalid(
@@ -111,7 +111,7 @@ impl SessionCommandState {
             let mut after = Vec::new();
             if !all {
                 for name in names {
-                    let id = self.project_named(name)?;
+                    let id = self.project_of_name(name)?;
                     if !after.contains(&id) {
                         after.push(id);
                     }
@@ -136,7 +136,7 @@ impl SessionCommandState {
         let room = match proposed.room.as_deref() {
             None => None,
             Some(room) if is_general(room) => Some(None),
-            Some(room) => Some(Some(self.project_named(room)?)),
+            Some(room) => Some(Some(self.project_of_name(room)?)),
         };
         if let Some(every) = proposed.every_minutes {
             if !EVERY_CHOICES.contains(&every) {
@@ -200,6 +200,13 @@ impl SessionCommandState {
         else {
             return Ok(None);
         };
+        // What goes without asking is written by the app, where the person
+        // clicked; the server turns none of it on.
+        if waiting.change.is_grant() {
+            return Err(invalid(
+                "this is applied in the app, by the person's own click".into(),
+            ));
+        }
         let written = self.session_repo.apply_agent_change(&waiting.change)?;
         self.session_repo.answer_agent_change(id)?;
         if !written {

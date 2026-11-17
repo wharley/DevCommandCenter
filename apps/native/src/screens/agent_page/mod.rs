@@ -116,6 +116,7 @@ mod room_live_turn;
 mod room_markdown;
 mod room_mentions;
 mod room_adjust;
+mod room_grant;
 mod room_proposals;
 mod room_question;
 mod room_question_card;

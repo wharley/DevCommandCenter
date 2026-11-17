@@ -100,7 +100,7 @@ const DELEGATION_MCP_TOOL_NAMES: [&str; 6] = [
 ];
 #[cfg(test)]
 const DCC_MCP_TOOL_COUNT: usize =
-    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 12;
+    BROWSER_MCP_TOOL_NAMES.len() + 9 + DELEGATION_MCP_TOOL_NAMES.len() + 13;
 /// Starting a delegation prepares a worktree and a child thread before it
 /// returns the task id; the child's turn itself runs in the background.
 const DELEGATE_TASK_HTTP_TIMEOUT: Duration = Duration::from_secs(45);
@@ -1634,6 +1634,9 @@ fn tool_call_is_well_formed(call: &ToolCall) -> bool {
         name if crate::change_tool::is_change_tool(name) => {
             crate::change_tool::call_is_well_formed(&call.arguments)
         }
+        name if crate::grant_tool::is_grant_tool(name) => {
+            crate::grant_tool::call_is_well_formed(&call.arguments)
+        }
         name if crate::device_tools::is_device_tool(name) => {
             crate::device_tools::call_is_well_formed(name, &call.arguments)
         }
@@ -1912,6 +1915,27 @@ async fn dispatch_tool(
             let response =
                 crate::github_tool::dispatch(&bridge.sessions, &binding.session_id, call.arguments)
                     .await;
+            if response["isError"] == true {
+                ToolDispatch {
+                    response,
+                    outcome: BrowserAuditOutcome::Failed,
+                    grant_state: BrowserAuditGrantState::NotApplicable,
+                }
+            } else {
+                ToolDispatch::executed(response, BrowserAuditGrantState::NotApplicable)
+            }
+        }
+        name if crate::grant_tool::is_grant_tool(name) => {
+            if !bridge.lease_is_current(binding) {
+                return ToolDispatch::computer_error(
+                    "proposing a grant is unavailable for this provider session",
+                );
+            }
+            let response = crate::grant_tool::dispatch(
+                &bridge.sessions,
+                &binding.session_id,
+                call.arguments,
+            );
             if response["isError"] == true {
                 ToolDispatch {
                     response,
@@ -3439,6 +3463,8 @@ fn tools() -> Vec<Value> {
     .chain([crate::help_tool::definition()])
     // A change to what exists, as a card the person applies.
     .chain([crate::change_tool::definition()])
+    // What an agent does without asking, proposed by the Guide alone.
+    .chain([crate::grant_tool::definition()])
     // A task in one of the person's projects, from that conversation.
     .chain([crate::open_task_tool::definition()])
     // The iOS Simulator, where the app offers one.
@@ -4815,6 +4841,7 @@ mod tests {
                 "dcc_team_state",
                 "dcc_help",
                 "dcc_propose_change",
+                "dcc_propose_grant",
                 "dcc_open_task",
             ]
         );

@@ -2,8 +2,9 @@
 //! agents (Tucano's Tuca). It looks at how the team is set up, explains the
 //! app by its own help and proposes what it can — an agent, a source, a
 //! routine, a change to what exists — as cards the person applies. It
-//! opens no task, changes no code, sends nothing outside, and never grants
-//! an agent anything: what goes without asking is the person's to turn on.
+//! opens no task, changes no code, sends nothing outside, and turns on
+//! nothing that lets an agent act without asking: it may propose that as a
+//! card (`dcc_propose_grant`), and only the person's click turns it on.
 //! Its role is DCC's, like the Reviewer's, so it learns each tool the app
 //! gains without the person rewriting it.
 
@@ -25,10 +26,11 @@ Do it, do not teach it:\n\
 - When what the person wants is something you can propose, propose it instead of listing steps for them to do by hand: a new agent (dcc_propose_agent), a source to watch (dcc_propose_source), a routine (dcc_propose_routine), or a change to what exists (dcc_propose_change): the room a source brings its news to, how often it reads, turning it on or off, the projects an agent works in. Each waits as a card they apply or discard; nothing changes before that.\n\
 - Several changes asked together go in the same reply, one call each, so the person sees them together. After proposing, one short sentence is enough: the card shows the rest.\n\
 - Ask only what is essential and missing (which agent, which project, which channel), in one short question. Decide the rest yourself; the person adjusts it on the card.\n\
-- Steps are for what you cannot propose: connecting a service, signing in, and everything that lets an agent act without asking. Then give the exact place, in the fewest steps.\n\
+- Steps are for what you cannot propose: connecting a service, signing in, starting tasks by itself, who an agent may call. Then give the exact place, in the fewest steps.\n\
 \n\
 What is only the person's:\n\
-- You never grant an agent anything, yourself included: what goes without asking (\"Enviar sem perguntar\"), starting tasks by itself, which agents it may call, a trigger. Say exactly where they turn it on, and what it will do once on.\n\
+- You never turn on anything that lets an agent act without asking, for any agent, yourself included. When the person asks for it (reviews, replies or a task's delivery going by themselves, fixing review comments in the task, a trigger), propose it with dcc_propose_grant: it waits as a card that says the agent will act by itself, and only their own click on it turns it on. Never propose it on your own idea, never to make something else work around a refusal, and never for yourself. Before proposing, say in one sentence what the agent will do by itself once it is on.\n\
+- Starting tasks by itself and which agents it may call are not yours to propose: say where the person sets them, on the agent's page.\n\
 - The merge is always the person's.\n\
 \n\
 How the team is meant to be set:\n\
@@ -108,6 +110,7 @@ mod tests {
         ] {
             assert!(GUIDE_ROLE.contains(tool), "{tool}");
         }
-        assert!(GUIDE_ROLE.contains("You never grant an agent anything"));
+        assert!(GUIDE_ROLE.contains("dcc_propose_grant"));
+        assert!(GUIDE_ROLE.contains("You never turn on anything that lets an agent act"));
     }
 }

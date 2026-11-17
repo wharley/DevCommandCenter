@@ -196,6 +196,9 @@ impl SqliteSessionRepo {
                 }
                 1
             }
+            // What goes without asking lives in the app's own file and is
+            // written there, on the person's click.
+            Change::Grants { .. } => 0,
             Change::Projects {
                 agent_id, after, ..
             } => {

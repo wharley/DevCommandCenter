@@ -15,17 +15,17 @@ use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Toaster};
 
-/// One thing that changes: its label's key under `agents.change`, and what
-/// it is before and after.
+/// One thing that changes: its label's whole key, and what it is before
+/// and after.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Line {
-    pub label: &'static str,
+    pub label: String,
     pub before: String,
     pub after: String,
 }
 
 /// What the card lists for `change`. `project`: a project's name by id;
-/// `word`: a text of `agents.change` by key.
+/// `word`: a text by its whole key.
 pub(super) fn lines(
     change: &Change,
     project: &dyn Fn(&str) -> String,
@@ -33,11 +33,11 @@ pub(super) fn lines(
 ) -> Vec<Line> {
     let room = |room: &Option<String>| match room {
         Some(id) => project(id),
-        None => word("general"),
+        None => word("agents.change.general"),
     };
     let listed = |ids: &[String]| {
         if ids.is_empty() {
-            word("all")
+            word("agents.change.all")
         } else {
             ids.iter()
                 .map(|id| project(id))
@@ -55,32 +55,39 @@ pub(super) fn lines(
         } => {
             if let Some((before, after)) = moved {
                 lines.push(Line {
-                    label: "room",
+                    label: "agents.change.room".to_string(),
                     before: room(before),
                     after: room(after),
                 });
             }
             if let Some((before, after)) = every_minutes {
                 lines.push(Line {
-                    label: "every",
+                    label: "agents.change.every".to_string(),
                     before: format!("{before} min"),
                     after: format!("{after} min"),
                 });
             }
             if let Some((before, after)) = enabled {
-                let state = |on: bool| word(if on { "on" } else { "off" });
+                let state = |on: bool| {
+                    word(if on {
+                        "agents.change.on"
+                    } else {
+                        "agents.change.off"
+                    })
+                };
                 lines.push(Line {
-                    label: "reads",
+                    label: "agents.change.reads".to_string(),
                     before: state(*before),
                     after: state(*after),
                 });
             }
         }
         Change::Projects { before, after, .. } => lines.push(Line {
-            label: "projects",
+            label: "agents.change.projects".to_string(),
             before: listed(before),
             after: listed(after),
         }),
+        Change::Grants { .. } => return super::room_grant::grant_lines(change, project, word),
     }
     lines.retain(|line| line.before != line.after);
     lines
@@ -108,6 +115,15 @@ impl TeamRoom {
         for change in &changes {
             self.answered_proposals.push(change.id.clone());
         }
+        // What goes without asking is written here, by the app, on this
+        // click; the desktop is only told the card was answered.
+        if apply && cx.has_global::<crate::data::agent_triggers::AgentTriggers>() {
+            for change in changes.iter().filter(|change| change.change.is_grant()) {
+                cx.update_global::<crate::data::agent_triggers::AgentTriggers, _>(|triggers, _| {
+                    super::room_grant::apply_grants(&change.change, triggers)
+                });
+            }
+        }
         cx.notify();
         cx.spawn(async move |room, cx| {
             let sent = changes.clone();
@@ -116,7 +132,7 @@ impl TeamRoom {
                 .spawn(async move {
                     let mut failed = Vec::new();
                     for change in &sent {
-                        let done = if apply {
+                        let done = if apply && !change.change.is_grant() {
                             api.accept_agent_change(change)
                         } else {
                             api.dismiss_agent_change(change)
@@ -161,8 +177,15 @@ impl TeamRoom {
         };
         let waiting = self.waiting_adjusts(cx);
         let mut rows = Vec::new();
-        if waiting.len() > 1 {
-            let all = waiting.clone();
+        // What lets an agent act without asking is never applied in a
+        // batch: each such card takes its own click.
+        let batch: Vec<AgentChange> = waiting
+            .iter()
+            .filter(|change| !change.change.is_grant())
+            .cloned()
+            .collect();
+        if batch.len() > 1 {
+            let all = batch.clone();
             rows.push(
                 div()
                     .flex()
@@ -175,7 +198,7 @@ impl TeamRoom {
                             .text_color(colors.muted_foreground)
                             .child(cx.t_with(
                                 "agents.change.several",
-                                &Args::default().with("count", waiting.len().to_string()),
+                                &Args::default().with("count", batch.len().to_string()),
                             )),
                     )
                     .child(
@@ -211,8 +234,13 @@ impl TeamRoom {
                     "agents.change.projectsOf",
                     &Args::default().with("agent", about_name.clone()),
                 ),
+                Change::Grants { .. } => cx.t_with(
+                    "agents.change.grantsOf",
+                    &Args::default().with("agent", about_name.clone()),
+                ),
             };
-            let word = |key: &str| cx.t(&format!("agents.change.{key}")).to_string();
+            let word = |key: &str| cx.t(key).to_string();
+            let grant = waiting.change.is_grant();
             let listed = lines(&waiting.change, &project, &word);
             // More projects for an agent that starts tasks by itself: it
             // will start them there too, and the card says so.
@@ -228,7 +256,11 @@ impl TeamRoom {
                 .py(px(12.0))
                 .rounded(px(14.0))
                 .border_1()
-                .border_color(colors.border.opacity(0.7))
+                .border_color(if grant {
+                    colors.warning.opacity(0.7)
+                } else {
+                    colors.border.opacity(0.7)
+                })
                 .bg(colors.card)
                 .child(
                     div()
@@ -246,7 +278,11 @@ impl TeamRoom {
                                 .text_size(px(11.5))
                                 .text_color(colors.muted_foreground)
                                 .child(cx.t_with(
-                                    "agents.change.by",
+                                    if grant {
+                                        "agents.change.byGrant"
+                                    } else {
+                                        "agents.change.by"
+                                    },
                                     &Args::default().with("agent", proposer.name.clone()),
                                 )),
                         ),
@@ -270,7 +306,7 @@ impl TeamRoom {
                         .child(
                             div()
                                 .text_color(colors.muted_foreground)
-                                .child(cx.t(&format!("agents.change.{}", line.label))),
+                                .child(cx.t(&line.label)),
                         )
                         .child(
                             div()
@@ -300,6 +336,18 @@ impl TeamRoom {
             if starts_there {
                 card = card.child(note(cx.t("agents.change.startsThere")));
             }
+            if grant {
+                card = card.child(
+                    div()
+                        .text_size(px(11.5))
+                        .line_height(px(17.0))
+                        .text_color(colors.warning)
+                        .child(cx.t_with(
+                            "agents.change.grantNote",
+                            &Args::default().with("agent", about_name.clone()),
+                        )),
+                );
+            }
             rows.push(
                 card.child(
                     div()
@@ -321,7 +369,11 @@ impl TeamRoom {
                                 .on_click(cx.listener(move |room, _, _, cx| {
                                     room.answer_adjusts(vec![apply.clone()], true, cx)
                                 }))
-                                .child(cx.t("agents.change.apply")),
+                                .child(cx.t(if grant {
+                                    "agents.change.applyGrant"
+                                } else {
+                                    "agents.change.apply"
+                                })),
                         ),
                 )
                 .into_any_element(),
@@ -341,7 +393,7 @@ mod tests {
             "app" => "Checkout".to_string(),
             other => other.to_string(),
         };
-        let word = |key: &str| key.to_string();
+        let word = |key: &str| key.rsplit('.').next().unwrap_or(key).to_string();
         let moved = Change::Source {
             source_id: "s".into(),
             agent_id: "sup".into(),
@@ -354,12 +406,21 @@ mod tests {
         let listed = lines(&moved, &project, &word);
         let shown: Vec<(&str, &str, &str)> = listed
             .iter()
-            .map(|line| (line.label, line.before.as_str(), line.after.as_str()))
+            .map(|line| {
+                (
+                    line.label.as_str(),
+                    line.before.as_str(),
+                    line.after.as_str(),
+                )
+            })
             .collect();
         // The interval is the same: it is not on the card.
         assert_eq!(
             shown,
-            [("room", "general", "Checkout"), ("reads", "on", "off")]
+            [
+                ("agents.change.room", "general", "Checkout"),
+                ("agents.change.reads", "on", "off")
+            ]
         );
         let projects = Change::Projects {
             agent_id: "dev".into(),

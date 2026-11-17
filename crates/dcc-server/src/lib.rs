@@ -39,6 +39,7 @@ pub mod named_events;
 pub mod open_task_tool;
 pub mod overview_own_tasks;
 pub mod change_tool;
+pub mod grant_tool;
 pub mod help_tool;
 pub mod overview_tool;
 pub mod team_state_tool;

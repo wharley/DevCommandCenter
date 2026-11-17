@@ -2,17 +2,35 @@
 //! Tucano's `propor_ajuste`): the room a source brings its news to, how
 //! often it reads, whether it is on; the projects an agent works in. It
 //! waits as a card with the before and the after, and nothing changes
-//! until the person applies it. What lets an agent act without asking is
-//! not here: that is the person's to turn on, never an agent's to propose
-//! into being.
+//! until the person applies it.
+//!
+//! What lets an agent act without asking (`Change::Grants`: what it sends
+//! by itself and the triggers that wake it) is proposed only by the Guide
+//! (`dcc_propose_grant`), never for itself, and is applied by the app when
+//! the person clicks that card — one card, one click; it is left out of
+//! "Aplicar todos". No agent turns any of it on.
 
 use serde::{Deserialize, Serialize};
+
+use super::agent_trigger::Trigger;
 
 pub const PROPOSE_CHANGE_TOOL: &str = "dcc_propose_change";
 /// Changes waiting for the person at once: a migration of a few sources
 /// and agents fits, a flood does not.
 pub const MAX_WAITING_CHANGES: usize = 8;
 pub const MAX_CHANGE_REASON_CHARS: usize = 300;
+pub const PROPOSE_GRANT_TOOL: &str = "dcc_propose_grant";
+/// How far a review goes by itself, as the desktop stores it.
+pub const REVIEW_SENDS: [&str; 3] = ["ask", "comment", "decide"];
+
+/// A trigger turned on or off.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerSwitch {
+    pub trigger: Trigger,
+    pub before: bool,
+    pub after: bool,
+}
 
 /// What changes, with what it was when proposed (the card's "before").
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,13 +59,38 @@ pub enum Change {
         before: Vec<String>,
         after: Vec<String>,
     },
+    /// What `agent_id` does without asking; only the fields that change,
+    /// each as `(before, after)`. A room is a project's id, "" for Geral.
+    #[serde(rename_all = "camelCase")]
+    Grants {
+        agent_id: String,
+        /// One of `REVIEW_SENDS`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        review: Option<(String, String)>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        review_projects: Option<(Vec<String>, Vec<String>)>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reply: Option<(bool, bool)>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reply_rooms: Option<(Vec<String>, Vec<String>)>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deliver: Option<(bool, bool)>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        deliver_projects: Option<(Vec<String>, Vec<String>)>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fix_in_task: Option<(bool, bool)>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        triggers: Vec<TriggerSwitch>,
+    },
 }
 
 impl Change {
     /// The agent the change is about.
     pub fn about(&self) -> &str {
         match self {
-            Self::Source { agent_id, .. } | Self::Projects { agent_id, .. } => agent_id,
+            Self::Source { agent_id, .. }
+            | Self::Projects { agent_id, .. }
+            | Self::Grants { agent_id, .. } => agent_id,
         }
     }
 
@@ -65,7 +108,36 @@ impl Change {
                     || enabled.is_some_and(|(before, after)| before != after)
             }
             Self::Projects { before, after, .. } => before != after,
+            Self::Grants {
+                review,
+                review_projects,
+                reply,
+                reply_rooms,
+                deliver,
+                deliver_projects,
+                fix_in_task,
+                triggers,
+                ..
+            } => {
+                fn differs<T: PartialEq>(pair: &Option<(T, T)>) -> bool {
+                    pair.as_ref().is_some_and(|(before, after)| before != after)
+                }
+                differs(review)
+                    || differs(review_projects)
+                    || differs(reply)
+                    || differs(reply_rooms)
+                    || differs(deliver)
+                    || differs(deliver_projects)
+                    || differs(fix_in_task)
+                    || triggers.iter().any(|switch| switch.before != switch.after)
+            }
         }
+    }
+
+    /// Whether it lets an agent act without asking: applied by the app on
+    /// the person's own click, never by the server and never in a batch.
+    pub fn is_grant(&self) -> bool {
+        matches!(self, Self::Grants { .. })
     }
 
     /// Two proposals for the same thing: the later one replaces the card.
@@ -73,6 +145,7 @@ impl Change {
         match (self, other) {
             (Self::Source { source_id: a, .. }, Self::Source { source_id: b, .. }) => a == b,
             (Self::Projects { agent_id: a, .. }, Self::Projects { agent_id: b, .. }) => a == b,
+            (Self::Grants { agent_id: a, .. }, Self::Grants { agent_id: b, .. }) => a == b,
             _ => false,
         }
     }
@@ -144,6 +217,42 @@ mod tests {
         assert_eq!(
             clean_reason("  a fonte\n está na  Geral "),
             "a fonte está na Geral"
+        );
+    }
+
+    #[test]
+    fn what_goes_without_asking_is_its_own_kind_of_change() {
+        let grant = |deliver: (bool, bool)| Change::Grants {
+            agent_id: "dev".into(),
+            review: None,
+            review_projects: None,
+            reply: None,
+            reply_rooms: None,
+            deliver: Some(deliver),
+            deliver_projects: None,
+            fix_in_task: None,
+            triggers: vec![TriggerSwitch {
+                trigger: Trigger::CiFailed,
+                before: true,
+                after: true,
+            }],
+        };
+        let projects = Change::Projects {
+            agent_id: "dev".into(),
+            before: Vec::new(),
+            after: vec!["app".into()],
+        };
+        assert!(grant((false, true)).is_grant() && !projects.is_grant());
+        assert!(grant((false, true)).changes_something());
+        // The trigger stays as it was and delivery too: nothing changes.
+        assert!(!grant((true, true)).changes_something());
+        assert!(grant((false, true)).same_target(&grant((true, false))));
+        assert!(!grant((false, true)).same_target(&projects));
+        let stored = serde_json::to_string(&grant((false, true))).unwrap();
+        assert!(stored.contains("\"kind\":\"grants\"") && stored.contains("ciFailed"));
+        assert_eq!(
+            serde_json::from_str::<Change>(&stored).unwrap(),
+            grant((false, true))
         );
     }
 }

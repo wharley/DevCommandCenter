@@ -8,6 +8,7 @@ pub mod agent_chain;
 pub mod agent_conversation;
 pub mod agent_memory;
 pub mod agent_change;
+pub mod agent_grant_proposal;
 pub mod agent_grants_check;
 pub mod agent_guide;
 pub mod agent_projects;

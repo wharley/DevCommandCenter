@@ -323,6 +323,16 @@
       "useful": "{{up}} útil · {{down}} não"
     },
     "change": {
+      "grantsOf": "O que {{agent}} faz sem perguntar",
+      "byGrant": "{{agent}} propõe liberar",
+      "grantNote": "Depois de aplicar, {{agent}} faz isso sozinho, sem perguntar a você. Só o seu clique libera.",
+      "applyGrant": "Liberar",
+      "reviewIn": "Revisão vale em",
+      "replyIn": "Resposta vale nas salas",
+      "deliverIn": "Entrega vale em",
+      "nowhere": "nenhum",
+      "triggerOn": "ligado",
+      "triggerOff": "desligado",
       "by": "{{agent}} propõe um ajuste",
       "source": "Fonte de {{agent}} · {{connector}} — {{watch}}",
       "projectsOf": "Projetos de {{agent}}",
@@ -4658,7 +4668,7 @@
           "Clique em [Conferir] no fim do cartão: ele diz o que está marcado mas não vai funcionar como você espera.",
           "Em [Gatilhos], ligue o que acorda o agente e ajuste o [Teto por dia]."
         ],
-        "tip": "Um agente nunca libera nada para si nem para outro agente. Só você marca essas opções.",
+        "tip": "Um agente nunca libera nada para si nem para outro agente. O Guia pode propor uma liberação num cartão quando você pede, mas só o seu clique em [Liberar] liga. Cada liberação tem o seu cartão e fica fora do [Aplicar todos].",
         "keywords": "enviar sem perguntar automático automatizar revisão resposta entrega commit push pull request anúncio corrigir na tarefa conferir gatilhos teto merge manual"
       },
       "account": {

@@ -2261,6 +2261,7 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_team_state"
                 | "dcc_help"
                 | "dcc_propose_change"
+                | "dcc_propose_grant"
                 | "dcc_open_task"
         )
 }

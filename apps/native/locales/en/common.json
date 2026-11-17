@@ -323,6 +323,16 @@
       "useful": "{{up}} useful · {{down}} not"
     },
     "change": {
+      "grantsOf": "What {{agent}} does without asking",
+      "byGrant": "{{agent}} proposes to grant",
+      "grantNote": "Once applied, {{agent}} does this by itself, without asking you. Only your click grants it.",
+      "applyGrant": "Grant",
+      "reviewIn": "Review holds in",
+      "replyIn": "Reply holds in the rooms",
+      "deliverIn": "Delivery holds in",
+      "nowhere": "none",
+      "triggerOn": "on",
+      "triggerOff": "off",
       "by": "{{agent}} proposes a change",
       "source": "{{agent}}'s source · {{connector}} — {{watch}}",
       "projectsOf": "{{agent}}'s projects",
@@ -4658,7 +4668,7 @@
           "Click [Check] at the foot of the card: it says what is picked but will not work the way you expect.",
           "Under [Triggers], turn on what wakes the agent and set the [Ceiling a day]."
         ],
-        "tip": "An agent never grants anything to itself or to another agent. Only you pick these options.",
+        "tip": "An agent never grants anything to itself or to another agent. The Guide may propose a grant as a card when you ask, but only your click on [Grant] turns it on. Each grant has its own card and is left out of [Apply all].",
         "keywords": "send without asking automatic automate review reply delivery commit push pull request announcement fix in the task check triggers ceiling merge manual"
       },
       "account": {

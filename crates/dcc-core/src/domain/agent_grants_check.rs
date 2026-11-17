@@ -163,6 +163,15 @@ pub fn stored_grants(file: &Value, agent_id: &str) -> Grants {
     }
 }
 
+/// How far `agent_id`'s reviews go by themselves, as stored: "ask" when
+/// the file does not say.
+pub fn stored_review_send(file: &Value, agent_id: &str) -> String {
+    file["autoSend"][agent_id]["review"]
+        .as_str()
+        .unwrap_or("ask")
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

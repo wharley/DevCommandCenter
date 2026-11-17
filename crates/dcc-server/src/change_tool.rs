@@ -128,6 +128,7 @@ pub fn dispatch(
             let what = match &kept.change {
                 Change::Source { watch, .. } => format!("the source \"{watch}\""),
                 Change::Projects { .. } => "the agent's projects".to_string(),
+                Change::Grants { .. } => "what the agent does without asking".to_string(),
             };
             text(
                 format!("Proposed to the person: a change to {what}. It waits as a card they apply or discard; nothing changed yet. Tell them it is there and stop."),
