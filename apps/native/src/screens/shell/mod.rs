@@ -18,6 +18,7 @@ mod delivery;
 mod device;
 mod editor;
 mod feedback;
+mod floating_terminal;
 mod help;
 pub mod layout;
 mod menu_bar;
@@ -93,6 +94,8 @@ gpui::actions!(
         ToggleCodeChanges,
         /// ⌘J: the terminal dock (`isToggleTerminalShortcut`).
         ToggleTerminal,
+        /// ⌘⌥T: the floating terminal, which belongs to no task.
+        ToggleFloatingTerminal,
         /// ⌘⇧N, and the composer's bulb: a note from the task on screen.
         CaptureNote
     ]
@@ -104,6 +107,7 @@ pub fn bind_keys(cx: &mut gpui::App) {
         gpui::KeyBinding::new("cmd-shift-e", ToggleCodeFiles, None),
         gpui::KeyBinding::new("cmd-shift-g", ToggleCodeChanges, None),
         gpui::KeyBinding::new("cmd-j", ToggleTerminal, None),
+        gpui::KeyBinding::new("cmd-alt-t", ToggleFloatingTerminal, None),
         gpui::KeyBinding::new("cmd-shift-n", CaptureNote, None),
     ]);
     editor::bind_keys(cx);
@@ -210,6 +214,9 @@ pub struct Shell {
     pub(crate) terminal: Entity<crate::screens::terminal::TerminalDock>,
     _terminal_events: Subscription,
     _terminal_counts: Subscription,
+    /// The terminal that belongs to no task, over every screen.
+    pub(crate) floating_terminal: Entity<crate::screens::terminal::TerminalDock>,
+    _floating_events: Subscription,
     /// The conversation header's delivery and its dialogs.
     delivery: delivery::DeliveryLink,
 }
@@ -377,6 +384,7 @@ impl Shell {
         device::serve_agents(window, cx);
         let (terminal, terminal_events) = terminal::new_dock(&prefs, window, cx);
         let terminal_counts = terminal::follow_terminals(&terminal, cx);
+        let (floating_terminal, floating_events) = floating_terminal::new_floating(window, cx);
         let (notes, notes_follow) = Self::new_notes(&sidebar, &conversation, window, cx);
         cx.defer_in(window, |shell: &mut Self, window, cx| {
             if shell.onboarding_on_start() {
@@ -431,6 +439,8 @@ impl Shell {
             terminal,
             _terminal_events: terminal_events,
             _terminal_counts: terminal_counts,
+            floating_terminal,
+            _floating_events: floating_events,
             layout: ShellLayout::new(prefs.sidebar_width, prefs.sidebar_collapsed),
             prefs,
             prefs_path,
@@ -929,6 +939,9 @@ impl Render for Shell {
                     this.toggle_terminal(window, cx)
                 }),
             )
+            .on_action(cx.listener(|this, _: &ToggleFloatingTerminal, window, cx| {
+                this.toggle_floating_terminal(window, cx)
+            }))
             // ⌘F: find in the conversation.
             .on_action(cx.listener(
                 |this, _: &crate::screens::conversation::OpenThreadFind, window, cx| {
@@ -1028,6 +1041,7 @@ impl Render for Shell {
                     self.pr_hub_element()
                 }
             }))
+            .children(self.floating_terminal_overlay(cx))
             .child(self.delivery.overlay.clone())
             .children(self.open_project.as_ref().map(|(dialog, _)| dialog.clone()))
             .children(self.annotation.as_ref().map(|(card, _)| card.clone()))

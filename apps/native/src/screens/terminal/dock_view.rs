@@ -40,7 +40,7 @@ pub(super) fn tip(id: &'static str, text: SharedString, child: impl IntoElement)
 }
 
 impl TerminalDock {
-    fn grip(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn grip(&self, cx: &mut Context<Self>) -> AnyElement {
         let colors = cx.theme().colors.clone();
         let hover = colors.muted.opacity(0.6);
         let handle = div()
@@ -84,7 +84,7 @@ impl TerminalDock {
         )
     }
 
-    fn tab_strip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn tab_strip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let scope = self.scope()?;
         let colors = cx.theme().colors.clone();
         let scope_tabs = self.tabs.scope(&scope.key);
@@ -218,6 +218,8 @@ impl TerminalDock {
                 "terminalDock.maxTabs",
                 &Args::default().with("count", MAX_TABS.to_string()),
             )
+        } else if self.floating {
+            cx.t("terminalDock.newTab")
         } else if scope.cwd.is_some() {
             let label = match scope.kind {
                 ScopeKind::Worktree => cx.t("terminalDock.scopes.worktree"),
@@ -290,7 +292,7 @@ impl TerminalDock {
             .into_any_element()
     }
 
-    fn panel(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let content: AnyElement = match self.active_session(cx) {
             Some(session) => session.into_any_element(),
             None => {
@@ -328,6 +330,9 @@ impl Render for TerminalDock {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.open {
             return div().into_any_element();
+        }
+        if self.floating {
+            return self.render_floating(window, cx);
         }
         let colors = cx.theme().colors.clone();
         let parent = f32::from(window.viewport_size().height);

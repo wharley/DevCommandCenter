@@ -38,6 +38,18 @@ pub struct ShellContext {
 }
 
 fn banner(context: &ShellContext, spec: &ShellSpec) -> String {
+    // The floating terminal belongs to no task: no workspace to tell.
+    if context.workspace_name.is_empty() {
+        return [
+            "\x1b[2mDev Command Center terminal\x1b[0m".to_string(),
+            String::new(),
+            format!("cwd: {}", spec.cwd),
+            format!("shell: {}", spec.command),
+            String::new(),
+        ]
+        .join("\r\n")
+            + "\r\n";
+    }
     [
         "\x1b[2mDev Command Center terminal\x1b[0m".to_string(),
         String::new(),
@@ -139,6 +151,8 @@ pub struct TerminalSession {
     pub dev_servers: super::dev_server::DevServers,
     /// The "Dev Command Center terminal" lines a new shell starts with.
     banner: bool,
+    /// Its selection can go to the task's agent (not in the floating one).
+    pub agent: bool,
     _open: Option<Task<()>>,
 }
 
@@ -178,6 +192,7 @@ impl TerminalSession {
             opened_at: (0, 0),
             dev_servers: Default::default(),
             banner: true,
+            agent: true,
             _open: None,
         };
         session.open(cx);

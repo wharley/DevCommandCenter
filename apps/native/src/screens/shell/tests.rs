@@ -920,3 +920,30 @@ fn an_appshot_from_the_key_goes_into_the_open_tasks_composer(cx: &mut TestAppCon
     );
     assert!(taken.exists());
 }
+
+#[gpui::test]
+fn the_floating_terminal_opens_over_any_screen_right_of_the_sidebar(cx: &mut TestAppContext) {
+    let (shell, cx, _dir) = open_shell(cx, Prefs::default());
+    cx.update(|_, cx| super::bind_keys(cx));
+    assert!(cx.debug_bounds("floating-terminal").is_none());
+    // The sidebar's button, with no task open.
+    let sidebar = shell.read_with(cx, |shell, _| shell.sidebar.clone());
+    sidebar.update(cx, |_, cx| {
+        cx.emit(crate::screens::sidebar::SidebarEvent::ToggleFloatingTerminal)
+    });
+    cx.run_until_parked();
+    let panel = cx.debug_bounds("floating-terminal").expect("the panel");
+    let sidebar_width = shell.read_with(cx, |shell, _| shell.layout.sidebar_rail_width());
+    assert!(f32::from(panel.origin.x) > sidebar_width, "{panel:?}");
+    assert!(
+        cx.debug_bounds("terminal-dock").is_none(),
+        "not the task's dock"
+    );
+    // Its shell has the focus: ⌘⌥T hides it, and brings it back.
+    cx.simulate_keystrokes("cmd-alt-t");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("floating-terminal").is_none());
+    cx.simulate_keystrokes("cmd-alt-t");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("floating-terminal").is_some());
+}

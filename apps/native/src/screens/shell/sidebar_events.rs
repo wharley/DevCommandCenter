@@ -47,6 +47,7 @@ impl Shell {
             SidebarEvent::OpenSkills => self.open_skills(window, cx),
             SidebarEvent::OpenFeedback => self.open_feedback(window, cx),
             // `toggleCodeColumn`
+            SidebarEvent::ToggleFloatingTerminal => self.toggle_floating_terminal(window, cx),
             SidebarEvent::ToggleCodeColumn => {
                 let open = !self.prefs.code_column_open;
                 self.set_code_column(open, None, cx);

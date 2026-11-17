@@ -322,7 +322,7 @@ impl Render for TerminalSession {
         let input = (self.focus.clone(), cx.entity());
         let surface_border = colors.border.opacity(0.9);
         // `hasTerminalSelection`: the selection can go to the agent.
-        let send = self.selection_text().is_some().then(|| {
+        let send = (self.agent && self.selection_text().is_some()).then(|| {
             div()
                 .absolute()
                 .top(px(8.0))

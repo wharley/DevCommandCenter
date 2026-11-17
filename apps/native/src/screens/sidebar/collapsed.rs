@@ -8,7 +8,7 @@ use dcc_core::domain::attention::AttentionReason;
 use gpui::{ClickEvent, Context, SharedString, Window, div, prelude::*, px};
 
 use super::footer::{TOOLS, tool_button};
-use super::header::code_column_toggle;
+use super::header::{code_column_toggle, floating_terminal_toggle};
 use super::labels::reason_dot;
 use super::row::{avatar, selected_background};
 use super::{Sidebar, SidebarEvent};
@@ -177,6 +177,11 @@ pub fn render(sidebar: &Sidebar, cx: &mut Context<Sidebar>) -> impl IntoElement 
         .py(px(8.0))
         .overflow_hidden()
         .child(expand)
+        .child(floating_terminal_toggle(
+            "rail-floating-terminal",
+            Side::Right,
+            cx,
+        ))
         .children(code_column)
         .child(new_task)
         .child(

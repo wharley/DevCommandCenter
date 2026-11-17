@@ -48,7 +48,7 @@ pub use feedback::{
     thinking_indicator,
 };
 pub use icon::Icon;
-pub use kbd::{command_key, shortcut_keys};
+pub use kbd::{command_key, option_key, shortcut_keys};
 pub use menu::{ItemStyle, Menu, MenuAlign, MenuEntry, MenuItem};
 pub use pulse_loop::{Looping, PulseSpinner, pulse_loop, pulse_spinner};
 pub use resize_handle::ResizeHandle;

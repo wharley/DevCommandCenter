@@ -113,6 +113,8 @@ pub enum SidebarEvent {
     CloneProject,
     ToggleCollapsed,
     ToggleCodeColumn,
+    /// The floating terminal, which belongs to no task (⌘⌥T).
+    ToggleFloatingTerminal,
     /// "Em espera" or "Concluídos" opened or closed (saved with the layout).
     SectionsChanged,
 }

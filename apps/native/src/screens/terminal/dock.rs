@@ -153,6 +153,9 @@ pub struct TerminalDock {
     /// Every shell the desktop holds, as last read.
     pub activity: std::rc::Rc<Vec<crate::data::terminal_api::TerminalActivity>>,
     ui_states: HashMap<String, UiState>,
+    /// The terminal that belongs to no task (`floating.rs`): its own tabs
+    /// in `~`, nothing of a task's (scope, agent, browser) on its bar.
+    pub(super) floating: bool,
     /// "Renomear terminal", while open.
     pub(super) renaming: Option<super::dock_actions::Renaming>,
     /// "Há um processo em execução": the tab and what runs in it.
@@ -181,6 +184,7 @@ impl TerminalDock {
             by_pty: HashMap::new(),
             api,
             ui_states: HashMap::new(),
+            floating: false,
             activity: Default::default(),
             renaming: None,
             closing: None,
@@ -341,7 +345,12 @@ impl TerminalDock {
             .map(|place| place.context.clone())
             .unwrap_or_default();
         let spec = ShellSpec::login(cwd, shell, FIRST_COLS, FIRST_ROWS);
-        let session = cx.new(|cx| TerminalSession::new(owner.clone(), spec, context, api, cx));
+        let agent = !self.floating;
+        let session = cx.new(|cx| {
+            let mut session = TerminalSession::new(owner.clone(), spec, context, api, cx);
+            session.agent = agent;
+            session
+        });
         self._sessions.push(
             cx.subscribe(&session, |dock, session, event, cx| match event {
                 SessionEvent::Opened(pty_id) => {
@@ -493,7 +502,8 @@ impl TerminalDock {
         let Some(api) = self.api.clone() else {
             return;
         };
-        if self._activity.is_some() {
+        // The floating terminal is handed what the task's dock reads.
+        if self._activity.is_some() || self.floating {
             return;
         }
         self._activity = Some(cx.spawn(async move |this, cx| {
@@ -522,21 +532,7 @@ impl TerminalDock {
                         dock.activity = std::rc::Rc::new(items.clone());
                         cx.notify();
                     }
-                    // The tabs' dots and names are drawn by the dock.
-                    let mut changed = false;
-                    for session in dock.sessions.values() {
-                        session.update(cx, |session, cx| {
-                            let item = session
-                                .pty_id()
-                                .and_then(|pty| items.iter().find(|item| item.pty_id == pty))
-                                .cloned();
-                            changed |= session.activity != item;
-                            session.set_activity(item, cx);
-                        });
-                    }
-                    if changed {
-                        cx.notify();
-                    }
+                    dock.apply_activity(&items, cx);
                 });
                 if alive.is_err() {
                     return;
@@ -544,6 +540,28 @@ impl TerminalDock {
                 cx.background_executor().timer(ACTIVITY_EVERY).await;
             }
         }));
+    }
+
+    /// The tabs' dots and names, from what the desktop says runs in them.
+    pub fn apply_activity(
+        &mut self,
+        items: &[crate::data::terminal_api::TerminalActivity],
+        cx: &mut Context<Self>,
+    ) {
+        let mut changed = false;
+        for session in self.sessions.values() {
+            session.update(cx, |session, cx| {
+                let item = session
+                    .pty_id()
+                    .and_then(|pty| items.iter().find(|item| item.pty_id == pty))
+                    .cloned();
+                changed |= session.activity != item;
+                session.set_activity(item, cx);
+            });
+        }
+        if changed {
+            cx.notify();
+        }
     }
 
     pub(super) fn start_resize(&mut self, pointer_y: f32) {

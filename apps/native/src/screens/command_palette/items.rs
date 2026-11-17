@@ -43,6 +43,8 @@ pub enum PaletteCommand {
     Settings,
     /// "DCC Usage".
     Usage,
+    /// The floating terminal, which belongs to no task.
+    FloatingTerminal,
     /// Skills.
     Skills,
     /// "Abrir onboarding".
@@ -179,6 +181,12 @@ fn actions(selected: bool, cx: &App) -> Vec<Action> {
         ]);
     }
     list.extend([
+        action(
+            "commandPalette.floatingTerminal",
+            "commandPalette.keywords.floatingTerminal",
+            Some(keys(&[command, crate::ui::option_key(), "T"])),
+            PaletteCommand::FloatingTerminal,
+        ),
         // The desktop shows ⌘O here, though ⌘O opens the editor.
         action(
             "commandPalette.openProject",

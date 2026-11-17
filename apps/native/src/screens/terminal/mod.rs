@@ -10,10 +10,11 @@ mod dock_actions;
 mod dock_dialogs;
 mod dock_menus;
 mod dock_view;
-mod run_command;
 pub mod emulator;
+mod floating;
 pub mod keys;
 pub mod palette;
+mod run_command;
 mod select;
 pub mod session;
 pub mod tabs;
@@ -21,6 +22,8 @@ pub mod tabs;
 mod tests;
 #[cfg(test)]
 mod tests_bar;
+#[cfg(test)]
+mod tests_floating;
 mod view;
 
 pub use dock::{DockEvent, ScopeKind, TerminalDock, TerminalPlace};

@@ -153,6 +153,7 @@ impl TerminalDock {
             .as_ref()
             .is_some_and(|session| session.read(cx).busy());
         let has_cwd = self.scope().and_then(|scope| scope.cwd).is_some();
+        let floating = self.floating;
         let labels = [
             cx.t("terminalDock.sendToAgent"),
             cx.t("terminalDock.clear"),
@@ -188,7 +189,7 @@ impl TerminalDock {
                     .disabled(!enabled),
                 )
             };
-            vec![
+            let mut entries = vec![
                 action(&labels[0], "sparkles", has_session, |dock, _, cx| {
                     dock.send_to_agent(cx)
                 }),
@@ -207,7 +208,12 @@ impl TerminalDock {
                 action(&labels[4], "external-link", has_cwd, |dock, _, _| {
                     dock.open_external()
                 }),
-            ]
+            ];
+            // The floating terminal has no agent to send to.
+            if floating {
+                entries.remove(0);
+            }
+            entries
         })
         .align(MenuAlign::End)
         .min_width(224.0)

@@ -13,6 +13,15 @@ pub fn command_key() -> &'static str {
     }
 }
 
+/// The modifier next to it: Option on macOS, Alt elsewhere.
+pub fn option_key() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Option"
+    } else {
+        "Alt"
+    }
+}
+
 pub fn shortcut_keys(keys: &[&str], cx: &App) -> AnyElement {
     let colors = &cx.theme().colors;
     let caps = keys.iter().map(|key| {

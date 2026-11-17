@@ -1393,7 +1393,8 @@
       "inspectorChanges": "inspector git mudanças diff diferenças",
       "inspectorFiles": "inspector arquivos código",
       "activity": "inspector atividade marcos",
-      "details": "inspector detalhes diagnósticos"
+      "details": "inspector detalhes diagnósticos",
+      "floatingTerminal": "terminal shell console solto livre fora de tarefa"
     },
     "workbench": {
       "title": "Workspace atual",
@@ -1407,7 +1408,8 @@
       "inspectorFiles": "Abrir Arquivos",
       "inspectorActivity": "Abrir atividade da sessão",
       "inspectorDetails": "Abrir detalhes do workspace"
-    }
+    },
+    "floatingTerminal": "Abrir terminal fora de tarefas"
   },
   "origin": {
     "label": "Origem:",
@@ -4146,7 +4148,8 @@
     "sendPrompt": "Enviar prompt",
     "steerSession": "Controlar sessão",
     "abortSession": "Abortar sessão",
-    "openPreferredEditor": "Abrir editor preferido"
+    "openPreferredEditor": "Abrir editor preferido",
+    "floatingTerminal": "Terminal fora de tarefas"
   },
   "help": {
     "title": "Ajuda",
@@ -6665,5 +6668,9 @@
       "close": "Fechar",
       "sentToAgent": "Falhas dos checks enviadas ao agente"
     }
+  },
+  "floatingTerminal": {
+    "open": "Terminal fora de tarefas",
+    "hide": "Ocultar (os comandos continuam rodando)"
   }
 }

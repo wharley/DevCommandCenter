@@ -1393,7 +1393,8 @@
       "inspectorChanges": "inspector git changes diff",
       "inspectorFiles": "inspector files code",
       "activity": "inspector activity milestones",
-      "details": "inspector details runtime diagnostics"
+      "details": "inspector details runtime diagnostics",
+      "floatingTerminal": "terminal shell console standalone floating outside task"
     },
     "workbench": {
       "title": "Current workspace",
@@ -1407,7 +1408,8 @@
       "inspectorFiles": "Open Files",
       "inspectorActivity": "Open session activity",
       "inspectorDetails": "Open workspace details"
-    }
+    },
+    "floatingTerminal": "Open standalone terminal"
   },
   "origin": {
     "label": "Origin:",
@@ -4146,7 +4148,8 @@
     "sendPrompt": "Send prompt",
     "steerSession": "Steer session",
     "abortSession": "Abort session",
-    "openPreferredEditor": "Open preferred editor"
+    "openPreferredEditor": "Open preferred editor",
+    "floatingTerminal": "Standalone terminal"
   },
   "help": {
     "title": "Help",
@@ -6665,5 +6668,9 @@
       "close": "Close",
       "sentToAgent": "Check failures sent to the agent"
     }
+  },
+  "floatingTerminal": {
+    "open": "Standalone terminal",
+    "hide": "Hide (commands keep running)"
   }
 }

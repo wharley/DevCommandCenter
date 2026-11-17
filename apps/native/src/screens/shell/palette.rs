@@ -138,6 +138,7 @@ impl Shell {
             }
             PaletteCommand::Help(topic) => self.open_help(topic, window, cx),
             PaletteCommand::Usage => self.open_usage(cx),
+            PaletteCommand::FloatingTerminal => self.toggle_floating_terminal(window, cx),
             PaletteCommand::Settings => self.open_settings(None, window, cx),
             PaletteCommand::Skills => self.open_skills(window, cx),
             PaletteCommand::Onboarding => self.open_onboarding(window, cx),

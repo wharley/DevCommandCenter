@@ -36,6 +36,10 @@ pub(super) fn follow_terminals(
 ) -> Subscription {
     cx.observe(dock, |shell, dock, cx| {
         let terminals = dock.read(cx).activity.clone();
+        // The floating terminal's tabs read the same list.
+        shell
+            .floating_terminal
+            .update(cx, |floating, cx| floating.apply_activity(&terminals, cx));
         shell
             .sidebar
             .update(cx, |sidebar, cx| sidebar.set_terminals(terminals, cx));

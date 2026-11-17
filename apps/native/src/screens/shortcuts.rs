@@ -18,6 +18,10 @@ pub fn rows() -> Vec<(&'static str, Vec<&'static str>)> {
         ),
         ("shortcutsSheet.focusComposer", vec![command, "Shift", "L"]),
         ("shortcutsSheet.toggleTerminal", vec![command, "J"]),
+        (
+            "shortcutsSheet.floatingTerminal",
+            vec![command, crate::ui::option_key(), "T"],
+        ),
         ("shortcutsSheet.quickOpen", vec![command, "P"]),
         (
             "shortcutsSheet.workspaceSearch",
