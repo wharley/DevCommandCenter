@@ -320,6 +320,45 @@ exportação em vez de contarem como aceitos) e respostas do assistente encaixad
 injeção: fonte ignorada sai, fixada vem primeiro e corrigida entra com o texto do usuário. Elas só
 reordenam ou reescrevem o que a consulta do próprio projeto devolveu.
 
+### Atualização para v3.4.7 (2026-11-17)
+
+O DCC passou a fixar a release **v3.4.7**. O "3" da upstream é o plugin para Claude Code/Codex,
+o `ai-memory setup` e a interface web; o DCC não usa nenhum deles. O que o DCC chama (`init`,
+`serve --transport http --bind`, `/hook/batch` e `memory_query` sem sessão MCP) não mudou.
+
+- **Smoke:** **27 verificações** ([resultado](AI_MEMORY_FEASIBILITY_RESULTS_3_4_7.json)); o
+  binário anuncia 27 ferramentas MCP, p50 de **5,74 ms**, p95 de **11,75 ms** e pico de
+  **54,61 MiB RSS** no corpus sintético. Uma verificação foi ajustada: com um único prompt, o
+  handoff automático agora cita o prompt em `open_questions` em vez do `summary`. O DCC desliga
+  esses handoffs, então isso não muda nada para ele.
+- **Store real:** numa cópia consistente (`sqlite3 .backup`) do store do app instalado (27 MB de
+  banco, 14.646 observações), a v3.4.7 aplicou **25 migrações (V77–V101)**, reindexou o FTS e
+  respondeu em **1,24 s** (a 2.6.1, na mesma cópia: 0,51 s), abaixo do limite de 8 s do sidecar. O
+  embedder local continua `all-MiniLM-L6-v2`: nada é baixado de novo e os vetores valem.
+- **Mesmas consultas, as duas versões:** dez prompts reais de dois projetos, enviados como o
+  adaptador envia (`tools/call` sem `initialize`). Todas responderam 200 com o mesmo número de
+  `hits`/`raw_hits`; no projeto com páginas, as três primeiras coincidem em 13 de 15 posições. A
+  consulta ficou mais lenta (28–59 ms contra 12–42 ms), efeito do fluxo de observações que entrou
+  no ranking por padrão na 3.0.
+- **Configuração:** as quatro variáveis fixadas acima continuam existindo com o mesmo nome. Na
+  3.4.7 o perfil passa a aceitar `"auto"` e, assim como o auto-improve, vem ligado num servidor de
+  um usuário só; a fixação continua necessária. As chaves ativas do `config.toml` padrão são as da
+  2.6.1, mais `language` (idioma do terminal), `ledger_retention_months = 0` e
+  `[auto_improve.eval] builtin = ""`. A retenção de observações continua `0` (nunca apaga).
+
+Correções da upstream que alcançam o uso do DCC:
+
+- `memory_query` pulava o fallback de observações brutas sempre que havia embedder configurado —
+  o caso do DCC com embeddings locais —, e uma sessão ainda aberta não aparecia na consulta
+  (#1600, 3.2.2);
+- uma sessão que passava por dois repositórios podia publicar observações de um projeto na página
+  consolidada do outro (3.4.4);
+- palavras acentuadas pararam de casar consultas em português sem relação no reforço por
+  feedback (#2088), e a busca de reserva passou a aplicar as stopwords configuradas.
+
+A migração é de mão única, como na 2.6: o sidecar copia `db/` para
+`backups/before-ai-memory-3.4.7/` antes do primeiro start da nova versão.
+
 O script cria HOME e armazenamento temporários, não herda credenciais e encerra o servidor ao sair.
 
 ## Teste integrado do adaptador DCC
@@ -447,12 +486,12 @@ execute `install-hooks` nem `install-mcp` para Claude/Codex ainda, pois isso cri
 fonte de eventos e poderia duplicar observações. Esses instaladores serão avaliados depois, caso
 o fluxo nativo seja escolhido para complementar a exportação do DCC.
 
-No macOS Apple Silicon, instale a release publicada v2.6.1 (a mesma fixada no build) em um diretório fixo:
+No macOS Apple Silicon, instale a release publicada v3.4.7 (a mesma fixada no build) em um diretório fixo:
 
 ```bash
 mkdir -p ~/Applications/ai-memory
 cd ~/Applications/ai-memory
-curl -fsSL -O https://github.com/akitaonrails/ai-memory/releases/download/v2.6.1/ai-memory-macos-aarch64.tar.gz
+curl -fsSL -O https://github.com/akitaonrails/ai-memory/releases/download/v3.4.7/ai-memory-macos-aarch64.tar.gz
 tar -xzf ai-memory-macos-aarch64.tar.gz
 ./ai-memory --data-dir /tmp/dcc-ai-memory init
 ```
@@ -504,7 +543,7 @@ contexto do modelo. Esse pacote usa no máximo 4.000 caracteres para complementa
 não altera o prompt persistido e instrui o modelo a verificar a evidência contra o pedido, arquivos,
 permissões e estado Git atuais.
 
-1. Iniciar uma instância local do ai-memory v2.6.1 em uma porta de teste, sem reutilizar o diretório
+1. Iniciar uma instância local do ai-memory v3.4.7 em uma porta de teste, sem reutilizar o diretório
    de produção. Por exemplo: `ai-memory init --data-dir /tmp/dcc-ai-memory` e depois
    `ai-memory serve --transport http --bind 127.0.0.1:49374`.
 2. Executar uma sessão curta no DCC, registrar uma decisão, uma tentativa falha e uma pendência.

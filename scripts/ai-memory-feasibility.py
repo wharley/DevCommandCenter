@@ -206,7 +206,9 @@ def run(binary, expected_version=None):
             check("assistant_text_not_captured_by_default", "ASSISTANTSENTINEL" not in serialized)
             check("session_end_generates_searchable_page_without_llm",
                   bool(call("memory_query", **a, query="CAPTURESENTINEL")["hits"]))
-            check("automatic_handoff_contains_prompt_context", "CAPTURESENTINEL" in rows[0]["summary"])
+            # 3.x quotes a single prompt under open_questions instead of the summary.
+            handoff_context = json.dumps([rows[0].get("summary"), rows[0].get("open_questions")])
+            check("automatic_handoff_contains_prompt_context", "CAPTURESENTINEL" in handoff_context)
             check("handoff_accept_succeeds", "error" not in call("memory_handoff_accept", **a, handoff_id=rows[0]["id"], cwd=cwd))
             check("accepted_handoff_leaves_open_list", not call("memory_handoff_list", **a)["handoffs"])
 

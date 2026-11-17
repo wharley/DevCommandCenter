@@ -20,7 +20,7 @@ const repoRoot = join(scriptDir, '..');
 const sidecarDir = join(repoRoot, 'sidecar');
 const targetDir = join(repoRoot, 'target');
 const releaseDir = join(targetDir, 'release');
-const aiMemoryVersion = process.env.AI_MEMORY_VERSION || 'v2.6.1';
+const aiMemoryVersion = process.env.AI_MEMORY_VERSION || 'v3.4.7';
 // Bump both together, after the Device panel is tried on the new release:
 // the addon reaches private CoreSimulator frameworks that each Xcode moves.
 const serveSimVersion = '0.1.48';
