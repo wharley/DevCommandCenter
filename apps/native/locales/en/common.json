@@ -4591,6 +4591,57 @@
         ],
         "keywords": "editor ide cursor zed vscode open file edit save preferred"
       },
+      "agentRooms": {
+        "label": "Agent rooms",
+        "summary": "Where you talk to the team, and how the room says which project the work is for.",
+        "whatIs": "In [Agents] there is the [General] room and one room per project, made with [New room]. The same agent serves all of them: in each room it has its own conversation, with that project's context. The room is what says which project a request is for: in a project's room, the task an agent opens goes to that project. [General] has no project.",
+        "whenToUse": "Use the project's room for anything that becomes work on code. Keep [General] for questions across projects and for talking to the team.",
+        "steps": [
+          "Open [Agents] in the sidebar and click [New room] to pick the project.",
+          "Write in the room: with @ you choose who answers; without it, whoever [Answers: automatic] picks, which you can change to a fixed agent.",
+          "When you ask for work on code, the agent opens a task in the room's project. It shows in your task list and the result comes back to the same room.",
+          "A request that arrives by itself (from a source, a trigger, a routine or passed by another agent) starts a task without you in two cases only: in the room's project, or in a project picked under [Projects] on the agent's page. Anywhere else the task waits as a card for you to start.",
+          "Under [Projects], in the agent's [Settings] tab, [All] lets it serve any project. Pick some for it to see and open tasks only in those.",
+          "[Pause agents], at the top of the room, holds every trigger, source and automatic send at once."
+        ],
+        "tip": "If an agent opened a task in the wrong project, the request almost always came through [General]. Move the source to the project's room.",
+        "keywords": "room rooms general project team agents conversation who answers wrong project card task start by itself pause"
+      },
+      "agentSources": {
+        "label": "Sources and routines",
+        "summary": "What wakes an agent by itself: news in a connector, or a time of day.",
+        "whatIs": "A source watches something in a connector (mentions in Slack, tasks in ClickUp) and wakes the agent only when something new shows up. DCC does the reading, with no model; the agent comes in only when there is news. A routine is a request the agent gets at a set time. Both are on the agent's page, under [Sources] and [Routines].",
+        "whenToUse": "When you want outside questions and requests answered without you copying and pasting, or a summary every day at the same time.",
+        "steps": [
+          "Connect the service first, in Settings, [Connectors].",
+          "On the agent's page, under [Sources], click [New source]. Fill in [What to watch], the [Connector], [What to read] and [Read every].",
+          "Pick [Notify in room]: the room of the project these requests come from. That choice is what makes the task land in the right project. Use [General] only for what belongs to no project.",
+          "Click [Test read] to see whether it brings what you expect, then [Create source].",
+          "To change the room or the interval later, use [Edit] on the source. [Read now] reads it right away.",
+          "A company's Slack is not a project: if one connector brings matters of two projects, make two sources, each with its own filter and room.",
+          "Under [Routines], click [New routine], pick the days and the time and write the request."
+        ],
+        "tip": "The connector is generic: DCC does not know which project a Slack workspace belongs to. The source's room is what says it.",
+        "keywords": "source sources routine routines slack clickup jira mentions watch connector interval room notify read now schedule wake agent"
+      },
+      "agentAutoSend": {
+        "label": "Send without asking",
+        "summary": "What each agent may publish by itself, where, and what stays yours.",
+        "whatIs": "By default, everything an agent wants to send out waits for you: a review stays a draft, a reply becomes a card, a task waits for its commit. Under [Send without asking], on the agent's page, you grant each thing separately and pick where it holds. The merge is never automatic.",
+        "whenToUse": "When the flow is already trusted in a project and you only want to review and approve at the end.",
+        "steps": [
+          "Open the agent, [Settings] tab, [Send without asking] card.",
+          "[Pull request review]: [Comment only] publishes the comments; [Comment and decide] also approves or requests changes. Pick the projects under [Holds in].",
+          "[Reply to the outside]: on [Send], the reply the agent proposes (in Slack, on a task) goes by itself. Under [Holds in the rooms], pick the rooms its sources notify.",
+          "[Task delivery]: on [Deliver], a task the agent opened is committed, pushed and gets its pull request when it ends with changes. Only for a task in its own worktree.",
+          "[When the pull request opens]: write what the agent should do when the pull request opens, for example announce it in a channel mentioning the reviewers. To go by itself, [Reply to the outside] must be granted.",
+          "[Comments on your pull request]: on [Fix in the task], the comments of whoever reviewed your pull request go straight to the task's agent. It needs the [A review came on a task's PR] trigger on.",
+          "Click [Check] at the foot of the card: it says what is picked but will not work the way you expect.",
+          "Under [Triggers], turn on what wakes the agent and set the [Ceiling a day]."
+        ],
+        "tip": "An agent never grants anything to itself or to another agent. Only you pick these options.",
+        "keywords": "send without asking automatic automate review reply delivery commit push pull request announcement fix in the task check triggers ceiling merge manual"
+      },
       "account": {
         "label": "GitHub and GitLab accounts",
         "summary": "CLI logins for PRs, MRs and review status.",

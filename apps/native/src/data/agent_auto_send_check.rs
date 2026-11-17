@@ -4,84 +4,37 @@
 //! in a room its sources do not use, a choice whose trigger is off. Read
 //! from what is stored, with no model; nothing here changes a grant.
 
-use super::agent_auto_send::{GENERAL_ROOM, ReviewSend};
+use dcc_core::domain::agent_grants_check::{Grants, gaps};
+
+pub use dcc_core::domain::agent_grants_check::Gap;
+
+use super::agent_auto_send::ReviewSend;
 use super::agent_triggers::{AgentTriggers, Trigger};
-
-/// Something set that does not close.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Gap {
-    /// "Pausar todos" is on: nothing goes by itself.
-    Paused,
-    /// The announcement is written but replies are not granted: it will
-    /// wait as a card.
-    AnnounceWaits,
-    /// Replies are granted, but not in a room its sources bring news to.
-    SourceRoomNotGranted,
-    /// "Corrigir na tarefa" is picked but "review received" is off.
-    FixWithoutTrigger,
-    /// A review grant with nothing that starts a review.
-    ReviewNeverStarts,
-    /// A grant picked with no project or room: it holds nowhere.
-    HoldsNowhere,
-}
-
-impl Gap {
-    /// `agents.autoSend.check.<key>`
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Paused => "paused",
-            Self::AnnounceWaits => "announceWaits",
-            Self::SourceRoomNotGranted => "sourceRoom",
-            Self::FixWithoutTrigger => "fixWithoutTrigger",
-            Self::ReviewNeverStarts => "reviewNeverStarts",
-            Self::HoldsNowhere => "holdsNowhere",
-        }
-    }
-}
 
 impl AgentTriggers {
     /// What does not close in `agent_id`'s grants. `source_rooms`: the room
-    /// of each source it watches (none: Geral).
+    /// of each source it watches (none: Geral). The rules are the ones an
+    /// agent reads the team's state with (`agent_grants_check`).
     pub fn auto_send_gaps(&self, agent_id: &str, source_rooms: &[Option<String>]) -> Vec<Gap> {
         let Some(grants) = self.stored.auto_send.get(agent_id) else {
             return Vec::new();
         };
-        let review = grants.review != ReviewSend::Ask;
-        let any = review || grants.reply || grants.deliver || grants.fix_in_task;
-        let mut gaps = Vec::new();
-        if any && self.stored.paused {
-            gaps.push(Gap::Paused);
-        }
-        let reply_holds = grants.reply && !grants.reply_rooms.is_empty();
-        if grants.deliver && !grants.deliver_note.trim().is_empty() && !reply_holds {
-            gaps.push(Gap::AnnounceWaits);
-        }
-        if reply_holds
-            && source_rooms.iter().any(|room| {
-                let room = room.as_deref().unwrap_or(GENERAL_ROOM);
-                !grants.reply_rooms.iter().any(|granted| granted == room)
-            })
-        {
-            gaps.push(Gap::SourceRoomNotGranted);
-        }
-        if grants.fix_in_task && !self.is_on(agent_id, Trigger::ReviewReceived) {
-            gaps.push(Gap::FixWithoutTrigger);
-        }
-        if review
-            && !grants.review_projects.is_empty()
-            && !self.is_on(agent_id, Trigger::ReviewRequested)
-            && !self.is_on(agent_id, Trigger::PrUpdated)
-            && source_rooms.is_empty()
-        {
-            gaps.push(Gap::ReviewNeverStarts);
-        }
-        if (review && grants.review_projects.is_empty())
-            || (grants.reply && grants.reply_rooms.is_empty())
-            || (grants.deliver && grants.deliver_projects.is_empty())
-        {
-            gaps.push(Gap::HoldsNowhere);
-        }
-        gaps
+        let grants = Grants {
+            paused: self.stored.paused,
+            review: grants.review != ReviewSend::Ask,
+            review_projects: grants.review_projects.clone(),
+            reply: grants.reply,
+            reply_rooms: grants.reply_rooms.clone(),
+            deliver: grants.deliver,
+            deliver_projects: grants.deliver_projects.clone(),
+            announces: !grants.deliver_note.trim().is_empty(),
+            fix_in_task: grants.fix_in_task,
+            triggers: Trigger::ALL
+                .into_iter()
+                .filter(|trigger| self.is_on(agent_id, *trigger))
+                .collect(),
+        };
+        gaps(&grants, source_rooms)
     }
 
     /// Whether the agent has anything granted, so the check has something
@@ -96,6 +49,7 @@ impl AgentTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::agent_auto_send::GENERAL_ROOM;
 
     fn triggers() -> (tempfile::TempDir, AgentTriggers) {
         let dir = tempfile::tempdir().unwrap();

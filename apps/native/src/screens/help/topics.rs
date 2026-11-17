@@ -9,7 +9,7 @@ use crate::i18n::I18n;
 use crate::ui::command_key;
 
 /// `HELP_TOPIC_IDS`, in order.
-pub const TOPICS: [&str; 31] = [
+pub const TOPICS: [&str; 34] = [
     "workspaces",
     "composer",
     "plan",
@@ -18,6 +18,9 @@ pub const TOPICS: [&str; 31] = [
     "review",
     "prComments",
     "agents",
+    "agentRooms",
+    "agentSources",
+    "agentAutoSend",
     "terminal",
     "browser",
     "ports",
@@ -56,6 +59,9 @@ pub fn icon(topic: &str) -> &'static str {
         "review" => "file-diff",
         "prComments" => "messages-square",
         "agents" => "badge-check",
+        "agentRooms" => "hash",
+        "agentSources" => "radar",
+        "agentAutoSend" => "zap",
         "terminal" => "square-terminal",
         "browser" => "globe",
         "ports" => "server",

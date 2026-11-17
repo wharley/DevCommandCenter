@@ -2258,6 +2258,8 @@ fn is_auto_allowed_dcc_browser_tool(
                 | "dcc_propose_source"
                 | "dcc_propose_reply"
                 | "dcc_overview"
+                | "dcc_team_state"
+                | "dcc_help"
                 | "dcc_open_task"
         )
 }

@@ -50,7 +50,7 @@ fn text(message: String, is_error: bool) -> Value {
 }
 
 /// `at` in the machine's time zone, as written; unreadable times stay as is.
-fn local_time(at: &str) -> String {
+pub(crate) fn local_time(at: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(at)
         .map(|time| {
             time.with_timezone(&chrono::Local)

@@ -4591,6 +4591,57 @@
         ],
         "keywords": "editor ide cursor zed vscode abrir arquivo editar salvar preferido"
       },
+      "agentRooms": {
+        "label": "Salas dos agentes",
+        "summary": "Onde você fala com a equipe, e como a sala diz de qual projeto é o trabalho.",
+        "whatIs": "Em [Agentes] há a sala [Geral] e uma sala por projeto, criada em [Nova sala]. O mesmo agente atende todas: em cada sala ele tem uma conversa própria, com o contexto daquele projeto. A sala é o que diz de qual projeto é um pedido: numa sala de projeto, a tarefa que o agente abre vai para aquele projeto. A [Geral] não tem projeto.",
+        "whenToUse": "Use a sala do projeto para tudo que vira trabalho em código. Deixe a [Geral] para perguntas entre projetos e para conversar com a equipe.",
+        "steps": [
+          "Abra [Agentes] na barra lateral e clique em [Nova sala] para escolher o projeto.",
+          "Escreva na sala: com @ você escolhe quem responde; sem @ responde quem está em [Responde: automático], que você pode trocar por um agente fixo.",
+          "Quando você pede trabalho em código, o agente abre uma tarefa no projeto da sala. Ela aparece na sua lista de tarefas e o resultado volta para a mesma sala.",
+          "Um pedido que chega sozinho (por uma fonte, um gatilho, uma rotina ou passado por outro agente) só começa uma tarefa sem você em dois casos: no projeto da sala, ou num projeto marcado em [Projetos] na página do agente. Fora disso, a tarefa espera como cartão para você iniciar.",
+          "Em [Projetos], na aba [Configuração] do agente, [Todos] deixa ele atender qualquer projeto. Marque alguns para ele enxergar e abrir tarefas só neles.",
+          "[Pausar agentes], no topo da sala, segura todos os gatilhos, fontes e envios automáticos de uma vez."
+        ],
+        "tip": "Se um agente abriu tarefa no projeto errado, quase sempre o pedido chegou pela [Geral]. Mova a fonte para a sala do projeto.",
+        "keywords": "sala salas geral projeto equipe agentes conversa quem responde projeto errado cartão tarefa começar sozinho pausar"
+      },
+      "agentSources": {
+        "label": "Fontes e rotinas",
+        "summary": "O que acorda um agente sozinho: novidades num conector, ou um horário.",
+        "whatIs": "Uma fonte vigia algo num conector (menções no Slack, tarefas no ClickUp) e acorda o agente só quando aparece algo novo. A leitura é feita pelo DCC, sem gastar modelo; o agente só entra quando há novidade. Uma rotina é um pedido que o agente recebe num horário. As duas ficam na página do agente, em [Fontes] e [Rotinas].",
+        "whenToUse": "Quando você quer que perguntas e pedidos de fora sejam respondidos sem você copiar e colar, ou um resumo todo dia no mesmo horário.",
+        "steps": [
+          "Conecte o serviço antes, em Configurações, [Conectores].",
+          "Na página do agente, em [Fontes], clique em [Nova fonte]. Preencha [O que vigiar], o [Conector], [O que ler] e [Ler a cada].",
+          "Escolha [Avisar na sala]: é a sala do projeto de onde vêm esses pedidos. É essa escolha que faz a tarefa cair no projeto certo. Use [Geral] só para o que não é de um projeto.",
+          "Clique em [Testar leitura] para ver se traz o que você espera, depois em [Criar fonte].",
+          "Para mudar a sala ou o intervalo depois, use [Editar] na fonte. [Ler agora] faz uma leitura na hora.",
+          "Um Slack de uma empresa não é um projeto: se o mesmo conector traz assunto de dois projetos, crie duas fontes, cada uma com o seu filtro e a sua sala.",
+          "Em [Rotinas], clique em [Nova rotina], escolha os dias e o horário e escreva o pedido."
+        ],
+        "tip": "O conector é genérico: o DCC não sabe de qual projeto é um workspace do Slack. Quem diz é a sala da fonte.",
+        "keywords": "fonte fontes rotina rotinas slack clickup jira menções vigiar conector intervalo sala avisar ler agora horário acordar agente"
+      },
+      "agentAutoSend": {
+        "label": "Enviar sem perguntar",
+        "summary": "O que cada agente pode publicar sozinho, onde, e o que continua sendo seu.",
+        "whatIs": "Por padrão, tudo que um agente quer mandar para fora espera você: a revisão fica como rascunho, a resposta vira cartão, a tarefa espera o commit. Em [Enviar sem perguntar], na página do agente, você libera cada coisa separadamente e escolhe onde vale. O merge nunca é automático.",
+        "whenToUse": "Quando o fluxo já está confiável num projeto e você quer só revisar e aprovar no final.",
+        "steps": [
+          "Abra o agente, aba [Configuração], cartão [Enviar sem perguntar].",
+          "[Revisão de pull request]: [Só comentar] publica os comentários; [Comentar e decidir] também aprova ou pede mudanças. Marque os projetos em [Vale em].",
+          "[Resposta para fora]: em [Enviar], a resposta que o agente propõe (no Slack, numa tarefa) sai sozinha. Marque em [Vale nas salas] as salas onde as fontes dele avisam.",
+          "[Entrega da tarefa]: em [Entregar], a tarefa que o agente abriu é commitada, enviada e ganha o pull request quando termina com mudanças. Só vale para tarefa em worktree própria.",
+          "[Ao abrir o PR]: escreva o que o agente deve fazer quando o PR abrir, por exemplo avisar num canal marcando quem revisa. Para sair sozinho, [Resposta para fora] precisa estar liberada.",
+          "[Comentários no seu PR]: em [Corrigir na tarefa], os comentários de quem revisou o seu PR vão direto ao agente da tarefa. Precisa do gatilho [Review chegou num PR de tarefa] ligado.",
+          "Clique em [Conferir] no fim do cartão: ele diz o que está marcado mas não vai funcionar como você espera.",
+          "Em [Gatilhos], ligue o que acorda o agente e ajuste o [Teto por dia]."
+        ],
+        "tip": "Um agente nunca libera nada para si nem para outro agente. Só você marca essas opções.",
+        "keywords": "enviar sem perguntar automático automatizar revisão resposta entrega commit push pull request anúncio corrigir na tarefa conferir gatilhos teto merge manual"
+      },
       "account": {
         "label": "Contas GitHub e GitLab",
         "summary": "Login nas CLIs para PRs, MRs e status de revisão.",

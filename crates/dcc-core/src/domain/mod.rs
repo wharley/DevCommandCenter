@@ -7,6 +7,7 @@ pub mod agent_call;
 pub mod agent_chain;
 pub mod agent_conversation;
 pub mod agent_memory;
+pub mod agent_grants_check;
 pub mod agent_projects;
 pub mod agent_proposal;
 pub mod agent_reaction;
