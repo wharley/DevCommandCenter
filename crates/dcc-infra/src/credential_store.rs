@@ -11,8 +11,51 @@ use dcc_core::{
     ports::{CredentialStore, CredentialStoreError, CredentialStoreResult, SecretValue},
 };
 
+use crate::credential_file_store::FileCredentialStore;
+
 pub const DCC_MCP_CREDENTIAL_SERVICE: &str = "com.devcommandcenter.app.mcp";
 const MAX_REFERENCE_CHARS: usize = 512;
+
+/// Where secrets go in this process: the system store (Keychain, Credential
+/// Manager, Secret Service), or a file only this user reads where there is
+/// none (`credential_file_store`). `DCC_CREDENTIAL_STORE=file|system` forces
+/// one; otherwise Linux asks the Secret Service once and falls back to the
+/// file when it does not answer, and the other systems always use theirs.
+fn file_store_for(service: &str) -> Option<FileCredentialStore> {
+    static USE_FILE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let use_file = *USE_FILE.get_or_init(|| {
+        let (chosen, why) = match std::env::var("DCC_CREDENTIAL_STORE").as_deref() {
+            Ok("file") => (true, "DCC_CREDENTIAL_STORE=file"),
+            Ok("system") => (false, ""),
+            _ => (
+                cfg!(target_os = "linux") && !system_store_answers(),
+                "o cofre do sistema não respondeu",
+            ),
+        };
+        if chosen {
+            if let Some(dir) = FileCredentialStore::default_dir() {
+                eprintln!(
+                    "[DCC] segredos em {} (só este usuário lê): {why}",
+                    dir.display()
+                );
+            }
+        }
+        chosen
+    });
+    if !use_file {
+        return None;
+    }
+    FileCredentialStore::default_dir().map(|dir| FileCredentialStore::new(&dir, service))
+}
+
+/// A lookup that finds nothing proves the store works; anything else (no
+/// D-Bus, no keyring daemon, a locked store) means there is none to use.
+fn system_store_answers() -> bool {
+    match Entry::new(DCC_MCP_CREDENTIAL_SERVICE, "__dcc_probe__") {
+        Ok(entry) => matches!(entry.get_secret(), Ok(_) | Err(KeyringError::NoEntry)),
+        Err(_) => false,
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct SystemCredentialStore {
@@ -56,6 +99,9 @@ impl CredentialStore for SystemCredentialStore {
         let service = self.service.clone();
         let reference = reference.0.clone();
         Self::run(move || {
+            if let Some(file) = file_store_for(&service) {
+                return file.store(&reference, &secret);
+            }
             let entry = Entry::new(&service, &reference).map_err(map_keyring_error)?;
             entry
                 .set_secret(secret.expose_secret())
@@ -72,6 +118,9 @@ impl CredentialStore for SystemCredentialStore {
         let service = self.service.clone();
         let reference = reference.0.clone();
         Self::run(move || {
+            if let Some(file) = file_store_for(&service) {
+                return file.resolve(&reference);
+            }
             let entry = Entry::new(&service, &reference).map_err(map_keyring_error)?;
             match entry.get_secret() {
                 Ok(secret) => SecretValue::new(secret).map(Some),
@@ -87,6 +136,9 @@ impl CredentialStore for SystemCredentialStore {
         let service = self.service.clone();
         let reference = reference.0.clone();
         Self::run(move || {
+            if let Some(file) = file_store_for(&service) {
+                return file.delete(&reference);
+            }
             let entry = Entry::new(&service, &reference).map_err(map_keyring_error)?;
             match entry.delete_credential() {
                 Ok(()) => Ok(true),

@@ -1,5 +1,6 @@
 pub mod ai_memory;
 pub mod connector_icon;
+pub mod credential_file_store;
 pub mod credential_store;
 pub mod db;
 pub mod browser_sessions;
