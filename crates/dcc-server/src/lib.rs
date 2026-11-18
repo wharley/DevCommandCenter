@@ -9,6 +9,7 @@ pub mod agent_memory_tools;
 pub mod agent_proposal_tool;
 pub mod agent_requests;
 pub mod agent_tool_access;
+mod ai_memory_auth;
 pub mod ai_memory_sidecar;
 pub mod browser_agent_requests;
 pub mod browser_commands;

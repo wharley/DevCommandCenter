@@ -338,6 +338,8 @@ impl AiMemorySidecar {
         // process is healthy so a failed start cannot create a misleading URL.
         std::env::set_var("DCC_AI_MEMORY_URL", &base_url);
         std::env::set_var("DCC_AI_MEMORY_DATA_DIR", &data_dir);
+        // A data folder `init` made since 3.x holds the token the server wants.
+        crate::ai_memory_auth::use_folder_token(&data_dir);
         if let Some(version) = version.as_deref() {
             if let Err(error) = fs::write(data_dir.join(VERSION_MARKER_FILE), version) {
                 eprintln!("[DCC][ai-memory] could not record sidecar version: {error}");
@@ -755,21 +757,9 @@ fn stop_orphan(pid: u32, base_url: &str) -> bool {
 }
 
 fn wait_until_healthy(base_url: &str) -> bool {
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(HEALTH_TIMEOUT)
-        .build()
-    {
-        Ok(client) => client,
-        Err(_) => return false,
-    };
     let started = Instant::now();
     while started.elapsed() < STARTUP_TIMEOUT {
-        if client
-            .get(format!("{base_url}/mcp"))
-            .send()
-            .map(|response| response.status().as_u16() == 405 || response.status().is_success())
-            .unwrap_or(false)
-        {
+        if crate::ai_memory_auth::answers(base_url, HEALTH_TIMEOUT) {
             return true;
         }
         thread::sleep(Duration::from_millis(120));
@@ -822,13 +812,7 @@ fn server_version_from_initialize(body: &str) -> Option<String> {
 }
 
 fn is_healthy_once(base_url: &str) -> bool {
-    reqwest::blocking::Client::builder()
-        .timeout(HEALTH_TIMEOUT)
-        .build()
-        .ok()
-        .and_then(|client| client.get(format!("{base_url}/mcp")).send().ok())
-        .map(|response| response.status().as_u16() == 405 || response.status().is_success())
-        .unwrap_or(false)
+    crate::ai_memory_auth::answers(base_url, HEALTH_TIMEOUT)
 }
 
 #[cfg(test)]
