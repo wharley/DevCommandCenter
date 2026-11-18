@@ -368,6 +368,23 @@ impl Clock {
     }
 }
 
+/// Runs `change` on the triggers' state, caught up with the file: the
+/// clock's own copy when it runs, else one read now.
+pub(super) fn with_triggers<T>(
+    backend: &HttpBackend,
+    change: impl FnOnce(&mut AgentTriggers) -> T,
+) -> Option<T> {
+    if let Some(clock) = backend.agent_clock.get() {
+        let mut triggers = clock.triggers.lock().ok()?;
+        triggers.refresh();
+        return Some(change(&mut triggers));
+    }
+    let dir = backend.workspace.db_path.parent()?;
+    Some(change(&mut AgentTriggers::load(
+        dir.join("agent-triggers.json"),
+    )))
+}
+
 /// The person talked to `agent_id` (from the phone's room, or any client
 /// through the server): its brake starts over, as the app's own room does.
 pub(super) fn attended(backend: &HttpBackend, agent_id: &str) {

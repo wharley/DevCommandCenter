@@ -57,6 +57,7 @@ use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
 pub(crate) mod agent_clock;
+mod agent_task_ask;
 mod agent_conversation;
 mod agent_memory;
 mod agent_changes;
@@ -70,6 +71,7 @@ mod ai_memory;
 mod ai_memory_settings;
 mod attention;
 mod automation;
+mod ci_failing;
 mod browser_bridge;
 mod browser_opens;
 mod computer_bridge;

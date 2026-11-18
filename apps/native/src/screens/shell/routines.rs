@@ -51,23 +51,24 @@ struct Announced(Option<String>);
 impl Global for Announced {}
 
 impl Shell {
-    /// The server ran a routine: say so when the window is away. Called once
-    /// the triggers' file is read again.
+    /// The server ran a routine, or woke an agent for a failing check: say
+    /// so when the window is away. Called once the triggers' file is read
+    /// again.
     pub(super) fn announce_routine_runs(&self, cx: &mut App) {
-        let runs: Vec<(String, String)> = cx
+        let runs: Vec<(String, String, Trigger)> = cx
             .global::<AgentTriggers>()
             .runs()
             .iter()
-            .filter(|run| run.trigger == Trigger::Routine)
-            .map(|run| (run.agent_id.clone(), run.at.clone()))
+            .filter(|run| matches!(run.trigger, Trigger::Routine | Trigger::CiFailed))
+            .map(|run| (run.agent_id.clone(), run.at.clone(), run.trigger))
             .collect();
         let newest = runs
             .iter()
-            .map(|(_, at)| at.clone())
+            .map(|(_, at, _)| at.clone())
             .max_by(|a, b| later(a, b));
         let seen = cx.default_global::<Announced>().0.clone();
         if let Some(seen) = &seen {
-            for (agent_id, at) in &runs {
+            for (agent_id, at, trigger) in &runs {
                 if later(at, seen) == std::cmp::Ordering::Greater {
                     let name = self
                         .sidebar
@@ -77,7 +78,7 @@ impl Shell {
                         .find(|agent| &agent.id == agent_id)
                         .map(|agent| agent.name.clone());
                     if let Some(name) = name {
-                        announce(&name, cx);
+                        announce(&name, *trigger, cx);
                     }
                 }
             }
@@ -119,12 +120,16 @@ fn later(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
-fn announce(agent: &str, cx: &App) {
-    let title = cx.t_with(
-        "agents.routines.done",
-        &Args::default().with("agent", agent.to_string()),
-    );
-    crate::ui::attention::notify_away(&title, &cx.t("agents.routines.ready"));
+fn announce(agent: &str, trigger: Trigger, cx: &App) {
+    let (done, ready) = match trigger {
+        Trigger::CiFailed => (
+            "agents.triggers.ciFailed.done",
+            "agents.triggers.ciFailed.ready",
+        ),
+        _ => ("agents.routines.done", "agents.routines.ready"),
+    };
+    let title = cx.t_with(done, &Args::default().with("agent", agent.to_string()));
+    crate::ui::attention::notify_away(&title, &cx.t(ready));
 }
 
 /// The clock that keeps the list on screen.

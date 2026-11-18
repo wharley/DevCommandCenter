@@ -45,15 +45,18 @@ impl PrWatch {
     }
 }
 
-/// Searches once and keeps the result; the error otherwise.
-pub(super) async fn search(backend: &HttpBackend) -> Result<Value, String> {
-    let result =
+/// Searches once, keeps the result and lets what reacts to it react (each
+/// reaction remembers what it already handled); the error otherwise.
+pub(super) async fn search(backend: &Arc<HttpBackend>) -> Result<Value, String> {
+    let output =
         dcc_tauri::commands::pr_hub_since::pull_request_hub_reviewed_with_state(&backend.workspace)
             .await?;
-    let result = serde_json::to_value(result).map_err(|error| error.to_string())?;
+    let result = serde_json::to_value(&output).map_err(|error| error.to_string())?;
     if let Some(watch) = backend.pr_watch.get() {
         watch.keep(result.clone()).await;
     }
+    // A task's pull request whose checks fail (`ci_failing`).
+    super::ci_failing::react(backend, &output.failing).await;
     Ok(result)
 }
 

@@ -10,7 +10,6 @@ mod browser;
 mod browser_opens;
 mod cached;
 mod check_in;
-mod ci_trigger;
 mod cli_updates;
 mod computer;
 mod deliver_auto;
@@ -409,7 +408,6 @@ impl Shell {
                 // News may wake the Reviewer (its trigger, `review_trigger`).
                 let news = cx.subscribe(&watch, |shell, _, event: &pr_watch::PrNewsArrived, cx| {
                     shell.pr_news_arrived(&event.news, cx);
-                    shell.checks_failing(&event.failing, cx);
                     shell.reviews_received(&event.received, cx);
                     shell.check_in_arrived(event, cx);
                     // The same pass looks at the merged tasks still waiting
