@@ -27,6 +27,12 @@ use dcc_tauri::state::{SessionCommandState, WorkspaceCommandState};
 use rusqlite::Connection;
 
 pub use app::HostApp;
+
+/// True when a DCC backend already answers the API on `port` (the app or a
+/// `dcc serve`).
+pub fn api_answers_on(port: u16) -> bool {
+    http::http_port_held_by_dcc(port)
+}
 pub use browser::HostBrowser;
 pub use computer::HostComputer;
 pub use terminals::HostTerminals;

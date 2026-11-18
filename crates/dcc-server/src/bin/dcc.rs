@@ -58,6 +58,7 @@ fn print_usage() {
     eprintln!("  dcc daemon attach <project-id> <task-id>");
     eprintln!("  dcc daemon detach <project-id> <task-id>");
     eprintln!("  dcc mcp");
+    eprintln!("  dcc serve   (o servidor inteiro, sem tela, até SIGTERM ou Ctrl-C)");
 }
 
 fn read_mcp_message(stdin: &mut io::StdinLock<'_>) -> Option<Value> {
@@ -489,6 +490,13 @@ fn main() {
         "mcp" => {
             if let Err(error) = serve_mcp() {
                 eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        "serve" => {
+            let options = dcc_server::headless_host::ServeOptions::from_environment();
+            if let Err(error) = dcc_server::headless_host::serve(options) {
+                eprintln!("[DCC] {error}");
                 std::process::exit(1);
             }
         }
