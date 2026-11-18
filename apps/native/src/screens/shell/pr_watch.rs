@@ -1,10 +1,8 @@
-//! The pull requests the person reviewed, searched again every 5 minutes
-//! while the app runs (`PrNews`): the count beside "Pull Requests" follows
-//! them, and news that has not been announced posts one system notification
-//! — only while the person is in another app, without bouncing the Dock.
-//!
-//! One search covers every repository (one `gh` for the GitHub account),
-//! so the cost does not grow with the projects; the hub's list is not read.
+//! The pull requests the person reviewed (`PrNews`), as the server's search
+//! last found them (`dcc_server::http_api::pr_watch`, one `gh` every 5
+//! minutes with or without this window), read at the same period; the count beside "Pull Requests" follows them, and news that has
+//! not been announced posts one system notification — only while the person
+//! is in another app, without bouncing the Dock.
 //! The same pass brings the agents' check-in: pull requests asking for the
 //! person's review, issues assigned to them, and the running turns with no
 //! sign of life (one indexed read per running conversation).
@@ -20,6 +18,8 @@ use crate::data::pr_news::{PrNews, news_text};
 use crate::screens::sidebar::Sidebar;
 
 const FIRST_CHECK: Duration = Duration::from_secs(20);
+/// The same pass looks at merged tasks' deployments (`shipped_due`), which
+/// calls the forge: kept at the server's own period.
 const EVERY: Duration = Duration::from_secs(5 * 60);
 
 /// What each search brought for the Reviewer's triggers: the reviewed pull
@@ -72,7 +72,7 @@ impl PrWatch {
                         .background_executor()
                         .spawn(async move {
                             (
-                                DesktopApi::load().map(|api| api.pr_hub_reviewed()),
+                                DesktopApi::load().map(|api| api.pr_hub_reviewed(false)),
                                 with_last_events(running),
                             )
                         })

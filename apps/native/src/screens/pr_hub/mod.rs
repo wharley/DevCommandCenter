@@ -370,7 +370,7 @@ impl PrHub {
         cx.spawn(async move |this, cx| {
             let read = cx
                 .background_executor()
-                .spawn(async move { api.pr_hub_reviewed() })
+                .spawn(async move { api.pr_hub_reviewed(true) })
                 .await;
             if let Ok(list) = read {
                 let _ = this.update(cx, |hub, cx| {

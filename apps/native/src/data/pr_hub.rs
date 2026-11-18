@@ -381,11 +381,13 @@ impl DesktopApi {
 
     /// The open pull requests the person reviewed and what came since: one
     /// search (one `gh`) for every repository.
-    pub fn pr_hub_reviewed(&self) -> Result<ReviewedList, ApiError> {
+    /// `fresh`: search now (the Pull Requests screen); otherwise the
+    /// server's latest search while it is recent.
+    pub fn pr_hub_reviewed(&self, fresh: bool) -> Result<ReviewedList, ApiError> {
         decode(self.request_waiting(
             "POST",
             "/api/v1/pull-request-hub/reviewed",
-            Some(&json!({})),
+            Some(&json!({ "fresh": fresh })),
             FORGE_WAIT,
         )?)
     }

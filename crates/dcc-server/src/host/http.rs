@@ -142,6 +142,8 @@ pub(crate) fn serve(
     // Routines and sources wake the agents from here, with or without a
     // screen (the native app had the clocks).
     crate::http_api::agent_clock::start(server.config(), server.backend().clone());
+    // The reviewed pull requests, searched here every 5 minutes.
+    crate::http_api::pr_watch::start(server.backend().clone());
     let listening = server.clone();
     crate::runtime::spawn(async move {
         let port = listening.port();

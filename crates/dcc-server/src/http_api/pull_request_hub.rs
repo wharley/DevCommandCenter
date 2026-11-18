@@ -69,13 +69,32 @@ async fn list(
     reply(forge_commands::pull_request_hub_list_with_state(&backend.workspace, input).await)
 }
 
-/// The open pull requests the person reviewed, with what came since: one
-/// search, for the app's count beside "Pull Requests".
-async fn reviewed(State(backend): State<Arc<HttpBackend>>) -> Result<Json<Value>, HttpApiError> {
-    reply(
-        dcc_tauri::commands::pr_hub_since::pull_request_hub_reviewed_with_state(&backend.workspace)
-            .await,
-    )
+#[derive(Default, serde::Deserialize)]
+struct ReviewedInput {
+    /// The Pull Requests screen opened or refreshed: search now.
+    #[serde(default)]
+    fresh: bool,
+}
+
+/// The open pull requests the person reviewed, with what came since, for
+/// the app's count beside "Pull Requests": the server's latest search
+/// (`pr_watch`) while it is fresh, else (or when asked) one search now.
+async fn reviewed(
+    State(backend): State<Arc<HttpBackend>>,
+    input: Option<Json<ReviewedInput>>,
+) -> Result<Json<Value>, HttpApiError> {
+    let fresh = input.is_some_and(|Json(input)| input.fresh);
+    let kept = match backend.pr_watch.get() {
+        Some(watch) if !fresh => watch.fresh().await,
+        _ => None,
+    };
+    if let Some(latest) = kept {
+        return Ok(Json(latest));
+    }
+    super::pr_watch::search(&backend)
+        .await
+        .map(Json)
+        .map_err(HttpApiError::bad_request)
 }
 
 async fn detail(

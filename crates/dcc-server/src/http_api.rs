@@ -95,6 +95,7 @@ mod mobile_room_actions;
 mod mobile_room_send;
 mod mobile_rooms;
 mod pr_review_requests;
+pub(crate) mod pr_watch;
 mod provider_accounts;
 mod provider_usage;
 mod providers;
@@ -279,6 +280,8 @@ pub struct HttpBackend {
     agent_requests: OnceLock<Arc<dyn crate::agent_requests::AgentRequestSource>>,
     /// The agents' clock (`agent_clock`), for "Rodar agora" and "Ler agora".
     agent_clock: OnceLock<Arc<agent_clock::Clock>>,
+    /// The reviewed pull requests' search (`pr_watch`).
+    pr_watch: OnceLock<Arc<pr_watch::PrWatch>>,
     fixture_agent_requests: OnceLock<Arc<crate::agent_requests::InMemoryAgentRequests>>,
     // The runtime keeps only a weak reference to its buses.
     _bus: Arc<dyn EventBus>,
@@ -336,6 +339,7 @@ impl HttpBackend {
             machines: OnceLock::new(),
             agent_requests: OnceLock::new(),
             agent_clock: OnceLock::new(),
+            pr_watch: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
             app: OnceLock::new(),
         })
@@ -367,6 +371,7 @@ impl HttpBackend {
             machines: OnceLock::new(),
             agent_requests: OnceLock::new(),
             agent_clock: OnceLock::new(),
+            pr_watch: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
             app: OnceLock::new(),
         }
