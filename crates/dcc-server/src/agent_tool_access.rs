@@ -31,8 +31,16 @@ fn allowed(access: &ToolAccess, tool: &Value) -> bool {
         .is_some_and(|name| access.allows_dcc(name, read_only(tool)))
 }
 
-/// The tools the agent sees.
+/// The tools the agent sees: never one this engine hides (`DCC_HIDE_TOOLS`).
 pub fn visible(access: Option<&ToolAccess>, tools: Vec<Value>) -> Vec<Value> {
+    let tools = tools
+        .into_iter()
+        .filter(|tool| {
+            tool.get("name")
+                .and_then(Value::as_str)
+                .is_none_or(|name| !crate::hidden_tools::hidden(name))
+        })
+        .collect::<Vec<_>>();
     match access {
         Some(access) => tools
             .into_iter()
@@ -44,6 +52,11 @@ pub fn visible(access: Option<&ToolAccess>, tools: Vec<Value>) -> Vec<Value> {
 
 /// The answer to a call the agent may not make, if it may not.
 pub fn refusal(access: Option<&ToolAccess>, name: &str, tools: &[Value]) -> Option<Value> {
+    if crate::hidden_tools::hidden(name) {
+        return Some(
+            json!({"content": [{"type": "text", "text": ACCESS_DENIED}], "isError": true}),
+        );
+    }
     let access = access?;
     let tool = tools
         .iter()

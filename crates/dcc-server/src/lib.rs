@@ -27,6 +27,7 @@ pub mod desktop_agent_requests;
 pub mod device_tools;
 pub mod embedded_http;
 pub mod headless_host;
+mod hidden_tools;
 pub mod host;
 pub mod http_api;
 pub mod http_auth;
