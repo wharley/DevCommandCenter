@@ -119,6 +119,7 @@ impl AgentTriggers {
     }
 
     pub fn set_review_send(&mut self, agent_id: &str, send: ReviewSend) {
+        let _lock = self.begin();
         self.stored
             .auto_send
             .entry(agent_id.to_string())
@@ -129,6 +130,7 @@ impl AgentTriggers {
     }
 
     pub fn set_review_send_in(&mut self, agent_id: &str, project_id: &str, on: bool) {
+        let _lock = self.begin();
         let grants = self
             .stored
             .auto_send
@@ -177,6 +179,7 @@ impl AgentTriggers {
 
     /// A reply went by itself; only today's are kept.
     pub fn record_reply_sent(&mut self, agent_id: &str, now: DateTime<Utc>) {
+        let _lock = self.begin();
         let grants = self
             .stored
             .auto_send
@@ -188,6 +191,7 @@ impl AgentTriggers {
     }
 
     pub fn set_reply_send(&mut self, agent_id: &str, on: bool) {
+        let _lock = self.begin();
         self.stored
             .auto_send
             .entry(agent_id.to_string())
@@ -198,6 +202,7 @@ impl AgentTriggers {
     }
 
     pub fn set_reply_send_in(&mut self, agent_id: &str, room: &str, on: bool) {
+        let _lock = self.begin();
         let grants = self
             .stored
             .auto_send
@@ -264,6 +269,7 @@ impl AgentTriggers {
     }
 
     pub fn set_fix_in_task(&mut self, agent_id: &str, on: bool) {
+        let _lock = self.begin();
         self.stored
             .auto_send
             .entry(agent_id.to_string())
@@ -282,6 +288,7 @@ impl AgentTriggers {
     }
 
     pub fn set_deliver_note(&mut self, agent_id: &str, note: &str) {
+        let _lock = self.begin();
         let note: String = note.trim().chars().take(MAX_DELIVER_NOTE).collect();
         if self.deliver_note(agent_id) == note {
             return;
@@ -296,6 +303,7 @@ impl AgentTriggers {
     }
 
     pub fn set_deliver(&mut self, agent_id: &str, on: bool) {
+        let _lock = self.begin();
         let grants = self
             .stored
             .auto_send
@@ -308,6 +316,7 @@ impl AgentTriggers {
     }
 
     pub fn set_deliver_in(&mut self, agent_id: &str, project_id: &str, on: bool) {
+        let _lock = self.begin();
         let grants = self
             .stored
             .auto_send

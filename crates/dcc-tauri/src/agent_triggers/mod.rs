@@ -65,10 +65,26 @@ pub(crate) struct Stored {
     pub(crate) auto_send: BTreeMap<String, auto_send::AutoSend>,
 }
 
+/// One copy of the file in memory. The file is what counts: the server and
+/// the app (and a second process) each keep a copy, so every change locks
+/// the file, reads it again when someone else wrote it since, changes it and
+/// writes it whole (a temporary file and a rename), and a reader catches up
+/// with `refresh`. A copy never writes over what another one wrote.
 #[derive(Default)]
 pub struct AgentTriggers {
     path: Option<PathBuf>,
     pub(crate) stored: Stored,
+    /// The file as this copy last read or wrote it.
+    seen: Option<Stamp>,
+}
+
+/// When a file was last written, and its size: enough to tell that another
+/// copy wrote it.
+type Stamp = (std::time::SystemTime, u64);
+
+fn stamp(path: &std::path::Path) -> Option<Stamp> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.modified().ok()?, metadata.len()))
 }
 
 /// Why a trigger does not run now.
@@ -93,26 +109,77 @@ fn local_day(at: &str) -> Option<NaiveDate> {
 
 impl AgentTriggers {
     pub fn load(path: PathBuf) -> Self {
-        let stored = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default();
-        Self {
+        let mut triggers = Self {
             path: Some(path),
-            stored,
-        }
+            ..Self::default()
+        };
+        triggers.refresh();
+        triggers
     }
 
-    pub(crate) fn save(&self) {
+    /// Reads the file again when another copy wrote it since; true when it
+    /// did. Cheap when nothing changed (one `stat`).
+    pub fn refresh(&mut self) -> bool {
         let Some(path) = &self.path else {
+            return false;
+        };
+        let now = stamp(path);
+        if now.is_some() && now == self.seen {
+            return false;
+        }
+        let read = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok());
+        let changed = match read {
+            Some(stored) => {
+                let changed = stored != self.stored;
+                self.stored = stored;
+                changed
+            }
+            // Missing: nothing kept yet. Unreadable: keep what this copy has
+            // rather than forget every switch.
+            None => false,
+        };
+        self.seen = now;
+        changed
+    }
+
+    /// Before a change: holds the file's lock until the returned handle
+    /// drops (the end of the change), with this copy caught up.
+    pub(crate) fn begin(&mut self) -> Option<std::fs::File> {
+        let path = self.path.clone()?;
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path.with_extension("lock"))
+            .ok()?;
+        let locked = lock.lock().is_ok();
+        self.refresh();
+        locked.then_some(lock)
+    }
+
+    pub(crate) fn save(&mut self) {
+        let Some(path) = self.path.clone() else {
             return;
         };
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if let Ok(raw) = serde_json::to_string(&self.stored) {
-            let _ = std::fs::write(path, raw);
+        let Ok(raw) = serde_json::to_string(&self.stored) else {
+            return;
+        };
+        let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        let written =
+            std::fs::write(&temporary, raw).and_then(|()| std::fs::rename(&temporary, &path));
+        if written.is_err() {
+            let _ = std::fs::remove_file(&temporary);
         }
+        self.seen = stamp(&path);
     }
 
     pub fn is_on(&self, agent_id: &str, trigger: Trigger) -> bool {
@@ -131,6 +198,7 @@ impl AgentTriggers {
     }
 
     pub fn set(&mut self, agent_id: &str, trigger: Trigger, on: bool) {
+        let _lock = self.begin();
         let triggers = self.stored.on.entry(agent_id.to_string()).or_default();
         triggers.retain(|candidate| *candidate != trigger);
         if on {
@@ -218,6 +286,7 @@ impl AgentTriggers {
     }
 
     pub fn advance_received(&mut self, agent_id: &str, url: &str, latest: &str) -> bool {
+        let _lock = self.begin();
         let key = format!("{agent_id}|{url}");
         // Turned on before this was kept: from now on.
         if !self.stored.received_since.contains_key(agent_id) {
@@ -250,6 +319,7 @@ impl AgentTriggers {
 
     /// The failure on `sha` is handled (looked at, or held by a ceiling).
     pub fn mark_failure(&mut self, agent_id: &str, url: &str, sha: &str) {
+        let _lock = self.begin();
         self.stored
             .failures
             .insert(format!("{agent_id}|{url}"), sha.to_string());
@@ -259,6 +329,7 @@ impl AgentTriggers {
     /// Pull requests no longer failing are forgotten, so failing again later
     /// is news.
     pub fn keep_failures(&mut self, agent_id: &str, failing: &[&str]) {
+        let _lock = self.begin();
         let before = self.stored.failures.len();
         self.stored.failures.retain(|key, _| {
             key.split_once('|')
@@ -276,6 +347,7 @@ impl AgentTriggers {
 
     /// A run started; runs older than a week go.
     pub fn record(&mut self, agent_id: &str, trigger: Trigger, target: &str, now: DateTime<Utc>) {
+        let _lock = self.begin();
         let cutoff = now - Duration::days(KEEP_DAYS);
         self.stored.runs.retain(|run| {
             DateTime::parse_from_rfc3339(&run.at).is_ok_and(|at| at.with_timezone(&Utc) > cutoff)
@@ -383,5 +455,39 @@ mod tests {
 
         later.set("rev", Trigger::PrUpdated, false);
         assert!(!AgentTriggers::load(path).any_on("rev"));
+    }
+
+    #[test]
+    fn two_copies_of_the_file_never_write_over_each_other() {
+        use super::quiet::QuietHours;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent-triggers.json");
+        // The app's copy and the server's, both read before either writes.
+        let mut app = AgentTriggers::load(path.clone());
+        let mut server = AgentTriggers::load(path.clone());
+        app.set("dev", Trigger::ReviewRequested, true);
+        server.set_paused(true);
+        server.record("dev", Trigger::Source, "slack", chrono::Utc::now());
+        app.set_quiet(Some(QuietHours { from: 22, to: 8 }));
+        let read = AgentTriggers::load(path);
+        assert!(read.is_on("dev", Trigger::ReviewRequested));
+        assert!(read.paused());
+        assert_eq!(read.runs().len(), 1);
+        assert_eq!(read.quiet(), Some(QuietHours { from: 22, to: 8 }));
+        // A reader catches up without writing.
+        assert!(server.refresh());
+        assert_eq!(server.quiet(), Some(QuietHours { from: 22, to: 8 }));
+        assert!(!server.refresh(), "nothing new");
+    }
+
+    #[test]
+    fn an_unreadable_file_keeps_what_the_copy_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent-triggers.json");
+        let mut copy = AgentTriggers::load(path.clone());
+        copy.set("dev", Trigger::ReviewRequested, true);
+        std::fs::write(&path, "{ half a fi").unwrap();
+        assert!(!copy.refresh());
+        assert!(copy.is_on("dev", Trigger::ReviewRequested));
     }
 }

@@ -21,6 +21,7 @@ impl AgentTriggers {
     }
 
     pub fn set_daily_ceiling(&mut self, agent_id: &str, ceiling: Option<usize>) {
+        let _lock = self.begin();
         match ceiling {
             Some(DAILY_RUNS) => {
                 self.stored.ceilings.remove(agent_id);

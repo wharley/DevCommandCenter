@@ -13,6 +13,7 @@ pub const UNATTENDED_LIMIT: usize = 30;
 impl AgentTriggers {
     /// The person talked to the agent (the room, a passed turn, "Retomar").
     pub fn attend(&mut self, agent_id: &str, now: DateTime<Utc>) {
+        let _lock = self.begin();
         self.stored
             .attended
             .insert(agent_id.to_string(), now.to_rfc3339());

@@ -38,6 +38,7 @@ impl AgentTriggers {
     }
 
     pub fn set_paused(&mut self, paused: bool) {
+        let _lock = self.begin();
         if self.stored.paused != paused {
             self.stored.paused = paused;
             self.save();
@@ -49,6 +50,7 @@ impl AgentTriggers {
     }
 
     pub fn set_quiet(&mut self, quiet: Option<QuietHours>) {
+        let _lock = self.begin();
         if self.stored.quiet != quiet {
             self.stored.quiet = quiet;
             self.save();
