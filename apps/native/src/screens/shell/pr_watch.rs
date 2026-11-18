@@ -13,7 +13,7 @@ use gpui::{App, BorrowAppContext, Context, Entity, EventEmitter, Subscription, T
 
 use crate::data::check_ins::{CheckIn, Running, stalled};
 use crate::data::desktop_api::DesktopApi;
-use crate::data::pr_hub::{Asked, Received, Reviewed};
+use crate::data::pr_hub::{Asked, Reviewed};
 use crate::data::pr_news::{PrNews, news_text};
 use crate::screens::sidebar::Sidebar;
 
@@ -23,12 +23,11 @@ const FIRST_CHECK: Duration = Duration::from_secs(20);
 const EVERY: Duration = Duration::from_secs(5 * 60);
 
 /// What each search brought for the Reviewer's triggers: the reviewed pull
-/// requests with news just announced (a failing check wakes its agent in the
-/// server, `dcc_server::http_api::ci_failing`).
+/// requests with news just announced (a failing check and a review received
+/// wake their agent in the server, `dcc_server::http_api::ci_failing` and
+/// `review_received`).
 pub struct PrNewsArrived {
     pub news: Vec<Reviewed>,
-    /// The person's own pull requests with reviews from someone else.
-    pub received: Vec<Received>,
     /// Pull requests asking for the person's review.
     pub requested: Vec<Asked>,
     /// Issues assigned to the person.
@@ -82,7 +81,6 @@ impl PrWatch {
                             if !cx.has_global::<PrNews>() {
                                 return;
                             }
-                            let received = list.received;
                             let (requested, issues) = (list.requested, list.issues);
                             let stalled = stalled(&running, chrono::Utc::now());
                             let news =
@@ -92,7 +90,6 @@ impl PrWatch {
                             }
                             cx.emit(PrNewsArrived {
                                 news,
-                                received,
                                 requested,
                                 issues,
                                 stalled,

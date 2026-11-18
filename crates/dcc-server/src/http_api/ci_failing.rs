@@ -93,8 +93,11 @@ async fn read_checks(backend: &HttpBackend, path: &str) -> Option<String> {
     failure_read(snapshot.get("snapshot")?)
 }
 
-/// The failing pull requests of this search, for every agent watching.
-pub(super) async fn react(backend: &Arc<HttpBackend>, failing: &[PullRequestHubFailing]) {
+/// The agents with `trigger` on (the pull requests' reactions share it).
+pub(super) async fn watching(
+    backend: &HttpBackend,
+    trigger: Trigger,
+) -> Result<Vec<ResidentAgent>, String> {
     let db_path = backend.workspace.db_path.clone();
     let agents = tokio::task::spawn_blocking(move || {
         let repo =
@@ -102,24 +105,27 @@ pub(super) async fn react(backend: &Arc<HttpBackend>, failing: &[PullRequestHubF
         Ok::<_, String>(read_team(&repo)?.agents)
     })
     .await
-    .map_err(|error| error.to_string())
-    .and_then(|read| read);
-    let agents = match agents {
-        Ok(agents) => agents,
+    .map_err(|error| error.to_string())??;
+    Ok(agents
+        .into_iter()
+        .filter(|agent| {
+            super::agent_clock::with_triggers(backend, |triggers| {
+                triggers.is_on(&agent.id, trigger)
+            })
+            .unwrap_or(false)
+        })
+        .collect())
+}
+
+/// The failing pull requests of this search, for every agent watching.
+pub(super) async fn react(backend: &Arc<HttpBackend>, failing: &[PullRequestHubFailing]) {
+    let watching = match watching(backend, Trigger::CiFailed).await {
+        Ok(watching) => watching,
         Err(error) => {
             eprintln!("[DCC][ci-failed] agents unreadable: {error}");
             return;
         }
     };
-    let watching: Vec<ResidentAgent> = agents
-        .into_iter()
-        .filter(|agent| {
-            super::agent_clock::with_triggers(backend, |triggers| {
-                triggers.is_on(&agent.id, Trigger::CiFailed)
-            })
-            .unwrap_or(false)
-        })
-        .collect();
     let urls: Vec<&str> = failing.iter().map(|pr| pr.url.as_str()).collect();
     for agent in &watching {
         super::agent_clock::with_triggers(backend, |triggers| {
@@ -144,9 +150,6 @@ pub(super) async fn react(backend: &Arc<HttpBackend>, failing: &[PullRequestHubF
                         .check(&agent.id, Trigger::CiFailed, &task, now)
                         .is_ok();
                 triggers.mark_failure(&agent.id, &pr.url, &pr.head_sha);
-                if allowed {
-                    triggers.record(&agent.id, Trigger::CiFailed, &task, now);
-                }
                 Some(allowed)
             })
             .flatten();
@@ -157,11 +160,19 @@ pub(super) async fn react(backend: &Arc<HttpBackend>, failing: &[PullRequestHubF
             crate::runtime::spawn(async move {
                 let checks = read_checks(&backend, &path).await;
                 let prompt = diagnosis_prompt(&pr, checks.as_deref());
-                if let Err(error) =
-                    super::agent_task_ask::ask_in_task(&backend, &agent, &task, &project, &prompt)
-                        .await
+                match super::agent_task_ask::ask_in_task(&backend, &agent, &task, &project, &prompt)
+                    .await
                 {
-                    eprintln!("[DCC][ci-failed] {}#{}: {error}", pr.repository, pr.number);
+                    // Counted once the agent has it: the app announces what
+                    // is recorded, so a failed ask is never told as done.
+                    Ok(_) => {
+                        super::agent_clock::with_triggers(&backend, |triggers| {
+                            triggers.record(&agent.id, Trigger::CiFailed, &task, now)
+                        });
+                    }
+                    Err(error) => {
+                        eprintln!("[DCC][ci-failed] {}#{}: {error}", pr.repository, pr.number)
+                    }
                 }
             });
         }

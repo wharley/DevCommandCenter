@@ -31,8 +31,6 @@ mod quick_open;
 mod regions;
 mod reply_auto_send;
 mod review_auto_send;
-mod review_fix;
-mod review_received;
 mod review_requests;
 mod review_resume;
 mod review_trigger;
@@ -408,7 +406,6 @@ impl Shell {
                 // News may wake the Reviewer (its trigger, `review_trigger`).
                 let news = cx.subscribe(&watch, |shell, _, event: &pr_watch::PrNewsArrived, cx| {
                     shell.pr_news_arrived(&event.news, cx);
-                    shell.reviews_received(&event.received, cx);
                     shell.check_in_arrived(event, cx);
                     // The same pass looks at the merged tasks still waiting
                     // for their deployment.

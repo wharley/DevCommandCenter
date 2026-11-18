@@ -57,6 +57,9 @@ pub(super) async fn search(backend: &Arc<HttpBackend>) -> Result<Value, String> 
     }
     // A task's pull request whose checks fail (`ci_failing`).
     super::ci_failing::react(backend, &output.failing).await;
+    // Someone else reviewed one of the person's task pull requests
+    // (`review_received`).
+    super::review_received::react(backend, &output.received).await;
     Ok(result)
 }
 

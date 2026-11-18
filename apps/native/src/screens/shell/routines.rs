@@ -51,15 +51,20 @@ struct Announced(Option<String>);
 impl Global for Announced {}
 
 impl Shell {
-    /// The server ran a routine, or woke an agent for a failing check: say
-    /// so when the window is away. Called once the triggers' file is read
-    /// again.
+    /// The server ran a routine, or woke an agent for a failing check or a
+    /// review received: say so when the window is away. Called once the
+    /// triggers' file is read again.
     pub(super) fn announce_routine_runs(&self, cx: &mut App) {
         let runs: Vec<(String, String, Trigger)> = cx
             .global::<AgentTriggers>()
             .runs()
             .iter()
-            .filter(|run| matches!(run.trigger, Trigger::Routine | Trigger::CiFailed))
+            .filter(|run| {
+                matches!(
+                    run.trigger,
+                    Trigger::Routine | Trigger::CiFailed | Trigger::ReviewReceived
+                )
+            })
             .map(|run| (run.agent_id.clone(), run.at.clone(), run.trigger))
             .collect();
         let newest = runs
@@ -125,6 +130,10 @@ fn announce(agent: &str, trigger: Trigger, cx: &App) {
         Trigger::CiFailed => (
             "agents.triggers.ciFailed.done",
             "agents.triggers.ciFailed.ready",
+        ),
+        Trigger::ReviewReceived => (
+            "agents.triggers.reviewReceived.done",
+            "agents.triggers.reviewReceived.ready",
         ),
         _ => ("agents.routines.done", "agents.routines.ready"),
     };

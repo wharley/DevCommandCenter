@@ -117,7 +117,7 @@ fn task_approval_policy(
 }
 
 /// The level recorded on the session's newest turn that has one.
-fn latest_session_approval_policy(
+pub(super) fn latest_session_approval_policy(
     conn: &rusqlite::Connection,
     session_id: &str,
 ) -> Result<Option<ProviderApprovalPolicy>, String> {

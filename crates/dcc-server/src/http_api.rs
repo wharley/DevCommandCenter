@@ -103,6 +103,8 @@ mod provider_usage;
 mod providers;
 mod pull_request_hub;
 mod remote_devices;
+mod review_fix;
+mod review_received;
 mod room_approval_respond;
 mod room_cards;
 mod room_feed;

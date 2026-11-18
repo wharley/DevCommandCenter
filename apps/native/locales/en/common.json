@@ -403,9 +403,7 @@
         "ask": "Analyse only",
         "send": "Fix in the task",
         "askHint": "When someone comments on a pull request of yours, this agent reads it and says what to change, in a conversation of its own in the task. It does not change the code.",
-        "sendHint": "When someone comments on a pull request of yours, the conversations open on lines and what was written in the pull request's own conversation go straight to the task's own agent, which fixes them. This agent is not called. The fix waits for you to deliver, or goes to the pull request where delivery is granted. Use it on private repositories: the comments' text reaches an agent that can change code.",
-        "sent": "comments sent to the task to be fixed",
-        "failed": "could not send to the task: {{error}}"
+        "sendHint": "When someone comments on a pull request of yours, the conversations open on lines and what was written in the pull request's own conversation go straight to the task's own agent, which fixes them. This agent is not called. The fix waits for you to deliver, or goes to the pull request where delivery is granted. Use it on private repositories: the comments' text reaches an agent that can change code."
       },
       "deliver": {
         "note": "When the pull request opens",
@@ -449,15 +447,13 @@
         "title": "A task's CI failed",
         "hint": "When the checks of one of your tasks' PRs fail, the agent reads what failed and says the cause and the smallest fix in its conversation in that task. It only reads; who fixes it is up to you.",
         "done": "{{agent}} looked at the CI",
-        "ready": "diagnosis in the task",
-        "failed": "could not ask for the diagnosis"
+        "ready": "diagnosis in the task"
       },
       "reviewReceived": {
         "title": "A review came on a task's PR",
         "hint": "When someone reviews or comments on one of your tasks' PRs, the agent reads the open conversations and says, in its conversation in that task, whether each point holds and what to change. It only reads and does not reply on the PR.",
         "done": "{{agent}} read the review",
-        "ready": "analysis in the task",
-        "failed": "could not ask for the analysis"
+        "ready": "analysis in the task"
       },
       "prUpdated": {
         "title": "A PR you reviewed was updated",

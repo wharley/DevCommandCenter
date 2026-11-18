@@ -403,9 +403,7 @@
         "ask": "Só analisar",
         "send": "Corrigir na tarefa",
         "askHint": "Quando comentam num PR seu, este agente lê e diz o que mudar, numa conversa dele na tarefa. Ele não altera o código.",
-        "sendHint": "Quando comentam num PR seu, as conversas abertas nas linhas e o que foi escrito na conversa geral do PR vão direto ao agente da própria tarefa, que corrige. Este agente não é chamado. O ajuste espera você entregar, ou vai ao PR onde a entrega está autorizada. Use em repositórios privados: o texto dos comentários chega a um agente que pode alterar código.",
-        "sent": "comentários enviados à tarefa para corrigir",
-        "failed": "não foi possível enviar à tarefa: {{error}}"
+        "sendHint": "Quando comentam num PR seu, as conversas abertas nas linhas e o que foi escrito na conversa geral do PR vão direto ao agente da própria tarefa, que corrige. Este agente não é chamado. O ajuste espera você entregar, ou vai ao PR onde a entrega está autorizada. Use em repositórios privados: o texto dos comentários chega a um agente que pode alterar código."
       },
       "deliver": {
         "note": "Ao abrir o PR",
@@ -449,15 +447,13 @@
         "title": "CI de uma tarefa falhou",
         "hint": "Quando os checks do PR de uma tarefa sua falham, o agente lê o que falhou e diz a causa e a menor correção na conversa dele nessa tarefa. Ele só lê; você decide quem corrige.",
         "done": "{{agent}} olhou o CI",
-        "ready": "diagnóstico na tarefa",
-        "failed": "não consegui pedir o diagnóstico"
+        "ready": "diagnóstico na tarefa"
       },
       "reviewReceived": {
         "title": "Review chegou num PR de tarefa",
         "hint": "Quando alguém revisa ou comenta o PR de uma tarefa sua, o agente lê as conversas abertas e diz, na conversa dele nessa tarefa, se cada ponto procede e o que mudar. Ele só lê e não responde no PR.",
         "done": "{{agent}} leu o review",
-        "ready": "análise na tarefa",
-        "failed": "não consegui pedir a análise"
+        "ready": "análise na tarefa"
       },
       "prUpdated": {
         "title": "PR que você revisou foi atualizado",
