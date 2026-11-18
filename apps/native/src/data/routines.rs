@@ -77,9 +77,11 @@ impl DesktopApi {
             .map(|_| ())
     }
 
-    pub fn routine_ran(&self, agent_id: &str, id: &str, at: &str) -> Result<(), ApiError> {
-        self.post(&routine_path(agent_id, id, "ran"), &json!({ "at": at }))
-            .map(|_| ())
+    /// "Rodar agora"; false when the pause, the quiet hours or the brake
+    /// keep it.
+    pub fn run_routine_now(&self, agent_id: &str, id: &str) -> Result<bool, ApiError> {
+        self.post(&routine_path(agent_id, id, "run"), &json!({}))
+            .map(|answer| answer["started"].as_bool().unwrap_or(false))
     }
 }
 

@@ -275,7 +275,8 @@
       "lastRead": "última leitura {{when}}",
       "delete": "Remover",
       "grouped_one": "{{count}} aviso das fontes · {{connectors}}",
-      "grouped_other": "{{count}} avisos das fontes · {{connectors}}"
+      "grouped_other": "{{count}} avisos das fontes · {{connectors}}",
+      "held": "Não li agora: a pausa, o horário de silêncio ou o freio do agente seguram."
     },
     "report": {
       "readAll": "Ler tudo",
@@ -962,7 +963,8 @@
       "brake": "{{agent}} parou depois de {{count}} turnos sozinho, sem você",
       "done": "Rotina de {{agent}}",
       "ready": "resposta na conversa dele",
-      "failed": "não consegui rodar a rotina"
+      "failed": "não consegui rodar a rotina",
+      "held": "Não rodou agora: a pausa, o horário de silêncio ou o freio do agente seguram."
     },
     "access": {
       "title": "Acesso",

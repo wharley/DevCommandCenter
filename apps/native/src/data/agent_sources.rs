@@ -70,6 +70,13 @@ impl DesktopApi {
             .map(|_| ())
     }
 
+    /// "Ler agora": the server reads it and wakes the agent with news; false
+    /// when the pause, the quiet hours or the brake keep it.
+    pub fn read_source_now(&self, source: &AgentSource) -> Result<bool, ApiError> {
+        self.post(&source_path(source, "wake"), &json!({}))
+            .map(|answer| answer["started"].as_bool().unwrap_or(false))
+    }
+
     /// Reads the source now (the connector answers in its own time).
     pub fn read_source(&self, source: &AgentSource) -> Result<SourceRead, ApiError> {
         let value: Value = self.request_waiting(

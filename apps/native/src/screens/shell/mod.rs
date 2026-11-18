@@ -13,6 +13,7 @@ mod check_in;
 mod ci_trigger;
 mod cli_updates;
 mod computer;
+mod deliver_auto;
 mod delivery;
 #[cfg(target_os = "macos")]
 mod device;
@@ -29,11 +30,10 @@ mod palette;
 mod pr_watch;
 mod quick_open;
 mod regions;
-mod review_received;
-mod deliver_auto;
 mod reply_auto_send;
 mod review_auto_send;
 mod review_fix;
+mod review_received;
 mod review_requests;
 mod review_resume;
 mod review_trigger;
@@ -196,8 +196,8 @@ pub struct Shell {
     /// "Atualização dos agentes", top right while a CLI has a newer release.
     cli_updates: Entity<cli_updates::CliUpdates>,
     _pr_watch: (Entity<pr_watch::PrWatch>, gpui::Subscription),
-    _routines: (Entity<routines::RoutineClock>, gpui::Subscription),
-    _sources: (Entity<sources::SourceClock>, gpui::Subscription),
+    _routines: Entity<routines::RoutineClock>,
+    _sources: Entity<sources::SourceClock>,
     /// The merged tasks to tell their agents about (`shipped`).
     shipped: shipped::ShippedWatch,
     reply_auto_send: reply_auto_send::ReplyAutoSend,
@@ -273,6 +273,14 @@ impl Shell {
                 new_task.set_projects(&projects, &linked, cx)
             });
             this.sync_session_agents(cx);
+            // What the server wrote (`agent_clock`): its runs, a routine to announce.
+            if cx.has_global::<crate::data::agent_triggers::AgentTriggers>()
+                && cx.update_global::<crate::data::agent_triggers::AgentTriggers, _>(
+                    |triggers, _| triggers.refresh(),
+                )
+            {
+                this.announce_routine_runs(cx);
+            }
             this.watch_rooms(cx);
             // A task whose pull request just merged (`shipped`).
             this.shipped_seen(cx);

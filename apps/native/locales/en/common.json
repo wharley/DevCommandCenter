@@ -275,7 +275,8 @@
       "lastRead": "last read {{when}}",
       "delete": "Remove",
       "grouped_one": "{{count}} source notice · {{connectors}}",
-      "grouped_other": "{{count}} source notices · {{connectors}}"
+      "grouped_other": "{{count}} source notices · {{connectors}}",
+      "held": "Didn't read now: the pause, the quiet hours or the agent's brake hold it."
     },
     "report": {
       "readAll": "Read all",
@@ -962,7 +963,8 @@
       "brake": "{{agent}} stopped after {{count}} turns on its own, without you",
       "done": "{{agent}}'s routine",
       "ready": "answer in its conversation",
-      "failed": "could not run the routine"
+      "failed": "could not run the routine",
+      "held": "Didn't run now: the pause, the quiet hours or the agent's brake hold it."
     },
     "access": {
       "title": "Access",

@@ -22,6 +22,7 @@ const BIND_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 pub struct EmbeddedHttpServer {
     backend: Arc<HttpBackend>,
+    config: Arc<RwLock<HttpConfig>>,
     router: Router,
     port: u16,
 }
@@ -34,12 +35,17 @@ impl EmbeddedHttpServer {
         let port = config.port;
         let config = Arc::new(RwLock::new(config));
         let backend = Arc::new(backend);
-        let router = build_router(config, backend.clone());
+        let router = build_router(config.clone(), backend.clone());
         Self {
             backend,
+            config,
             router,
             port,
         }
+    }
+
+    pub fn config(&self) -> Arc<RwLock<HttpConfig>> {
+        self.config.clone()
     }
 
     pub fn port(&self) -> u16 {

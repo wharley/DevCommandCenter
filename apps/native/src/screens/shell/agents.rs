@@ -53,10 +53,10 @@ impl Shell {
                             shell.deliver_task(task_id, *step, cx)
                         }
                         AgentPageEvent::ReadSource(source) => {
-                            shell.sources_due(std::slice::from_ref(source.as_ref()), cx)
+                            shell.read_source_now(source.as_ref().clone(), cx)
                         }
                         AgentPageEvent::RunRoutine(routine) => {
-                            shell.routines_due(std::slice::from_ref(routine.as_ref()), cx)
+                            shell.run_routine_now(routine.as_ref().clone(), cx)
                         }
                         // `requestOpenPullRequest`
                         AgentPageEvent::OpenPullRequest(pr_id) => {

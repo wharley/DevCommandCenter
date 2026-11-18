@@ -56,6 +56,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+pub(crate) mod agent_clock;
 mod agent_conversation;
 mod agent_memory;
 mod agent_changes;
@@ -276,6 +277,8 @@ pub struct HttpBackend {
     attention: tokio::sync::broadcast::Sender<crate::remote_push::Attention>,
     /// Browser and computer-use requests from agents (`agent_requests`).
     agent_requests: OnceLock<Arc<dyn crate::agent_requests::AgentRequestSource>>,
+    /// The agents' clock (`agent_clock`), for "Rodar agora" and "Ler agora".
+    agent_clock: OnceLock<Arc<agent_clock::Clock>>,
     fixture_agent_requests: OnceLock<Arc<crate::agent_requests::InMemoryAgentRequests>>,
     // The runtime keeps only a weak reference to its buses.
     _bus: Arc<dyn EventBus>,
@@ -332,6 +335,7 @@ impl HttpBackend {
             remote: OnceLock::new(),
             machines: OnceLock::new(),
             agent_requests: OnceLock::new(),
+            agent_clock: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
             app: OnceLock::new(),
         })
@@ -362,6 +366,7 @@ impl HttpBackend {
             remote: OnceLock::new(),
             machines: OnceLock::new(),
             agent_requests: OnceLock::new(),
+            agent_clock: OnceLock::new(),
             fixture_agent_requests: OnceLock::new(),
             app: OnceLock::new(),
         }
@@ -1133,6 +1138,14 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route(
             "/api/v1/agents/:agent_id/routines/:routine_id/ran",
             post(agent_routines::ran),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/routines/:routine_id/run",
+            post(agent_clock::run_routine_now),
+        )
+        .route(
+            "/api/v1/agents/:agent_id/sources/:source_id/wake",
+            post(agent_clock::read_source_now),
         )
         .route(
             "/api/v1/agents/:agent_id/sources",
@@ -2134,6 +2147,8 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/agents/:agent_id/routines/:routine_id/delete",
             "POST /api/v1/agents/:agent_id/routines/:routine_id/accept",
             "POST /api/v1/agents/:agent_id/routines/:routine_id/ran",
+            "POST /api/v1/agents/:agent_id/routines/:routine_id/run",
+            "POST /api/v1/agents/:agent_id/sources/:source_id/wake",
             "POST /api/v1/agents/:agent_id/conversation",
             "POST /api/v1/task-proposals/:proposal_id/start",
             "POST /api/v1/task-proposals/:proposal_id/dismiss",

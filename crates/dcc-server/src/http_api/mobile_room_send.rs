@@ -519,6 +519,8 @@ pub(super) async fn send(
         retry_of.as_deref(),
     )
     .await?;
+    // The person wrote it: the agent's brake starts over.
+    super::agent_clock::attended(&backend, &to.agent.id);
     Ok(Json(sent_json(&to, &delivered, room.as_deref())))
 }
 
