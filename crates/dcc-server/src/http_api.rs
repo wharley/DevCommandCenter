@@ -89,6 +89,7 @@ mod local_branches;
 mod machine_tasks;
 mod machines;
 mod mcp;
+mod mcp_request;
 mod menu_bar;
 mod mobile;
 mod mobile_agents;
@@ -1037,6 +1038,7 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
         .route("/api/v1/mcp/logo/fetch", post(mcp::fetch_logo))
         .route("/api/v1/mcp/project", post(mcp::set_project))
         .route("/api/v1/mcp/tool-policy", post(mcp::set_tool_policy))
+        .route("/api/v1/mcp/request", post(mcp_request::request))
         .route(
             "/api/v1/mcp/native-servers",
             get(mcp::native_servers).post(mcp::import_native),
@@ -2083,6 +2085,7 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "POST /api/v1/mcp/logo/fetch",
             "POST /api/v1/mcp/project",
             "POST /api/v1/mcp/tool-policy",
+            "POST /api/v1/mcp/request",
             "GET /api/v1/mcp/native-servers",
             "POST /api/v1/mcp/native-servers",
             "POST /api/v1/workspaces/automation",

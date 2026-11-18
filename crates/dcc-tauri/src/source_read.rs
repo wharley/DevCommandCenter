@@ -67,8 +67,9 @@ pub(crate) async fn call_once(
 }
 
 /// One request of the connector (`tools/call`, `tools/list`), in a session
-/// of its own: initialize, ask, close. Its result comes back.
-pub(crate) async fn request_once(
+/// of its own: initialize, ask, close. Its result comes back. Also what the
+/// engine's `/api/v1/mcp/request` runs for a client.
+pub async fn request_once(
     gateway: &ConnectorGateway,
     connector: &McpDefinitionId,
     method: &str,
