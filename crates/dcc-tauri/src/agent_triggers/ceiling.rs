@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 
-use super::agent_triggers::{AgentTriggers, DAILY_RUNS};
+use super::{AgentTriggers, DAILY_RUNS};
 
 /// The choices on the agent's page; `None` is no ceiling.
 pub const CEILING_CHOICES: [Option<usize>; 4] = [Some(DAILY_RUNS), Some(10), Some(20), None];
@@ -45,7 +45,7 @@ impl AgentTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::agent_triggers::Trigger;
+    use crate::agent_triggers::Trigger;
 
     #[test]
     fn the_ceiling_is_five_unless_the_person_picks_another() {

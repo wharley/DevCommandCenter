@@ -6,7 +6,7 @@
 
 use chrono::{DateTime, Utc};
 
-use super::agent_triggers::{AgentTriggers, Held};
+use super::{AgentTriggers, Held};
 
 pub const UNATTENDED_LIMIT: usize = 30;
 
@@ -41,7 +41,7 @@ impl AgentTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::agent_triggers::Trigger;
+    use crate::agent_triggers::Trigger;
 
     #[test]
     fn runs_without_the_person_stop_at_the_brake_until_they_talk() {

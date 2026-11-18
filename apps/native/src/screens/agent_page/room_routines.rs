@@ -10,7 +10,7 @@ use gpui::{AnyElement, BorrowAppContext, Context, FontWeight, SharedString, div,
 
 use super::room::TeamRoom;
 use crate::agent::AgentAvatarView;
-use crate::data::agent_brake::UNATTENDED_LIMIT;
+use crate::data::agent_triggers::UNATTENDED_LIMIT;
 use crate::data::agent_triggers::AgentTriggers;
 use crate::data::agents::AgentRecord;
 use crate::data::routines::{Routines, schedule_label};

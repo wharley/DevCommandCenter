@@ -628,7 +628,7 @@ fn the_weekly_bulletin_opens_in_place_and_reads_the_week(cx: &mut TestAppContext
 
 #[gpui::test]
 fn routines_show_as_lines_proposals_and_a_brake(cx: &mut TestAppContext) {
-    use crate::data::agent_brake::UNATTENDED_LIMIT;
+    use crate::data::agent_triggers::UNATTENDED_LIMIT;
     use crate::data::agent_triggers::{AgentTriggers, Trigger};
     use crate::data::routines::Routines;
     use dcc_core::domain::agent_routine::{QUIET_ANSWER, Routine, routine_prompt};

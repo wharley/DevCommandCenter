@@ -7,7 +7,7 @@ use chrono::{Local, Timelike, Utc};
 use gpui::{AnyElement, BorrowAppContext, Context, SharedString, div, prelude::*, px};
 
 use super::AgentPage;
-use crate::data::agent_quiet::{QUIET_CHOICES, QuietHours};
+use crate::data::agent_triggers::{QUIET_CHOICES, QuietHours};
 use crate::data::agent_triggers::AgentTriggers;
 use crate::i18n::{Args, Translate};
 use crate::theme::ActiveTheme;

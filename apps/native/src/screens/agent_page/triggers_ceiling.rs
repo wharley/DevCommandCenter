@@ -5,7 +5,7 @@
 use gpui::{AnyElement, BorrowAppContext, Context, SharedString, div, prelude::*, px};
 
 use super::AgentPage;
-use crate::data::agent_ceiling::CEILING_CHOICES;
+use crate::data::agent_triggers::CEILING_CHOICES;
 use crate::data::agent_triggers::AgentTriggers;
 use crate::i18n::Translate;
 use crate::theme::ActiveTheme;

@@ -1,5 +1,6 @@
 pub mod agent_chain_runtime;
 pub mod agent_task;
+pub mod agent_triggers;
 pub(crate) mod antigravity_account_state;
 pub mod antigravity_installation;
 pub mod app_events;

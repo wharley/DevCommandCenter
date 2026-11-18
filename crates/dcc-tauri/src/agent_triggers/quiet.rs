@@ -6,7 +6,7 @@
 use chrono::{DateTime, Local, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::agent_triggers::{AgentTriggers, Held};
+use super::{AgentTriggers, Held};
 
 /// From `from` to `to` o'clock, local; `from > to` crosses midnight.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +71,7 @@ impl AgentTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::agent_triggers::Trigger;
+    use crate::agent_triggers::Trigger;
 
     #[test]
     fn the_pause_and_the_quiet_hours_hold_every_trigger() {

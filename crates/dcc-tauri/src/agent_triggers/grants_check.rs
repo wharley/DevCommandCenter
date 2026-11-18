@@ -4,12 +4,11 @@
 //! in a room its sources do not use, a choice whose trigger is off. Read
 //! from what is stored, with no model; nothing here changes a grant.
 
-use dcc_core::domain::agent_grants_check::{Grants, gaps};
+use dcc_core::domain::agent_grants_check::{gaps, Grants};
 
 pub use dcc_core::domain::agent_grants_check::Gap;
 
-use super::agent_auto_send::ReviewSend;
-use super::agent_triggers::{AgentTriggers, Trigger};
+use super::{AgentTriggers, ReviewSend, Trigger};
 
 impl AgentTriggers {
     /// What does not close in `agent_id`'s grants. `source_rooms`: the room
@@ -49,7 +48,7 @@ impl AgentTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::agent_auto_send::GENERAL_ROOM;
+    use crate::agent_triggers::GENERAL_ROOM;
 
     fn triggers() -> (tempfile::TempDir, AgentTriggers) {
         let dir = tempfile::tempdir().unwrap();
@@ -88,11 +87,9 @@ mod tests {
             triggers.auto_send_gaps("sup", &[None]),
             [Gap::SourceRoomNotGranted]
         );
-        assert!(
-            triggers
-                .auto_send_gaps("sup", &[Some("app".to_string())])
-                .is_empty()
-        );
+        assert!(triggers
+            .auto_send_gaps("sup", &[Some("app".to_string())])
+            .is_empty());
         triggers.set_reply_send_in("sup", GENERAL_ROOM, true);
         assert!(triggers.auto_send_gaps("sup", &[None]).is_empty());
     }
