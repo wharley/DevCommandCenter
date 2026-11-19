@@ -77,10 +77,13 @@ impl Default for HttpConfig {
 }
 
 impl HttpConfig {
+    /// `DCC_HTTP_CONFIG_PATH` when set (a host that runs DCC as its engine
+    /// keeps a file of its own), else `~/.dcc/http-config.json`.
     pub fn default_config_path() -> Option<PathBuf> {
-        std::env::var("HOME")
-            .ok()
-            .map(|home| PathBuf::from(home).join(".dcc").join("http-config.json"))
+        config_path_from(
+            std::env::var_os("DCC_HTTP_CONFIG_PATH"),
+            std::env::var_os("HOME"),
+        )
     }
 
     /// Load configuration from environment variables and optional JSON file
@@ -376,6 +379,16 @@ fn validate_api_key_strength(api_key: &str) -> Result<(), String> {
 }
 
 /// The config holds the API key and bearer tokens: owner read/write only.
+fn config_path_from(
+    given: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    given
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| home.map(|home| PathBuf::from(home).join(".dcc").join("http-config.json")))
+}
+
 fn write_private_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -409,6 +422,18 @@ mod tests {
         assert!(config.enabled);
         assert_eq!(config.effective_auth_mode(), HttpAuthMode::Local);
         assert!(!config.is_network_exposed());
+    }
+
+    #[test]
+    fn a_host_can_keep_a_config_file_of_its_own() {
+        let own = config_path_from(
+            Some("/data/engine/http-config.json".into()),
+            Some("/h".into()),
+        );
+        assert_eq!(own, Some(PathBuf::from("/data/engine/http-config.json")));
+        let home = config_path_from(Some("".into()), Some("/h".into()));
+        assert_eq!(home, Some(PathBuf::from("/h/.dcc/http-config.json")));
+        assert_eq!(config_path_from(None, None), None);
     }
 
     #[test]
