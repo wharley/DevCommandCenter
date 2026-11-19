@@ -75,6 +75,7 @@ mod ci_failing;
 mod browser_bridge;
 mod browser_opens;
 mod computer_bridge;
+mod conversation_rewind;
 mod decision_provider;
 mod delegation_review;
 mod delivery;
@@ -119,6 +120,7 @@ mod skills;
 mod task_proposals;
 mod terminals;
 mod turn_review;
+mod usage_history;
 mod workspace_preview;
 mod workspace_tree;
 
@@ -841,6 +843,15 @@ pub fn build_router(config: Arc<RwLock<HttpConfig>>, backend: Arc<HttpBackend>) 
             "/api/v1/sessions/:session_id/turns",
             post(send_turn_handler),
         )
+        .route(
+            "/api/v1/sessions/:session_id/rewind/prepare",
+            post(conversation_rewind::prepare),
+        )
+        .route(
+            "/api/v1/sessions/:session_id/rewind",
+            post(conversation_rewind::execute),
+        )
+        .route("/api/v1/usage/history", get(usage_history::history))
         .route(
             "/api/v1/usage-limit/settings",
             get(usage_limit_settings_handler),
@@ -2136,6 +2147,9 @@ async fn root_handler(State(config): State<Arc<RwLock<HttpConfig>>>) -> Json<Val
             "PUT /api/v1/provider-accounts/:account_id",
             "DELETE /api/v1/provider-accounts/:account_id",
             "POST /api/v1/provider-accounts/usage",
+            "GET /api/v1/usage/history",
+            "POST /api/v1/sessions/:session_id/rewind/prepare",
+            "POST /api/v1/sessions/:session_id/rewind",
             "POST /api/v1/provider-accounts/reset",
             "POST /api/v1/antigravity/status",
             "POST /api/v1/antigravity/install",

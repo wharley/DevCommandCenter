@@ -4,12 +4,14 @@
 //! `dcc_infra::usage_logs`; this module only knows the rows.
 
 mod aggregate;
+mod history;
 #[cfg(test)]
 mod tests;
 
 pub use aggregate::{
     aggregate, Band, DayBar, PeakDay, PeakHour, UsageFilter, UsageSummary, OTHERS_GROUP,
 };
+pub use history::{daily_history, HistoryDay, HistoryModel, RuntimeHistory};
 
 /// Which harness wrote the log.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
