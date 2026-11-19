@@ -329,7 +329,7 @@ fn parse_claude_oauth_account_usage(value: &Value) -> Result<ProviderAccountUsag
         windows,
         reset_credits: None,
         plan_type: None,
-        extras: Vec::new(),
+        extras: crate::usage_extras::claude(value),
         updated_at: Utc::now().to_rfc3339(),
         is_cached: false,
     })
