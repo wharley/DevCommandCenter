@@ -7,6 +7,7 @@ pub mod create_workspace_bundle;
 pub mod create_workspace_for_repo;
 pub mod create_workspace_from_url;
 pub mod mcp_conformance;
+pub mod mcp_session_url;
 pub mod mcp_trust;
 pub mod probe_mcp;
 pub mod record_plan_handoff;

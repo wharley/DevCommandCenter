@@ -123,10 +123,22 @@ pub async fn resolve_session_mcp_servers(
         let policies = policies_by_definition
             .remove(&definition.id)
             .unwrap_or_default();
-        servers
-            .push(project_definition(definition, server_name, policies, credential_store).await?);
+        let server =
+            project_definition(definition, server_name, policies, credential_store).await?;
+        servers.push(for_session(server, &input.session_id));
     }
     Ok(servers)
+}
+
+/// A local server that asks which session calls it gets this one's id.
+fn for_session(
+    mut server: ProviderMcpServerConfig,
+    session_id: &SessionId,
+) -> ProviderMcpServerConfig {
+    if let ProviderMcpTransport::Http { url, .. } = &mut server.transport {
+        *url = super::mcp_session_url::with_session(url, &session_id.0);
+    }
+    server
 }
 
 fn binding_applies(scope: &McpBindingScope, input: &ResolveSessionMcpInput) -> bool {
@@ -498,6 +510,32 @@ mod tests {
             .push((definition.id.clone(), ProjectId("project-a".to_string())));
         assert_eq!(resolve("project-a"), 0);
         assert_eq!(resolve("project-b"), 1, "other projects keep it");
+    }
+
+    #[test]
+    fn a_local_server_that_asks_learns_the_session() {
+        let repo = FakeMcpRepo::default();
+        let credentials = FakeCredentialStore::default();
+        repo.definitions.lock().unwrap().push(trusted_definition(
+            "bot",
+            McpTransport::Http {
+                url: "http://127.0.0.1:3100/mcp?bot=b&session={dccSessionId}".to_string(),
+            },
+            Vec::new(),
+        ));
+        repo.bindings.lock().unwrap().push(binding(
+            "global",
+            "bot",
+            McpBindingScope::Global,
+            Vec::new(),
+        ));
+        let servers =
+            futures::executor::block_on(resolve_session_mcp_servers(&repo, &credentials, &input()))
+                .expect("resolve");
+        let ProviderMcpTransport::Http { url, .. } = &servers[0].transport else {
+            panic!("http");
+        };
+        assert_eq!(url, "http://127.0.0.1:3100/mcp?bot=b&session=session-a");
     }
 
     fn input() -> ResolveSessionMcpInput {
