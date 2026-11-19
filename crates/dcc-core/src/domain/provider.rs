@@ -409,6 +409,27 @@ pub struct ProviderResetCredit {
     pub expires_at: Option<String>,
 }
 
+/// What a plan has beyond its windows: credits left to spend, or extra
+/// usage spent, with its cap when it has one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUsageExtra {
+    /// `credits` (Codex), `extra_usage` (Claude).
+    pub id: String,
+    /// `left` (an amount left to spend), `spent` (used, with no cap) or
+    /// `capped` (used of `limit`).
+    pub kind: String,
+    /// `None` with `unlimited`.
+    #[serde(default)]
+    pub amount: Option<f64>,
+    #[serde(default)]
+    pub limit: Option<f64>,
+    /// `credits` or `usd`.
+    pub unit: String,
+    #[serde(default)]
+    pub unlimited: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderResetCredits {
@@ -443,6 +464,9 @@ pub struct ProviderAccountUsage {
     pub reset_credits: Option<ProviderResetCredits>,
     #[serde(default)]
     pub plan_type: Option<String>,
+    /// Credits and extra usage beyond the windows.
+    #[serde(default)]
+    pub extras: Vec<ProviderUsageExtra>,
     pub updated_at: String,
     pub is_cached: bool,
 }

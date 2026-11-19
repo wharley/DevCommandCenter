@@ -32,6 +32,7 @@ mod cli_model_lists;
 pub mod cli_updates;
 pub mod model_discovery;
 pub mod priority;
+mod usage_extras;
 #[cfg(all(test, unix))]
 mod test_cli;
 

@@ -329,6 +329,7 @@ fn parse_claude_oauth_account_usage(value: &Value) -> Result<ProviderAccountUsag
         windows,
         reset_credits: None,
         plan_type: None,
+        extras: Vec::new(),
         updated_at: Utc::now().to_rfc3339(),
         is_cached: false,
     })
@@ -690,6 +691,7 @@ async fn cache_claude_account_usage(state: &ProviderRuntimeState, cache_key: &st
             windows: Vec::new(),
             reset_credits: None,
             plan_type: None,
+            extras: Vec::new(),
             updated_at: Utc::now().to_rfc3339(),
             is_cached: true,
         });
@@ -1482,6 +1484,7 @@ impl Provider for ClaudeSdkSidecarAdapter {
                 windows: Vec::new(),
                 reset_credits: None,
                 plan_type: None,
+                extras: Vec::new(),
                 updated_at: Utc::now().to_rfc3339(),
                 is_cached: true,
             }))),

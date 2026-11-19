@@ -820,6 +820,7 @@ fn parse_codex_account_usage(value: &Value) -> Result<ProviderAccountUsage> {
             .get("planType")
             .and_then(Value::as_str)
             .map(str::to_string),
+        extras: crate::usage_extras::codex(limits),
         updated_at: Utc::now().to_rfc3339(),
         is_cached: false,
     })
