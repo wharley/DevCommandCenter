@@ -393,28 +393,6 @@ pub(super) fn assistant_row(
                 .into_any_element(),
         );
     }
-    if has_activity {
-        let live_mascot = status_carries_mascot.then(|| {
-            AgentMascot::new(provider, model, mascot_state)
-                .moving(frame)
-                .into_any_element()
-        });
-        column.push(turn_activity(
-            view,
-            TurnActivity {
-                key: &message.id,
-                annotations: &message.annotations,
-                streaming,
-                interrupted,
-                waiting,
-                started_at: message.turn_started_at.as_deref(),
-                ended_at: message.turn_ended_at.as_deref(),
-                live_mascot,
-            },
-            window,
-            cx,
-        ));
-    }
     let subagents: Vec<AnyElement> = message
         .annotations
         .iter()
@@ -425,7 +403,6 @@ pub(super) fn assistant_row(
             _ => None,
         })
         .collect();
-    column.extend(subagents);
     // A permission still waiting shows in the panel above the composer
     // (`hidePendingApprovals`); answered ones stay in the thread.
     let mut requests: Vec<AnyElement> = Vec::new();
@@ -467,8 +444,9 @@ pub(super) fn assistant_row(
             _ => {}
         }
     }
+    let mut cards: Vec<AnyElement> = subagents;
     if !requests.is_empty() {
-        column.push(
+        cards.push(
             div()
                 .mb(px(8.0))
                 .flex()
@@ -478,6 +456,36 @@ pub(super) fn assistant_row(
                 .into_any_element(),
         );
     }
+    if has_activity {
+        let live_mascot = status_carries_mascot.then(|| {
+            AgentMascot::new(provider, model, mascot_state)
+                .moving(frame)
+                .into_any_element()
+        });
+        column.push(turn_activity(
+            view,
+            TurnActivity {
+                key: &message.id,
+                annotations: &message.annotations,
+                streaming,
+                interrupted,
+                waiting,
+                started_at: message.turn_started_at.as_deref(),
+                ended_at: message.turn_ended_at.as_deref(),
+                live_mascot,
+                // While the turn runs its status line stays the last thing:
+                // the cards already answered go above it.
+                before_status: if status_carries_mascot {
+                    std::mem::take(&mut cards)
+                } else {
+                    Vec::new()
+                },
+            },
+            window,
+            cx,
+        ));
+    }
+    column.extend(cards);
     // Plan cards and mission reports keep their own layouts (later slices);
     // until then their text reads as the answer.
     if !message.content.trim().is_empty() {

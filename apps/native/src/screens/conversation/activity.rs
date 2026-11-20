@@ -32,6 +32,9 @@ pub(super) struct TurnActivity<'a> {
     pub ended_at: Option<&'a str>,
     /// The agent's robot for the live status line.
     pub live_mascot: Option<AnyElement>,
+    /// Cards drawn between the live steps and the status line (answered
+    /// approvals, subagents), so "Escrevendo" never sits above them.
+    pub before_status: Vec<AnyElement>,
 }
 
 fn reasoning_item(
@@ -388,6 +391,7 @@ pub(super) fn turn_activity(
             })
         });
         let clock = since.map(|since| format_elapsed(view.now_ms() - since));
+        rows.extend(activity.before_status);
         let marker = activity.live_mascot.unwrap_or_else(|| {
             if activity.waiting {
                 Icon::new("circle-pause").size(14.0).into_any_element()
