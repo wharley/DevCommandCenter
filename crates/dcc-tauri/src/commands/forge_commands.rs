@@ -1304,7 +1304,7 @@ fn github_hub_item(
     let number = raw.get("number")?.as_u64()? as u32;
     let head_branch = raw.get("headRefName")?.as_str()?.to_string();
     let login = context.effective_login.as_deref().unwrap_or_default();
-    let author = raw
+    let mut author = raw
         .get("author")
         .and_then(|value| hub_actor(value, ForgeCliProvider::Github));
     let review_requests = raw
@@ -1333,6 +1333,9 @@ fn github_hub_item(
                 reviewers.push(actor);
             }
         }
+    }
+    for actor in author.iter_mut().chain(reviewers.iter_mut()) {
+        super::forge_avatar::fill_actor(actor, &context.host);
     }
     let checks = github_checks(raw.get("statusCheckRollup").unwrap_or(&Value::Null));
     let (linked_workspace_id, linked_workspace_name) = linked_workspace_for_pr(
@@ -2102,7 +2105,7 @@ pub async fn pull_request_hub_detail_with_state(
             } else {
                 (Vec::new(), Vec::new())
             };
-            Ok(PullRequestHubDetailOutput {
+            let mut detail = PullRequestHubDetailOutput {
                 body: raw
                     .get("body")
                     .and_then(Value::as_str)
@@ -2123,7 +2126,9 @@ pub async fn pull_request_hub_detail_with_state(
                 commits: github_commits(&raw),
                 state: hub_detail_state(&raw),
                 changed_paths: crate::commands::pr_hub_paths::changed_paths(&raw),
-            })
+            };
+            super::forge_avatar::fill_detail(&mut detail, &context.host);
+            Ok(detail)
         }
         ForgeCliProvider::Gitlab => {
             let raw = crate::commands::forge::gitlab::merge_request_detail_json(
@@ -3328,7 +3333,12 @@ fn map_github_review_state(
             reviewer,
         );
     }
-    let reviewers = reviewers.into_values().collect::<Vec<_>>();
+    let mut reviewers = reviewers.into_values().collect::<Vec<_>>();
+    for reviewer in reviewers.iter_mut() {
+        if let Some(host) = host.as_deref() {
+            super::forge_avatar::fill_reviewer(reviewer, host);
+        }
+    }
     let approvals_received = reviewers
         .iter()
         .filter(|reviewer| reviewer.state == "approved")

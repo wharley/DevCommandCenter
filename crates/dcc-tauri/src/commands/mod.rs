@@ -10,6 +10,7 @@ pub mod local_branches;
 pub use dcc_infra::forge;
 pub mod agent_conversation;
 pub mod delivery_draft;
+mod forge_avatar;
 pub mod forge_commands;
 pub mod mcp_commands;
 pub mod permission_always;
