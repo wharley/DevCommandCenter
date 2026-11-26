@@ -52,7 +52,7 @@ fn code_ranges(content: &str) -> Vec<(usize, usize)> {
         let fence = &content[index..index + ticks];
         let body = index + ticks;
         match content[body..].find(fence) {
-            Some(found) if found > 0 && !content[body..body + 1].starts_with('\n') => {
+            Some(found) if found > 0 && !content[body..].starts_with('\n') => {
                 let end = body + found + ticks;
                 ranges.push((index, end));
                 index = end;
@@ -241,5 +241,16 @@ mod tests {
         assert_eq!(prompt_parts(text), vec![PromptPart::Text(text.into())]);
         let fenced = "```\n@src/a.ts\n```\n";
         assert_eq!(prompt_parts(fenced), vec![PromptPart::Text(fenced.into())]);
+    }
+
+    #[test]
+    fn inline_code_opening_on_a_multibyte_char() {
+        for text in ["roda `ação` @src/a.ts", "`✅ ok` e `é`", "``çã``"] {
+            assert!(!prompt_parts(text).is_empty());
+        }
+        assert_eq!(
+            prompt_parts("`@src/ção.ts`"),
+            vec![PromptPart::Text("`@src/ção.ts`".into())]
+        );
     }
 }
